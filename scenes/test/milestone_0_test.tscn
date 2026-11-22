@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=19 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
 [ext_resource type="PackedScene" path="res://scenes/units/test_unit.tscn" id="2_test_unit"]
@@ -14,6 +14,9 @@
 [ext_resource type="PackedScene" path="res://scenes/buildings/command_core.tscn" id="12_command_core"]
 [ext_resource type="PackedScene" path="res://scenes/units/worker_unit.tscn" id="13_worker_unit"]
 [ext_resource type="PackedScene" path="res://ui/hud/resource_hud.tscn" id="14_resource_hud"]
+[ext_resource type="PackedScene" path="res://scenes/world/silica_vein.tscn" id="15_silica_vein"]
+[ext_resource type="PackedScene" path="res://scenes/world/compute_vent.tscn" id="16_compute_vent"]
+[ext_resource type="Script" path="res://ui/overlays/build_ghost_preview.gd" id="17_build_ghost"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_arena"]
 vertices = PackedVector2Array(-640, -360, 640, -360, 640, 360, -640, 360, -100, -120, 100, -120, 100, 120, -100, 120)
@@ -69,6 +72,21 @@ position = Vector2(-535, 175)
 [node name="BiomassNode3" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
 position = Vector2(-505, 260)
 
+[node name="SilicaVein1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(435, -155)
+
+[node name="SilicaVein2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(495, -95)
+
+[node name="SilicaVein3" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(465, -20)
+
+[node name="ComputeVent1" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(-475, -55)
+
+[node name="ComputeVent2" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(215, -165)
+
 [node name="Buildings" type="Node2D" parent="."]
 
 [node name="CommandCore" parent="Buildings" instance=ExtResource("12_command_core")]
@@ -100,6 +118,10 @@ script = ExtResource("4_sel_box")
 [node name="AbilityTargetingReticle" type="Node2D" parent="SelectionController"]
 z_index = 95
 script = ExtResource("8_ability_reticle")
+
+[node name="BuildGhostPreview" type="Node2D" parent="SelectionController"]
+z_index = 96
+script = ExtResource("17_build_ghost")
 
 [node name="SandboxSpawner" type="Node2D" parent="."]
 script = ExtResource("6_spawner")

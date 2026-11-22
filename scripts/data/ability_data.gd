@@ -5,6 +5,7 @@ enum TargetType {
 	POINT_AOE,
 	UNIT_TARGET,
 	INSTANT,
+	BUILD_PLACEMENT,
 }
 
 @export var ability_id: StringName = &""
@@ -16,3 +17,4 @@ enum TargetType {
 @export var damage_or_value: float = 35.0
 @export var aoe_radius: float = 64.0
 @export_multiline var description: String = ""
+@export var building_to_build: BuildingData = null

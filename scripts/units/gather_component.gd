@@ -39,7 +39,9 @@ func has_cargo() -> bool:
 func start_gather(owner_unit: Unit, resource_node: ResourceNode) -> bool:
 	if owner_unit == null or owner_unit.data == null or not owner_unit.data.can_gather:
 		return false
-	if not is_instance_valid(resource_node) or resource_node.is_depleted():
+	if not is_instance_valid(resource_node) or resource_node.is_depleted() or resource_node.is_vent:
+		return false
+	if owner_unit.data.allowed_resource != &"" and resource_node.resource_type != owner_unit.data.allowed_resource:
 		return false
 
 	target_node = resource_node
@@ -49,10 +51,9 @@ func start_gather(owner_unit: Unit, resource_node: ResourceNode) -> bool:
 
 	if carried_amount >= owner_unit.data.carry_capacity and carried_type == resource_node.resource_type:
 		dropoff_building = _find_nearest_dropoff(owner_unit, carried_type)
-		if dropoff_building != null:
-			_set_state(GatherState.GATHER_RETURNING_TO_BASE)
-			gather_progress_changed.emit(0.0, false)
-			return true
+		_set_state(GatherState.GATHER_RETURNING_TO_BASE)
+		gather_progress_changed.emit(0.0, false)
+		return true
 
 	_set_state(GatherState.GATHER_MOVING_TO_NODE)
 	gather_progress_changed.emit(0.0, false)
@@ -175,7 +176,7 @@ func _tick_gathering(owner_unit: Unit, delta: float) -> void:
 
 	if carried_amount > 0:
 		dropoff_building = _find_nearest_dropoff(owner_unit, carried_type)
-		if dropoff_building != null:
+		if dropoff_building != null or owner_unit.data.auto_gather_on_spawn:
 			_set_state(GatherState.GATHER_RETURNING_TO_BASE)
 		else:
 			cancel()
@@ -201,6 +202,10 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 	if not is_instance_valid(dropoff_building) or dropoff_building.is_destroyed or not dropoff_building.accepts_resource(carried_type):
 		dropoff_building = _find_nearest_dropoff(owner_unit, carried_type)
 		if dropoff_building == null:
+			# Automated harvesters wait patiently with their full load until a Refinery is constructed.
+			if owner_unit.data.auto_gather_on_spawn:
+				owner_unit.stop_component_navigation()
+				return
 			cancel()
 			owner_unit.stop_component_navigation()
 			owner_unit.command_state = Unit.CommandState.IDLE
@@ -237,11 +242,12 @@ func _get_approach_point(owner_unit: Unit, target_center: Vector2, target_radius
 
 
 func _ensure_valid_target_node(owner_unit: Unit) -> bool:
-	if is_instance_valid(target_node) and not target_node.is_depleted():
+	if is_instance_valid(target_node) and not target_node.is_depleted() and not target_node.is_vent:
 		return true
 	var search_origin: Vector2 = last_node_position if last_node_position != Vector2.ZERO else owner_unit.global_position
-	var res_type: StringName = last_resource_type if last_resource_type != &"" else &"biomass"
-	target_node = _find_nearest_resource_node(owner_unit, search_origin, res_type, NODE_REACQUIRE_RADIUS)
+	var res_type: StringName = owner_unit.data.allowed_resource if (owner_unit.data != null and owner_unit.data.allowed_resource != &"") else (last_resource_type if last_resource_type != &"" else &"biomass")
+	var radius: float = 2400.0 if (owner_unit.data != null and owner_unit.data.auto_gather_on_spawn) else NODE_REACQUIRE_RADIUS
+	target_node = _find_nearest_resource_node(owner_unit, search_origin, res_type, radius)
 	return target_node != null
 
 
@@ -282,7 +288,7 @@ func _find_nearest_resource_node(owner_unit: Unit, origin: Vector2, resource_typ
 		if not (node is ResourceNode) or not is_instance_valid(node):
 			continue
 		var res_node: ResourceNode = node
-		if res_node.is_depleted() or res_node.resource_type != resource_type:
+		if res_node.is_depleted() or res_node.is_vent or res_node.resource_type != resource_type:
 			continue
 		var d_sq: float = origin.distance_squared_to(res_node.global_position)
 		if d_sq <= best_dist_sq:

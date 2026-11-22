@@ -10,6 +10,9 @@ extends Control
 @onready var btn_unit_5: Button = %BtnUnit5
 @onready var btn_scout_1: Button = %BtnScout1
 @onready var btn_worker_1: Button = %BtnWorker1
+@onready var btn_harvester_1: Button = %BtnHarvester1
+@onready var btn_engineer_1: Button = %BtnEngineer1
+@onready var btn_grant_res: Button = %BtnGrantRes
 @onready var btn_dummy_1: Button = %BtnDummy1
 @onready var btn_dummy_3: Button = %BtnDummy3
 @onready var btn_clear_dummies: Button = %BtnClearDummies
@@ -38,6 +41,18 @@ func _ready() -> void:
 	btn_worker_1.pressed.connect(func() -> void:
 		if _spawner != null:
 			_spawner.spawn_worker_units(1)
+	)
+	btn_harvester_1.pressed.connect(func() -> void:
+		if _spawner != null:
+			_spawner.spawn_harvester_units(1)
+	)
+	btn_engineer_1.pressed.connect(func() -> void:
+		if _spawner != null:
+			_spawner.spawn_engineer_units(1)
+	)
+	btn_grant_res.pressed.connect(func() -> void:
+		if _spawner != null:
+			_spawner.grant_debug_resources()
 	)
 	btn_dummy_1.pressed.connect(func() -> void:
 		if _spawner != null:

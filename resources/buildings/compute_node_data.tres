@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/compute_node.tscn" id="2_scene"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"compute_node"
+display_name = "Compute Node"
+scene = ExtResource("2_scene")
+biomass_cost = 100
+silica_cost = 50
+compute_cost = 0
+build_time = 5.0
+footprint_size = Vector2(76, 76)
+max_hp = 650.0
+bandwidth_provided = 0
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+requires_vent = true
+max_staff_slots = 2

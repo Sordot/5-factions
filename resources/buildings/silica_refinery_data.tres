@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/silica_refinery.tscn" id="2_scene"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"silica_refinery"
+display_name = "Silica Refinery"
+scene = ExtResource("2_scene")
+biomass_cost = 100
+silica_cost = 0
+compute_cost = 0
+build_time = 4.0
+footprint_size = Vector2(84, 84)
+max_hp = 800.0
+bandwidth_provided = 0
+is_dropoff = true
+accepted_resources = Array[StringName]([&"silica"])
+requires_vent = false
+max_staff_slots = 0

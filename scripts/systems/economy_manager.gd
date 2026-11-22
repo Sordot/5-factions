@@ -184,6 +184,12 @@ func get_bandwidth_cap(team: int) -> int:
 	return int(_bandwidth_cap.get(team, 0))
 
 
+func has_bandwidth(team: int, cost: int = 1) -> bool:
+	if cost <= 0:
+		return true
+	return get_bandwidth_used(team) + cost <= get_bandwidth_cap(team)
+
+
 func recalculate_bandwidth(team: int, excluded_node: Node = null) -> void:
 	_ensure_team(team)
 	var used: int = 0
@@ -203,7 +209,7 @@ func recalculate_bandwidth(team: int, excluded_node: Node = null) -> void:
 			if node == excluded_node or not (node is Building) or not is_instance_valid(node):
 				continue
 			var building: Building = node
-			if building.is_destroyed or building.is_queued_for_deletion() or building.team != team:
+			if building.is_destroyed or building.is_queued_for_deletion() or not building.is_constructed or building.team != team:
 				continue
 			cap += maxi(0, building.bandwidth_provided)
 	else:

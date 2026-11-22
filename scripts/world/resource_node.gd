@@ -12,11 +12,13 @@ signal depleted(node: ResourceNode)
 @export var remaining_amount: int = 1500
 @export var collision_radius: float = 22.0
 @export var interaction_radius: float = 28.0
+@export var is_vent: bool = false
 
 @onready var visual_root: Node2D = get_node_or_null("VisualRoot") as Node2D
 @onready var highlight_ring: Line2D = get_node_or_null("HighlightRing") as Line2D
 @onready var amount_label: Label = get_node_or_null("AmountLabel") as Label
 
+var occupied_by_building: Building = null
 var _pulse_timer: float = 0.0
 var _is_highlighted: bool = false
 
@@ -41,7 +43,26 @@ func _process(delta: float) -> void:
 
 
 func is_depleted() -> bool:
+	if is_vent:
+		return false
 	return remaining_amount <= 0
+
+
+func is_occupied() -> bool:
+	return occupied_by_building != null and is_instance_valid(occupied_by_building) and not occupied_by_building.is_destroyed
+
+
+func claim_by_building(building: Building) -> void:
+	occupied_by_building = building
+	if amount_label != null and is_vent:
+		amount_label.visible = false
+
+
+func release_building(building: Building) -> void:
+	if occupied_by_building == building:
+		occupied_by_building = null
+		if amount_label != null and is_vent:
+			amount_label.visible = true
 
 
 func contains_point(world_point: Vector2) -> bool:
@@ -61,7 +82,7 @@ func pulse_harvest_feedback() -> void:
 
 
 func extract(amount: int) -> int:
-	if amount <= 0 or remaining_amount <= 0:
+	if is_vent or amount <= 0 or remaining_amount <= 0:
 		return 0
 	var extracted: int = mini(amount, remaining_amount)
 	remaining_amount -= extracted
@@ -74,6 +95,10 @@ func extract(amount: int) -> int:
 
 
 func _update_visuals() -> void:
+	if is_vent:
+		if amount_label != null:
+			amount_label.visible = not is_occupied()
+		return
 	var ratio: float = clampf(float(remaining_amount) / float(maxi(1, max_amount)), 0.0, 1.0)
 	if visual_root != null:
 		var scale_factor: float = lerpf(0.65, 1.0, ratio)

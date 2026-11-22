@@ -14,6 +14,8 @@ enum CommandState {
 	HOLD_POSITION,
 	CASTING_ABILITY,
 	GATHERING,
+	CONSTRUCTING,
+	STAFFING_BUILDING,
 }
 
 const ATTACK_TRACER_SCRIPT: GDScript = preload("res://ui/overlays/attack_tracer.gd")
@@ -30,27 +32,33 @@ signal died(unit: Unit)
 signal ability_cooldown_updated(ability_id: StringName, remaining: float, duration: float)
 signal ability_executed(ability_id: StringName, target_pos: Vector2)
 signal cargo_changed(unit: Unit, resource_type: StringName, amount: int)
+signal staffed_state_changed(unit: Unit, staffed: bool)
 
 @export var team: Team = Team.PLAYER
 @export var data: UnitData
 @export var always_show_health_bar: bool = false
 
+@onready var collision_shape: CollisionShape2D = get_node_or_null("CollisionShape2D") as CollisionShape2D
 @onready var nav_agent: NavigationAgent2D = get_node_or_null("NavigationAgent2D") as NavigationAgent2D
 @onready var selection_ring: Node2D = $SelectionRing
 @onready var body_visual: Node2D = $BodyVisual
 @onready var health_bar_root: Node2D = get_node_or_null("HealthBar") as Node2D
 @onready var health_bar_fill: ColorRect = get_node_or_null("HealthBar/Fill") as ColorRect
 @onready var gather_component: GatherComponent = get_node_or_null("GatherComponent") as GatherComponent
+@onready var staff_component: StaffComponent = get_node_or_null("StaffComponent") as StaffComponent
 @onready var cargo_visual: Node2D = get_node_or_null("BodyVisual/CargoVisual") as Node2D
 @onready var gather_bar_root: Node2D = get_node_or_null("GatherBar") as Node2D
 @onready var gather_bar_fill: ColorRect = get_node_or_null("GatherBar/Fill") as ColorRect
 
 var is_selected: bool = false
 var is_dead: bool = false
+var is_staffed: bool = false
 var current_hp: float = 100.0
 var command_state: CommandState = CommandState.IDLE
 var current_target: Unit = null
 var ability_component: AbilityComponent = null
+
+var _construction_target: Building = null
 
 var _move_destination: Vector2 = Vector2.ZERO
 var _attack_move_destination: Vector2 = Vector2.ZERO
@@ -101,6 +109,8 @@ func _ready() -> void:
 		gather_bar_root.visible = false
 
 	_register_with_economy()
+	if data != null and data.auto_gather_on_spawn and can_gather():
+		call_deferred("_try_start_auto_gather")
 
 
 func _exit_tree() -> void:
@@ -118,7 +128,7 @@ func set_selected(selected: bool) -> void:
 
 
 func contains_point(world_point: Vector2) -> bool:
-	if is_dead:
+	if is_dead or is_staffed:
 		return false
 	var radius: float = data.selection_radius if data != null else 20.0
 	return global_position.distance_squared_to(world_point) <= radius * radius
@@ -160,7 +170,28 @@ func command_cast_ability(ability: AbilityData, target_pos: Vector2, target_unit
 
 
 func can_gather() -> bool:
-	return data != null and data.can_gather and gather_component != null
+	return not is_dead and not is_staffed and data != null and data.can_gather and gather_component != null
+
+
+func can_gather_resource(resource_type: StringName) -> bool:
+	if not can_gather():
+		return false
+	if data.allowed_resource != &"" and data.allowed_resource != resource_type:
+		return false
+	return true
+
+
+func can_construct() -> bool:
+	if is_dead or is_staffed or data == null:
+		return false
+	for ability: AbilityData in data.abilities:
+		if ability != null and ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
+			return true
+	return false
+
+
+func can_staff_compute() -> bool:
+	return not is_dead and not is_staffed and data != null and data.can_staff_compute and staff_component != null
 
 
 func is_carrying_cargo() -> bool:
@@ -176,10 +207,9 @@ func get_carried_type() -> StringName:
 
 
 func command_gather(resource_node: ResourceNode) -> bool:
-	if is_dead or not can_gather() or not _can_move() or resource_node == null:
+	if is_dead or is_staffed or not can_gather() or not _can_move() or resource_node == null:
 		return false
-	if ability_component != null:
-		ability_component.cancel_pending_cast()
+	_cancel_active_tasks(true)
 	if not gather_component.start_gather(self, resource_node):
 		return false
 	command_state = CommandState.GATHERING
@@ -190,10 +220,9 @@ func command_gather(resource_node: ResourceNode) -> bool:
 
 
 func command_return_cargo(building: Building = null) -> bool:
-	if is_dead or not can_gather() or not _can_move() or not is_carrying_cargo():
+	if is_dead or is_staffed or not can_gather() or not _can_move() or not is_carrying_cargo():
 		return false
-	if ability_component != null:
-		ability_component.cancel_pending_cast()
+	_cancel_active_tasks(true)
 	if not gather_component.start_return_cargo(self, building):
 		return false
 	command_state = CommandState.GATHERING
@@ -201,6 +230,104 @@ func command_return_cargo(building: Building = null) -> bool:
 	_reset_progress_tracker()
 	_last_nav_target = Vector2.INF
 	return true
+
+
+func command_construct_building(building: Building) -> bool:
+	if is_dead or is_staffed or not can_construct() or not _can_move():
+		return false
+	if building == null or not is_instance_valid(building) or building.is_destroyed or building.is_constructed or building.team != team:
+		return false
+	_cancel_active_tasks(false)
+	_construction_target = building
+	command_state = CommandState.CONSTRUCTING
+	current_target = null
+	_reset_progress_tracker()
+	_last_nav_target = Vector2.INF
+	return true
+
+
+func command_staff_building(building: Building) -> bool:
+	if is_dead or is_staffed or not can_staff_compute() or not _can_move():
+		return false
+	if building == null or not is_instance_valid(building) or not building.can_accept_staff(self):
+		return false
+	_cancel_active_tasks(false)
+	if not staff_component.start_staffing(self, building):
+		return false
+	command_state = CommandState.STAFFING_BUILDING
+	current_target = null
+	_reset_progress_tracker()
+	_last_nav_target = Vector2.INF
+	return true
+
+
+func enter_staffed_building(_building: Building) -> void:
+	if is_staffed:
+		return
+	is_staffed = true
+	_cancel_active_tasks(false)
+	command_state = CommandState.IDLE
+	current_target = null
+	stop_component_navigation()
+	set_selected(false)
+	visible = false
+	if collision_shape != null:
+		collision_shape.set_deferred("disabled", true)
+	if is_in_group("selectable_units"):
+		remove_from_group("selectable_units")
+	set_physics_process(false)
+	staffed_state_changed.emit(self, true)
+
+
+func exit_staffed_building(world_pos: Vector2) -> void:
+	if not is_staffed:
+		return
+	is_staffed = false
+	global_position = world_pos
+	velocity = Vector2.ZERO
+	command_state = CommandState.IDLE
+	if staff_component != null:
+		staff_component.staffed_building = null
+	visible = true
+	if collision_shape != null:
+		collision_shape.set_deferred("disabled", false)
+	if not is_in_group("selectable_units"):
+		add_to_group("selectable_units")
+	set_physics_process(true)
+	staffed_state_changed.emit(self, false)
+
+
+func _cancel_active_tasks(keep_gather: bool) -> void:
+	if ability_component != null:
+		ability_component.cancel_pending_cast()
+	if not keep_gather and gather_component != null:
+		gather_component.cancel()
+	if staff_component != null:
+		staff_component.cancel()
+	if _construction_target != null:
+		_construction_target = null
+		if gather_bar_root != null:
+			gather_bar_root.visible = false
+
+
+func _try_start_auto_gather() -> void:
+	if is_dead or is_staffed or not can_gather() or not is_inside_tree():
+		return
+	var target_type: StringName = data.allowed_resource if data.allowed_resource != &"" else &"silica"
+	var best: ResourceNode = null
+	var best_dist_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+		if not (node is ResourceNode) or not is_instance_valid(node):
+			continue
+		var res_node: ResourceNode = node
+		if res_node.is_depleted() or res_node.is_vent or res_node.resource_type != target_type:
+			continue
+		var d_sq: float = global_position.distance_squared_to(res_node.global_position)
+		if d_sq < best_dist_sq:
+			best_dist_sq = d_sq
+			best = res_node
+	if best != null:
+		command_gather(best)
 
 
 func request_component_navigation(target_point: Vector2, repath_threshold: float = 10.0) -> void:
@@ -236,12 +363,9 @@ func heal(amount: float) -> void:
 
 
 func command_move(target_pos: Vector2) -> void:
-	if is_dead or not _can_move():
+	if is_dead or is_staffed or not _can_move():
 		return
-	if ability_component != null:
-		ability_component.cancel_pending_cast()
-	if gather_component != null:
-		gather_component.cancel()
+	_cancel_active_tasks(false)
 	command_state = CommandState.MOVING
 	current_target = null
 	_move_destination = target_pos
@@ -250,14 +374,11 @@ func command_move(target_pos: Vector2) -> void:
 
 
 func command_attack_target(target: Unit) -> void:
-	if is_dead or not _can_attack():
+	if is_dead or is_staffed or not _can_attack():
 		return
 	if not is_instance_valid(target) or target.is_dead or target.team == team:
 		return
-	if ability_component != null:
-		ability_component.cancel_pending_cast()
-	if gather_component != null:
-		gather_component.cancel()
+	_cancel_active_tasks(false)
 	command_state = CommandState.ATTACKING_TARGET
 	current_target = target
 	_reset_progress_tracker()
@@ -265,12 +386,9 @@ func command_attack_target(target: Unit) -> void:
 
 
 func command_attack_move(target_pos: Vector2) -> void:
-	if is_dead or not _can_move():
+	if is_dead or is_staffed or not _can_move():
 		return
-	if ability_component != null:
-		ability_component.cancel_pending_cast()
-	if gather_component != null:
-		gather_component.cancel()
+	_cancel_active_tasks(false)
 	command_state = CommandState.ATTACK_MOVING
 	_attack_move_destination = target_pos
 	_move_destination = target_pos
@@ -280,12 +398,9 @@ func command_attack_move(target_pos: Vector2) -> void:
 
 
 func command_stop() -> void:
-	if is_dead:
+	if is_dead or is_staffed:
 		return
-	if ability_component != null:
-		ability_component.cancel_pending_cast()
-	if gather_component != null:
-		gather_component.cancel()
+	_cancel_active_tasks(false)
 	command_state = CommandState.IDLE
 	current_target = null
 	_wants_nav_movement = false
@@ -296,12 +411,9 @@ func command_stop() -> void:
 
 
 func command_hold_position() -> void:
-	if is_dead:
+	if is_dead or is_staffed:
 		return
-	if ability_component != null:
-		ability_component.cancel_pending_cast()
-	if gather_component != null:
-		gather_component.cancel()
+	_cancel_active_tasks(false)
 	command_state = CommandState.HOLD_POSITION
 	current_target = null
 	_wants_nav_movement = false
@@ -328,8 +440,7 @@ func _die() -> void:
 	if is_dead:
 		return
 	is_dead = true
-	if gather_component != null:
-		gather_component.cancel()
+	_cancel_active_tasks(false)
 	command_state = CommandState.IDLE
 	current_target = null
 	_wants_nav_movement = false
@@ -380,6 +491,10 @@ func _physics_process(delta: float) -> void:
 			_process_casting_ability(delta)
 		CommandState.GATHERING:
 			_process_gathering(delta)
+		CommandState.CONSTRUCTING:
+			_process_constructing(delta)
+		CommandState.STAFFING_BUILDING:
+			_process_staffing_building(delta)
 
 	if _can_move() and nav_agent != null and nav_agent.avoidance_enabled:
 		nav_agent.set_velocity(_desired_move_velocity)
@@ -415,6 +530,12 @@ func _process_moving(delta: float) -> void:
 		command_state = CommandState.IDLE
 		_reset_progress_tracker()
 		velocity = Vector2.ZERO
+		if data != null and data.auto_gather_on_spawn and can_gather():
+			if is_carrying_cargo():
+				if not command_return_cargo():
+					_try_start_auto_gather()
+			else:
+				_try_start_auto_gather()
 		return
 	_compute_nav_desired_velocity()
 
@@ -498,6 +619,43 @@ func _process_gathering(delta: float) -> void:
 	gather_component.tick(self, delta)
 
 
+func _process_constructing(delta: float) -> void:
+	if _construction_target == null or not is_instance_valid(_construction_target) or _construction_target.is_destroyed or _construction_target.is_constructed:
+		_construction_target = null
+		command_state = CommandState.IDLE
+		stop_component_navigation()
+		if gather_bar_root != null:
+			gather_bar_root.visible = false
+		return
+
+	var unit_r: float = data.collision_radius if data != null else 13.0
+	var build_reach: float = _construction_target.footprint_radius + unit_r + 24.0
+	var dist: float = global_position.distance_to(_construction_target.global_position)
+	if dist <= build_reach:
+		stop_component_navigation()
+		face_world_point(_construction_target.global_position, delta)
+		var completed: bool = _construction_target.advance_construction(delta)
+		if gather_bar_root != null and gather_bar_fill != null:
+			gather_bar_root.visible = not completed
+			gather_bar_fill.size.x = GATHER_BAR_WIDTH * clampf(_construction_target.construction_progress, 0.0, 1.0)
+		if completed:
+			_construction_target = null
+			command_state = CommandState.IDLE
+		return
+
+	var offset: Vector2 = global_position - _construction_target.global_position
+	var dir: Vector2 = offset.normalized() if offset.length_squared() > 0.01 else Vector2.RIGHT
+	var approach: Vector2 = _construction_target.global_position + dir * (_construction_target.footprint_radius * 0.75)
+	request_component_navigation(approach, 12.0)
+
+
+func _process_staffing_building(delta: float) -> void:
+	if staff_component == null or not staff_component.is_active():
+		command_state = CommandState.IDLE
+		return
+	staff_component.tick(self, delta)
+
+
 func _request_nav_toward_point(target_point: Vector2, repath_threshold: float) -> void:
 	if nav_agent == null:
 		return
@@ -530,7 +688,7 @@ func _steer_around_static_units(move_dir: Vector2) -> Vector2:
 		if not (node is Unit) or node == self:
 			continue
 		var other: Unit = node
-		if not is_instance_valid(other) or other.is_dead:
+		if not is_instance_valid(other) or other.is_dead or other.is_staffed:
 			continue
 		if other._can_move():
 			continue
@@ -574,6 +732,11 @@ func _apply_stationary_separation(delta: float) -> void:
 	if command_state == CommandState.GATHERING and gather_component != null and gather_component.is_harvesting_in_place():
 		velocity = Vector2.ZERO
 		return
+	if command_state == CommandState.CONSTRUCTING and _construction_target != null and is_instance_valid(_construction_target):
+		var unit_r: float = data.collision_radius if data != null else 13.0
+		if global_position.distance_to(_construction_target.global_position) <= _construction_target.footprint_radius + unit_r + 24.0:
+			velocity = Vector2.ZERO
+			return
 	var sep_margin: float = 0.0 if command_state == CommandState.HOLD_POSITION else 2.5
 	var sep: Vector2 = _compute_overlap_separation(sep_margin)
 	if sep.length_squared() > 1.0:
@@ -595,7 +758,7 @@ func _compute_overlap_separation(extra_margin: float) -> Vector2:
 		if not (node is Unit) or node == self:
 			continue
 		var other: Unit = node
-		if not is_instance_valid(other) or other.is_dead:
+		if not is_instance_valid(other) or other.is_dead or other.is_staffed:
 			continue
 		var other_r: float = other.data.collision_radius if other.data != null else 16.0
 		var min_dist: float = my_r + other_r + extra_margin
@@ -698,7 +861,7 @@ func _find_nearest_enemy(max_range: float) -> Unit:
 		if not (node is Unit):
 			continue
 		var candidate: Unit = node
-		if not is_instance_valid(candidate) or candidate.is_dead or candidate.team == team:
+		if not is_instance_valid(candidate) or candidate.is_dead or candidate.is_staffed or candidate.team == team:
 			continue
 		var dist: float = _distance_to_unit_edge(candidate)
 		if dist <= best_dist:

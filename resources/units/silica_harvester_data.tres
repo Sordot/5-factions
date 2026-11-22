@@ -1,0 +1,32 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"silica_harvester"
+display_name = "Silica Harvester"
+max_hp = 160.0
+move_speed = 190.0
+acceleration = 1400.0
+turn_speed = 10.0
+selection_radius = 22.0
+collision_radius = 16.0
+attack_damage = 0.0
+attack_range = 0.0
+aggro_range = 0.0
+attack_cooldown = 1.0
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([])
+bandwidth_cost = 2
+can_gather = true
+gather_duration = 3.5
+carry_capacity = 25
+gather_range = 52.0
+dropoff_range = 68.0
+allowed_resource = &"silica"
+auto_gather_on_spawn = true
+can_staff_compute = false
+biomass_cost = 75
+silica_cost = 0
+compute_cost = 0
+build_time = 4.0

@@ -11,9 +11,13 @@ signal entities_changed
 @export var player_unit_scene: PackedScene = preload("res://scenes/units/test_unit.tscn")
 @export var scout_unit_scene: PackedScene = preload("res://scenes/units/scout_unit.tscn")
 @export var worker_unit_scene: PackedScene = preload("res://scenes/units/worker_unit.tscn")
+@export var harvester_unit_scene: PackedScene = preload("res://scenes/units/silica_harvester.tscn")
+@export var engineer_unit_scene: PackedScene = preload("res://scenes/units/engineer_unit.tscn")
 @export var target_dummy_scene: PackedScene = preload("res://scenes/units/target_dummy.tscn")
 @export var player_spawn_origin: Vector2 = Vector2(-280.0, 0.0)
 @export var worker_spawn_origin: Vector2 = Vector2(-265.0, 165.0)
+@export var harvester_spawn_origin: Vector2 = Vector2(320.0, -110.0)
+@export var engineer_spawn_origin: Vector2 = Vector2(-340.0, 50.0)
 @export var dummy_spawn_origin: Vector2 = Vector2(260.0, 0.0)
 
 var _spawn_cycle: int = 0
@@ -31,6 +35,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("debug_spawn_worker_1"):
 		spawn_worker_units(1, get_global_mouse_position())
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("debug_spawn_harvester_1"):
+		spawn_harvester_units(1, get_global_mouse_position())
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("debug_spawn_engineer_1"):
+		spawn_engineer_units(1, get_global_mouse_position())
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("debug_spawn_dummy_1"):
 		spawn_target_dummies(1, get_global_mouse_position())
@@ -61,6 +71,23 @@ func spawn_worker_units(count: int, origin: Vector2 = Vector2.INF) -> Array[Unit
 	return _spawn_batch(worker_unit_scene, count, base_pos, 38.0)
 
 
+func spawn_harvester_units(count: int, origin: Vector2 = Vector2.INF) -> Array[Unit]:
+	var base_pos: Vector2 = _resolve_origin(origin, harvester_spawn_origin)
+	return _spawn_batch(harvester_unit_scene, count, base_pos, 44.0)
+
+
+func spawn_engineer_units(count: int, origin: Vector2 = Vector2.INF) -> Array[Unit]:
+	var base_pos: Vector2 = _resolve_origin(origin, engineer_spawn_origin)
+	return _spawn_batch(engineer_unit_scene, count, base_pos, 38.0)
+
+
+func grant_debug_resources() -> void:
+	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	if econ != null:
+		econ.add_resource(Unit.Team.PLAYER, EconomyManager.RESOURCE_BIOMASS, 200)
+		econ.add_resource(Unit.Team.PLAYER, EconomyManager.RESOURCE_SILICA, 100)
+
+
 func spawn_target_dummies(count: int, origin: Vector2 = Vector2.INF) -> Array[Unit]:
 	var base_pos: Vector2 = _resolve_origin(origin, dummy_spawn_origin)
 	return _spawn_batch(target_dummy_scene, count, base_pos, 52.0)
@@ -78,6 +105,12 @@ func reset_sandbox() -> void:
 	if sel_ctrl != null:
 		sel_ctrl.clear_selection()
 		sel_ctrl.clear_control_groups()
+
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if node is Building and is_instance_valid(node):
+			var b: Building = node
+			if b.building_type_id != &"command_core":
+				b.queue_free()
 
 	var container: Node = _get_units_container()
 	if container != null:

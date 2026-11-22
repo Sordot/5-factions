@@ -1,6 +1,9 @@
-[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="UnitData" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/build_silica_refinery.tres" id="2_build_refinery"]
+[ext_resource type="Resource" path="res://resources/abilities/build_compute_node.tres" id="3_build_compute"]
+[ext_resource type="Resource" path="res://resources/abilities/build_bandwidth_relay.tres" id="4_build_relay"]
 
 [resource]
 script = ExtResource("1_unit_data")
@@ -16,10 +19,17 @@ attack_damage = 6.0
 attack_range = 80.0
 aggro_range = 130.0
 attack_cooldown = 1.0
-abilities = Array[Resource("res://scripts/data/ability_data.gd")]([])
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_build_refinery"), ExtResource("3_build_compute"), ExtResource("4_build_relay")])
 bandwidth_cost = 1
 can_gather = true
 gather_duration = 3.0
 carry_capacity = 10
 gather_range = 48.0
 dropoff_range = 64.0
+allowed_resource = &"biomass"
+auto_gather_on_spawn = false
+can_staff_compute = false
+biomass_cost = 50
+silica_cost = 0
+compute_cost = 0
+build_time = 3.0

@@ -1,0 +1,54 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/resource_node.gd" id="1_res_node_script"]
+
+[node name="ComputeVent" type="StaticBody2D"]
+collision_layer = 0
+collision_mask = 0
+script = ExtResource("1_res_node_script")
+resource_type = &"compute"
+display_name = "Compute Vent"
+max_amount = 9999
+remaining_amount = 9999
+collision_radius = 26.0
+interaction_radius = 34.0
+is_vent = true
+
+[node name="HighlightRing" type="Line2D" parent="."]
+visible = false
+points = PackedVector2Array(34, 0, 29.4, 17, 17, 29.4, 0, 34, -17, 29.4, -29.4, 17, -34, 0, -29.4, -17, -17, -29.4, 0, -34, 17, -29.4, 29.4, -17)
+closed = true
+width = 2.2
+default_color = Color(0.32, 0.88, 1, 0.95)
+antialiased = true
+
+[node name="VisualRoot" type="Node2D" parent="."]
+
+[node name="OuterBasin" type="Polygon2D" parent="VisualRoot"]
+color = Color(0.06, 0.14, 0.22, 0.95)
+polygon = PackedVector2Array(28, 0, 24.2, 14, 14, 24.2, 0, 28, -14, 24.2, -24.2, 14, -28, 0, -24.2, -14, -14, -24.2, 0, -28, 14, -24.2, 24.2, -14)
+
+[node name="MidGlow" type="Polygon2D" parent="VisualRoot"]
+color = Color(0.14, 0.56, 0.86, 0.85)
+polygon = PackedVector2Array(19, 0, 13.4, 13.4, 0, 19, -13.4, 13.4, -19, 0, -13.4, -13.4, 0, -19, 13.4, -13.4)
+
+[node name="VentCore" type="Polygon2D" parent="VisualRoot"]
+color = Color(0.55, 0.94, 1, 1)
+polygon = PackedVector2Array(10, 0, 7, 7, 0, 10, -7, 7, -10, 0, -7, -7, 0, -10, 7, -7)
+
+[node name="RimOutline" type="Line2D" parent="VisualRoot"]
+points = PackedVector2Array(28, 0, 24.2, 14, 14, 24.2, 0, 28, -14, 24.2, -24.2, 14, -28, 0, -24.2, -14, -14, -24.2, 0, -28, 14, -24.2, 24.2, -14)
+closed = true
+width = 2.0
+default_color = Color(0.32, 0.84, 1, 0.8)
+antialiased = true
+
+[node name="AmountLabel" type="Label" parent="."]
+offset_left = -42.0
+offset_top = 29.0
+offset_right = 42.0
+offset_bottom = 45.0
+theme_override_colors/font_color = Color(0.56, 0.9, 1, 0.9)
+theme_override_font_sizes/font_size = 10
+text = "COMPUTE VENT"
+horizontal_alignment = 1

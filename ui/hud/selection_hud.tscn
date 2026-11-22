@@ -49,9 +49,9 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -450.0
-offset_top = -126.0
-offset_right = 450.0
+offset_left = -520.0
+offset_top = -128.0
+offset_right = 520.0
 offset_bottom = -8.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -137,7 +137,7 @@ text = "Role: Biomass Drop-Off  |  Provides +10 Bandwidth"
 layout_mode = 2
 
 [node name="RightPanel" type="VBoxContainer" parent="BottomAnchor/BottomPanel/HBox"]
-custom_minimum_size = Vector2(310, 0)
+custom_minimum_size = Vector2(440, 0)
 layout_mode = 2
 theme_override_constants/separation = 6
 
