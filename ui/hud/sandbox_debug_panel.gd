@@ -14,6 +14,7 @@ extends Control
 @onready var btn_engineer_1: Button = %BtnEngineer1
 @onready var btn_grant_res: Button = %BtnGrantRes
 @onready var btn_trigger_zone: Button = %BtnTriggerZone
+@onready var btn_toggle_edge_pan: Button = %BtnToggleEdgePan
 @onready var btn_dummy_1: Button = %BtnDummy1
 @onready var btn_dummy_3: Button = %BtnDummy3
 @onready var btn_enemy_1: Button = %BtnEnemy1
@@ -22,11 +23,15 @@ extends Control
 
 var _spawner: SandboxSpawner = null
 var _selection_controller: SelectionController = null
+var _camera: RTSCamera = null
 
 
 func _ready() -> void:
 	_spawner = get_node_or_null(spawner_path) as SandboxSpawner
 	_selection_controller = get_node_or_null(selection_controller_path) as SelectionController
+	_camera = get_tree().get_first_node_in_group("rts_camera") as RTSCamera
+	if _camera != null and not _camera.edge_pan_toggled.is_connected(_on_camera_edge_pan_toggled):
+		_camera.edge_pan_toggled.connect(_on_camera_edge_pan_toggled)
 
 	btn_unit_1.pressed.connect(func() -> void:
 		if _spawner != null:
@@ -60,6 +65,12 @@ func _ready() -> void:
 		if _spawner != null:
 			_spawner.trigger_zone_phase()
 	)
+	btn_toggle_edge_pan.pressed.connect(func() -> void:
+		if _camera == null and is_inside_tree():
+			_camera = get_tree().get_first_node_in_group("rts_camera") as RTSCamera
+		if _camera != null:
+			_camera.toggle_edge_pan()
+	)
 	btn_dummy_1.pressed.connect(func() -> void:
 		if _spawner != null:
 			_spawner.spawn_target_dummies(1)
@@ -81,7 +92,20 @@ func _ready() -> void:
 			_spawner.reset_sandbox()
 	)
 
+	_refresh_edge_pan_button()
 	_refresh_status()
+
+
+func _on_camera_edge_pan_toggled(_enabled: bool) -> void:
+	_refresh_edge_pan_button()
+
+
+func _refresh_edge_pan_button() -> void:
+	if btn_toggle_edge_pan == null:
+		return
+	var enabled: bool = _camera.edge_pan_enabled if _camera != null else true
+	btn_toggle_edge_pan.text = "Edge Pan: ON (F12)" if enabled else "Edge Pan: OFF (F12)"
+	btn_toggle_edge_pan.modulate = Color(0.55, 1.0, 0.92, 1.0) if enabled else Color(0.76, 0.72, 0.72, 0.85)
 
 
 func _process(_delta: float) -> void:

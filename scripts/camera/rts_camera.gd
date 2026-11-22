@@ -1,59 +1,219 @@
 class_name RTSCamera
 extends Camera2D
 
-@export var pan_speed: float = 550.0
+signal edge_pan_toggled(enabled: bool)
+
+const EDGE_BOUNDS_TOLERANCE_PX: float = 4.0
+const MAX_FRAME_DELTA: float = 0.05
+
+@export var pan_speed: float = 650.0
+@export var edge_pan_enabled: bool = true
+@export var edge_margin_px: float = 24.0
+@export var edge_pan_speed: float = 900.0
+@export_range(0.1, 1.0, 0.05) var edge_inner_speed_ratio: float = 0.45
+@export var pan_smoothing: float = 18.0
+@export var scale_speed_with_zoom: bool = true
 @export var zoom_step: float = 0.12
 @export var min_zoom: float = 0.5
 @export var max_zoom: float = 2.0
-@export var zoom_smoothness: float = 12.0
+@export var zoom_smoothness: float = 14.0
 @export var pan_bounds: Rect2 = Rect2(-960.0, -540.0, 1920.0, 1080.0)
 
+var _target_position: Vector2 = Vector2.ZERO
 var _target_zoom: float = 1.0
 var _is_middle_dragging: bool = false
+var _mouse_in_window: bool = true
 
 
 func _ready() -> void:
+	add_to_group("rts_camera")
 	_target_zoom = clampf(zoom.x, min_zoom, max_zoom)
 	zoom = Vector2(_target_zoom, _target_zoom)
+	_target_position = _clamp_point(global_position)
+	global_position = _target_position
+
+
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_WM_MOUSE_ENTER, NOTIFICATION_WM_WINDOW_FOCUS_IN:
+			_mouse_in_window = true
+		NOTIFICATION_WM_MOUSE_EXIT, NOTIFICATION_WM_WINDOW_FOCUS_OUT, NOTIFICATION_APPLICATION_FOCUS_OUT:
+			_mouse_in_window = false
+			_is_middle_dragging = false
+
+
+func _input(event: InputEvent) -> void:
+	# Recover mouse-in-window tracking automatically if cursor was already inside on launch or focus regain.
+	if event is InputEventMouseMotion:
+		var vp: Viewport = get_viewport()
+		if vp != null and vp.get_visible_rect().grow(EDGE_BOUNDS_TOLERANCE_PX).has_point((event as InputEventMouseMotion).position):
+			_mouse_in_window = true
 
 
 func _process(delta: float) -> void:
-	var pan_input: Vector2 = Input.get_vector(
+	var dt: float = minf(delta, MAX_FRAME_DELTA)
+	var kb_input: Vector2 = Input.get_vector(
 		"camera_pan_left",
 		"camera_pan_right",
 		"camera_pan_up",
 		"camera_pan_down"
 	)
-	if pan_input != Vector2.ZERO:
-		global_position += pan_input * (pan_speed / zoom.x) * delta
-		_clamp_position()
+	var edge_vec: Vector2 = _get_edge_pan_vector()
+	var combined_dir: Vector2 = (kb_input + edge_vec).limit_length(1.0)
 
-	var next_zoom: float = lerpf(zoom.x, _target_zoom, clampf(zoom_smoothness * delta, 0.0, 1.0))
+	if combined_dir != Vector2.ZERO:
+		var base_speed: float = pan_speed
+		var apply_zoom_scale: bool = true
+		if edge_vec != Vector2.ZERO and kb_input == Vector2.ZERO:
+			base_speed = edge_pan_speed
+			apply_zoom_scale = scale_speed_with_zoom
+		elif edge_vec != Vector2.ZERO and kb_input != Vector2.ZERO:
+			base_speed = maxf(pan_speed, edge_pan_speed)
+			apply_zoom_scale = scale_speed_with_zoom
+
+		var effective_speed: float = base_speed / maxf(0.1, zoom.x) if apply_zoom_scale else base_speed
+		_target_position = _clamp_point(_target_position + combined_dir * effective_speed * dt)
+
+	# Frame-rate-independent exponential chase for silky SC2 / LoL / Dota camera motion.
+	if pan_smoothing > 0.0:
+		var pan_alpha: float = 1.0 - exp(-pan_smoothing * dt)
+		global_position = global_position.lerp(_target_position, pan_alpha)
+		if global_position.distance_squared_to(_target_position) < 0.04:
+			global_position = _target_position
+	else:
+		global_position = _target_position
+
+	var zoom_alpha: float = 1.0 - exp(-zoom_smoothness * dt)
+	var next_zoom: float = lerpf(zoom.x, _target_zoom, zoom_alpha)
+	if absf(next_zoom - _target_zoom) < 0.0005:
+		next_zoom = _target_zoom
 	zoom = Vector2(next_zoom, next_zoom)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("camera_toggle_edge_pan"):
+		toggle_edge_pan()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("camera_toggle_fullscreen"):
+		toggle_fullscreen()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event is InputEventKey:
+		var key_ev: InputEventKey = event
+		if key_ev.pressed and not key_ev.echo and key_ev.alt_pressed and (key_ev.keycode == KEY_ENTER or key_ev.keycode == KEY_KP_ENTER):
+			toggle_fullscreen()
+			get_viewport().set_input_as_handled()
+			return
+
 	if event is InputEventMouseButton:
 		var mouse_event: InputEventMouseButton = event
 		if mouse_event.button_index == MOUSE_BUTTON_MIDDLE:
 			_is_middle_dragging = mouse_event.pressed
+			if _is_middle_dragging:
+				_target_position = global_position
 		elif mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_target_zoom = clampf(_target_zoom + zoom_step, min_zoom, max_zoom)
 		elif mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_target_zoom = clampf(_target_zoom - zoom_step, min_zoom, max_zoom)
 	elif event is InputEventMouseMotion and _is_middle_dragging:
 		var motion_event: InputEventMouseMotion = event
-		global_position -= motion_event.relative / zoom
-		_clamp_position()
+		_target_position = _clamp_point(_target_position - motion_event.relative / zoom)
+		global_position = _target_position
+
+
+func set_edge_pan_enabled(enabled: bool) -> void:
+	if edge_pan_enabled == enabled:
+		return
+	edge_pan_enabled = enabled
+	edge_pan_toggled.emit(edge_pan_enabled)
+
+
+func toggle_edge_pan() -> bool:
+	set_edge_pan_enabled(not edge_pan_enabled)
+	return edge_pan_enabled
+
+
+func toggle_fullscreen() -> void:
+	var mode: DisplayServer.WindowMode = DisplayServer.window_get_mode()
+	if mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	else:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 
 
 func center_on(world_pos: Vector2) -> void:
-	global_position = world_pos
-	_clamp_position()
+	_target_position = _clamp_point(world_pos)
+	global_position = _target_position
 
 
-func _clamp_position() -> void:
+func _get_edge_pan_vector() -> Vector2:
+	if not edge_pan_enabled or not _mouse_in_window or _is_middle_dragging:
+		return Vector2.ZERO
+	var win: Window = get_window()
+	if win == null or not win.has_focus():
+		return Vector2.ZERO
+
+	var viewport: Viewport = get_viewport()
+	if viewport == null:
+		return Vector2.ZERO
+
+	# Don't yank the camera while hovering clickable HUD buttons near viewport borders.
+	var hovered: Control = viewport.gui_get_hovered_control()
+	if hovered is BaseButton:
+		return Vector2.ZERO
+
+	var viewport_size: Vector2 = viewport.get_visible_rect().size
+	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0 or edge_margin_px <= 0.0:
+		return Vector2.ZERO
+
+	# Allow small subpixel/DPI tolerance at borders so canvas_items stretch scaling never drops frames at the edge.
+	var mouse_pos: Vector2 = viewport.get_mouse_position()
+	if (
+		mouse_pos.x < -EDGE_BOUNDS_TOLERANCE_PX
+		or mouse_pos.y < -EDGE_BOUNDS_TOLERANCE_PX
+		or mouse_pos.x > viewport_size.x + EDGE_BOUNDS_TOLERANCE_PX
+		or mouse_pos.y > viewport_size.y + EDGE_BOUNDS_TOLERANCE_PX
+	):
+		return Vector2.ZERO
+
+	var clamped_pos: Vector2 = Vector2(
+		clampf(mouse_pos.x, 0.0, viewport_size.x),
+		clampf(mouse_pos.y, 0.0, viewport_size.y)
+	)
+
+	var raw_dir: Vector2 = Vector2.ZERO
+	var max_penetration: float = 0.0
+
+	if clamped_pos.x <= edge_margin_px:
+		raw_dir.x -= 1.0
+		max_penetration = maxf(max_penetration, 1.0 - (clamped_pos.x / edge_margin_px))
+	elif clamped_pos.x >= viewport_size.x - edge_margin_px:
+		raw_dir.x += 1.0
+		max_penetration = maxf(max_penetration, 1.0 - ((viewport_size.x - clamped_pos.x) / edge_margin_px))
+
+	if clamped_pos.y <= edge_margin_px:
+		raw_dir.y -= 1.0
+		max_penetration = maxf(max_penetration, 1.0 - (clamped_pos.y / edge_margin_px))
+	elif clamped_pos.y >= viewport_size.y - edge_margin_px:
+		raw_dir.y += 1.0
+		max_penetration = maxf(max_penetration, 1.0 - ((viewport_size.y - clamped_pos.y) / edge_margin_px))
+
+	if raw_dir == Vector2.ZERO:
+		return Vector2.ZERO
+
+	# Progressive edge curve: gentle nudge at inner edge, full 100% speed in the outer ~8px border.
+	var ramp_t: float = clampf(max_penetration * 1.5, 0.0, 1.0)
+	var strength: float = lerpf(edge_inner_speed_ratio, 1.0, ramp_t)
+	return raw_dir.normalized() * strength
+
+
+func _clamp_point(pos: Vector2) -> Vector2:
 	if not pan_bounds.has_area():
-		return
-	global_position.x = clampf(global_position.x, pan_bounds.position.x, pan_bounds.end.x)
-	global_position.y = clampf(global_position.y, pan_bounds.position.y, pan_bounds.end.y)
+		return pos
+	return Vector2(
+		clampf(pos.x, pan_bounds.position.x, pan_bounds.end.x),
+		clampf(pos.y, pan_bounds.position.y, pan_bounds.end.y)
+	)
