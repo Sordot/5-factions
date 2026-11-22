@@ -5,7 +5,13 @@
 [resource]
 script = ExtResource("1_unit_data")
 display_name = "Test Unit"
+max_hp = 100.0
 move_speed = 260.0
 acceleration = 1800.0
 turn_speed = 14.0
 selection_radius = 20.0
+collision_radius = 16.0
+attack_damage = 20.0
+attack_range = 180.0
+aggro_range = 280.0
+attack_cooldown = 0.7
