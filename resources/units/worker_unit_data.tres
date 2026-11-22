@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"worker"
+display_name = "Worker Drone"
+max_hp = 55.0
+move_speed = 230.0
+acceleration = 1800.0
+turn_speed = 16.0
+selection_radius = 18.0
+collision_radius = 13.0
+attack_damage = 6.0
+attack_range = 80.0
+aggro_range = 130.0
+attack_cooldown = 1.0
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([])
+bandwidth_cost = 1
+can_gather = true
+gather_duration = 3.0
+carry_capacity = 10
+gather_range = 48.0
+dropoff_range = 64.0

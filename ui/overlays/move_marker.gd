@@ -4,6 +4,7 @@ extends Node2D
 enum MarkerStyle {
 	MOVE,
 	ATTACK,
+	GATHER,
 }
 
 @export var style: MarkerStyle = MarkerStyle.MOVE
@@ -18,6 +19,8 @@ func configure(marker_style: MarkerStyle) -> void:
 	style = marker_style
 	if style == MarkerStyle.ATTACK:
 		color = Color(1.0, 0.36, 0.24, 0.95)
+	elif style == MarkerStyle.GATHER:
+		color = Color(0.28, 1.0, 0.56, 0.95)
 	else:
 		color = Color(0.28, 0.98, 0.84, 0.95)
 	queue_redraw()
@@ -46,3 +49,13 @@ func _draw() -> void:
 		draw_line(Vector2(radius - 2.0, 0.0), Vector2(radius + tick, 0.0), ring_color, 1.8, true)
 		draw_line(Vector2(0.0, -radius - tick), Vector2(0.0, -radius + 2.0), ring_color, 1.8, true)
 		draw_line(Vector2(0.0, radius - 2.0), Vector2(0.0, radius + tick), ring_color, 1.8, true)
+	elif style == MarkerStyle.GATHER:
+		var d: float = lerpf(max_radius * 0.72, 6.0, t)
+		var diamond: PackedVector2Array = PackedVector2Array([
+			Vector2(0.0, -d),
+			Vector2(d, 0.0),
+			Vector2(0.0, d),
+			Vector2(-d, 0.0),
+			Vector2(0.0, -d),
+		])
+		draw_polyline(diamond, ring_color, 1.8, true)

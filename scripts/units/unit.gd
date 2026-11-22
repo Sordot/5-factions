@@ -13,12 +13,14 @@ enum CommandState {
 	ATTACKING_TARGET,
 	HOLD_POSITION,
 	CASTING_ABILITY,
+	GATHERING,
 }
 
 const ATTACK_TRACER_SCRIPT: GDScript = preload("res://ui/overlays/attack_tracer.gd")
 const ABILITY_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/ability_component.gd")
 const HIT_FLASH_DURATION: float = 0.10
 const HEALTH_BAR_WIDTH: float = 36.0
+const GATHER_BAR_WIDTH: float = 32.0
 const SETTLE_PROXIMITY_RADIUS: float = 160.0
 const SETTLE_NO_PROGRESS_TIME: float = 0.45
 
@@ -27,6 +29,7 @@ signal health_changed(unit: Unit, current_hp: float, max_hp: float)
 signal died(unit: Unit)
 signal ability_cooldown_updated(ability_id: StringName, remaining: float, duration: float)
 signal ability_executed(ability_id: StringName, target_pos: Vector2)
+signal cargo_changed(unit: Unit, resource_type: StringName, amount: int)
 
 @export var team: Team = Team.PLAYER
 @export var data: UnitData
@@ -37,6 +40,10 @@ signal ability_executed(ability_id: StringName, target_pos: Vector2)
 @onready var body_visual: Node2D = $BodyVisual
 @onready var health_bar_root: Node2D = get_node_or_null("HealthBar") as Node2D
 @onready var health_bar_fill: ColorRect = get_node_or_null("HealthBar/Fill") as ColorRect
+@onready var gather_component: GatherComponent = get_node_or_null("GatherComponent") as GatherComponent
+@onready var cargo_visual: Node2D = get_node_or_null("BodyVisual/CargoVisual") as Node2D
+@onready var gather_bar_root: Node2D = get_node_or_null("GatherBar") as Node2D
+@onready var gather_bar_fill: ColorRect = get_node_or_null("GatherBar/Fill") as ColorRect
 
 var is_selected: bool = false
 var is_dead: bool = false
@@ -83,6 +90,22 @@ func _ready() -> void:
 		ability_executed.emit(ability_id, target_pos)
 	)
 
+	if gather_component != null:
+		if not gather_component.cargo_changed.is_connected(_on_gather_cargo_changed):
+			gather_component.cargo_changed.connect(_on_gather_cargo_changed)
+		if not gather_component.gather_progress_changed.is_connected(_on_gather_progress_changed):
+			gather_component.gather_progress_changed.connect(_on_gather_progress_changed)
+	if cargo_visual != null:
+		cargo_visual.visible = false
+	if gather_bar_root != null:
+		gather_bar_root.visible = false
+
+	_register_with_economy()
+
+
+func _exit_tree() -> void:
+	_unregister_from_economy()
+
 
 func set_selected(selected: bool) -> void:
 	if is_selected == selected:
@@ -123,6 +146,8 @@ func command_cast_ability(ability: AbilityData, target_pos: Vector2, target_unit
 	var accepted: bool = ability_component.request_cast(self, ability, target_pos, target_unit)
 	if not accepted:
 		return false
+	if gather_component != null:
+		gather_component.cancel()
 	if ability_component.has_pending_cast():
 		if not _can_move():
 			ability_component.cancel_pending_cast()
@@ -132,6 +157,71 @@ func command_cast_ability(ability: AbilityData, target_pos: Vector2, target_unit
 		_reset_progress_tracker()
 		_last_nav_target = Vector2.INF
 	return true
+
+
+func can_gather() -> bool:
+	return data != null and data.can_gather and gather_component != null
+
+
+func is_carrying_cargo() -> bool:
+	return gather_component != null and gather_component.has_cargo()
+
+
+func get_carried_amount() -> int:
+	return gather_component.carried_amount if gather_component != null else 0
+
+
+func get_carried_type() -> StringName:
+	return gather_component.carried_type if gather_component != null else &""
+
+
+func command_gather(resource_node: ResourceNode) -> bool:
+	if is_dead or not can_gather() or not _can_move() or resource_node == null:
+		return false
+	if ability_component != null:
+		ability_component.cancel_pending_cast()
+	if not gather_component.start_gather(self, resource_node):
+		return false
+	command_state = CommandState.GATHERING
+	current_target = null
+	_reset_progress_tracker()
+	_last_nav_target = Vector2.INF
+	return true
+
+
+func command_return_cargo(building: Building = null) -> bool:
+	if is_dead or not can_gather() or not _can_move() or not is_carrying_cargo():
+		return false
+	if ability_component != null:
+		ability_component.cancel_pending_cast()
+	if not gather_component.start_return_cargo(self, building):
+		return false
+	command_state = CommandState.GATHERING
+	current_target = null
+	_reset_progress_tracker()
+	_last_nav_target = Vector2.INF
+	return true
+
+
+func request_component_navigation(target_point: Vector2, repath_threshold: float = 10.0) -> void:
+	_request_nav_toward_point(target_point, repath_threshold)
+	if not _wants_nav_movement:
+		var to_target: Vector2 = target_point - global_position
+		if to_target.length_squared() > 4.0:
+			var dir: Vector2 = _steer_around_static_units(to_target.normalized())
+			_wants_nav_movement = true
+			_desired_move_velocity = dir * data.move_speed
+
+
+func face_world_point(world_point: Vector2, delta: float) -> void:
+	_face_point(world_point, delta)
+
+
+func stop_component_navigation() -> void:
+	_wants_nav_movement = false
+	_desired_move_velocity = Vector2.ZERO
+	velocity = Vector2.ZERO
+	_clear_nav_target()
 
 
 func heal(amount: float) -> void:
@@ -150,6 +240,8 @@ func command_move(target_pos: Vector2) -> void:
 		return
 	if ability_component != null:
 		ability_component.cancel_pending_cast()
+	if gather_component != null:
+		gather_component.cancel()
 	command_state = CommandState.MOVING
 	current_target = null
 	_move_destination = target_pos
@@ -164,6 +256,8 @@ func command_attack_target(target: Unit) -> void:
 		return
 	if ability_component != null:
 		ability_component.cancel_pending_cast()
+	if gather_component != null:
+		gather_component.cancel()
 	command_state = CommandState.ATTACKING_TARGET
 	current_target = target
 	_reset_progress_tracker()
@@ -175,6 +269,8 @@ func command_attack_move(target_pos: Vector2) -> void:
 		return
 	if ability_component != null:
 		ability_component.cancel_pending_cast()
+	if gather_component != null:
+		gather_component.cancel()
 	command_state = CommandState.ATTACK_MOVING
 	_attack_move_destination = target_pos
 	_move_destination = target_pos
@@ -188,6 +284,8 @@ func command_stop() -> void:
 		return
 	if ability_component != null:
 		ability_component.cancel_pending_cast()
+	if gather_component != null:
+		gather_component.cancel()
 	command_state = CommandState.IDLE
 	current_target = null
 	_wants_nav_movement = false
@@ -202,6 +300,8 @@ func command_hold_position() -> void:
 		return
 	if ability_component != null:
 		ability_component.cancel_pending_cast()
+	if gather_component != null:
+		gather_component.cancel()
 	command_state = CommandState.HOLD_POSITION
 	current_target = null
 	_wants_nav_movement = false
@@ -228,11 +328,14 @@ func _die() -> void:
 	if is_dead:
 		return
 	is_dead = true
+	if gather_component != null:
+		gather_component.cancel()
 	command_state = CommandState.IDLE
 	current_target = null
 	_wants_nav_movement = false
 	velocity = Vector2.ZERO
 	set_selected(false)
+	_unregister_from_economy()
 	died.emit(self)
 	queue_free()
 
@@ -275,6 +378,8 @@ func _physics_process(delta: float) -> void:
 			_process_hold_position(delta)
 		CommandState.CASTING_ABILITY:
 			_process_casting_ability(delta)
+		CommandState.GATHERING:
+			_process_gathering(delta)
 
 	if _can_move() and nav_agent != null and nav_agent.avoidance_enabled:
 		nav_agent.set_velocity(_desired_move_velocity)
@@ -386,6 +491,13 @@ func _process_casting_ability(delta: float) -> void:
 	_request_nav_toward_point(dest, 8.0)
 
 
+func _process_gathering(delta: float) -> void:
+	if gather_component == null or not gather_component.is_active():
+		command_state = CommandState.IDLE
+		return
+	gather_component.tick(self, delta)
+
+
 func _request_nav_toward_point(target_point: Vector2, repath_threshold: float) -> void:
 	if nav_agent == null:
 		return
@@ -458,6 +570,9 @@ func _apply_direct_motion(target_velocity: Vector2, delta: float) -> void:
 
 func _apply_stationary_separation(delta: float) -> void:
 	if not _can_move():
+		return
+	if command_state == CommandState.GATHERING and gather_component != null and gather_component.is_harvesting_in_place():
+		velocity = Vector2.ZERO
 		return
 	var sep_margin: float = 0.0 if command_state == CommandState.HOLD_POSITION else 2.5
 	var sep: Vector2 = _compute_overlap_separation(sep_margin)
@@ -644,3 +759,33 @@ func _update_health_bar() -> void:
 	var ratio: float = clampf(current_hp / max_val, 0.0, 1.0)
 	health_bar_fill.size.x = HEALTH_BAR_WIDTH * ratio
 	health_bar_root.visible = always_show_health_bar or is_selected or ratio < 0.999
+
+
+func _on_gather_cargo_changed(resource_type: StringName, amount: int) -> void:
+	if cargo_visual != null:
+		cargo_visual.visible = amount > 0
+	cargo_changed.emit(self, resource_type, amount)
+
+
+func _on_gather_progress_changed(progress: float, is_active: bool) -> void:
+	if gather_bar_root == null or gather_bar_fill == null:
+		return
+	gather_bar_root.visible = is_active
+	gather_bar_fill.size.x = GATHER_BAR_WIDTH * clampf(progress, 0.0, 1.0)
+
+
+func _register_with_economy() -> void:
+	if not is_inside_tree():
+		return
+	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	if econ != null:
+		var cost: int = data.bandwidth_cost if data != null else 1
+		econ.register_unit_bandwidth(self, team, cost)
+
+
+func _unregister_from_economy() -> void:
+	if not is_inside_tree():
+		return
+	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	if econ != null:
+		econ.unregister_unit_bandwidth(self)

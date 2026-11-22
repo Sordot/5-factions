@@ -7,9 +7,12 @@ extends Control
 @onready var portrait_swatch: ColorRect = %PortraitSwatch
 @onready var unit_name_label: Label = %UnitNameLabel
 @onready var unit_hp_label: Label = %UnitHPLabel
+@onready var unit_hp_bar: ProgressBar = %UnitHPBar
 @onready var unit_stats_label: Label = %UnitStatsLabel
 @onready var subgroup_tabs_row: HBoxContainer = %SubgroupTabsRow
 @onready var unit_badges_grid: GridContainer = %UnitBadgesGrid
+@onready var building_info_label: Label = %BuildingInfoLabel
+@onready var standard_commands_row: HBoxContainer = %StandardCommandsRow
 @onready var ability_row: HBoxContainer = %AbilityRow
 @onready var btn_cmd_move: Button = %BtnCmdMove
 @onready var btn_cmd_stop: Button = %BtnCmdStop
@@ -18,6 +21,7 @@ extends Control
 
 var _selection_controller: SelectionController = null
 var _connected_units: Array[Unit] = []
+var _selected_building: Building = null
 var _active_subgroup_units: Array[Unit] = []
 var _active_abilities: Array[AbilityData] = []
 var _ability_buttons: Dictionary = {}
@@ -28,6 +32,7 @@ func _ready() -> void:
 	_selection_controller = get_node_or_null(selection_controller_path) as SelectionController
 	if _selection_controller != null:
 		_selection_controller.selection_changed.connect(_on_selection_changed)
+		_selection_controller.building_selection_changed.connect(_on_building_selection_changed)
 		_selection_controller.ability_targeting_changed.connect(_on_ability_targeting_changed)
 
 	btn_cmd_stop.pressed.connect(func() -> void:
@@ -50,10 +55,21 @@ func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Diction
 	_active_abilities = []
 
 	if selected_units.is_empty() or subgroups.is_empty():
-		bottom_panel.visible = false
+		if _selected_building != null and is_instance_valid(_selected_building) and not _selected_building.is_destroyed:
+			_show_building_panel(_selected_building)
+		else:
+			bottom_panel.visible = false
 		return
 
+	_disconnect_building_signals()
+	_selected_building = null
 	bottom_panel.visible = true
+	subgroup_tabs_row.visible = true
+	unit_badges_grid.visible = true
+	building_info_label.visible = false
+	standard_commands_row.visible = true
+	ability_row.visible = true
+
 	var safe_idx: int = clampi(active_subgroup_index, 0, subgroups.size() - 1)
 	var active_group: Dictionary = subgroups[safe_idx]
 	_active_subgroup_units = active_group["units"]
@@ -64,6 +80,78 @@ func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Diction
 	_rebuild_ability_buttons(active_group)
 	_refresh_left_panel(active_group)
 	_refresh_all_ability_states()
+
+
+func _on_building_selection_changed(building: Building) -> void:
+	_disconnect_building_signals()
+	_selected_building = building if (building != null and is_instance_valid(building) and not building.is_destroyed) else null
+
+	if _selected_building == null:
+		if _active_subgroup_units.is_empty():
+			bottom_panel.visible = false
+		return
+
+	_connect_building_signals(_selected_building)
+	_show_building_panel(_selected_building)
+
+
+func _show_building_panel(building: Building) -> void:
+	bottom_panel.visible = true
+	subgroup_tabs_row.visible = false
+	unit_badges_grid.visible = false
+	building_info_label.visible = true
+	standard_commands_row.visible = false
+	ability_row.visible = false
+
+	for child: Node in ability_row.get_children():
+		child.queue_free()
+	_ability_buttons.clear()
+	_active_abilities.clear()
+
+	portrait_swatch.color = Color(0.22, 0.88, 0.94, 1.0)
+	unit_name_label.text = building.display_name
+	unit_hp_label.text = "HP: %d / %d" % [int(round(building.current_hp)), int(round(building.max_hp))]
+	if unit_hp_bar != null:
+		unit_hp_bar.max_value = maxf(1.0, building.max_hp)
+		unit_hp_bar.value = clampf(building.current_hp, 0.0, building.max_hp)
+	unit_stats_label.text = "+%d Bandwidth  |  Structure" % building.bandwidth_provided
+
+	var role_parts: PackedStringArray = PackedStringArray()
+	if building.is_resource_dropoff:
+		role_parts.append("Biomass Drop-Off")
+	if building.bandwidth_provided > 0:
+		role_parts.append("+%d Bandwidth" % building.bandwidth_provided)
+	building_info_label.text = "  |  ".join(role_parts) if not role_parts.is_empty() else "Friendly Structure"
+
+
+func _on_building_health_changed(building: Building, _current_hp: float, _max_hp: float) -> void:
+	if building == _selected_building and is_instance_valid(building):
+		_show_building_panel(building)
+
+
+func _on_building_destroyed(building: Building) -> void:
+	if building == _selected_building:
+		_disconnect_building_signals()
+		_selected_building = null
+		if _active_subgroup_units.is_empty():
+			bottom_panel.visible = false
+
+
+func _connect_building_signals(building: Building) -> void:
+	if building == null or not is_instance_valid(building):
+		return
+	if not building.health_changed.is_connected(_on_building_health_changed):
+		building.health_changed.connect(_on_building_health_changed)
+	if not building.destroyed.is_connected(_on_building_destroyed):
+		building.destroyed.connect(_on_building_destroyed)
+
+
+func _disconnect_building_signals() -> void:
+	if _selected_building != null and is_instance_valid(_selected_building):
+		if _selected_building.health_changed.is_connected(_on_building_health_changed):
+			_selected_building.health_changed.disconnect(_on_building_health_changed)
+		if _selected_building.destroyed.is_connected(_on_building_destroyed):
+			_selected_building.destroyed.disconnect(_on_building_destroyed)
 
 
 func _on_ability_targeting_changed(active_ability: AbilityData) -> void:
@@ -84,6 +172,14 @@ func _on_unit_ability_cooldown_updated(ability_id: StringName, _remaining: float
 	_refresh_single_ability_button(ability_id)
 
 
+func _on_unit_cargo_changed(_unit: Unit, _resource_type: StringName, _amount: int) -> void:
+	if _selection_controller == null:
+		return
+	var active_group: Dictionary = _selection_controller.get_active_subgroup()
+	if not active_group.is_empty():
+		_refresh_left_panel(active_group)
+
+
 func _connect_unit_signals(units: Array[Unit]) -> void:
 	for item: Variant in units:
 		if not is_instance_valid(item) or not (item is Unit):
@@ -93,6 +189,8 @@ func _connect_unit_signals(units: Array[Unit]) -> void:
 			unit.health_changed.connect(_on_unit_health_changed)
 		if not unit.ability_cooldown_updated.is_connected(_on_unit_ability_cooldown_updated):
 			unit.ability_cooldown_updated.connect(_on_unit_ability_cooldown_updated)
+		if not unit.cargo_changed.is_connected(_on_unit_cargo_changed):
+			unit.cargo_changed.connect(_on_unit_cargo_changed)
 		_connected_units.append(unit)
 
 
@@ -104,6 +202,8 @@ func _disconnect_unit_signals() -> void:
 				unit.health_changed.disconnect(_on_unit_health_changed)
 			if unit.ability_cooldown_updated.is_connected(_on_unit_ability_cooldown_updated):
 				unit.ability_cooldown_updated.disconnect(_on_unit_ability_cooldown_updated)
+			if unit.cargo_changed.is_connected(_on_unit_cargo_changed):
+				unit.cargo_changed.disconnect(_on_unit_cargo_changed)
 	_connected_units.clear()
 
 
@@ -116,19 +216,33 @@ func _refresh_left_panel(active_group: Dictionary) -> void:
 
 	if data != null and data.unit_type_id == &"scout_unit":
 		portrait_swatch.color = Color(0.98, 0.78, 0.24, 1.0)
+	elif data != null and data.can_gather:
+		portrait_swatch.color = Color(0.28, 0.94, 0.56, 1.0)
 	else:
 		portrait_swatch.color = Color(0.24, 0.92, 0.88, 1.0)
 
 	if count > 0 and is_instance_valid(units[0]) and data != null:
 		var lead: Unit = units[0]
 		unit_hp_label.text = "HP: %d / %d" % [int(round(lead.current_hp)), int(round(data.max_hp))]
-		unit_stats_label.text = "DMG: %d  |  SPD: %d  |  RNG: %d" % [
-			int(round(data.attack_damage)),
-			int(round(data.move_speed)),
-			int(round(data.attack_range)),
-		]
+		if unit_hp_bar != null:
+			unit_hp_bar.max_value = maxf(1.0, data.max_hp)
+			unit_hp_bar.value = clampf(lead.current_hp, 0.0, data.max_hp)
+		if data.can_gather:
+			unit_stats_label.text = "CARRY: %d / %d  |  SPD: %d" % [
+				lead.get_carried_amount(),
+				data.carry_capacity,
+				int(round(data.move_speed)),
+			]
+		else:
+			unit_stats_label.text = "DMG: %d  |  SPD: %d  |  RNG: %d" % [
+				int(round(data.attack_damage)),
+				int(round(data.move_speed)),
+				int(round(data.attack_range)),
+			]
 	else:
 		unit_hp_label.text = "HP: --"
+		if unit_hp_bar != null:
+			unit_hp_bar.value = 0.0
 		unit_stats_label.text = ""
 
 

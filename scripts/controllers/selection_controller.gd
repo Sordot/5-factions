@@ -8,6 +8,7 @@ const RING_SPACING_MULTIPLIER: float = 2.6
 
 signal selection_updated(selected_count: int)
 signal selection_changed(selected_units: Array[Unit], subgroups: Array[Dictionary], active_subgroup_index: int)
+signal building_selection_changed(building: Building)
 signal control_groups_changed(summary: Dictionary)
 signal ability_targeting_changed(active_ability: AbilityData)
 
@@ -18,6 +19,7 @@ signal ability_targeting_changed(active_ability: AbilityData)
 @onready var ability_reticle: AbilityTargetingReticle = get_node_or_null("AbilityTargetingReticle") as AbilityTargetingReticle
 
 var selected_units: Array[Unit] = []
+var selected_building: Building = null
 var subgroups: Array[Dictionary] = []
 var active_subgroup_index: int = 0
 var inspected_enemy: Unit = null
@@ -127,6 +129,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func clear_selection() -> void:
 	cancel_ability_targeting()
+	_set_selected_building(null)
 	_set_inspected_enemy(null)
 	_set_selected_units([])
 
@@ -328,6 +331,7 @@ func recall_control_group(group_num: int, allow_double_tap_center: bool = true) 
 
 	control_groups[group_num] = group_units
 	cancel_ability_targeting()
+	_set_selected_building(null)
 	_set_inspected_enemy(null)
 	_set_selected_units(group_units)
 	_emit_control_groups_changed()
@@ -439,21 +443,32 @@ func _finish_left_selection(end_screen_pos: Vector2) -> void:
 func _select_at_point(world_point: Vector2) -> void:
 	var clicked_player: Unit = _find_unit_at_point(world_point, Unit.Team.PLAYER)
 	if clicked_player != null:
+		_set_selected_building(null)
 		_set_inspected_enemy(null)
 		_set_selected_units([clicked_player])
 		return
 
+	var clicked_building: Building = _find_building_at_point(world_point, Unit.Team.PLAYER)
+	if clicked_building != null:
+		_set_inspected_enemy(null)
+		_set_selected_units([])
+		_set_selected_building(clicked_building)
+		return
+
 	var clicked_enemy: Unit = _find_unit_at_point(world_point, Unit.Team.ENEMY)
 	if clicked_enemy != null:
+		_set_selected_building(null)
 		_set_selected_units([])
 		_set_inspected_enemy(clicked_enemy)
 		return
 
+	_set_selected_building(null)
 	_set_inspected_enemy(null)
 	_set_selected_units([])
 
 
 func _select_in_rect(world_rect: Rect2) -> void:
+	_set_selected_building(null)
 	_set_inspected_enemy(null)
 	var hits: Array[Unit] = []
 	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
@@ -522,6 +537,26 @@ func _set_inspected_enemy(enemy: Unit) -> void:
 		inspected_enemy.set_selected(true)
 
 
+func _set_selected_building(building: Building) -> void:
+	var next_building: Building = building if (building != null and is_instance_valid(building) and not building.is_destroyed) else null
+	if selected_building == next_building:
+		return
+	if selected_building != null and is_instance_valid(selected_building):
+		if selected_building.destroyed.is_connected(_on_selected_building_destroyed):
+			selected_building.destroyed.disconnect(_on_selected_building_destroyed)
+		selected_building.set_selected(false)
+	selected_building = next_building
+	if selected_building != null:
+		selected_building.set_selected(true)
+		if not selected_building.destroyed.is_connected(_on_selected_building_destroyed):
+			selected_building.destroyed.connect(_on_selected_building_destroyed)
+	building_selection_changed.emit(selected_building)
+
+
+func _on_selected_building_destroyed(_building: Building) -> void:
+	_set_selected_building(null)
+
+
 func _handle_right_click(world_pos: Vector2) -> void:
 	_prune_invalid_units()
 	if selected_units.is_empty():
@@ -532,11 +567,46 @@ func _handle_right_click(world_pos: Vector2) -> void:
 		for unit: Unit in selected_units:
 			unit.command_attack_target(clicked_enemy)
 		_spawn_move_marker(clicked_enemy.global_position, MoveMarker.MarkerStyle.ATTACK)
-	else:
-		var targets: Array[Vector2] = _assign_group_destinations(selected_units, world_pos)
-		for i: int in range(selected_units.size()):
-			selected_units[i].command_move(targets[i])
-		_spawn_move_marker(world_pos, MoveMarker.MarkerStyle.MOVE)
+		return
+
+	var clicked_resource: ResourceNode = _find_resource_node_at_point(world_pos)
+	if clicked_resource != null and _has_any_gatherer(selected_units):
+		var non_gatherers: Array[Unit] = []
+		for unit: Unit in selected_units:
+			if unit.can_gather():
+				unit.command_gather(clicked_resource)
+			else:
+				non_gatherers.append(unit)
+		if not non_gatherers.is_empty():
+			var escort_targets: Array[Vector2] = _assign_group_destinations(non_gatherers, clicked_resource.global_position)
+			for i: int in range(non_gatherers.size()):
+				non_gatherers[i].command_move(escort_targets[i])
+		_spawn_move_marker(clicked_resource.global_position, MoveMarker.MarkerStyle.GATHER)
+		return
+
+	var clicked_building: Building = _find_building_at_point(world_pos, Unit.Team.PLAYER)
+	if clicked_building != null and clicked_building.is_resource_dropoff:
+		var returning_workers: Array[Unit] = []
+		var other_units: Array[Unit] = []
+		for unit: Unit in selected_units:
+			if unit.can_gather() and unit.is_carrying_cargo() and clicked_building.accepts_resource(unit.get_carried_type()):
+				returning_workers.append(unit)
+			else:
+				other_units.append(unit)
+		if not returning_workers.is_empty():
+			for worker: Unit in returning_workers:
+				worker.command_return_cargo(clicked_building)
+			if not other_units.is_empty():
+				var move_targets: Array[Vector2] = _assign_group_destinations(other_units, world_pos)
+				for i: int in range(other_units.size()):
+					other_units[i].command_move(move_targets[i])
+			_spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.GATHER)
+			return
+
+	var targets: Array[Vector2] = _assign_group_destinations(selected_units, world_pos)
+	for i: int in range(selected_units.size()):
+		selected_units[i].command_move(targets[i])
+	_spawn_move_marker(world_pos, MoveMarker.MarkerStyle.MOVE)
 
 
 func _assign_group_destinations(units: Array[Unit], center_pos: Vector2) -> Array[Vector2]:
@@ -625,6 +695,47 @@ func _find_unit_at_point(world_point: Vector2, target_team: Unit.Team) -> Unit:
 	return closest
 
 
+func _find_building_at_point(world_point: Vector2, target_team: Unit.Team) -> Building:
+	var closest: Building = null
+	var closest_dist_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
+		if not (node is Building):
+			continue
+		var building: Building = node
+		if not is_instance_valid(building) or building.is_destroyed or building.team != target_team:
+			continue
+		if building.contains_point(world_point):
+			var dist_sq: float = building.global_position.distance_squared_to(world_point)
+			if dist_sq < closest_dist_sq:
+				closest_dist_sq = dist_sq
+				closest = building
+	return closest
+
+
+func _find_resource_node_at_point(world_point: Vector2) -> ResourceNode:
+	var closest: ResourceNode = null
+	var closest_dist_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+		if not (node is ResourceNode):
+			continue
+		var res_node: ResourceNode = node
+		if not is_instance_valid(res_node) or res_node.is_depleted():
+			continue
+		if res_node.contains_point(world_point):
+			var dist_sq: float = res_node.global_position.distance_squared_to(world_point)
+			if dist_sq < closest_dist_sq:
+				closest_dist_sq = dist_sq
+				closest = res_node
+	return closest
+
+
+func _has_any_gatherer(units: Array[Unit]) -> bool:
+	for unit: Unit in units:
+		if is_instance_valid(unit) and not unit.is_dead and unit.can_gather():
+			return true
+	return false
+
+
 func _spawn_move_marker(target_pos: Vector2, marker_style: MoveMarker.MarkerStyle) -> void:
 	if get_parent() == null:
 		return
@@ -646,6 +757,8 @@ func _prune_invalid_units() -> void:
 		_set_selected_units(valid, false)
 	if inspected_enemy != null and (not is_instance_valid(inspected_enemy) or inspected_enemy.is_dead):
 		inspected_enemy = null
+	if selected_building != null and (not is_instance_valid(selected_building) or selected_building.is_destroyed):
+		_set_selected_building(null)
 
 
 func _build_world_rect(a: Vector2, b: Vector2) -> Rect2:

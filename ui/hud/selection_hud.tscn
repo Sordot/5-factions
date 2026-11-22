@@ -1,4 +1,4 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://ui/hud/selection_hud.gd" id="1_hud_script"]
 
@@ -17,6 +17,20 @@ corner_radius_top_left = 6
 corner_radius_top_right = 6
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hp_bg"]
+bg_color = Color(0.05, 0.08, 0.12, 0.95)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hp_fill"]
+bg_color = Color(0.24, 0.94, 0.74, 1)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
 
 [node name="SelectionHUD" type="Control"]
 layout_mode = 3
@@ -80,6 +94,15 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "HP: 100 / 100"
 
+[node name="UnitHPBar" type="ProgressBar" parent="BottomAnchor/BottomPanel/HBox/LeftPanel/StatsVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 7)
+layout_mode = 2
+theme_override_styles/background = SubResource("StyleBoxFlat_hp_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_hp_fill")
+value = 100.0
+show_percentage = false
+
 [node name="UnitStatsLabel" type="Label" parent="BottomAnchor/BottomPanel/HBox/LeftPanel/StatsVBox"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -103,6 +126,13 @@ unique_name_in_owner = true
 layout_mode = 2
 columns = 6
 
+[node name="BuildingInfoLabel" type="Label" parent="BottomAnchor/BottomPanel/HBox/CenterPanel"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.95, 0.98, 0.95)
+text = "Role: Biomass Drop-Off  |  Provides +10 Bandwidth"
+
 [node name="Sep2" type="VSeparator" parent="BottomAnchor/BottomPanel/HBox"]
 layout_mode = 2
 
@@ -112,6 +142,7 @@ layout_mode = 2
 theme_override_constants/separation = 6
 
 [node name="StandardCommandsRow" type="HBoxContainer" parent="BottomAnchor/BottomPanel/HBox/RightPanel"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
 
