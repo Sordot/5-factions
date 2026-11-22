@@ -12,6 +12,7 @@ extends Resource
 @export var attack_damage: float = 20.0
 @export var attack_range: float = 180.0
 @export var aggro_range: float = 280.0
+@export var vision_range: float = 360.0
 @export var attack_cooldown: float = 0.7
 @export var abilities: Array[AbilityData] = []
 @export var bandwidth_cost: int = 1

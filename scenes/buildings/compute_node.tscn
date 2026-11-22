@@ -13,6 +13,7 @@ team = 0
 building_type_id = &"compute_node"
 display_name = "Compute Node"
 max_hp = 650.0
+vision_range = 360.0
 footprint_radius = 36.0
 selection_radius = 44.0
 is_resource_dropoff = false

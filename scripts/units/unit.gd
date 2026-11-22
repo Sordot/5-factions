@@ -79,6 +79,7 @@ func _ready() -> void:
 		data = UnitData.new()
 	current_hp = data.max_hp
 	selection_ring.visible = is_selected
+	_apply_team_visuals()
 	_update_health_bar()
 
 	if nav_agent != null:
@@ -147,6 +148,12 @@ func issue_move_command(target_pos: Vector2) -> void:
 
 func get_unit_type_id() -> StringName:
 	return data.unit_type_id if data != null else &"unit"
+
+
+func get_vision_range() -> float:
+	if data != null and data.vision_range > 0.0:
+		return data.vision_range
+	return 360.0
 
 
 func is_ability_ready(ability: AbilityData) -> bool:
@@ -881,6 +888,28 @@ func _update_health_bar() -> void:
 	var ratio: float = clampf(current_hp / max_val, 0.0, 1.0)
 	health_bar_fill.size.x = HEALTH_BAR_WIDTH * ratio
 	health_bar_root.visible = always_show_health_bar or is_selected or ratio < 0.999
+
+
+func _apply_team_visuals() -> void:
+	if team != Team.ENEMY:
+		return
+	var type_id: StringName = get_unit_type_id()
+	if type_id == &"enemy_trooper" or type_id == &"target_dummy":
+		return
+	if body_visual is Polygon2D:
+		(body_visual as Polygon2D).color = Color(0.84, 0.28, 0.26, 1.0)
+	var core_accent: Polygon2D = body_visual.get_node_or_null("CoreAccent") as Polygon2D if body_visual != null else null
+	if core_accent != null:
+		core_accent.color = Color(1.0, 0.68, 0.24, 1.0)
+	if health_bar_fill != null:
+		health_bar_fill.color = Color(0.98, 0.34, 0.26, 1.0)
+	if selection_ring != null:
+		var ring_fill: Polygon2D = selection_ring.get_node_or_null("Fill") as Polygon2D
+		if ring_fill != null:
+			ring_fill.color = Color(1.0, 0.30, 0.24, 0.16)
+		var ring_outline: Line2D = selection_ring.get_node_or_null("Outline") as Line2D
+		if ring_outline != null:
+			ring_outline.default_color = Color(1.0, 0.36, 0.26, 0.95)
 
 
 func _on_gather_cargo_changed(resource_type: StringName, amount: int) -> void:

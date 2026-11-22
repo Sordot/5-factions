@@ -19,6 +19,7 @@ collision_radius = 13.0
 attack_damage = 6.0
 attack_range = 80.0
 aggro_range = 130.0
+vision_range = 300.0
 attack_cooldown = 1.0
 abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_build_refinery"), ExtResource("3_build_compute"), ExtResource("4_build_relay"), ExtResource("5_build_biolab")])
 bandwidth_cost = 1

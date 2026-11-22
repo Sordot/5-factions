@@ -1,0 +1,61 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://ui/hud/minimap.gd" id="1_minimap_script"]
+[ext_resource type="Theme" path="res://resources/themes/technozen_theme.tres" id="2_theme"]
+
+[node name="TacticalMinimap" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_minimap_script")
+
+[node name="BottomLeftAnchor" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -196.0
+offset_right = 232.0
+grow_vertical = 0
+mouse_filter = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="FramePanel" type="PanelContainer" parent="BottomLeftAnchor"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="BottomLeftAnchor/FramePanel"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="HeaderRow" type="HBoxContainer" parent="BottomLeftAnchor/FramePanel/VBox"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="TitleLabel" type="Label" parent="BottomLeftAnchor/FramePanel/VBox/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.36, 0.9, 0.96, 0.95)
+theme_override_font_sizes/font_size = 10
+text = "TACTICAL RADAR"
+
+[node name="StatusBadge" type="Label" parent="BottomLeftAnchor/FramePanel/VBox/HeaderRow"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.58, 0.8, 0.86, 0.88)
+theme_override_font_sizes/font_size = 10
+text = "FOG: ON"
+
+[node name="MapViewport" type="Control" parent="BottomLeftAnchor/FramePanel/VBox"]
+unique_name_in_owner = true
+clip_contents = true
+custom_minimum_size = Vector2(204, 149)
+layout_mode = 2
+mouse_filter = 0

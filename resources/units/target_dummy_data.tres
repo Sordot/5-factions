@@ -15,5 +15,6 @@ collision_radius = 18.0
 attack_damage = 0.0
 attack_range = 0.0
 aggro_range = 0.0
+vision_range = 200.0
 attack_cooldown = 1.0
 abilities = Array[Resource("res://scripts/data/ability_data.gd")]([])

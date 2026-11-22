@@ -13,6 +13,7 @@ team = 0
 building_type_id = &"bandwidth_relay"
 display_name = "Bandwidth Relay"
 max_hp = 400.0
+vision_range = 340.0
 footprint_radius = 26.0
 selection_radius = 34.0
 is_resource_dropoff = false

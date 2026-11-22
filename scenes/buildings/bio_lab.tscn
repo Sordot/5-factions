@@ -15,6 +15,7 @@ team = 0
 building_type_id = &"bio_lab"
 display_name = "Bio-Lab"
 max_hp = 900.0
+vision_range = 380.0
 footprint_radius = 42.0
 selection_radius = 50.0
 is_resource_dropoff = false

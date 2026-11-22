@@ -12,6 +12,7 @@ signal production_bonus_changed(team: int, multiplier: float)
 @export var starting_biomass: int = 50
 @export var starting_silica: int = 0
 @export var starting_compute: int = 0
+@export var enemy_matches_starting_resources: bool = true
 
 var _resources: Dictionary = {}
 var _bandwidth_used: Dictionary = {}
@@ -26,7 +27,10 @@ var _uplink_bonus_pct: float = 0.05
 func _ready() -> void:
 	add_to_group("economy_manager")
 	_init_team_state(Unit.Team.PLAYER, starting_biomass, starting_silica, starting_compute)
-	_init_team_state(Unit.Team.ENEMY, 0, 0, 0)
+	if enemy_matches_starting_resources:
+		_init_team_state(Unit.Team.ENEMY, starting_biomass, starting_silica, starting_compute)
+	else:
+		_init_team_state(Unit.Team.ENEMY, 0, 0, 0)
 	call_deferred("_sync_initial_scene_state")
 
 
@@ -34,6 +38,7 @@ func _sync_initial_scene_state() -> void:
 	recalculate_bandwidth(Unit.Team.PLAYER)
 	recalculate_bandwidth(Unit.Team.ENEMY)
 	resources_changed.emit(Unit.Team.PLAYER, get_resources(Unit.Team.PLAYER))
+	resources_changed.emit(Unit.Team.ENEMY, get_resources(Unit.Team.ENEMY))
 
 
 func _init_team_state(team: int, biomass: int, silica: int, compute: int) -> void:
@@ -62,9 +67,9 @@ func reset_economy() -> void:
 		RESOURCE_COMPUTE: starting_compute,
 	}
 	_resources[Unit.Team.ENEMY] = {
-		RESOURCE_BIOMASS: 0,
-		RESOURCE_SILICA: 0,
-		RESOURCE_COMPUTE: 0,
+		RESOURCE_BIOMASS: starting_biomass if enemy_matches_starting_resources else 0,
+		RESOURCE_SILICA: starting_silica if enemy_matches_starting_resources else 0,
+		RESOURCE_COMPUTE: starting_compute if enemy_matches_starting_resources else 0,
 	}
 	_bandwidth_reserved[Unit.Team.PLAYER] = 0
 	_bandwidth_reserved[Unit.Team.ENEMY] = 0

@@ -129,7 +129,7 @@ func _refresh_status() -> void:
 			dummy_count += 1
 
 	var selected_count: int = _selection_controller.selected_units.size() if _selection_controller != null else 0
-	status_label.text = "Units: %d (Selected: %d)  |  Dummies: %d" % [
+	status_label.text = "Units: %d (Selected: %d)  |  Hostiles: %d" % [
 		player_count,
 		selected_count,
 		dummy_count,

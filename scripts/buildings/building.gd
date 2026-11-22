@@ -2,6 +2,8 @@ class_name Building
 extends StaticBody2D
 
 const PRODUCTION_COMPONENT_SCRIPT: GDScript = preload("res://scripts/buildings/production_component.gd")
+const ENEMY_TROOPER_DATA: UnitData = preload("res://resources/units/enemy_trooper_data.tres")
+const ENEMY_TROOPER_SCENE: PackedScene = preload("res://scenes/units/enemy_trooper.tscn")
 const HEALTH_BAR_WIDTH: float = 76.0
 const CONSTRUCT_BAR_WIDTH: float = 68.0
 const DEPOSIT_PULSE_DURATION: float = 0.25
@@ -20,6 +22,7 @@ signal rally_changed(building: Building)
 @export var building_type_id: StringName = &"command_core"
 @export var display_name: String = "Command Core"
 @export var max_hp: float = 1500.0
+@export var vision_range: float = 450.0
 @export var footprint_radius: float = 46.0
 @export var selection_radius: float = 54.0
 @export var is_resource_dropoff: bool = true
@@ -47,6 +50,7 @@ signal rally_changed(building: Building)
 var current_hp: float = 1500.0
 var is_selected: bool = false
 var is_destroyed: bool = false
+var has_been_spotted: bool = false
 var construction_progress: float = 1.0
 var claimed_vent: ResourceNode = null
 var assigned_engineers: Array[Unit] = []
@@ -72,6 +76,10 @@ func _ready() -> void:
 		current_hp = maxf(1.0, max_hp * 0.10)
 		construction_progress = 0.0
 		_construction_elapsed = 0.0
+	if team == Unit.Team.ENEMY and building_type_id == &"bio_lab":
+		trainable_unit_data = [ENEMY_TROOPER_DATA]
+		trainable_unit_scenes = [ENEMY_TROOPER_SCENE]
+	_apply_team_visuals()
 	if core_glow != null:
 		_base_core_color = core_glow.color
 	if selection_ring != null:
@@ -153,6 +161,7 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 		building_type_id = data.building_id
 		display_name = data.display_name
 		max_hp = data.max_hp
+		vision_range = data.vision_range
 		build_time = data.build_time
 		bandwidth_provided = data.bandwidth_provided
 		is_resource_dropoff = data.is_dropoff
@@ -161,6 +170,11 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 		can_set_rally = data.can_set_rally
 		if not data.trainable_units.is_empty():
 			trainable_unit_data = data.trainable_units.duplicate()
+
+	if team == Unit.Team.ENEMY and building_type_id == &"bio_lab":
+		trainable_unit_data = [ENEMY_TROOPER_DATA]
+		trainable_unit_scenes = [ENEMY_TROOPER_SCENE]
+	_apply_team_visuals()
 
 	if production_component == null and not trainable_unit_data.is_empty():
 		production_component = PRODUCTION_COMPONENT_SCRIPT.new()
@@ -369,6 +383,24 @@ func queue_unit_training(slot_index: int) -> bool:
 		return false
 	var scene_override: PackedScene = trainable_unit_scenes[slot_index] if slot_index < trainable_unit_scenes.size() else null
 	return production_component.enqueue_unit(self, trainable_unit_data[slot_index], scene_override)
+
+
+func can_train_unit_data(unit_data: UnitData, scene_override: PackedScene = null) -> bool:
+	if production_component == null or unit_data == null:
+		return false
+	return production_component.can_queue_unit(self, unit_data, scene_override)
+
+
+func queue_unit_data(unit_data: UnitData, scene_override: PackedScene = null) -> bool:
+	if production_component == null or unit_data == null:
+		return false
+	return production_component.enqueue_unit(self, unit_data, scene_override)
+
+
+func get_vision_range() -> float:
+	if not is_constructed:
+		return maxf(120.0, vision_range * 0.55)
+	return maxf(120.0, vision_range)
 
 
 func cancel_queued_unit(queue_index: int) -> bool:
@@ -602,10 +634,40 @@ func _update_construction_visuals() -> void:
 			body_visual.modulate = Color.WHITE
 		else:
 			var alpha: float = lerpf(0.48, 0.92, construction_progress)
-			body_visual.modulate = Color(0.62, 0.88, 0.96, alpha)
+			if team == Unit.Team.ENEMY:
+				body_visual.modulate = Color(1.0, 0.62, 0.56, alpha)
+			else:
+				body_visual.modulate = Color(0.62, 0.88, 0.96, alpha)
 	if construct_bar_root != null and construct_bar_fill != null:
 		construct_bar_root.visible = not is_constructed
 		construct_bar_fill.size.x = CONSTRUCT_BAR_WIDTH * clampf(construction_progress, 0.0, 1.0)
+
+
+func _apply_team_visuals() -> void:
+	if team != Unit.Team.ENEMY:
+		return
+	if core_glow != null:
+		core_glow.color = Color(1.0, 0.30, 0.24, 1.0)
+		_base_core_color = core_glow.color
+	if body_visual != null:
+		var outer_hull: Polygon2D = body_visual.get_node_or_null("OuterHull") as Polygon2D
+		if outer_hull != null:
+			outer_hull.color = Color(0.24, 0.14, 0.16, 1.0)
+		var hull_border: Line2D = body_visual.get_node_or_null("HullBorder") as Line2D
+		if hull_border != null:
+			hull_border.default_color = Color(1.0, 0.42, 0.34, 0.90)
+	if health_bar_fill != null:
+		health_bar_fill.color = Color(0.98, 0.34, 0.26, 1.0)
+	if selection_ring != null:
+		var ring_fill: Polygon2D = selection_ring.get_node_or_null("Fill") as Polygon2D
+		if ring_fill != null:
+			ring_fill.color = Color(1.0, 0.30, 0.24, 0.16)
+		var ring_outline: Line2D = selection_ring.get_node_or_null("Outline") as Line2D
+		if ring_outline != null:
+			ring_outline.default_color = Color(1.0, 0.36, 0.26, 0.95)
+	var name_tag: Label = get_node_or_null("NameTag") as Label
+	if name_tag != null:
+		name_tag.add_theme_color_override("font_color", Color(1.0, 0.68, 0.64, 0.92))
 
 
 func _update_staff_slot_visuals() -> void:

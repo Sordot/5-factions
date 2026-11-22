@@ -160,9 +160,9 @@ func _get_edge_pan_vector() -> Vector2:
 	if viewport == null:
 		return Vector2.ZERO
 
-	# Don't yank the camera while hovering clickable HUD buttons near viewport borders.
+	# Don't yank the camera while hovering clickable HUD buttons or interactive minimap near viewport borders.
 	var hovered: Control = viewport.gui_get_hovered_control()
-	if hovered is BaseButton:
+	if hovered != null and (hovered is BaseButton or hovered.is_in_group("blocks_edge_pan")):
 		return Vector2.ZERO
 
 	var viewport_size: Vector2 = viewport.get_visible_rect().size

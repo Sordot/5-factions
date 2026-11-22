@@ -49,6 +49,17 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	# Drop inspection if an inspected hostile entity disappears into Fog of War.
+	if inspected_entity != null and is_instance_valid(inspected_entity):
+		if inspected_entity is Unit:
+			var iu: Unit = inspected_entity
+			if iu.team == Unit.Team.ENEMY and not iu.visible:
+				_set_inspected_entity(null)
+		elif inspected_entity is Building:
+			var ib: Building = inspected_entity
+			if ib.team == Unit.Team.ENEMY and not ib.visible:
+				_set_inspected_entity(null)
+
 	if active_targeting_ability == null or command_router == null:
 		return
 	var cursor_world: Vector2 = get_global_mouse_position()

@@ -10,6 +10,7 @@ extends Resource
 @export var build_time: float = 4.0
 @export var footprint_size: Vector2 = Vector2(72.0, 72.0)
 @export var max_hp: float = 500.0
+@export var vision_range: float = 420.0
 @export var bandwidth_provided: int = 0
 @export var is_dropoff: bool = false
 @export var accepted_resources: Array[StringName] = []

@@ -16,6 +16,7 @@ compute_cost = 0
 build_time = 5.0
 footprint_size = Vector2(86, 86)
 max_hp = 900.0
+vision_range = 380.0
 bandwidth_provided = 0
 is_dropoff = false
 accepted_resources = Array[StringName]([])

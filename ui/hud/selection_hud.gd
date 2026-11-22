@@ -68,6 +68,30 @@ func _ready() -> void:
 
 	_bind_static_command_tooltips()
 	bottom_panel.visible = false
+	call_deferred("_adjust_layout_for_minimap")
+	if get_viewport() != null and not get_viewport().size_changed.is_connected(_adjust_layout_for_minimap):
+		get_viewport().size_changed.connect(_adjust_layout_for_minimap)
+
+
+func _adjust_layout_for_minimap() -> void:
+	if not is_inside_tree():
+		return
+	var minimap_node: Node = get_tree().get_first_node_in_group("tactical_minimap")
+	var bottom_stack: Control = get_node_or_null("BottomStack") as Control
+	if minimap_node == null or bottom_stack == null:
+		return
+	var vp_width: float = get_viewport_rect().size.x
+	var minimap_clearance: float = 244.0
+	var desired_half_w: float = 460.0
+	var center_x: float = vp_width * 0.5
+	if center_x - desired_half_w < minimap_clearance:
+		var avail_w: float = maxf(680.0, vp_width - minimap_clearance - 12.0)
+		var shift_center: float = minimap_clearance + avail_w * 0.5
+		bottom_stack.offset_left = (shift_center - avail_w * 0.5) - center_x
+		bottom_stack.offset_right = (shift_center + avail_w * 0.5) - center_x
+	else:
+		bottom_stack.offset_left = -desired_half_w
+		bottom_stack.offset_right = desired_half_w
 
 
 func _setup_dynamic_bar_styles() -> void:

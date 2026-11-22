@@ -102,6 +102,11 @@ func try_fire_at(owner_unit: Unit, target: Node2D) -> bool:
 func _spawn_attack_tracer(owner_unit: Unit, from_pos: Vector2, to_pos: Vector2) -> void:
 	if owner_unit.get_parent() == null:
 		return
+	if owner_unit.is_inside_tree():
+		var fog: Node = owner_unit.get_tree().get_first_node_in_group("fog_of_war")
+		if fog != null and fog.has_method("is_world_pos_visible") and fog.get("fog_enabled"):
+			if not fog.is_world_pos_visible(from_pos) and not fog.is_world_pos_visible(to_pos):
+				return
 	var tracer: AttackTracer = ATTACK_TRACER_SCRIPT.new()
 	tracer.z_index = 50
 	owner_unit.get_parent().add_child(tracer)

@@ -2,6 +2,7 @@ class_name SandboxSpawner
 extends Node2D
 
 @export var arena_safe_bounds: Rect2 = Rect2(-580.0, -300.0, 1160.0, 600.0)
+@export var reload_scene_on_reset: bool = false
 
 signal entities_changed
 
@@ -120,6 +121,9 @@ func clear_dummies() -> void:
 
 
 func reset_sandbox() -> void:
+	if reload_scene_on_reset and is_inside_tree():
+		get_tree().reload_current_scene()
+		return
 	var sel_ctrl: SelectionController = _get_selection_controller()
 	if sel_ctrl != null:
 		sel_ctrl.clear_selection()

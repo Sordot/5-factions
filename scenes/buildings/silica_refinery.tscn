@@ -15,6 +15,7 @@ team = 0
 building_type_id = &"silica_refinery"
 display_name = "Silica Refinery"
 max_hp = 800.0
+vision_range = 360.0
 footprint_radius = 40.0
 selection_radius = 48.0
 is_resource_dropoff = true

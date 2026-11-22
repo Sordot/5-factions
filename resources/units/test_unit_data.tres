@@ -16,6 +16,7 @@ collision_radius = 16.0
 attack_damage = 20.0
 attack_range = 180.0
 aggro_range = 280.0
+vision_range = 340.0
 attack_cooldown = 0.7
 abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_overcharge")])
 bandwidth_cost = 1

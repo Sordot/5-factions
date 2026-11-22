@@ -86,10 +86,19 @@ func _set_controller(next_team: int) -> void:
 
 
 func _draw() -> void:
+	var has_live_vision: bool = true
+	if is_inside_tree():
+		var fog: Node = get_tree().get_first_node_in_group("fog_of_war")
+		if fog != null and fog.has_method("is_world_pos_visible") and fog.get("fog_enabled"):
+			has_live_vision = fog.is_world_pos_visible(global_position)
+
 	var base_col: Color = Color(0.62, 0.72, 0.82, 0.8)
 	var status_text: String = "DATA HYPER-UPLINK  —  NEUTRAL"
 
-	if is_contested:
+	if not has_live_vision:
+		base_col = Color(0.52, 0.62, 0.72, 0.72)
+		status_text = "DATA HYPER-UPLINK  —  NO LIVE SIGNAL"
+	elif is_contested:
 		var blink: float = 0.65 + 0.35 * sin(_pulse_time * 8.0)
 		base_col = Color(1.0, 0.78, 0.24, blink)
 		status_text = "DATA HYPER-UPLINK  —  CONTESTED"
@@ -110,9 +119,9 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, capture_radius, Color(base_col.r, base_col.g, base_col.b, 0.06))
 	draw_arc(Vector2.ZERO, capture_radius, 0.0, TAU, 64, Color(base_col.r, base_col.g, base_col.b, 0.55), 2.0, true)
 
-	# Progress arc around perimeter
+	# Progress arc around perimeter (only when live vision covers the uplink)
 	var mag: float = clampf(absf(capture_progress), 0.0, 1.0)
-	if mag > 0.01:
+	if has_live_vision and mag > 0.01:
 		var arc_col: Color = Color(0.18, 0.98, 0.92, 0.95) if capture_progress > 0.0 else Color(1.0, 0.34, 0.26, 0.95)
 		draw_arc(Vector2.ZERO, capture_radius - 5.0, -PI * 0.5, -PI * 0.5 + TAU * mag, 56, arc_col, 4.0, true)
 

@@ -156,7 +156,7 @@ func issue_hold(selected_units: Array[Unit]) -> void:
 		unit.command_hold_position()
 
 
-func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2) -> Dictionary:
+func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2, target_team: Unit.Team = Unit.Team.PLAYER) -> Dictionary:
 	var result: Dictionary = {
 		"pos": cursor_world,
 		"valid": false,
@@ -189,6 +189,13 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 		result["reason"] = "Out of buildable bounds"
 		return result
 
+	# Block placement inside or overlapping static terrain obstacles.
+	for node: Node in get_tree().get_nodes_in_group("terrain_obstacles"):
+		if is_instance_valid(node) and node.has_method("overlaps_circle"):
+			if node.overlaps_circle(place_pos, new_radius + 8.0):
+				result["reason"] = "Blocked by terrain"
+				return result
+
 	# Keep central Hyper-Uplink clear of structures.
 	for node: Node in get_tree().get_nodes_in_group("hyper_uplinks"):
 		if node is Node2D and is_instance_valid(node):
@@ -220,7 +227,7 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 			return result
 
 	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
-	if econ != null and not econ.can_afford(Unit.Team.PLAYER, building_data.get_cost_dict()):
+	if econ != null and not econ.can_afford(target_team, building_data.get_cost_dict()):
 		result["reason"] = "Need %s" % building_data.get_cost_label()
 		return result
 
@@ -311,6 +318,9 @@ func find_unit_at_point(world_point: Vector2, target_team: Unit.Team) -> Unit:
 		var unit: Unit = node
 		if not is_instance_valid(unit) or unit.is_dead or unit.team != target_team:
 			continue
+		# Block targeting or inspecting hostile units hidden in Fog of War.
+		if target_team == Unit.Team.ENEMY and not unit.visible:
+			continue
 		if unit.contains_point(world_point):
 			var dist_sq: float = unit.global_position.distance_squared_to(world_point)
 			if dist_sq < closest_dist_sq:
@@ -327,6 +337,9 @@ func find_building_at_point(world_point: Vector2, target_team: Unit.Team) -> Bui
 			continue
 		var building: Building = node
 		if not is_instance_valid(building) or building.is_destroyed or building.team != target_team:
+			continue
+		# Block targeting or inspecting hostile buildings hidden in unexplored Fog of War.
+		if target_team == Unit.Team.ENEMY and not building.visible:
 			continue
 		if building.contains_point(world_point):
 			var dist_sq: float = building.global_position.distance_squared_to(world_point)
