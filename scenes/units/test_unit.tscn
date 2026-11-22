@@ -8,7 +8,7 @@ radius = 16.0
 
 [node name="TestUnit" type="CharacterBody2D"]
 collision_layer = 2
-collision_mask = 1
+collision_mask = 3
 motion_mode = 1
 script = ExtResource("1_unit_script")
 team = 0
@@ -18,8 +18,15 @@ data = ExtResource("2_unit_data")
 shape = SubResource("CircleShape2D_unit")
 
 [node name="NavigationAgent2D" type="NavigationAgent2D" parent="."]
-path_desired_distance = 6.0
-target_desired_distance = 6.0
+path_desired_distance = 10.0
+target_desired_distance = 12.0
+avoidance_enabled = true
+radius = 18.0
+neighbor_distance = 120.0
+max_neighbors = 12
+time_horizon_agents = 0.8
+time_horizon_obstacles = 0.8
+max_speed = 260.0
 
 [node name="SelectionRing" type="Node2D" parent="."]
 visible = false

@@ -8,7 +8,7 @@ radius = 18.0
 
 [node name="TargetDummy" type="CharacterBody2D"]
 collision_layer = 2
-collision_mask = 1
+collision_mask = 3
 motion_mode = 1
 script = ExtResource("1_unit_script")
 team = 1
@@ -17,6 +17,11 @@ always_show_health_bar = true
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 shape = SubResource("CircleShape2D_dummy")
+
+[node name="NavigationObstacle2D" type="NavigationObstacle2D" parent="."]
+radius = 22.0
+affect_navigation_mesh = false
+avoidance_enabled = true
 
 [node name="SelectionRing" type="Node2D" parent="."]
 visible = false

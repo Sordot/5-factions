@@ -58,6 +58,7 @@ func reset_sandbox() -> void:
 	var sel_ctrl: SelectionController = _get_selection_controller()
 	if sel_ctrl != null:
 		sel_ctrl.clear_selection()
+		sel_ctrl.clear_control_groups()
 
 	var container: Node = _get_units_container()
 	if container != null:

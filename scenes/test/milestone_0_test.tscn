@@ -59,6 +59,7 @@ position = Vector2(260, 0)
 [node name="SelectionController" type="Node2D" parent="."]
 z_index = 90
 script = ExtResource("3_sel_ctrl")
+camera_path = NodePath("../RTSCamera")
 
 [node name="SelectionBox" type="Node2D" parent="SelectionController"]
 z_index = 100

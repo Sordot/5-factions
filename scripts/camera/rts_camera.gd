@@ -47,6 +47,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		_clamp_position()
 
 
+func center_on(world_pos: Vector2) -> void:
+	global_position = world_pos
+	_clamp_position()
+
+
 func _clamp_position() -> void:
 	if not pan_bounds.has_area():
 		return

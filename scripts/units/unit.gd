@@ -17,6 +17,8 @@ enum CommandState {
 const ATTACK_TRACER_SCRIPT: GDScript = preload("res://ui/overlays/attack_tracer.gd")
 const HIT_FLASH_DURATION: float = 0.10
 const HEALTH_BAR_WIDTH: float = 36.0
+const SETTLE_PROXIMITY_RADIUS: float = 160.0
+const SETTLE_NO_PROGRESS_TIME: float = 0.45
 
 signal selection_changed(unit: Unit, selected: bool)
 signal health_changed(unit: Unit, current_hp: float, max_hp: float)
@@ -38,10 +40,17 @@ var current_hp: float = 100.0
 var command_state: CommandState = CommandState.IDLE
 var current_target: Unit = null
 
+var _move_destination: Vector2 = Vector2.ZERO
 var _attack_move_destination: Vector2 = Vector2.ZERO
 var _attack_cooldown_timer: float = 0.0
 var _hit_flash_timer: float = 0.0
 var _last_nav_target: Vector2 = Vector2.INF
+
+var _wants_nav_movement: bool = false
+var _desired_move_velocity: Vector2 = Vector2.ZERO
+var _last_delta: float = 1.0 / 60.0
+var _no_progress_timer: float = 0.0
+var _best_dist_to_goal: float = INF
 
 
 func _ready() -> void:
@@ -52,6 +61,12 @@ func _ready() -> void:
 	current_hp = data.max_hp
 	selection_ring.visible = is_selected
 	_update_health_bar()
+
+	if nav_agent != null:
+		nav_agent.max_speed = maxf(1.0, data.move_speed)
+		nav_agent.radius = data.collision_radius + 2.0
+		if not nav_agent.velocity_computed.is_connected(_on_nav_velocity_computed):
+			nav_agent.velocity_computed.connect(_on_nav_velocity_computed)
 
 
 func set_selected(selected: bool) -> void:
@@ -80,6 +95,8 @@ func command_move(target_pos: Vector2) -> void:
 		return
 	command_state = CommandState.MOVING
 	current_target = null
+	_move_destination = target_pos
+	_reset_progress_tracker()
 	_set_nav_target(target_pos)
 
 
@@ -90,17 +107,18 @@ func command_attack_target(target: Unit) -> void:
 		return
 	command_state = CommandState.ATTACKING_TARGET
 	current_target = target
+	_reset_progress_tracker()
 	_last_nav_target = Vector2.INF
 
 
 func command_attack_move(target_pos: Vector2) -> void:
-	if is_dead:
-		return
-	if not _can_move():
+	if is_dead or not _can_move():
 		return
 	command_state = CommandState.ATTACK_MOVING
 	_attack_move_destination = target_pos
+	_move_destination = target_pos
 	current_target = null
+	_reset_progress_tracker()
 	_set_nav_target(target_pos)
 
 
@@ -109,6 +127,9 @@ func command_stop() -> void:
 		return
 	command_state = CommandState.IDLE
 	current_target = null
+	_wants_nav_movement = false
+	_desired_move_velocity = Vector2.ZERO
+	_reset_progress_tracker()
 	velocity = Vector2.ZERO
 	_clear_nav_target()
 
@@ -118,6 +139,9 @@ func command_hold_position() -> void:
 		return
 	command_state = CommandState.HOLD_POSITION
 	current_target = null
+	_wants_nav_movement = false
+	_desired_move_velocity = Vector2.ZERO
+	_reset_progress_tracker()
 	velocity = Vector2.ZERO
 	_clear_nav_target()
 
@@ -141,6 +165,7 @@ func _die() -> void:
 	is_dead = true
 	command_state = CommandState.IDLE
 	current_target = null
+	_wants_nav_movement = false
 	velocity = Vector2.ZERO
 	set_selected(false)
 	died.emit(self)
@@ -151,6 +176,7 @@ func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
 
+	_last_delta = delta
 	if current_target != null and (not is_instance_valid(current_target) or current_target.is_dead):
 		current_target = null
 
@@ -165,6 +191,9 @@ func _physics_process(delta: float) -> void:
 	if not _can_move() and not _can_attack():
 		return
 
+	_wants_nav_movement = false
+	_desired_move_velocity = Vector2.ZERO
+
 	match command_state:
 		CommandState.IDLE:
 			_process_idle(delta)
@@ -177,9 +206,21 @@ func _physics_process(delta: float) -> void:
 		CommandState.HOLD_POSITION:
 			_process_hold_position(delta)
 
+	if _can_move() and nav_agent != null and nav_agent.avoidance_enabled:
+		nav_agent.set_velocity(_desired_move_velocity)
+		if not _wants_nav_movement:
+			_apply_stationary_separation(delta)
+	else:
+		_apply_direct_motion(_desired_move_velocity, delta)
+
+
+func _on_nav_velocity_computed(safe_velocity: Vector2) -> void:
+	if is_dead or not _wants_nav_movement:
+		return
+	_apply_direct_motion(safe_velocity, _last_delta)
+
 
 func _process_idle(delta: float) -> void:
-	_decelerate_to_stop(delta)
 	if not _can_attack():
 		return
 	if not _is_valid_enemy_in_range(current_target, data.attack_range):
@@ -195,11 +236,12 @@ func _process_moving(delta: float) -> void:
 		return
 	if not _is_nav_map_ready():
 		return
-	if nav_agent.is_navigation_finished():
+	if _should_settle_at_destination(_move_destination, delta):
 		command_state = CommandState.IDLE
+		_reset_progress_tracker()
 		velocity = Vector2.ZERO
 		return
-	_step_along_nav_path(delta)
+	_compute_nav_desired_velocity()
 
 
 func _process_attack_moving(delta: float) -> void:
@@ -211,26 +253,27 @@ func _process_attack_moving(delta: float) -> void:
 			current_target = _find_nearest_enemy(data.aggro_range)
 
 	if current_target != null:
+		_reset_progress_tracker()
 		if _distance_to_unit_edge(current_target) <= data.attack_range:
-			_decelerate_to_stop(delta)
 			_face_point(current_target.global_position, delta)
 			_try_fire_at(current_target)
 			return
-		_navigate_toward_point(current_target.global_position, delta, 8.0)
+		_request_nav_toward_point(current_target.global_position, 8.0)
 		return
 
 	if nav_agent == null:
 		command_state = CommandState.IDLE
 		return
-	if _last_nav_target.distance_squared_to(_attack_move_destination) > 1.0:
+	if _last_nav_target == Vector2.INF or _last_nav_target.distance_squared_to(_attack_move_destination) > 1.0:
 		_set_nav_target(_attack_move_destination)
 	if not _is_nav_map_ready():
 		return
-	if nav_agent.is_navigation_finished():
+	if _should_settle_at_destination(_attack_move_destination, delta):
 		command_state = CommandState.IDLE
+		_reset_progress_tracker()
 		velocity = Vector2.ZERO
 		return
-	_step_along_nav_path(delta)
+	_compute_nav_desired_velocity()
 
 
 func _process_attacking_target(delta: float) -> void:
@@ -241,15 +284,12 @@ func _process_attacking_target(delta: float) -> void:
 		return
 
 	if _distance_to_unit_edge(current_target) <= data.attack_range:
-		_decelerate_to_stop(delta)
 		_face_point(current_target.global_position, delta)
 		_try_fire_at(current_target)
 		return
 
 	if _can_move():
-		_navigate_toward_point(current_target.global_position, delta, 6.0)
-	else:
-		_decelerate_to_stop(delta)
+		_request_nav_toward_point(current_target.global_position, 6.0)
 
 
 func _process_hold_position(delta: float) -> void:
@@ -263,7 +303,7 @@ func _process_hold_position(delta: float) -> void:
 		_try_fire_at(current_target)
 
 
-func _navigate_toward_point(target_point: Vector2, delta: float, repath_threshold: float) -> void:
+func _request_nav_toward_point(target_point: Vector2, repath_threshold: float) -> void:
 	if nav_agent == null:
 		return
 	if _last_nav_target == Vector2.INF or _last_nav_target.distance_squared_to(target_point) > repath_threshold * repath_threshold:
@@ -271,29 +311,150 @@ func _navigate_toward_point(target_point: Vector2, delta: float, repath_threshol
 	if not _is_nav_map_ready():
 		return
 	if nav_agent.is_navigation_finished():
-		_decelerate_to_stop(delta)
 		return
-	_step_along_nav_path(delta)
+	_compute_nav_desired_velocity()
 
 
-func _step_along_nav_path(delta: float) -> void:
+func _compute_nav_desired_velocity() -> void:
 	var next_point: Vector2 = nav_agent.get_next_path_position()
 	var to_next: Vector2 = next_point - global_position
 	if to_next.length_squared() < 1.0:
 		return
-	var desired_velocity: Vector2 = to_next.normalized() * data.move_speed
-	velocity = velocity.move_toward(desired_velocity, data.acceleration * delta)
-	_face_angle(to_next.angle(), delta)
-	move_and_slide()
+	var dir: Vector2 = to_next.normalized()
+	dir = _steer_around_static_units(dir)
+	_wants_nav_movement = true
+	_desired_move_velocity = dir * data.move_speed
 
 
-func _decelerate_to_stop(delta: float) -> void:
-	if velocity.length_squared() > 0.01:
+func _steer_around_static_units(move_dir: Vector2) -> Vector2:
+	# Prevent head-on deadlocks against stationary TargetDummy bodies by adding
+	# a deterministic tangential bias when a static unit blocks the forward path.
+	var steer: Vector2 = move_dir
+	var my_r: float = data.collision_radius if data != null else 16.0
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not (node is Unit) or node == self:
+			continue
+		var other: Unit = node
+		if not is_instance_valid(other) or other.is_dead:
+			continue
+		if other._can_move():
+			continue
+		var to_other: Vector2 = other.global_position - global_position
+		var dist: float = to_other.length()
+		var other_r: float = other.data.collision_radius if other.data != null else 18.0
+		var avoid_dist: float = my_r + other_r + 36.0
+		if dist <= 0.001 or dist > avoid_dist:
+			continue
+		var to_other_dir: Vector2 = to_other / dist
+		var forward_dot: float = move_dir.dot(to_other_dir)
+		if forward_dot <= 0.15:
+			continue
+		var cross: float = move_dir.cross(to_other_dir)
+		var side: float = -1.0 if cross >= 0.0 else 1.0
+		var tangent: Vector2 = Vector2(-to_other_dir.y, to_other_dir.x) * side
+		var weight: float = clampf((avoid_dist - dist) / avoid_dist, 0.25, 1.0) * 1.4
+		steer += tangent * weight
+	return steer.normalized() if steer.length_squared() > 0.0001 else move_dir
+
+
+func _apply_direct_motion(target_velocity: Vector2, delta: float) -> void:
+	var accel: float = data.acceleration if data.acceleration > 0.0 else 1800.0
+	if _wants_nav_movement:
+		var sep: Vector2 = _compute_overlap_separation(1.0)
+		var combined: Vector2 = target_velocity + sep
+		if combined.length() > data.move_speed:
+			combined = combined.normalized() * data.move_speed
+		velocity = velocity.move_toward(combined, accel * delta)
+		if velocity.length_squared() > 4.0:
+			_face_angle(velocity.angle(), delta)
+		move_and_slide()
+		_check_post_slide_settling()
+	else:
+		_apply_stationary_separation(delta)
+
+
+func _apply_stationary_separation(delta: float) -> void:
+	if not _can_move():
+		return
+	var sep_margin: float = 0.0 if command_state == CommandState.HOLD_POSITION else 2.5
+	var sep: Vector2 = _compute_overlap_separation(sep_margin)
+	if sep.length_squared() > 1.0:
+		velocity = sep
+		move_and_slide()
+	elif velocity.length_squared() > 0.01:
 		var decel: float = data.acceleration if data.acceleration > 0.0 else 1800.0
 		velocity = velocity.move_toward(Vector2.ZERO, decel * delta)
 		move_and_slide()
 	else:
 		velocity = Vector2.ZERO
+
+
+func _compute_overlap_separation(extra_margin: float) -> Vector2:
+	var push: Vector2 = Vector2.ZERO
+	var my_r: float = data.collision_radius if data != null else 16.0
+	var max_push: float = data.move_speed * 0.85 if data != null else 220.0
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not (node is Unit) or node == self:
+			continue
+		var other: Unit = node
+		if not is_instance_valid(other) or other.is_dead:
+			continue
+		var other_r: float = other.data.collision_radius if other.data != null else 16.0
+		var min_dist: float = my_r + other_r + extra_margin
+		var diff: Vector2 = global_position - other.global_position
+		var dist_sq: float = diff.length_squared()
+		if dist_sq >= min_dist * min_dist:
+			continue
+		var dir: Vector2
+		var dist: float = sqrt(dist_sq)
+		if dist < 0.01:
+			var angle: float = fmod(float(get_instance_id() % 360) * 1.618, TAU)
+			dir = Vector2.RIGHT.rotated(angle)
+		else:
+			dir = diff / dist
+		var overlap_ratio: float = clampf((min_dist - dist) / maxf(1.0, min_dist), 0.15, 1.0)
+		push += dir * max_push * overlap_ratio
+	if push.length() > max_push:
+		push = push.normalized() * max_push
+	return push
+
+
+func _reset_progress_tracker() -> void:
+	_no_progress_timer = 0.0
+	_best_dist_to_goal = INF
+
+
+func _should_settle_at_destination(goal_pos: Vector2, delta: float) -> bool:
+	var dist_to_goal: float = global_position.distance_to(goal_pos)
+	if dist_to_goal <= nav_agent.target_desired_distance or nav_agent.is_navigation_finished():
+		return true
+	if dist_to_goal < _best_dist_to_goal - 4.0:
+		_best_dist_to_goal = dist_to_goal
+		_no_progress_timer = 0.0
+	elif dist_to_goal <= SETTLE_PROXIMITY_RADIUS:
+		_no_progress_timer += delta
+		if _no_progress_timer >= SETTLE_NO_PROGRESS_TIME:
+			return true
+	return false
+
+
+func _check_post_slide_settling() -> void:
+	if command_state != CommandState.MOVING and not (command_state == CommandState.ATTACK_MOVING and current_target == null):
+		return
+	var goal_pos: Vector2 = _move_destination if command_state == CommandState.MOVING else _attack_move_destination
+	if global_position.distance_to(goal_pos) > SETTLE_PROXIMITY_RADIUS:
+		return
+	for i: int in range(get_slide_collision_count()):
+		var col: KinematicCollision2D = get_slide_collision(i)
+		var collider: Object = col.get_collider()
+		if collider is Unit:
+			var other: Unit = collider
+			if other.team == team and other.command_state == CommandState.IDLE:
+				command_state = CommandState.IDLE
+				_wants_nav_movement = false
+				_reset_progress_tracker()
+				velocity = Vector2.ZERO
+				return
 
 
 func _face_point(world_point: Vector2, delta: float) -> void:
@@ -375,6 +536,8 @@ func _clear_nav_target() -> void:
 	_last_nav_target = Vector2.INF
 	if nav_agent != null and is_inside_tree():
 		nav_agent.target_position = global_position
+		if nav_agent.avoidance_enabled:
+			nav_agent.set_velocity(Vector2.ZERO)
 
 
 func _is_nav_map_ready() -> bool:

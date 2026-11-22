@@ -5,6 +5,7 @@ extends Control
 @export var selection_controller_path: NodePath
 
 @onready var status_label: Label = %StatusLabel
+@onready var groups_label: Label = %GroupsLabel
 @onready var btn_unit_1: Button = %BtnUnit1
 @onready var btn_unit_5: Button = %BtnUnit5
 @onready var btn_dummy_1: Button = %BtnDummy1
@@ -14,7 +15,6 @@ extends Control
 
 var _spawner: SandboxSpawner = null
 var _selection_controller: SelectionController = null
-var _command_mode: String = "NORMAL"
 
 
 func _ready() -> void:
@@ -46,18 +46,10 @@ func _ready() -> void:
 			_spawner.reset_sandbox()
 	)
 
-	if _selection_controller != null:
-		_selection_controller.command_mode_changed.connect(_on_command_mode_changed)
-
 	_refresh_status()
 
 
 func _process(_delta: float) -> void:
-	_refresh_status()
-
-
-func _on_command_mode_changed(mode_name: String) -> void:
-	_command_mode = mode_name
 	_refresh_status()
 
 
@@ -78,10 +70,19 @@ func _refresh_status() -> void:
 			dummy_count += 1
 
 	var selected_count: int = _selection_controller.selected_units.size() if _selection_controller != null else 0
-	var mode_text: String = "ATTACK-MOVE (LMB target | RMB/Esc cancel)" if _command_mode == "ATTACK_MOVE" else "Normal"
-	status_label.text = "Mode: %s  |  Units: %d (Selected: %d)  |  Dummies: %d" % [
-		mode_text,
+	status_label.text = "Units: %d (Selected: %d)  |  Dummies: %d" % [
 		player_count,
 		selected_count,
 		dummy_count,
 	]
+
+	if groups_label != null and _selection_controller != null:
+		var summary: Dictionary = _selection_controller.get_control_groups_summary()
+		if summary.is_empty():
+			groups_label.text = "Control Groups: None (Ctrl/Shift/Alt + 1-9)"
+		else:
+			var parts: PackedStringArray = PackedStringArray()
+			for num: int in range(1, 10):
+				if summary.has(num):
+					parts.append("[%d]: %d" % [num, int(summary[num])])
+			groups_label.text = "Control Groups: " + "  ".join(parts)
