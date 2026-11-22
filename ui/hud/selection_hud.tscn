@@ -69,7 +69,7 @@ size_flags_vertical = 8
 [node name="BottomPanel" type="PanelContainer" parent="BottomStack"]
 unique_name_in_owner = true
 visible = false
-custom_minimum_size = Vector2(0, 118)
+custom_minimum_size = Vector2(0, 128)
 layout_mode = 2
 
 [node name="HBox" type="HBoxContainer" parent="BottomStack/BottomPanel"]
@@ -178,6 +178,31 @@ theme_override_constants/h_separation = 12
 theme_override_constants/v_separation = 4
 columns = 2
 
+[node name="ProductionQueueBox" type="VBoxContainer" parent="BottomStack/BottomPanel/HBox/CenterPanel"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="ProductionLabel" type="Label" parent="BottomStack/BottomPanel/HBox/CenterPanel/ProductionQueueBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.54, 0.96, 0.92, 0.96)
+theme_override_font_sizes/font_size = 11
+text = "Training Worker (0%)"
+
+[node name="ProductionBar" type="ProgressBar" parent="BottomStack/BottomPanel/HBox/CenterPanel/ProductionQueueBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 7)
+layout_mode = 2
+value = 0.0
+show_percentage = false
+
+[node name="QueueSlotsRow" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox/CenterPanel/ProductionQueueBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
 [node name="Sep2" type="VSeparator" parent="BottomStack/BottomPanel/HBox"]
 layout_mode = 2
 
@@ -185,7 +210,7 @@ layout_mode = 2
 custom_minimum_size = Vector2(436, 0)
 layout_mode = 2
 size_flags_vertical = 4
-theme_override_constants/separation = 6
+theme_override_constants/separation = 5
 
 [node name="StandardCommandsRow" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox/RightPanel"]
 unique_name_in_owner = true
@@ -220,10 +245,12 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Atk-Mv (A)"
 
-[node name="AbilityRow" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox/RightPanel"]
+[node name="AbilityRow" type="GridContainer" parent="BottomStack/BottomPanel/HBox/RightPanel"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 5
+theme_override_constants/h_separation = 5
+theme_override_constants/v_separation = 4
+columns = 2
 
 [node name="ReadOnlyLabel" type="Label" parent="BottomStack/BottomPanel/HBox/RightPanel"]
 unique_name_in_owner = true

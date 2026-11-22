@@ -16,7 +16,7 @@ script = ExtResource("1_panel_script")
 
 [node name="MarginContainer" type="MarginContainer" parent="."]
 layout_mode = 0
-offset_right = 630.0
+offset_right = 640.0
 offset_bottom = 172.0
 mouse_filter = 2
 theme_override_constants/margin_left = 12
@@ -34,7 +34,7 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.86, 0.96, 1, 1)
 theme_override_font_sizes/font_size = 12
-text = "Units: 3 (Selected: 0)  |  Dummies: 1"
+text = "Units: 3 (Selected: 0)  |  Hostiles: 1"
 
 [node name="GroupsLabel" type="Label" parent="MarginContainer/PanelContainer/VBox"]
 unique_name_in_owner = true
@@ -84,21 +84,28 @@ unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+1 Harvester (F7)"
+text = "+1 Harv (F7)"
 
 [node name="BtnEngineer1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+1 Engineer (F8)"
+text = "+1 Eng (F8)"
 
 [node name="BtnGrantRes" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+200B / +100S"
+text = "+200B/+100S"
+
+[node name="BtnTriggerZone" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Next Zone"
 
 [node name="ButtonRow2" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
 layout_mode = 2
@@ -116,24 +123,31 @@ unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+3 Dummies (F4)"
+text = "+3 Dum (F4)"
+
+[node name="BtnEnemy1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow2"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "+1 Trooper (F9)"
 
 [node name="BtnClearDummies" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow2"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "Clear Dummies (Del)"
+text = "Clear Hostiles"
 
 [node name="BtnReset" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow2"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "Reset (R)"
+text = "Reset (F10)"
 
 [node name="ControlsLabel" type="Label" parent="MarginContainer/PanelContainer/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.56, 0.72, 0.8, 0.85)
 theme_override_font_sizes/font_size = 10
-text = "LMB: Select/Inspect | Shift+LMB: Toggle | Dbl-Click: Type | Q/W/E: Ability/Build | RMB: Command | Tab | A/S/H"
+text = "LMB: Select/Inspect | Q/W/E/R: Ability/Build | RMB: Command/Rally | Tab: Subgroup | A/S/H | 1-9"

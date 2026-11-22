@@ -7,6 +7,7 @@ const RESOURCE_COMPUTE: StringName = &"compute"
 
 signal resources_changed(team: int, resources: Dictionary)
 signal bandwidth_changed(team: int, used: int, cap: int)
+signal production_bonus_changed(team: int, multiplier: float)
 
 @export var starting_biomass: int = 50
 @export var starting_silica: int = 0
@@ -14,9 +15,12 @@ signal bandwidth_changed(team: int, used: int, cap: int)
 
 var _resources: Dictionary = {}
 var _bandwidth_used: Dictionary = {}
+var _bandwidth_reserved: Dictionary = {}
 var _bandwidth_cap: Dictionary = {}
 var _bandwidth_providers: Dictionary = {}
 var _bandwidth_units: Dictionary = {}
+var _uplink_controller: int = -1
+var _uplink_bonus_pct: float = 0.05
 
 
 func _ready() -> void:
@@ -40,6 +44,8 @@ func _init_team_state(team: int, biomass: int, silica: int, compute: int) -> voi
 	}
 	if not _bandwidth_used.has(team):
 		_bandwidth_used[team] = 0
+	if not _bandwidth_reserved.has(team):
+		_bandwidth_reserved[team] = 0
 	if not _bandwidth_cap.has(team):
 		_bandwidth_cap[team] = 0
 
@@ -60,6 +66,9 @@ func reset_economy() -> void:
 		RESOURCE_SILICA: 0,
 		RESOURCE_COMPUTE: 0,
 	}
+	_bandwidth_reserved[Unit.Team.PLAYER] = 0
+	_bandwidth_reserved[Unit.Team.ENEMY] = 0
+	set_uplink_controller(-1, _uplink_bonus_pct)
 	recalculate_bandwidth(Unit.Team.PLAYER)
 	recalculate_bandwidth(Unit.Team.ENEMY)
 	resources_changed.emit(Unit.Team.PLAYER, get_resources(Unit.Team.PLAYER))
@@ -176,6 +185,35 @@ func update_bandwidth_used(team: int, used: int) -> void:
 	bandwidth_changed.emit(team, clamped_used, get_bandwidth_cap(team))
 
 
+func reserve_bandwidth(team: int, amount: int) -> void:
+	if amount <= 0:
+		return
+	_ensure_team(team)
+	_bandwidth_reserved[team] = int(_bandwidth_reserved.get(team, 0)) + amount
+	recalculate_bandwidth(team)
+
+
+func release_bandwidth(team: int, amount: int) -> void:
+	if amount <= 0:
+		return
+	_ensure_team(team)
+	_bandwidth_reserved[team] = maxi(0, int(_bandwidth_reserved.get(team, 0)) - amount)
+	recalculate_bandwidth(team)
+
+
+func set_uplink_controller(team: int, bonus_pct: float = 0.05) -> void:
+	_uplink_controller = team
+	_uplink_bonus_pct = maxf(0.0, bonus_pct)
+	production_bonus_changed.emit(Unit.Team.PLAYER, get_production_speed_multiplier(Unit.Team.PLAYER))
+	production_bonus_changed.emit(Unit.Team.ENEMY, get_production_speed_multiplier(Unit.Team.ENEMY))
+
+
+func get_production_speed_multiplier(team: int) -> float:
+	if _uplink_controller == team:
+		return 1.0 + _uplink_bonus_pct
+	return 1.0
+
+
 func get_bandwidth_used(team: int) -> int:
 	return int(_bandwidth_used.get(team, 0))
 
@@ -222,6 +260,7 @@ func recalculate_bandwidth(team: int, excluded_node: Node = null) -> void:
 			if u_entry["node"] != excluded_node and int(u_entry["team"]) == team and is_instance_valid(u_entry["node"]):
 				used += int(u_entry["cost"])
 
-	_bandwidth_used[team] = used
+	var reserved: int = maxi(0, int(_bandwidth_reserved.get(team, 0)))
+	_bandwidth_used[team] = used + reserved
 	_bandwidth_cap[team] = cap
-	bandwidth_changed.emit(team, used, cap)
+	bandwidth_changed.emit(team, _bandwidth_used[team], cap)

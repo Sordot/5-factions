@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/hyper_uplink.gd" id="1_uplink_script"]
+
+[node name="HyperUplink" type="Node2D"]
+script = ExtResource("1_uplink_script")
+capture_radius = 140.0
+capture_time = 8.0
+production_bonus_pct = 0.05

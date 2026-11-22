@@ -1,13 +1,8 @@
 class_name SelectionController
 extends Node2D
 
-const MOVE_MARKER_SCRIPT: GDScript = preload("res://ui/overlays/move_marker.gd")
+const COMMAND_ROUTER_SCRIPT: GDScript = preload("res://scripts/controllers/command_router.gd")
 const DOUBLE_TAP_WINDOW_MS: int = 350
-const DEFAULT_UNIT_RADIUS: float = 16.0
-const RING_SPACING_MULTIPLIER: float = 2.6
-const VENT_SNAP_RADIUS: float = 64.0
-const ARENA_BOUNDS: Rect2 = Rect2(-640.0, -360.0, 1280.0, 720.0)
-const CENTRAL_OBSTACLE_RECT: Rect2 = Rect2(-80.0, -100.0, 160.0, 200.0)
 
 signal selection_updated(selected_count: int)
 signal selection_changed(selected_units: Array[Unit], subgroups: Array[Dictionary], active_subgroup_index: int)
@@ -18,11 +13,13 @@ signal ability_targeting_changed(active_ability: AbilityData)
 
 @export var drag_threshold: float = 8.0
 @export var camera_path: NodePath
+@export var buildable_bounds: Rect2 = Rect2(-640.0, -360.0, 1280.0, 720.0)
 
 @onready var selection_box: SelectionBox = $SelectionBox
 @onready var ability_reticle: AbilityTargetingReticle = get_node_or_null("AbilityTargetingReticle") as AbilityTargetingReticle
 @onready var build_ghost_preview: BuildGhostPreview = get_node_or_null("BuildGhostPreview") as BuildGhostPreview
 
+var command_router: CommandRouter = null
 var selected_units: Array[Unit] = []
 var selected_building: Building = null
 var inspected_entity: Node = null
@@ -42,19 +39,28 @@ var _last_click_time_ms: int = 0
 var _tracked_death_units: Array[Unit] = []
 
 
+func _ready() -> void:
+	command_router = get_node_or_null("CommandRouter") as CommandRouter
+	if command_router == null:
+		command_router = COMMAND_ROUTER_SCRIPT.new()
+		command_router.name = "CommandRouter"
+		add_child(command_router)
+	command_router.buildable_bounds = buildable_bounds
+
+
 func _process(_delta: float) -> void:
-	if active_targeting_ability == null:
+	if active_targeting_ability == null or command_router == null:
 		return
 	var cursor_world: Vector2 = get_global_mouse_position()
 	if active_targeting_ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
-		var builder: Unit = _find_closest_builder(get_active_subgroup_units(), cursor_world)
+		var builder: Unit = command_router.find_closest_builder(get_active_subgroup_units(), cursor_world)
 		if builder == null or active_targeting_ability.building_to_build == null:
 			cancel_ability_targeting()
 			return
 		if ability_reticle != null:
 			ability_reticle.clear_targeting()
 		if build_ghost_preview != null:
-			var eval: Dictionary = _evaluate_build_placement(active_targeting_ability.building_to_build, cursor_world)
+			var eval: Dictionary = command_router.evaluate_build_placement(active_targeting_ability.building_to_build, cursor_world)
 			build_ghost_preview.set_preview(
 				active_targeting_ability.building_to_build,
 				eval["pos"],
@@ -95,6 +101,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_e", "E"):
 		return
+	if _try_handle_ability_hotkey_event(event, "cmd_ability_r", "R"):
+		return
+
 	if event.is_action_pressed("cmd_ability_e") and selected_units.is_empty() and inspected_entity is Building:
 		var b_node: Building = inspected_entity
 		if is_instance_valid(b_node) and b_node.team == Unit.Team.PLAYER and b_node.max_staff_slots > 0 and b_node.get_assigned_engineer_count() > 0:
@@ -151,7 +160,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				cancel_ability_targeting()
 				get_viewport().set_input_as_handled()
 				return
-			_handle_right_click(get_global_mouse_position())
+			issue_right_click_at(get_global_mouse_position())
 	elif event is InputEventMouseMotion and _is_dragging:
 		var motion_event: InputEventMouseMotion = event
 		if motion_event.position.distance_to(_drag_start_screen) >= drag_threshold:
@@ -184,9 +193,7 @@ func cycle_subgroup() -> void:
 
 
 func set_active_subgroup(index: int) -> void:
-	if index < 0 or index >= subgroups.size():
-		return
-	if active_subgroup_index == index:
+	if index < 0 or index >= subgroups.size() or active_subgroup_index == index:
 		return
 	cancel_ability_targeting()
 	active_subgroup_index = index
@@ -217,7 +224,7 @@ func request_ability_by_hotkey(hotkey: String) -> bool:
 
 
 func request_ability_slot(ability: AbilityData) -> bool:
-	if ability == null:
+	if ability == null or command_router == null:
 		return false
 	_prune_invalid_units()
 	var subgroup_units: Array[Unit] = get_active_subgroup_units()
@@ -227,8 +234,7 @@ func request_ability_slot(ability: AbilityData) -> bool:
 	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
 		if ability.building_to_build == null:
 			return false
-		var builder: Unit = _find_closest_builder(subgroup_units, get_global_mouse_position())
-		if builder == null:
+		if command_router.find_closest_builder(subgroup_units, get_global_mouse_position()) == null:
 			return false
 		active_targeting_ability = ability
 		Input.set_default_cursor_shape(Input.CURSOR_CROSS)
@@ -242,11 +248,7 @@ func request_ability_slot(ability: AbilityData) -> bool:
 
 	if ability.target_type == AbilityData.TargetType.INSTANT:
 		cancel_ability_targeting()
-		var caster: Unit = SubgroupHelper.find_closest_ready_caster(
-			subgroup_units,
-			ability,
-			get_global_mouse_position()
-		)
+		var caster: Unit = SubgroupHelper.find_closest_ready_caster(subgroup_units, ability, get_global_mouse_position())
 		if caster != null:
 			return caster.command_cast_ability(ability, caster.global_position, caster)
 		return false
@@ -260,15 +262,17 @@ func request_ability_slot(ability: AbilityData) -> bool:
 
 
 func confirm_ability_target_at(world_pos: Vector2) -> bool:
-	if active_targeting_ability == null:
+	if active_targeting_ability == null or command_router == null:
 		return false
 	var ability: AbilityData = active_targeting_ability
 	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
-		return _confirm_build_placement(ability, world_pos)
+		var placed: bool = command_router.confirm_build_placement(ability, world_pos, get_active_subgroup_units())
+		if placed:
+			cancel_ability_targeting()
+		return placed
 
 	var subgroup_units: Array[Unit] = get_active_subgroup_units()
-	var target_enemy: Unit = _find_unit_at_point(world_pos, Unit.Team.ENEMY)
-
+	var target_enemy: Unit = command_router.find_unit_at_point(world_pos, Unit.Team.ENEMY)
 	if ability.target_type == AbilityData.TargetType.UNIT_TARGET and target_enemy == null:
 		return false
 
@@ -280,7 +284,7 @@ func confirm_ability_target_at(world_pos: Vector2) -> bool:
 	var cast_point: Vector2 = target_enemy.global_position if target_enemy != null else world_pos
 	var accepted: bool = caster.command_cast_ability(ability, cast_point, target_enemy)
 	if accepted:
-		_spawn_move_marker(cast_point, MoveMarker.MarkerStyle.ATTACK)
+		command_router.spawn_move_marker(cast_point, MoveMarker.MarkerStyle.ATTACK)
 	return accepted
 
 
@@ -297,36 +301,27 @@ func cancel_ability_targeting() -> void:
 
 
 func issue_right_click_at(world_point: Vector2) -> void:
-	_handle_right_click(world_point)
+	_prune_invalid_units()
+	if command_router != null:
+		command_router.handle_right_click(world_point, selected_units, inspected_entity)
 
 
 func issue_attack_move_at(world_point: Vector2) -> void:
 	_prune_invalid_units()
-	if selected_units.is_empty():
-		return
-
-	var clicked_enemy: Unit = _find_unit_at_point(world_point, Unit.Team.ENEMY)
-	if clicked_enemy != null:
-		for unit: Unit in selected_units:
-			unit.command_attack_target(clicked_enemy)
-		_spawn_move_marker(clicked_enemy.global_position, MoveMarker.MarkerStyle.ATTACK)
-	else:
-		var targets: Array[Vector2] = _assign_group_destinations(selected_units, world_point)
-		for i: int in range(selected_units.size()):
-			selected_units[i].command_attack_move(targets[i])
-		_spawn_move_marker(world_point, MoveMarker.MarkerStyle.ATTACK)
+	if command_router != null:
+		command_router.issue_attack_move(world_point, selected_units)
 
 
 func issue_stop_command() -> void:
 	_prune_invalid_units()
-	for unit: Unit in selected_units:
-		unit.command_stop()
+	if command_router != null:
+		command_router.issue_stop(selected_units)
 
 
 func issue_hold_command() -> void:
 	_prune_invalid_units()
-	for unit: Unit in selected_units:
-		unit.command_hold_position()
+	if command_router != null:
+		command_router.issue_hold(selected_units)
 
 
 func assign_control_group(group_num: int) -> void:
@@ -355,11 +350,9 @@ func append_control_group(group_num: int) -> void:
 
 
 func remove_from_control_group(group_num: int) -> void:
-	if group_num < 1 or group_num > 9:
+	if group_num < 1 or group_num > 9 or not control_groups.has(group_num):
 		return
 	_prune_invalid_units()
-	if not control_groups.has(group_num):
-		return
 	var group_units: Array[Unit] = _get_pruned_group(group_num)
 	var remaining: Array[Unit] = []
 	for unit: Unit in group_units:
@@ -483,7 +476,6 @@ func _get_rts_camera() -> RTSCamera:
 func _finish_left_selection(end_screen_pos: Vector2, shift_pressed: bool = false) -> void:
 	_is_dragging = false
 	selection_box.update_box(Rect2(), false)
-
 	var end_world_pos: Vector2 = get_global_mouse_position()
 	if end_screen_pos.distance_to(_drag_start_screen) < drag_threshold:
 		_select_at_point(end_world_pos, shift_pressed)
@@ -492,8 +484,10 @@ func _finish_left_selection(end_screen_pos: Vector2, shift_pressed: bool = false
 
 
 func _select_at_point(world_point: Vector2, shift_pressed: bool = false) -> void:
-	# 1. Friendly player unit (supports Shift+Click toggle & Double-Click type select)
-	var clicked_player: Unit = _find_unit_at_point(world_point, Unit.Team.PLAYER)
+	if command_router == null:
+		return
+
+	var clicked_player: Unit = command_router.find_unit_at_point(world_point, Unit.Team.PLAYER)
 	if clicked_player != null:
 		_set_inspected_entity(null)
 		var now_ms: int = Time.get_ticks_msec()
@@ -506,7 +500,6 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false) -> void
 
 		_last_click_unit = clicked_player
 		_last_click_time_ms = now_ms
-
 		if shift_pressed:
 			var next_sel: Array[Unit] = selected_units.duplicate()
 			if next_sel.has(clicked_player):
@@ -521,28 +514,30 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false) -> void
 	_last_click_unit = null
 	_last_click_time_ms = 0
 
-	# 2. Friendly player building -> inspect (and command if commandable)
-	var clicked_building: Building = _find_building_at_point(world_point, Unit.Team.PLAYER)
+	var clicked_building: Building = command_router.find_building_at_point(world_point, Unit.Team.PLAYER)
 	if clicked_building != null:
 		_set_selected_units([])
 		_set_inspected_entity(clicked_building)
 		return
 
-	# 3. Enemy unit / TargetDummy -> read-only inspection
-	var clicked_enemy: Unit = _find_unit_at_point(world_point, Unit.Team.ENEMY)
+	var clicked_enemy: Unit = command_router.find_unit_at_point(world_point, Unit.Team.ENEMY)
 	if clicked_enemy != null:
 		_set_selected_units([])
 		_set_inspected_entity(clicked_enemy)
 		return
 
-	# 4. ResourceNode (BiomassNode, SilicaVein, ComputeVent) -> read-only inspection
-	var clicked_resource: ResourceNode = _find_resource_node_at_point(world_point)
+	var clicked_enemy_building: Building = command_router.find_building_at_point(world_point, Unit.Team.ENEMY)
+	if clicked_enemy_building != null:
+		_set_selected_units([])
+		_set_inspected_entity(clicked_enemy_building)
+		return
+
+	var clicked_resource: ResourceNode = command_router.find_resource_node_at_point(world_point)
 	if clicked_resource != null:
 		_set_selected_units([])
 		_set_inspected_entity(clicked_resource)
 		return
 
-	# 5. Empty ground
 	if not shift_pressed:
 		_set_inspected_entity(null)
 		_set_selected_units([])
@@ -556,9 +551,7 @@ func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
 		if not (node is Unit):
 			continue
 		var unit: Unit = node
-		if not is_instance_valid(unit) or unit.is_dead or unit.is_staffed:
-			continue
-		if unit.team != Unit.Team.PLAYER:
+		if not is_instance_valid(unit) or unit.is_dead or unit.is_staffed or unit.team != Unit.Team.PLAYER:
 			continue
 		if world_rect.has_point(unit.global_position):
 			hits.append(unit)
@@ -588,9 +581,7 @@ func _find_visible_units_of_type(type_id: StringName, target_team: Unit.Team) ->
 		if not (node is Unit) or not is_instance_valid(node):
 			continue
 		var unit: Unit = node
-		if unit.is_dead or unit.is_staffed or unit.team != target_team:
-			continue
-		if unit.get_unit_type_id() != type_id:
+		if unit.is_dead or unit.is_staffed or unit.team != target_team or unit.get_unit_type_id() != type_id:
 			continue
 		if not use_view_rect or view_rect.has_point(unit.global_position):
 			matches.append(unit)
@@ -663,7 +654,6 @@ func _set_inspected_entity(entity: Node) -> void:
 	if inspected_entity == next_entity:
 		return
 
-	# Clean up previous inspected entity
 	if inspected_entity != null and is_instance_valid(inspected_entity):
 		if inspected_entity is Building:
 			var prev_b: Building = inspected_entity
@@ -686,7 +676,6 @@ func _set_inspected_entity(entity: Node) -> void:
 	selected_building = inspected_entity as Building if inspected_entity is Building else null
 	inspected_enemy = inspected_entity as Unit if (inspected_entity is Unit and (inspected_entity as Unit).team == Unit.Team.ENEMY) else null
 
-	# Activate visual ring & lifecycle tracker on new inspected entity
 	if inspected_entity != null:
 		if inspected_entity is Building:
 			var b: Building = inspected_entity
@@ -713,215 +702,6 @@ func _on_inspected_entity_removed(_entity: Variant = null) -> void:
 	_set_inspected_entity(null)
 
 
-func _handle_right_click(world_pos: Vector2) -> void:
-	_prune_invalid_units()
-	if selected_units.is_empty():
-		return
-
-	var clicked_enemy: Unit = _find_unit_at_point(world_pos, Unit.Team.ENEMY)
-	if clicked_enemy != null:
-		for unit: Unit in selected_units:
-			unit.command_attack_target(clicked_enemy)
-		_spawn_move_marker(clicked_enemy.global_position, MoveMarker.MarkerStyle.ATTACK)
-		return
-
-	var clicked_resource: ResourceNode = _find_resource_node_at_point(world_pos)
-	if clicked_resource != null and not clicked_resource.is_vent and _has_any_gatherer_for(selected_units, clicked_resource.resource_type):
-		var non_gatherers: Array[Unit] = []
-		for unit: Unit in selected_units:
-			if unit.can_gather_resource(clicked_resource.resource_type):
-				unit.command_gather(clicked_resource)
-			else:
-				non_gatherers.append(unit)
-		if not non_gatherers.is_empty():
-			var escort_targets: Array[Vector2] = _assign_group_destinations(non_gatherers, clicked_resource.global_position)
-			for i: int in range(non_gatherers.size()):
-				non_gatherers[i].command_move(escort_targets[i])
-		_spawn_move_marker(clicked_resource.global_position, MoveMarker.MarkerStyle.GATHER)
-		return
-
-	var clicked_building: Building = _find_building_at_point(world_pos, Unit.Team.PLAYER)
-	if clicked_building != null:
-		if not clicked_building.is_constructed:
-			var builders: Array[Unit] = []
-			for unit: Unit in selected_units:
-				if unit.can_construct():
-					builders.append(unit)
-			if not builders.is_empty():
-				for worker: Unit in builders:
-					worker.command_construct_building(clicked_building)
-				_spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.GATHER)
-				return
-
-		if clicked_building.is_constructed and clicked_building.max_staff_slots > 0:
-			var engineers: Array[Unit] = []
-			var others: Array[Unit] = []
-			for unit: Unit in selected_units:
-				if unit.can_staff_compute() and clicked_building.can_accept_staff(unit):
-					engineers.append(unit)
-				else:
-					others.append(unit)
-			if not engineers.is_empty():
-				for eng: Unit in engineers:
-					eng.command_staff_building(clicked_building)
-				if not others.is_empty():
-					var move_targets_eng: Array[Vector2] = _assign_group_destinations(others, world_pos)
-					for i: int in range(others.size()):
-						others[i].command_move(move_targets_eng[i])
-				_spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.GATHER)
-				return
-
-		if clicked_building.is_constructed and clicked_building.is_resource_dropoff:
-			var returning_workers: Array[Unit] = []
-			var other_units: Array[Unit] = []
-			for unit: Unit in selected_units:
-				if unit.can_gather() and unit.is_carrying_cargo() and clicked_building.accepts_resource(unit.get_carried_type()):
-					returning_workers.append(unit)
-				else:
-					other_units.append(unit)
-			if not returning_workers.is_empty():
-				for worker: Unit in returning_workers:
-					worker.command_return_cargo(clicked_building)
-				if not other_units.is_empty():
-					var move_targets: Array[Vector2] = _assign_group_destinations(other_units, world_pos)
-					for i: int in range(other_units.size()):
-						other_units[i].command_move(move_targets[i])
-				_spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.GATHER)
-				return
-
-	var targets: Array[Vector2] = _assign_group_destinations(selected_units, world_pos)
-	for i: int in range(selected_units.size()):
-		selected_units[i].command_move(targets[i])
-	_spawn_move_marker(world_pos, MoveMarker.MarkerStyle.MOVE)
-
-
-func _assign_group_destinations(units: Array[Unit], center_pos: Vector2) -> Array[Vector2]:
-	var count: int = units.size()
-	var assigned: Array[Vector2] = []
-	if count == 0:
-		return assigned
-
-	var map_rid: RID = _get_navigation_map(units[0])
-	var has_map: bool = map_rid.is_valid() and NavigationServer2D.map_get_iteration_id(map_rid) > 0
-	if count == 1:
-		var single_pos: Vector2 = NavigationServer2D.map_get_closest_point(map_rid, center_pos) if has_map else center_pos
-		assigned.append(single_pos)
-		return assigned
-
-	var unit_radius: float = units[0].data.collision_radius if units[0].data != null else DEFAULT_UNIT_RADIUS
-	var spacing: float = unit_radius * RING_SPACING_MULTIPLIER
-	var slots: Array[Vector2] = _generate_ring_slots(count, center_pos, spacing, map_rid, has_map)
-
-	var used: Array[bool] = []
-	used.resize(slots.size())
-	used.fill(false)
-	assigned.resize(count)
-
-	for i: int in range(count):
-		var u_pos: Vector2 = units[i].global_position
-		var best_idx: int = 0
-		var best_dist_sq: float = INF
-		for s_idx: int in range(slots.size()):
-			if used[s_idx]:
-				continue
-			var d_sq: float = u_pos.distance_squared_to(slots[s_idx])
-			if d_sq < best_dist_sq:
-				best_dist_sq = d_sq
-				best_idx = s_idx
-		used[best_idx] = true
-		assigned[i] = slots[best_idx]
-
-	return assigned
-
-
-func _generate_ring_slots(count: int, center_pos: Vector2, spacing: float, map_rid: RID, has_map: bool) -> Array[Vector2]:
-	var slots: Array[Vector2] = []
-	var first_pos: Vector2 = NavigationServer2D.map_get_closest_point(map_rid, center_pos) if has_map else center_pos
-	slots.append(first_pos)
-
-	var ring: int = 1
-	while slots.size() < count:
-		var ring_radius: float = float(ring) * spacing
-		var circumference: float = TAU * ring_radius
-		var ring_slots: int = maxi(6, int(round(circumference / spacing)))
-		var angle_offset: float = 0.0 if (ring % 2) == 1 else (PI / float(ring_slots))
-		for k: int in range(ring_slots):
-			if slots.size() >= count:
-				break
-			var angle: float = angle_offset + (TAU * float(k) / float(ring_slots))
-			var candidate: Vector2 = center_pos + Vector2.RIGHT.rotated(angle) * ring_radius
-			if has_map:
-				candidate = NavigationServer2D.map_get_closest_point(map_rid, candidate)
-			slots.append(candidate)
-		ring += 1
-
-	return slots
-
-
-func _get_navigation_map(sample_unit: Unit) -> RID:
-	if sample_unit != null and sample_unit.nav_agent != null:
-		return sample_unit.nav_agent.get_navigation_map()
-	return get_world_2d().navigation_map
-
-
-func _find_unit_at_point(world_point: Vector2, target_team: Unit.Team) -> Unit:
-	var closest: Unit = null
-	var closest_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
-		if not (node is Unit):
-			continue
-		var unit: Unit = node
-		if not is_instance_valid(unit) or unit.is_dead or unit.team != target_team:
-			continue
-		if unit.contains_point(world_point):
-			var dist_sq: float = unit.global_position.distance_squared_to(world_point)
-			if dist_sq < closest_dist_sq:
-				closest_dist_sq = dist_sq
-				closest = unit
-	return closest
-
-
-func _find_building_at_point(world_point: Vector2, target_team: Unit.Team) -> Building:
-	var closest: Building = null
-	var closest_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
-		if not (node is Building):
-			continue
-		var building: Building = node
-		if not is_instance_valid(building) or building.is_destroyed or building.team != target_team:
-			continue
-		if building.contains_point(world_point):
-			var dist_sq: float = building.global_position.distance_squared_to(world_point)
-			if dist_sq < closest_dist_sq:
-				closest_dist_sq = dist_sq
-				closest = building
-	return closest
-
-
-func _find_resource_node_at_point(world_point: Vector2) -> ResourceNode:
-	var closest: ResourceNode = null
-	var closest_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
-		if not (node is ResourceNode):
-			continue
-		var res_node: ResourceNode = node
-		if not is_instance_valid(res_node) or res_node.is_depleted():
-			continue
-		if res_node.contains_point(world_point):
-			var dist_sq: float = res_node.global_position.distance_squared_to(world_point)
-			if dist_sq < closest_dist_sq:
-				closest_dist_sq = dist_sq
-				closest = res_node
-	return closest
-
-
-func _has_any_gatherer_for(units: Array[Unit], resource_type: StringName) -> bool:
-	for unit: Unit in units:
-		if is_instance_valid(unit) and not unit.is_dead and unit.can_gather_resource(resource_type):
-			return true
-	return false
-
-
 func _try_handle_ability_hotkey_event(event: InputEvent, action_name: StringName, hotkey_label: String) -> bool:
 	if not event.is_action_pressed(action_name):
 		return false
@@ -933,184 +713,6 @@ func _try_handle_ability_hotkey_event(event: InputEvent, action_name: StringName
 		get_viewport().set_input_as_handled()
 		return true
 	return false
-
-
-func _find_closest_builder(units: Array[Unit], target_pos: Vector2) -> Unit:
-	var best: Unit = null
-	var best_dist_sq: float = INF
-	for item: Variant in units:
-		if not is_instance_valid(item) or not (item is Unit):
-			continue
-		var unit: Unit = item
-		if not unit.can_construct():
-			continue
-		var d_sq: float = unit.global_position.distance_squared_to(target_pos)
-		if d_sq < best_dist_sq:
-			best_dist_sq = d_sq
-			best = unit
-	return best
-
-
-func _evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2) -> Dictionary:
-	var result: Dictionary = {
-		"pos": cursor_world,
-		"valid": false,
-		"reason": "",
-		"vent": null,
-	}
-	if building_data == null or building_data.scene == null:
-		result["reason"] = "Invalid building"
-		return result
-
-	var place_pos: Vector2 = cursor_world
-	var snapped_vent: ResourceNode = null
-	if building_data.requires_vent:
-		snapped_vent = _find_nearest_unoccupied_vent(cursor_world, VENT_SNAP_RADIUS)
-		if snapped_vent == null:
-			result["reason"] = "Must be built on a Compute Vent"
-			return result
-		place_pos = snapped_vent.global_position
-		result["pos"] = place_pos
-		result["vent"] = snapped_vent
-
-	var half: Vector2 = building_data.footprint_size * 0.5
-	var new_radius: float = building_data.get_footprint_radius()
-
-	# Check arena bounds
-	var safe_bounds: Rect2 = Rect2(
-		ARENA_BOUNDS.position + half + Vector2(8.0, 8.0),
-		ARENA_BOUNDS.size - building_data.footprint_size - Vector2(16.0, 16.0)
-	)
-	if not safe_bounds.has_point(place_pos):
-		result["reason"] = "Out of buildable bounds"
-		return result
-
-	# Check central obstacle
-	var obstacle_expanded: Rect2 = CENTRAL_OBSTACLE_RECT.grow_individual(half.x + 6.0, half.y + 6.0, half.x + 6.0, half.y + 6.0)
-	if obstacle_expanded.has_point(place_pos):
-		result["reason"] = "Blocked by terrain"
-		return result
-
-	# Check existing buildings overlap
-	for node: Node in get_tree().get_nodes_in_group("buildings"):
-		if not (node is Building) or not is_instance_valid(node):
-			continue
-		var existing: Building = node
-		if existing.is_destroyed:
-			continue
-		var min_dist: float = existing.footprint_radius + new_radius + 10.0
-		if existing.global_position.distance_squared_to(place_pos) < min_dist * min_dist:
-			result["reason"] = "Blocked by structure"
-			return result
-
-	# Check non-vent resource nodes overlap
-	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
-		if not (node is ResourceNode) or not is_instance_valid(node):
-			continue
-		var res_node: ResourceNode = node
-		if res_node.is_depleted() or res_node.is_vent:
-			continue
-		var min_dist: float = res_node.collision_radius + new_radius + 8.0
-		if res_node.global_position.distance_squared_to(place_pos) < min_dist * min_dist:
-			result["reason"] = "Too close to resource node"
-			return result
-
-	# Check affordability
-	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
-	if econ != null and not econ.can_afford(Unit.Team.PLAYER, building_data.get_cost_dict()):
-		result["reason"] = "Need %s" % building_data.get_cost_label()
-		return result
-
-	result["valid"] = true
-	result["reason"] = "%s (%s)" % [building_data.display_name, building_data.get_cost_label()]
-	return result
-
-
-func _find_nearest_unoccupied_vent(world_point: Vector2, max_radius: float) -> ResourceNode:
-	var best: ResourceNode = null
-	var best_dist_sq: float = max_radius * max_radius
-	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
-		if not (node is ResourceNode) or not is_instance_valid(node):
-			continue
-		var res_node: ResourceNode = node
-		if not res_node.is_vent or res_node.is_occupied():
-			continue
-		var d_sq: float = res_node.global_position.distance_squared_to(world_point)
-		if d_sq <= best_dist_sq:
-			best_dist_sq = d_sq
-			best = res_node
-	return best
-
-
-func _confirm_build_placement(ability: AbilityData, world_pos: Vector2) -> bool:
-	var building_data: BuildingData = ability.building_to_build
-	if building_data == null or building_data.scene == null:
-		cancel_ability_targeting()
-		return false
-
-	var eval: Dictionary = _evaluate_build_placement(building_data, world_pos)
-	if not bool(eval["valid"]):
-		return false
-
-	var builder: Unit = _find_closest_builder(get_active_subgroup_units(), eval["pos"])
-	if builder == null:
-		cancel_ability_targeting()
-		return false
-
-	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
-	if econ != null:
-		if not econ.spend_resources(Unit.Team.PLAYER, building_data.get_cost_dict()):
-			return false
-
-	var buildings_container: Node = get_parent().get_node_or_null("Buildings") if get_parent() != null else null
-	if buildings_container == null:
-		buildings_container = get_parent()
-	if buildings_container == null:
-		return false
-
-	var instance: Node = building_data.scene.instantiate()
-	if not (instance is Building):
-		instance.queue_free()
-		return false
-
-	var new_building: Building = instance
-	new_building.global_position = eval["pos"]
-	new_building.is_constructed = false
-	buildings_container.add_child(new_building)
-	new_building.begin_construction(building_data, Unit.Team.PLAYER, eval["vent"] as ResourceNode)
-	_nudge_units_out_of_building(new_building)
-
-	builder.command_construct_building(new_building)
-	_spawn_move_marker(new_building.global_position, MoveMarker.MarkerStyle.GATHER)
-	cancel_ability_targeting()
-	return true
-
-
-func _nudge_units_out_of_building(building: Building) -> void:
-	if building == null or not is_instance_valid(building):
-		return
-	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not (node is Unit) or not is_instance_valid(node):
-			continue
-		var unit: Unit = node
-		if unit.is_dead or unit.is_staffed:
-			continue
-		var unit_r: float = unit.data.collision_radius if unit.data != null else 14.0
-		var min_dist: float = building.footprint_radius + unit_r + 6.0
-		var diff: Vector2 = unit.global_position - building.global_position
-		if diff.length_squared() < min_dist * min_dist:
-			var dir: Vector2 = diff.normalized() if diff.length_squared() > 0.01 else Vector2.RIGHT
-			unit.global_position = building.global_position + dir * min_dist
-
-
-func _spawn_move_marker(target_pos: Vector2, marker_style: MoveMarker.MarkerStyle) -> void:
-	if get_parent() == null:
-		return
-	var marker: MoveMarker = MOVE_MARKER_SCRIPT.new()
-	marker.global_position = target_pos
-	marker.z_index = 60
-	get_parent().add_child(marker)
-	marker.configure(marker_style)
 
 
 func _prune_invalid_units() -> void:
@@ -1134,6 +736,4 @@ func _prune_invalid_units() -> void:
 
 
 func _build_world_rect(a: Vector2, b: Vector2) -> Rect2:
-	var top_left: Vector2 = Vector2(minf(a.x, b.x), minf(a.y, b.y))
-	var size: Vector2 = Vector2(absf(a.x - b.x), absf(a.y - b.y))
-	return Rect2(top_left, size)
+	return Rect2(Vector2(minf(a.x, b.x), minf(a.y, b.y)), Vector2(absf(a.x - b.x), absf(a.y - b.y)))

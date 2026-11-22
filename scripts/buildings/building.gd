@@ -1,6 +1,7 @@
 class_name Building
 extends StaticBody2D
 
+const PRODUCTION_COMPONENT_SCRIPT: GDScript = preload("res://scripts/buildings/production_component.gd")
 const HEALTH_BAR_WIDTH: float = 76.0
 const CONSTRUCT_BAR_WIDTH: float = 68.0
 const DEPOSIT_PULSE_DURATION: float = 0.25
@@ -13,6 +14,7 @@ signal construction_progress_changed(building: Building, progress: float, is_con
 signal construction_completed(building: Building)
 signal staffing_changed(building: Building, assigned_count: int, max_slots: int)
 signal training_changed(building: Building)
+signal rally_changed(building: Building)
 
 @export var team: Unit.Team = Unit.Team.PLAYER
 @export var building_type_id: StringName = &"command_core"
@@ -29,6 +31,7 @@ signal training_changed(building: Building)
 @export var max_staff_slots: int = 0
 @export var compute_tick_interval: float = 3.0
 @export var compute_per_engineer: int = 5
+@export var can_set_rally: bool = true
 @export var trainable_unit_data: Array[UnitData] = []
 @export var trainable_unit_scenes: Array[PackedScene] = []
 
@@ -47,14 +50,15 @@ var is_destroyed: bool = false
 var construction_progress: float = 1.0
 var claimed_vent: ResourceNode = null
 var assigned_engineers: Array[Unit] = []
+var production_component: ProductionComponent = null
 
+var _has_rally: bool = false
+var _rally_position: Vector2 = Vector2.ZERO
+var _rally_target: Node2D = null
 var _construction_elapsed: float = 0.0
 var _deposit_pulse_timer: float = 0.0
 var _base_core_color: Color = Color(0.22, 0.94, 0.88, 1.0)
 var _compute_tick_timer: float = 0.0
-var _training_queue: Array[Dictionary] = []
-var _training_elapsed: float = 0.0
-var _spawn_slot_index: int = 0
 
 
 func _ready() -> void:
@@ -72,6 +76,18 @@ func _ready() -> void:
 		_base_core_color = core_glow.color
 	if selection_ring != null:
 		selection_ring.visible = is_selected
+
+	production_component = get_node_or_null("ProductionComponent") as ProductionComponent
+	if production_component == null and not trainable_unit_data.is_empty():
+		production_component = PRODUCTION_COMPONENT_SCRIPT.new()
+		production_component.name = "ProductionComponent"
+		add_child(production_component)
+	if production_component != null:
+		production_component.queue_changed.connect(func(_q: Array[Dictionary], _p: float, _d: float) -> void:
+			training_changed.emit(self)
+			status_changed.emit(self)
+		)
+
 	_update_construction_visuals()
 	_update_health_bar()
 	_update_staff_slot_visuals()
@@ -80,6 +96,8 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	if production_component != null:
+		production_component.cancel_all_and_refund(self)
 	if claimed_vent != null and is_instance_valid(claimed_vent):
 		claimed_vent.release_building(self)
 	_unregister_from_economy()
@@ -103,8 +121,30 @@ func _process(delta: float) -> void:
 	if max_staff_slots > 0 and not assigned_engineers.is_empty():
 		_tick_compute_generation(delta)
 
-	if not _training_queue.is_empty():
-		_tick_unit_training(delta)
+	if production_component != null:
+		production_component.tick(self, delta)
+
+	if is_selected and has_rally():
+		queue_redraw()
+
+
+func _draw() -> void:
+	if not is_selected or not has_rally():
+		return
+	var target_world: Vector2 = get_rally_world_position()
+	var target_local: Vector2 = to_local(target_world)
+	var is_smart: bool = (_rally_target != null and is_instance_valid(_rally_target))
+	var rally_col: Color = Color(0.28, 1.0, 0.62, 0.88) if is_smart else Color(0.24, 0.92, 0.96, 0.85)
+	draw_line(Vector2.ZERO, target_local, rally_col, 1.8, true)
+	draw_arc(target_local, 10.0, 0.0, TAU, 20, rally_col, 2.0, true)
+	# Crisp rally flag triangle
+	var flag_pts: PackedVector2Array = PackedVector2Array([
+		target_local + Vector2(0.0, -2.0),
+		target_local + Vector2(0.0, -22.0),
+		target_local + Vector2(14.0, -15.0),
+		target_local + Vector2(0.0, -9.0),
+	])
+	draw_colored_polygon(flag_pts, rally_col)
 
 
 func begin_construction(data: BuildingData, target_team: Unit.Team, vent: ResourceNode = null) -> void:
@@ -118,6 +158,18 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 		is_resource_dropoff = data.is_dropoff
 		accepted_resources = data.accepted_resources.duplicate()
 		max_staff_slots = data.max_staff_slots
+		can_set_rally = data.can_set_rally
+		if not data.trainable_units.is_empty():
+			trainable_unit_data = data.trainable_units.duplicate()
+
+	if production_component == null and not trainable_unit_data.is_empty():
+		production_component = PRODUCTION_COMPONENT_SCRIPT.new()
+		production_component.name = "ProductionComponent"
+		add_child(production_component)
+		production_component.queue_changed.connect(func(_q: Array[Dictionary], _p: float, _d: float) -> void:
+			training_changed.emit(self)
+			status_changed.emit(self)
+		)
 
 	claimed_vent = vent
 	if claimed_vent != null and is_instance_valid(claimed_vent):
@@ -181,7 +233,63 @@ func set_selected(selected: bool) -> void:
 		if selection_ring != null:
 			selection_ring.visible = is_selected
 		_update_health_bar()
+		queue_redraw()
 	selection_changed.emit(self, is_selected)
+
+
+func set_rally_position(world_pos: Vector2) -> void:
+	if not can_set_rally:
+		return
+	_has_rally = true
+	_rally_position = world_pos
+	_rally_target = null
+	queue_redraw()
+	rally_changed.emit(self)
+	status_changed.emit(self)
+
+
+func set_rally_target(target: Node2D) -> void:
+	if not can_set_rally or target == null or not is_instance_valid(target):
+		return
+	_has_rally = true
+	_rally_target = target
+	_rally_position = target.global_position
+	queue_redraw()
+	rally_changed.emit(self)
+	status_changed.emit(self)
+
+
+func has_rally() -> bool:
+	if _rally_target != null and not is_instance_valid(_rally_target):
+		_rally_target = null
+	return _has_rally
+
+
+func get_rally_world_position() -> Vector2:
+	if _rally_target != null and is_instance_valid(_rally_target):
+		return _rally_target.global_position
+	return _rally_position
+
+
+func apply_rally_to_unit(unit: Unit) -> void:
+	if unit == null or not is_instance_valid(unit) or unit.is_dead:
+		return
+	if not has_rally():
+		return
+
+	if _rally_target != null and is_instance_valid(_rally_target):
+		if _rally_target is ResourceNode:
+			var res_node: ResourceNode = _rally_target
+			if not res_node.is_depleted() and unit.can_gather_resource(res_node.resource_type):
+				unit.command_gather(res_node)
+				return
+		elif _rally_target is Building:
+			var target_b: Building = _rally_target
+			if not target_b.is_destroyed and target_b.max_staff_slots > 0 and unit.can_staff_compute():
+				if unit.command_staff_building(target_b):
+					return
+
+	unit.command_move(get_rally_world_position())
 
 
 func contains_point(world_point: Vector2) -> bool:
@@ -250,56 +358,31 @@ func get_assigned_engineer_count() -> int:
 
 
 func can_train_unit(slot_index: int) -> bool:
-	if is_destroyed or not is_constructed:
+	if production_component == null or slot_index < 0 or slot_index >= trainable_unit_data.size():
 		return false
-	if slot_index < 0 or slot_index >= trainable_unit_data.size() or slot_index >= trainable_unit_scenes.size():
-		return false
-	var unit_data: UnitData = trainable_unit_data[slot_index]
-	var unit_scene: PackedScene = trainable_unit_scenes[slot_index]
-	if unit_data == null or unit_scene == null:
-		return false
-	var econ: EconomyManager = _get_economy_manager()
-	if econ == null:
-		return false
-	if not econ.can_afford(team, unit_data.get_cost_dict()):
-		return false
-	var queued_bw: int = _get_queued_bandwidth_cost()
-	return econ.has_bandwidth(team, unit_data.bandwidth_cost + queued_bw)
+	var scene_override: PackedScene = trainable_unit_scenes[slot_index] if slot_index < trainable_unit_scenes.size() else null
+	return production_component.can_queue_unit(self, trainable_unit_data[slot_index], scene_override)
 
 
 func queue_unit_training(slot_index: int) -> bool:
-	if not can_train_unit(slot_index):
+	if production_component == null or slot_index < 0 or slot_index >= trainable_unit_data.size():
 		return false
-	var unit_data: UnitData = trainable_unit_data[slot_index]
-	var unit_scene: PackedScene = trainable_unit_scenes[slot_index]
-	var econ: EconomyManager = _get_economy_manager()
-	if econ == null or not econ.spend_resources(team, unit_data.get_cost_dict()):
+	var scene_override: PackedScene = trainable_unit_scenes[slot_index] if slot_index < trainable_unit_scenes.size() else null
+	return production_component.enqueue_unit(self, trainable_unit_data[slot_index], scene_override)
+
+
+func cancel_queued_unit(queue_index: int) -> bool:
+	if production_component == null:
 		return false
-	_training_queue.append({
-		"data": unit_data,
-		"scene": unit_scene,
-		"duration": maxf(0.5, unit_data.build_time),
-	})
-	training_changed.emit(self)
-	status_changed.emit(self)
-	return true
+	return production_component.cancel_queue_item(self, queue_index)
 
 
 func get_training_queue_size() -> int:
-	return _training_queue.size()
+	return production_component.get_queue_size() if production_component != null else 0
 
 
 func get_active_training_status() -> Dictionary:
-	if _training_queue.is_empty():
-		return {}
-	var front: Dictionary = _training_queue[0]
-	var duration: float = maxf(0.1, float(front["duration"]))
-	var data: UnitData = front["data"] as UnitData
-	return {
-		"display_name": data.display_name if data != null else "Unit",
-		"progress": clampf(_training_elapsed / duration, 0.0, 1.0),
-		"queue_size": _training_queue.size(),
-	}
+	return production_component.get_active_training_status() if production_component != null else {}
 
 
 func pulse_deposit_feedback() -> void:
@@ -325,6 +408,8 @@ func get_inspection_data() -> Dictionary:
 		accent = Color(0.32, 0.84, 1.0, 1.0)
 	elif building_type_id == &"bandwidth_relay":
 		accent = Color(0.76, 0.58, 1.0, 1.0)
+	elif building_type_id == &"bio_lab":
+		accent = Color(0.24, 0.94, 0.72, 1.0)
 	elif team == Unit.Team.ENEMY:
 		accent = Color(1.0, 0.36, 0.26, 1.0)
 
@@ -333,11 +418,10 @@ func get_inspection_data() -> Dictionary:
 
 	if not is_constructed:
 		var pct: int = int(round(construction_progress * 100.0))
-		var has_builder: bool = _has_active_builder()
 		stats.append({"label": "Construction", "value": "%d%% Complete" % pct})
-		stats.append({"label": "Builder", "value": "Worker Active" if has_builder else "Awaiting Worker"})
+		stats.append({"label": "Builder", "value": "Worker Active" if _has_active_builder() else "Awaiting Worker"})
 		stats.append({"label": "Build Time", "value": "%.1fs Total" % build_time})
-		stats.append({"label": "Hull Integrity", "value": "%d / %d" % [int(round(current_hp)), int(round(max_hp))]})
+		stats.append({"label": "Hull", "value": "%d / %d" % [int(round(current_hp)), int(round(max_hp))]})
 		return {
 			"title": display_name,
 			"subtitle": "UNDER CONSTRUCTION",
@@ -381,26 +465,24 @@ func get_inspection_data() -> Dictionary:
 		stats.append({"label": "Staff Slots", "value": "%d / %d Engineers" % [staffed, max_staff_slots]})
 		stats.append({"label": "Construction", "value": "Operational"})
 	elif building_type_id == &"command_core":
-		subtitle = "COMMAND HEADQUARTERS"
+		subtitle = "COMMAND HEADQUARTERS" if team == Unit.Team.PLAYER else "HOSTILE COMMAND CORE"
 		var bw_str: String = "%d / %d" % [econ.get_bandwidth_used(team), econ.get_bandwidth_cap(team)] if econ != null else "--"
 		stats.append({"label": "Drop-Off", "value": "Biomass"})
 		stats.append({"label": "Bandwidth", "value": "+%d Capacity" % bandwidth_provided})
 		stats.append({"label": "Network", "value": bw_str})
-		var train_st: Dictionary = get_active_training_status()
-		if not train_st.is_empty():
-			stats.append({"label": "Training", "value": "%s (%d%%)" % [String(train_st["display_name"]), int(round(float(train_st["progress"]) * 100.0))]})
-		else:
-			stats.append({"label": "Status", "value": "Operational"})
+		stats.append({"label": "Rally", "value": _get_rally_summary()})
+	elif building_type_id == &"bio_lab":
+		subtitle = "MILITARY PRODUCTION"
+		var spd: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * 100.0))
+		stats.append({"label": "Roster", "value": "Infantry / Scout"})
+		stats.append({"label": "Prod Speed", "value": "%d%%" % spd})
+		stats.append({"label": "Rally", "value": _get_rally_summary()})
+		stats.append({"label": "Status", "value": "Operational"})
 	elif building_type_id == &"silica_refinery":
 		subtitle = "FRIENDLY FACILITY"
-		var harvesters: int = _count_friendly_harvesters()
 		stats.append({"label": "Drop-Off", "value": "Silica"})
-		stats.append({"label": "Harvesters", "value": "%d Active" % harvesters})
-		var train_st_r: Dictionary = get_active_training_status()
-		if not train_st_r.is_empty():
-			stats.append({"label": "Training", "value": "%s (%d%%)" % [String(train_st_r["display_name"]), int(round(float(train_st_r["progress"]) * 100.0))]})
-		else:
-			stats.append({"label": "Status", "value": "Operational"})
+		stats.append({"label": "Harvesters", "value": "%d Active" % _count_friendly_harvesters()})
+		stats.append({"label": "Rally", "value": _get_rally_summary()})
 		stats.append({"label": "Throughput", "value": "25 Silica / Trip"})
 	elif building_type_id == &"bandwidth_relay":
 		subtitle = "INFRASTRUCTURE NODE"
@@ -432,6 +514,55 @@ func get_inspection_data() -> Dictionary:
 	}
 
 
+func _get_rally_summary() -> String:
+	if not has_rally():
+		return "Default (RMB to Set)"
+	if _rally_target != null and is_instance_valid(_rally_target):
+		if _rally_target is ResourceNode:
+			return "Auto-Gather (%s)" % (_rally_target as ResourceNode).display_name
+		if _rally_target is Building:
+			return "Auto-Staff (%s)" % (_rally_target as Building).display_name
+	return "Ground Point"
+
+
+func _destroy() -> void:
+	if is_destroyed:
+		return
+	is_destroyed = true
+	if production_component != null:
+		production_component.cancel_all_and_refund(self)
+	eject_engineers()
+	if claimed_vent != null and is_instance_valid(claimed_vent):
+		claimed_vent.release_building(self)
+	set_selected(false)
+	_unregister_from_economy()
+	destroyed.emit(self)
+	queue_free()
+
+
+func _tick_compute_generation(delta: float) -> void:
+	var prev_count: int = assigned_engineers.size()
+	_prune_assigned_engineers()
+	if assigned_engineers.size() != prev_count:
+		_update_staff_slot_visuals()
+		staffing_changed.emit(self, assigned_engineers.size(), max_staff_slots)
+		status_changed.emit(self)
+	if assigned_engineers.is_empty():
+		_compute_tick_timer = 0.0
+		return
+
+	_compute_tick_timer += delta
+	if _compute_tick_timer < compute_tick_interval:
+		return
+	_compute_tick_timer -= compute_tick_interval
+
+	var econ: EconomyManager = _get_economy_manager()
+	if econ != null:
+		var yield_amount: int = assigned_engineers.size() * compute_per_engineer
+		econ.add_resource(team, EconomyManager.RESOURCE_COMPUTE, yield_amount)
+	pulse_deposit_feedback()
+
+
 func _has_active_builder() -> bool:
 	if not is_inside_tree():
 		return false
@@ -453,89 +584,6 @@ func _count_friendly_harvesters() -> int:
 			if not u.is_dead and u.team == team and u.get_unit_type_id() == &"silica_harvester":
 				count += 1
 	return count
-
-
-func _destroy() -> void:
-	if is_destroyed:
-		return
-	is_destroyed = true
-	eject_engineers()
-	if claimed_vent != null and is_instance_valid(claimed_vent):
-		claimed_vent.release_building(self)
-	set_selected(false)
-	_unregister_from_economy()
-	destroyed.emit(self)
-	queue_free()
-
-
-func _tick_compute_generation(delta: float) -> void:
-	var prev_count: int = assigned_engineers.size()
-	_prune_assigned_engineers()
-	if assigned_engineers.size() != prev_count:
-		_update_staff_slot_visuals()
-		staffing_changed.emit(self, assigned_engineers.size(), max_staff_slots)
-	if assigned_engineers.is_empty():
-		_compute_tick_timer = 0.0
-		return
-
-	_compute_tick_timer += delta
-	if _compute_tick_timer < compute_tick_interval:
-		return
-	_compute_tick_timer -= compute_tick_interval
-
-	var econ: EconomyManager = _get_economy_manager()
-	if econ != null:
-		var yield_amount: int = assigned_engineers.size() * compute_per_engineer
-		econ.add_resource(team, EconomyManager.RESOURCE_COMPUTE, yield_amount)
-	pulse_deposit_feedback()
-
-
-func _tick_unit_training(delta: float) -> void:
-	var front: Dictionary = _training_queue[0]
-	var duration: float = maxf(0.1, float(front["duration"]))
-	_training_elapsed += delta
-	if _training_elapsed < duration:
-		training_changed.emit(self)
-		status_changed.emit(self)
-		return
-
-	_training_elapsed = 0.0
-	_training_queue.remove_at(0)
-	var unit_scene: PackedScene = front["scene"] as PackedScene
-	_spawn_trained_unit(unit_scene)
-	training_changed.emit(self)
-	status_changed.emit(self)
-
-
-func _spawn_trained_unit(unit_scene: PackedScene) -> void:
-	if unit_scene == null or not is_inside_tree():
-		return
-	var scene_root: Node = get_tree().current_scene
-	var units_container: Node = scene_root.get_node_or_null("Units") if scene_root != null else null
-	if units_container == null:
-		units_container = get_parent()
-	if units_container == null:
-		return
-	var node: Node = unit_scene.instantiate()
-	if not (node is Unit):
-		node.queue_free()
-		return
-	var unit: Unit = node
-	unit.team = team
-	var angle: float = float(_spawn_slot_index) * 0.95
-	_spawn_slot_index = (_spawn_slot_index + 1) % 8
-	var spawn_dist: float = footprint_radius + 26.0
-	unit.global_position = global_position + Vector2.RIGHT.rotated(angle) * spawn_dist
-	units_container.add_child(unit)
-
-
-func _get_queued_bandwidth_cost() -> int:
-	var total: int = 0
-	for entry: Dictionary in _training_queue:
-		var data: UnitData = entry["data"] as UnitData
-		if data != null:
-			total += maxi(0, data.bandwidth_cost)
-	return total
 
 
 func _prune_assigned_engineers() -> void:

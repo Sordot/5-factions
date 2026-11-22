@@ -23,149 +23,178 @@ anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -388.0
-offset_bottom = 66.0
+offset_bottom = 96.0
 grow_horizontal = 0
 mouse_filter = 2
 theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 12
 
-[node name="ResourceBarPanel" type="PanelContainer" parent="RootControl/TopRightAnchor"]
+[node name="TopRightVBox" type="VBoxContainer" parent="RootControl/TopRightAnchor"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="ResourceBarPanel" type="PanelContainer" parent="RootControl/TopRightAnchor/TopRightVBox"]
 layout_mode = 2
 mouse_filter = 2
 
-[node name="HBox" type="HBoxContainer" parent="RootControl/TopRightAnchor/ResourceBarPanel"]
+[node name="HBox" type="HBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel"]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/separation = 14
 
-[node name="BiomassBox" type="HBoxContainer" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox"]
+[node name="BiomassBox" type="HBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox"]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/separation = 6
 
-[node name="Swatch" type="ColorRect" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/BiomassBox"]
+[node name="Swatch" type="ColorRect" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BiomassBox"]
 custom_minimum_size = Vector2(6, 28)
 layout_mode = 2
 size_flags_vertical = 4
 mouse_filter = 2
 color = Color(0.24, 0.94, 0.56, 1)
 
-[node name="VBox" type="VBoxContainer" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/BiomassBox"]
+[node name="VBox" type="VBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BiomassBox"]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/separation = 0
 
-[node name="Label" type="Label" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/BiomassBox/VBox"]
+[node name="Label" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BiomassBox/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.46, 0.9, 0.66, 0.92)
 theme_override_font_sizes/font_size = 10
 text = "BIOMASS"
 
-[node name="BiomassValueLabel" type="Label" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/BiomassBox/VBox"]
+[node name="BiomassValueLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BiomassBox/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 1, 0.95, 1)
 theme_override_font_sizes/font_size = 16
 text = "50"
 
-[node name="Sep1" type="VSeparator" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox"]
+[node name="Sep1" type="VSeparator" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox"]
 layout_mode = 2
 mouse_filter = 2
 
-[node name="SilicaBox" type="HBoxContainer" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox"]
+[node name="SilicaBox" type="HBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox"]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/separation = 6
 
-[node name="Swatch" type="ColorRect" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/SilicaBox"]
+[node name="Swatch" type="ColorRect" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/SilicaBox"]
 custom_minimum_size = Vector2(6, 28)
 layout_mode = 2
 size_flags_vertical = 4
 mouse_filter = 2
 color = Color(0.98, 0.76, 0.26, 1)
 
-[node name="VBox" type="VBoxContainer" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/SilicaBox"]
+[node name="VBox" type="VBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/SilicaBox"]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/separation = 0
 
-[node name="Label" type="Label" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/SilicaBox/VBox"]
+[node name="Label" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/SilicaBox/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.96, 0.8, 0.44, 0.92)
 theme_override_font_sizes/font_size = 10
 text = "SILICA"
 
-[node name="SilicaValueLabel" type="Label" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/SilicaBox/VBox"]
+[node name="SilicaValueLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/SilicaBox/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.96, 0.88, 1)
 theme_override_font_sizes/font_size = 16
 text = "0"
 
-[node name="Sep2" type="VSeparator" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox"]
+[node name="Sep2" type="VSeparator" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox"]
 layout_mode = 2
 mouse_filter = 2
 
-[node name="ComputeBox" type="HBoxContainer" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox"]
+[node name="ComputeBox" type="HBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox"]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/separation = 6
 
-[node name="Swatch" type="ColorRect" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/ComputeBox"]
+[node name="Swatch" type="ColorRect" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/ComputeBox"]
 custom_minimum_size = Vector2(6, 28)
 layout_mode = 2
 size_flags_vertical = 4
 mouse_filter = 2
 color = Color(0.0, 0.898, 1, 1)
 
-[node name="VBox" type="VBoxContainer" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/ComputeBox"]
+[node name="VBox" type="VBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/ComputeBox"]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/separation = 0
 
-[node name="Label" type="Label" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/ComputeBox/VBox"]
+[node name="Label" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/ComputeBox/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.45, 0.9, 1, 0.92)
 theme_override_font_sizes/font_size = 10
 text = "COMPUTE"
 
-[node name="ComputeValueLabel" type="Label" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/ComputeBox/VBox"]
+[node name="ComputeValueLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/ComputeBox/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.98, 1, 1)
 theme_override_font_sizes/font_size = 16
 text = "0"
 
-[node name="Sep3" type="VSeparator" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox"]
+[node name="Sep3" type="VSeparator" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox"]
 layout_mode = 2
 mouse_filter = 2
 
-[node name="BandwidthBox" type="HBoxContainer" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox"]
+[node name="BandwidthBox" type="HBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox"]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/separation = 6
 
-[node name="Swatch" type="ColorRect" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/BandwidthBox"]
+[node name="Swatch" type="ColorRect" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BandwidthBox"]
 custom_minimum_size = Vector2(6, 28)
 layout_mode = 2
 size_flags_vertical = 4
 mouse_filter = 2
 color = Color(0.76, 0.6, 1, 1)
 
-[node name="VBox" type="VBoxContainer" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/BandwidthBox"]
+[node name="VBox" type="VBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BandwidthBox"]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/separation = 0
 
-[node name="Label" type="Label" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/BandwidthBox/VBox"]
+[node name="Label" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BandwidthBox/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.84, 0.76, 1, 0.92)
 theme_override_font_sizes/font_size = 10
 text = "BANDWIDTH"
 
-[node name="BandwidthValueLabel" type="Label" parent="RootControl/TopRightAnchor/ResourceBarPanel/HBox/BandwidthBox/VBox"]
+[node name="BandwidthValueLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BandwidthBox/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 0.96, 1, 1)
 theme_override_font_sizes/font_size = 16
 text = "0 / 10"
+
+[node name="ObjectivesStrip" type="HBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox"]
+layout_mode = 2
+mouse_filter = 2
+alignment = 2
+theme_override_constants/separation = 10
+
+[node name="UplinkBonusLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.24, 0.98, 0.9, 1)
+theme_override_font_sizes/font_size = 11
+text = "UPLINK: +5% PROD"
+
+[node name="ZoneStatusLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.92, 0.72, 0.78, 0.95)
+theme_override_font_sizes/font_size = 11
+text = "ZONE P1: 03:00"

@@ -23,10 +23,21 @@ extends Resource
 @export var allowed_resource: StringName = &"biomass"
 @export var auto_gather_on_spawn: bool = false
 @export var can_staff_compute: bool = false
-@export var biomass_cost: int = 0
+@export var biomass_cost: int = 50
 @export var silica_cost: int = 0
 @export var compute_cost: int = 0
 @export var build_time: float = 3.0
+@export var train_time: float = 4.0
+@export_file("*.tscn") var unit_scene_path: String = ""
+@export var unit_scene: PackedScene = null
+
+
+func resolve_unit_scene() -> PackedScene:
+	if unit_scene != null:
+		return unit_scene
+	if not unit_scene_path.is_empty():
+		return load(unit_scene_path) as PackedScene
+	return null
 
 
 func get_cost_dict() -> Dictionary:

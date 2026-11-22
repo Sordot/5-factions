@@ -15,6 +15,8 @@ extends Resource
 @export var accepted_resources: Array[StringName] = []
 @export var requires_vent: bool = false
 @export var max_staff_slots: int = 0
+@export var trainable_units: Array[UnitData] = []
+@export var can_set_rally: bool = true
 
 
 func get_cost_dict() -> Dictionary:

@@ -18,8 +18,8 @@ enum CommandState {
 	STAFFING_BUILDING,
 }
 
-const ATTACK_TRACER_SCRIPT: GDScript = preload("res://ui/overlays/attack_tracer.gd")
 const ABILITY_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/ability_component.gd")
+const COMBAT_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/combat_component.gd")
 const HIT_FLASH_DURATION: float = 0.10
 const HEALTH_BAR_WIDTH: float = 36.0
 const GATHER_BAR_WIDTH: float = 32.0
@@ -56,17 +56,15 @@ var is_dead: bool = false
 var is_staffed: bool = false
 var current_hp: float = 100.0
 var command_state: CommandState = CommandState.IDLE
-var current_target: Unit = null
+var current_target: Node2D = null
 var ability_component: AbilityComponent = null
+var combat_component: CombatComponent = null
 
 var _construction_target: Building = null
-
 var _move_destination: Vector2 = Vector2.ZERO
 var _attack_move_destination: Vector2 = Vector2.ZERO
-var _attack_cooldown_timer: float = 0.0
 var _hit_flash_timer: float = 0.0
 var _last_nav_target: Vector2 = Vector2.INF
-
 var _wants_nav_movement: bool = false
 var _desired_move_velocity: Vector2 = Vector2.ZERO
 var _last_delta: float = 1.0 / 60.0
@@ -88,6 +86,12 @@ func _ready() -> void:
 		nav_agent.radius = data.collision_radius + 2.0
 		if not nav_agent.velocity_computed.is_connected(_on_nav_velocity_computed):
 			nav_agent.velocity_computed.connect(_on_nav_velocity_computed)
+
+	combat_component = get_node_or_null("CombatComponent") as CombatComponent
+	if combat_component == null:
+		combat_component = COMBAT_COMPONENT_SCRIPT.new()
+		combat_component.name = "CombatComponent"
+		add_child(combat_component)
 
 	ability_component = ABILITY_COMPONENT_SCRIPT.new()
 	ability_component.name = "AbilityComponent"
@@ -154,7 +158,7 @@ func get_ability_remaining_cooldown(ability_id: StringName) -> float:
 
 
 func command_cast_ability(ability: AbilityData, target_pos: Vector2, target_unit: Unit = null) -> bool:
-	if is_dead or ability_component == null or ability == null:
+	if is_dead or is_staffed or ability_component == null or ability == null:
 		return false
 	var accepted: bool = ability_component.request_cast(self, ability, target_pos, target_unit)
 	if not accepted:
@@ -219,6 +223,7 @@ func command_gather(resource_node: ResourceNode) -> bool:
 	current_target = null
 	_reset_progress_tracker()
 	_last_nav_target = Vector2.INF
+	status_changed.emit(self)
 	return true
 
 
@@ -232,6 +237,7 @@ func command_return_cargo(building: Building = null) -> bool:
 	current_target = null
 	_reset_progress_tracker()
 	_last_nav_target = Vector2.INF
+	status_changed.emit(self)
 	return true
 
 
@@ -246,6 +252,7 @@ func command_construct_building(building: Building) -> bool:
 	current_target = null
 	_reset_progress_tracker()
 	_last_nav_target = Vector2.INF
+	status_changed.emit(self)
 	return true
 
 
@@ -261,6 +268,7 @@ func command_staff_building(building: Building) -> bool:
 	current_target = null
 	_reset_progress_tracker()
 	_last_nav_target = Vector2.INF
+	status_changed.emit(self)
 	return true
 
 
@@ -298,39 +306,6 @@ func exit_staffed_building(world_pos: Vector2) -> void:
 		add_to_group("selectable_units")
 	set_physics_process(true)
 	staffed_state_changed.emit(self, false)
-
-
-func _cancel_active_tasks(keep_gather: bool) -> void:
-	if ability_component != null:
-		ability_component.cancel_pending_cast()
-	if not keep_gather and gather_component != null:
-		gather_component.cancel()
-	if staff_component != null:
-		staff_component.cancel()
-	if _construction_target != null:
-		_construction_target = null
-		if gather_bar_root != null:
-			gather_bar_root.visible = false
-
-
-func _try_start_auto_gather() -> void:
-	if is_dead or is_staffed or not can_gather() or not is_inside_tree():
-		return
-	var target_type: StringName = data.allowed_resource if data.allowed_resource != &"" else &"silica"
-	var best: ResourceNode = null
-	var best_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
-		if not (node is ResourceNode) or not is_instance_valid(node):
-			continue
-		var res_node: ResourceNode = node
-		if res_node.is_depleted() or res_node.is_vent or res_node.resource_type != target_type:
-			continue
-		var d_sq: float = global_position.distance_squared_to(res_node.global_position)
-		if d_sq < best_dist_sq:
-			best_dist_sq = d_sq
-			best = res_node
-	if best != null:
-		command_gather(best)
 
 
 func request_component_navigation(target_point: Vector2, repath_threshold: float = 10.0) -> void:
@@ -377,10 +352,10 @@ func command_move(target_pos: Vector2) -> void:
 	_set_nav_target(target_pos)
 
 
-func command_attack_target(target: Unit) -> void:
+func command_attack_target(target: Node2D) -> void:
 	if is_dead or is_staffed or not _can_attack():
 		return
-	if not is_instance_valid(target) or target.is_dead or target.team == team:
+	if combat_component == null or not combat_component.is_valid_target(self, target):
 		return
 	_cancel_active_tasks(false)
 	command_state = CommandState.ATTACKING_TARGET
@@ -427,7 +402,7 @@ func command_hold_position() -> void:
 	_clear_nav_target()
 
 
-func take_damage(amount: float, _attacker: Unit = null) -> void:
+func take_damage(amount: float, attacker: Unit = null) -> void:
 	if is_dead or amount <= 0.0:
 		return
 	current_hp = maxf(0.0, current_hp - amount)
@@ -437,6 +412,12 @@ func take_damage(amount: float, _attacker: Unit = null) -> void:
 	_update_health_bar()
 	health_changed.emit(self, current_hp, data.max_hp)
 	status_changed.emit(self)
+
+	# Idle enemy combatants retaliate against attackers even if attacked from beyond aggro range.
+	if team == Team.ENEMY and command_state == CommandState.IDLE and current_target == null and attacker != null and _can_attack():
+		if combat_component != null and combat_component.is_valid_target(self, attacker):
+			current_target = attacker
+
 	if current_hp <= 0.0:
 		_die()
 
@@ -457,16 +438,15 @@ func _die() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if is_dead:
+	if is_dead or is_staffed:
 		return
 
 	_last_delta = delta
-	if current_target != null and (not is_instance_valid(current_target) or current_target.is_dead):
+	if current_target != null and (combat_component == null or not combat_component.is_valid_target(self, current_target)):
 		current_target = null
 
-	if _attack_cooldown_timer > 0.0:
-		_attack_cooldown_timer = maxf(0.0, _attack_cooldown_timer - delta)
-
+	if combat_component != null:
+		combat_component.tick_cooldown(delta)
 	if ability_component != null:
 		ability_component.tick_cooldowns(delta)
 
@@ -510,19 +490,33 @@ func _physics_process(delta: float) -> void:
 
 
 func _on_nav_velocity_computed(safe_velocity: Vector2) -> void:
-	if is_dead or not _wants_nav_movement:
+	if is_dead or is_staffed or not _wants_nav_movement:
 		return
 	_apply_direct_motion(safe_velocity, _last_delta)
 
 
 func _process_idle(delta: float) -> void:
-	if not _can_attack():
+	if not _can_attack() or combat_component == null:
 		return
-	if not _is_valid_enemy_in_range(current_target, data.attack_range):
-		current_target = _find_nearest_enemy(data.attack_range)
+
+	# Active Enemy AI (GUARD): scan aggro_range, pursue into attack_range, and return fire.
+	if team == Team.ENEMY and _can_move():
+		var leash: float = maxf(data.aggro_range, data.attack_range) * 1.35
+		if not combat_component.is_valid_target_in_range(self, current_target, leash):
+			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
+		if current_target != null:
+			if combat_component.distance_to_target_edge(self, current_target) <= data.attack_range:
+				_face_point(current_target.global_position, delta)
+				combat_component.try_fire_at(self, current_target)
+			else:
+				_request_nav_toward_point(current_target.global_position, 8.0)
+		return
+
+	if not combat_component.is_valid_target_in_range(self, current_target, data.attack_range):
+		current_target = combat_component.find_nearest_enemy(self, data.attack_range)
 	if current_target != null:
 		_face_point(current_target.global_position, delta)
-		_try_fire_at(current_target)
+		combat_component.try_fire_at(self, current_target)
 
 
 func _process_moving(delta: float) -> void:
@@ -546,18 +540,18 @@ func _process_moving(delta: float) -> void:
 
 
 func _process_attack_moving(delta: float) -> void:
-	if _can_attack():
+	if _can_attack() and combat_component != null:
 		var leash_range: float = maxf(data.aggro_range, data.attack_range) * 1.25
-		if not _is_valid_enemy_in_range(current_target, leash_range):
+		if not combat_component.is_valid_target_in_range(self, current_target, leash_range):
 			current_target = null
 		if current_target == null:
-			current_target = _find_nearest_enemy(data.aggro_range)
+			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
 
-	if current_target != null:
+	if current_target != null and combat_component != null:
 		_reset_progress_tracker()
-		if _distance_to_unit_edge(current_target) <= data.attack_range:
+		if combat_component.distance_to_target_edge(self, current_target) <= data.attack_range:
 			_face_point(current_target.global_position, delta)
-			_try_fire_at(current_target)
+			combat_component.try_fire_at(self, current_target)
 			return
 		_request_nav_toward_point(current_target.global_position, 8.0)
 		return
@@ -578,15 +572,15 @@ func _process_attack_moving(delta: float) -> void:
 
 
 func _process_attacking_target(delta: float) -> void:
-	if not is_instance_valid(current_target) or current_target.is_dead:
+	if combat_component == null or not combat_component.is_valid_target(self, current_target):
 		current_target = null
 		command_state = CommandState.IDLE
 		velocity = Vector2.ZERO
 		return
 
-	if _distance_to_unit_edge(current_target) <= data.attack_range:
+	if combat_component.distance_to_target_edge(self, current_target) <= data.attack_range:
 		_face_point(current_target.global_position, delta)
-		_try_fire_at(current_target)
+		combat_component.try_fire_at(self, current_target)
 		return
 
 	if _can_move():
@@ -595,13 +589,13 @@ func _process_attacking_target(delta: float) -> void:
 
 func _process_hold_position(delta: float) -> void:
 	velocity = Vector2.ZERO
-	if not _can_attack():
+	if not _can_attack() or combat_component == null:
 		return
-	if not _is_valid_enemy_in_range(current_target, data.attack_range):
-		current_target = _find_nearest_enemy(data.attack_range)
+	if not combat_component.is_valid_target_in_range(self, current_target, data.attack_range):
+		current_target = combat_component.find_nearest_enemy(self, data.attack_range)
 	if current_target != null:
 		_face_point(current_target.global_position, delta)
-		_try_fire_at(current_target)
+		combat_component.try_fire_at(self, current_target)
 
 
 func _process_casting_ability(delta: float) -> void:
@@ -661,6 +655,41 @@ func _process_staffing_building(delta: float) -> void:
 	staff_component.tick(self, delta)
 
 
+func _cancel_active_tasks(keep_gather: bool) -> void:
+	if ability_component != null:
+		ability_component.cancel_pending_cast()
+	if not keep_gather and gather_component != null:
+		gather_component.cancel()
+	if staff_component != null:
+		staff_component.cancel()
+	if _construction_target != null:
+		_construction_target = null
+		if gather_bar_root != null:
+			gather_bar_root.visible = false
+
+
+func _try_start_auto_gather() -> void:
+	if is_dead or is_staffed or not can_gather() or not is_inside_tree():
+		return
+	if command_state != CommandState.IDLE:
+		return
+	var target_type: StringName = data.allowed_resource if data.allowed_resource != &"" else &"silica"
+	var best: ResourceNode = null
+	var best_dist_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+		if not (node is ResourceNode) or not is_instance_valid(node):
+			continue
+		var res_node: ResourceNode = node
+		if res_node.is_depleted() or res_node.is_vent or res_node.resource_type != target_type:
+			continue
+		var d_sq: float = global_position.distance_squared_to(res_node.global_position)
+		if d_sq < best_dist_sq:
+			best_dist_sq = d_sq
+			best = res_node
+	if best != null:
+		command_gather(best)
+
+
 func _request_nav_toward_point(target_point: Vector2, repath_threshold: float) -> void:
 	if nav_agent == null:
 		return
@@ -678,24 +707,19 @@ func _compute_nav_desired_velocity() -> void:
 	var to_next: Vector2 = next_point - global_position
 	if to_next.length_squared() < 1.0:
 		return
-	var dir: Vector2 = to_next.normalized()
-	dir = _steer_around_static_units(dir)
+	var dir: Vector2 = _steer_around_static_units(to_next.normalized())
 	_wants_nav_movement = true
 	_desired_move_velocity = dir * data.move_speed
 
 
 func _steer_around_static_units(move_dir: Vector2) -> Vector2:
-	# Prevent head-on deadlocks against stationary TargetDummy bodies by adding
-	# a deterministic tangential bias when a static unit blocks the forward path.
 	var steer: Vector2 = move_dir
 	var my_r: float = data.collision_radius if data != null else 16.0
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not (node is Unit) or node == self:
 			continue
 		var other: Unit = node
-		if not is_instance_valid(other) or other.is_dead or other.is_staffed:
-			continue
-		if other._can_move():
+		if not is_instance_valid(other) or other.is_dead or other.is_staffed or other._can_move():
 			continue
 		var to_other: Vector2 = other.global_position - global_position
 		var dist: float = to_other.length()
@@ -704,11 +728,9 @@ func _steer_around_static_units(move_dir: Vector2) -> Vector2:
 		if dist <= 0.001 or dist > avoid_dist:
 			continue
 		var to_other_dir: Vector2 = to_other / dist
-		var forward_dot: float = move_dir.dot(to_other_dir)
-		if forward_dot <= 0.15:
+		if move_dir.dot(to_other_dir) <= 0.15:
 			continue
-		var cross: float = move_dir.cross(to_other_dir)
-		var side: float = -1.0 if cross >= 0.0 else 1.0
+		var side: float = -1.0 if move_dir.cross(to_other_dir) >= 0.0 else 1.0
 		var tangent: Vector2 = Vector2(-to_other_dir.y, to_other_dir.x) * side
 		var weight: float = clampf((avoid_dist - dist) / avoid_dist, 0.25, 1.0) * 1.4
 		steer += tangent * weight
@@ -718,8 +740,7 @@ func _steer_around_static_units(move_dir: Vector2) -> Vector2:
 func _apply_direct_motion(target_velocity: Vector2, delta: float) -> void:
 	var accel: float = data.acceleration if data.acceleration > 0.0 else 1800.0
 	if _wants_nav_movement:
-		var sep: Vector2 = _compute_overlap_separation(1.0)
-		var combined: Vector2 = target_velocity + sep
+		var combined: Vector2 = target_velocity + _compute_overlap_separation(1.0)
 		if combined.length() > data.move_speed:
 			combined = combined.normalized() * data.move_speed
 		velocity = velocity.move_toward(combined, accel * delta)
@@ -771,18 +792,11 @@ func _compute_overlap_separation(extra_margin: float) -> Vector2:
 		var dist_sq: float = diff.length_squared()
 		if dist_sq >= min_dist * min_dist:
 			continue
-		var dir: Vector2
 		var dist: float = sqrt(dist_sq)
-		if dist < 0.01:
-			var angle: float = fmod(float(get_instance_id() % 360) * 1.618, TAU)
-			dir = Vector2.RIGHT.rotated(angle)
-		else:
-			dir = diff / dist
+		var dir: Vector2 = Vector2.RIGHT.rotated(fmod(float(get_instance_id() % 360) * 1.618, TAU)) if dist < 0.01 else (diff / dist)
 		var overlap_ratio: float = clampf((min_dist - dist) / maxf(1.0, min_dist), 0.15, 1.0)
 		push += dir * max_push * overlap_ratio
-	if push.length() > max_push:
-		push = push.normalized() * max_push
-	return push
+	return push.normalized() * max_push if push.length() > max_push else push
 
 
 func _reset_progress_tracker() -> void:
@@ -811,8 +825,7 @@ func _check_post_slide_settling() -> void:
 	if global_position.distance_to(goal_pos) > SETTLE_PROXIMITY_RADIUS:
 		return
 	for i: int in range(get_slide_collision_count()):
-		var col: KinematicCollision2D = get_slide_collision(i)
-		var collider: Object = col.get_collider()
+		var collider: Object = get_slide_collision(i).get_collider()
 		if collider is Unit:
 			var other: Unit = collider
 			if other.team == team and other.command_state == CommandState.IDLE:
@@ -831,64 +844,7 @@ func _face_point(world_point: Vector2, delta: float) -> void:
 
 func _face_angle(target_angle: float, delta: float) -> void:
 	var turn_speed: float = data.turn_speed if data != null else 14.0
-	body_visual.rotation = lerp_angle(
-		body_visual.rotation,
-		target_angle,
-		clampf(turn_speed * delta, 0.0, 1.0)
-	)
-
-
-func _try_fire_at(target: Unit) -> void:
-	if _attack_cooldown_timer > 0.0 or not is_instance_valid(target) or target.is_dead:
-		return
-	_attack_cooldown_timer = data.attack_cooldown
-	var muzzle_offset: Vector2 = Vector2.RIGHT.rotated(body_visual.rotation) * data.collision_radius
-	var tracer_origin: Vector2 = global_position + muzzle_offset
-	var tracer_end: Vector2 = target.global_position
-	_spawn_attack_tracer(tracer_origin, tracer_end)
-	target.take_damage(data.attack_damage, self)
-
-
-func _spawn_attack_tracer(from_pos: Vector2, to_pos: Vector2) -> void:
-	if get_parent() == null:
-		return
-	var tracer: AttackTracer = ATTACK_TRACER_SCRIPT.new()
-	tracer.z_index = 50
-	get_parent().add_child(tracer)
-	var tracer_color: Color = Color(0.32, 0.98, 0.90, 0.95) if team == Team.PLAYER else Color(1.0, 0.35, 0.25, 0.95)
-	tracer.setup(from_pos, to_pos, tracer_color)
-
-
-func _find_nearest_enemy(max_range: float) -> Unit:
-	var best_enemy: Unit = null
-	var best_dist: float = max_range
-	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not (node is Unit):
-			continue
-		var candidate: Unit = node
-		if not is_instance_valid(candidate) or candidate.is_dead or candidate.is_staffed or candidate.team == team:
-			continue
-		var dist: float = _distance_to_unit_edge(candidate)
-		if dist <= best_dist:
-			best_dist = dist
-			best_enemy = candidate
-	return best_enemy
-
-
-func _is_valid_enemy_in_range(candidate: Variant, max_range: float) -> bool:
-	if candidate == null or not is_instance_valid(candidate) or not (candidate is Unit):
-		return false
-	var target_unit: Unit = candidate
-	if target_unit.is_dead or target_unit.team == team:
-		return false
-	return _distance_to_unit_edge(target_unit) <= max_range
-
-
-func _distance_to_unit_edge(other: Unit) -> float:
-	var center_dist: float = global_position.distance_to(other.global_position)
-	var my_r: float = data.collision_radius if data != null else 16.0
-	var other_r: float = other.data.collision_radius if other.data != null else 16.0
-	return maxf(0.0, center_dist - my_r - other_r)
+	body_visual.rotation = lerp_angle(body_visual.rotation, target_angle, clampf(turn_speed * delta, 0.0, 1.0))
 
 
 func _set_nav_target(target_pos: Vector2) -> void:
@@ -907,9 +863,7 @@ func _clear_nav_target() -> void:
 
 
 func _is_nav_map_ready() -> bool:
-	if nav_agent == null:
-		return false
-	return NavigationServer2D.map_get_iteration_id(nav_agent.get_navigation_map()) > 0
+	return nav_agent != null and NavigationServer2D.map_get_iteration_id(nav_agent.get_navigation_map()) > 0
 
 
 func _can_move() -> bool:
@@ -917,7 +871,7 @@ func _can_move() -> bool:
 
 
 func _can_attack() -> bool:
-	return data != null and data.attack_damage > 0.0 and data.attack_range > 0.0
+	return combat_component != null and combat_component.can_attack(self)
 
 
 func _update_health_bar() -> void:
@@ -933,6 +887,17 @@ func _on_gather_cargo_changed(resource_type: StringName, amount: int) -> void:
 	if cargo_visual != null:
 		cargo_visual.visible = amount > 0
 	cargo_changed.emit(self, resource_type, amount)
+	status_changed.emit(self)
+
+
+func _on_gather_progress_changed(progress: float, is_active: bool) -> void:
+	if gather_bar_root == null or gather_bar_fill == null:
+		return
+	gather_bar_root.visible = is_active
+	gather_bar_fill.size.x = GATHER_BAR_WIDTH * clampf(progress, 0.0, 1.0)
+
+
+func _on_gather_state_changed(_new_state: GatherComponent.GatherState) -> void:
 	status_changed.emit(self)
 
 
@@ -1036,17 +1001,6 @@ func _get_command_state_label() -> String:
 		CommandState.STAFFING_BUILDING:
 			return "Entering Node"
 	return "Active"
-
-
-func _on_gather_progress_changed(progress: float, is_active: bool) -> void:
-	if gather_bar_root == null or gather_bar_fill == null:
-		return
-	gather_bar_root.visible = is_active
-	gather_bar_fill.size.x = GATHER_BAR_WIDTH * clampf(progress, 0.0, 1.0)
-
-
-func _on_gather_state_changed(_new_state: GatherComponent.GatherState) -> void:
-	status_changed.emit(self)
 
 
 func _register_with_economy() -> void:

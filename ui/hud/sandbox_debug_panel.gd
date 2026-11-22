@@ -13,8 +13,10 @@ extends Control
 @onready var btn_harvester_1: Button = %BtnHarvester1
 @onready var btn_engineer_1: Button = %BtnEngineer1
 @onready var btn_grant_res: Button = %BtnGrantRes
+@onready var btn_trigger_zone: Button = %BtnTriggerZone
 @onready var btn_dummy_1: Button = %BtnDummy1
 @onready var btn_dummy_3: Button = %BtnDummy3
+@onready var btn_enemy_1: Button = %BtnEnemy1
 @onready var btn_clear_dummies: Button = %BtnClearDummies
 @onready var btn_reset: Button = %BtnReset
 
@@ -54,6 +56,10 @@ func _ready() -> void:
 		if _spawner != null:
 			_spawner.grant_debug_resources()
 	)
+	btn_trigger_zone.pressed.connect(func() -> void:
+		if _spawner != null:
+			_spawner.trigger_zone_phase()
+	)
 	btn_dummy_1.pressed.connect(func() -> void:
 		if _spawner != null:
 			_spawner.spawn_target_dummies(1)
@@ -61,6 +67,10 @@ func _ready() -> void:
 	btn_dummy_3.pressed.connect(func() -> void:
 		if _spawner != null:
 			_spawner.spawn_target_dummies(3)
+	)
+	btn_enemy_1.pressed.connect(func() -> void:
+		if _spawner != null:
+			_spawner.spawn_enemy_troopers(1)
 	)
 	btn_clear_dummies.pressed.connect(func() -> void:
 		if _spawner != null:

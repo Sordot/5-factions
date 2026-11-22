@@ -30,3 +30,5 @@ biomass_cost = 75
 silica_cost = 0
 compute_cost = 0
 build_time = 4.0
+train_time = 4.0
+unit_scene_path = "res://scenes/units/silica_harvester.tscn"

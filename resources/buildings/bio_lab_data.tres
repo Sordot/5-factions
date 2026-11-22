@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/bio_lab.tscn" id="2_scene"]
+[ext_resource type="Resource" path="res://resources/units/test_unit_data.tres" id="3_test_unit"]
+[ext_resource type="Resource" path="res://resources/units/scout_unit_data.tres" id="4_scout_unit"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"bio_lab"
+display_name = "Bio-Lab"
+scene = ExtResource("2_scene")
+biomass_cost = 125
+silica_cost = 50
+compute_cost = 0
+build_time = 5.0
+footprint_size = Vector2(86, 86)
+max_hp = 900.0
+bandwidth_provided = 0
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+requires_vent = false
+max_staff_slots = 0
+trainable_units = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("3_test_unit"), ExtResource("4_scout_unit")])
+can_set_rally = true

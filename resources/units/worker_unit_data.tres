@@ -1,9 +1,10 @@
-[gd_resource type="Resource" script_class="UnitData" load_steps=5 format=3]
+[gd_resource type="Resource" script_class="UnitData" load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
 [ext_resource type="Resource" path="res://resources/abilities/build_silica_refinery.tres" id="2_build_refinery"]
 [ext_resource type="Resource" path="res://resources/abilities/build_compute_node.tres" id="3_build_compute"]
 [ext_resource type="Resource" path="res://resources/abilities/build_bandwidth_relay.tres" id="4_build_relay"]
+[ext_resource type="Resource" path="res://resources/abilities/build_bio_lab.tres" id="5_build_biolab"]
 
 [resource]
 script = ExtResource("1_unit_data")
@@ -19,7 +20,7 @@ attack_damage = 6.0
 attack_range = 80.0
 aggro_range = 130.0
 attack_cooldown = 1.0
-abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_build_refinery"), ExtResource("3_build_compute"), ExtResource("4_build_relay")])
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_build_refinery"), ExtResource("3_build_compute"), ExtResource("4_build_relay"), ExtResource("5_build_biolab")])
 bandwidth_cost = 1
 can_gather = true
 gather_duration = 3.0
@@ -33,3 +34,5 @@ biomass_cost = 50
 silica_cost = 0
 compute_cost = 0
 build_time = 3.0
+train_time = 3.0
+unit_scene_path = "res://scenes/units/worker_unit.tscn"

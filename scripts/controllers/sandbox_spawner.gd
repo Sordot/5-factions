@@ -1,8 +1,7 @@
 class_name SandboxSpawner
 extends Node2D
 
-const ARENA_SAFE_BOUNDS: Rect2 = Rect2(-580.0, -300.0, 1160.0, 600.0)
-const OBSTACLE_EXCLUSION: Rect2 = Rect2(-130.0, -150.0, 260.0, 300.0)
+@export var arena_safe_bounds: Rect2 = Rect2(-580.0, -300.0, 1160.0, 600.0)
 
 signal entities_changed
 
@@ -14,11 +13,13 @@ signal entities_changed
 @export var harvester_unit_scene: PackedScene = preload("res://scenes/units/silica_harvester.tscn")
 @export var engineer_unit_scene: PackedScene = preload("res://scenes/units/engineer_unit.tscn")
 @export var target_dummy_scene: PackedScene = preload("res://scenes/units/target_dummy.tscn")
+@export var enemy_trooper_scene: PackedScene = preload("res://scenes/units/enemy_trooper.tscn")
 @export var player_spawn_origin: Vector2 = Vector2(-280.0, 0.0)
 @export var worker_spawn_origin: Vector2 = Vector2(-265.0, 165.0)
 @export var harvester_spawn_origin: Vector2 = Vector2(320.0, -110.0)
 @export var engineer_spawn_origin: Vector2 = Vector2(-340.0, 50.0)
 @export var dummy_spawn_origin: Vector2 = Vector2(260.0, 0.0)
+@export var enemy_spawn_origin: Vector2 = Vector2(240.0, 120.0)
 
 var _spawn_cycle: int = 0
 
@@ -47,6 +48,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("debug_spawn_dummy_3"):
 		spawn_target_dummies(3, get_global_mouse_position())
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("debug_spawn_enemy_1"):
+		spawn_enemy_troopers(1, get_global_mouse_position())
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("debug_clear_dummies"):
 		clear_dummies()
@@ -81,11 +85,26 @@ func spawn_engineer_units(count: int, origin: Vector2 = Vector2.INF) -> Array[Un
 	return _spawn_batch(engineer_unit_scene, count, base_pos, 38.0)
 
 
+func spawn_enemy_troopers(count: int, origin: Vector2 = Vector2.INF, attack_move_center: bool = false) -> Array[Unit]:
+	var base_pos: Vector2 = _resolve_origin(origin, enemy_spawn_origin)
+	var spawned: Array[Unit] = _spawn_batch(enemy_trooper_scene, count, base_pos, 42.0)
+	if attack_move_center:
+		for u: Unit in spawned:
+			u.call_deferred("command_attack_move", Vector2.ZERO)
+	return spawned
+
+
 func grant_debug_resources() -> void:
 	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 	if econ != null:
 		econ.add_resource(Unit.Team.PLAYER, EconomyManager.RESOURCE_BIOMASS, 200)
 		econ.add_resource(Unit.Team.PLAYER, EconomyManager.RESOURCE_SILICA, 100)
+
+
+func trigger_zone_phase() -> void:
+	var zone: EncroachingZone = get_tree().get_first_node_in_group("encroaching_zone") as EncroachingZone
+	if zone != null:
+		zone.trigger_next_phase_now()
 
 
 func spawn_target_dummies(count: int, origin: Vector2 = Vector2.INF) -> Array[Unit]:
@@ -126,6 +145,14 @@ func reset_sandbox() -> void:
 	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 	if econ != null:
 		econ.reset_economy()
+
+	for node: Node in get_tree().get_nodes_in_group("hyper_uplinks"):
+		if node is HyperUplink:
+			(node as HyperUplink).reset_uplink()
+
+	var zone: EncroachingZone = get_tree().get_first_node_in_group("encroaching_zone") as EncroachingZone
+	if zone != null:
+		zone.reset_zone()
 
 	entities_changed.emit()
 
@@ -168,16 +195,10 @@ func _resolve_origin(origin: Vector2, preset: Vector2) -> Vector2:
 
 
 func _clamp_to_walkable_arena(pos: Vector2) -> Vector2:
-	var clamped: Vector2 = Vector2(
-		clampf(pos.x, ARENA_SAFE_BOUNDS.position.x, ARENA_SAFE_BOUNDS.end.x),
-		clampf(pos.y, ARENA_SAFE_BOUNDS.position.y, ARENA_SAFE_BOUNDS.end.y)
+	return Vector2(
+		clampf(pos.x, arena_safe_bounds.position.x, arena_safe_bounds.end.x),
+		clampf(pos.y, arena_safe_bounds.position.y, arena_safe_bounds.end.y)
 	)
-	if OBSTACLE_EXCLUSION.has_point(clamped):
-		if clamped.x < 0.0:
-			clamped.x = OBSTACLE_EXCLUSION.position.x - 16.0
-		else:
-			clamped.x = OBSTACLE_EXCLUSION.end.x + 16.0
-	return clamped
 
 
 func _get_units_container() -> Node:
