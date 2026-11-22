@@ -2,8 +2,7 @@ class_name Building
 extends StaticBody2D
 
 const PRODUCTION_COMPONENT_SCRIPT: GDScript = preload("res://scripts/buildings/production_component.gd")
-const ENEMY_TROOPER_DATA: UnitData = preload("res://resources/units/enemy_trooper_data.tres")
-const ENEMY_TROOPER_SCENE: PackedScene = preload("res://scenes/units/enemy_trooper.tscn")
+const ENEMY_TROOPER_DATA_PATH: String = "res://resources/units/enemy_trooper_data.tres"
 const HEALTH_BAR_WIDTH: float = 76.0
 const CONSTRUCT_BAR_WIDTH: float = 68.0
 const DEPOSIT_PULSE_DURATION: float = 0.25
@@ -77,8 +76,7 @@ func _ready() -> void:
 		construction_progress = 0.0
 		_construction_elapsed = 0.0
 	if team == Unit.Team.ENEMY and building_type_id == &"bio_lab":
-		trainable_unit_data = [ENEMY_TROOPER_DATA]
-		trainable_unit_scenes = [ENEMY_TROOPER_SCENE]
+		_apply_enemy_bio_lab_roster()
 	_apply_team_visuals()
 	if core_glow != null:
 		_base_core_color = core_glow.color
@@ -172,8 +170,7 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 			trainable_unit_data = data.trainable_units.duplicate()
 
 	if team == Unit.Team.ENEMY and building_type_id == &"bio_lab":
-		trainable_unit_data = [ENEMY_TROOPER_DATA]
-		trainable_unit_scenes = [ENEMY_TROOPER_SCENE]
+		_apply_enemy_bio_lab_roster()
 	_apply_team_visuals()
 
 	if production_component == null and not trainable_unit_data.is_empty():
@@ -641,6 +638,13 @@ func _update_construction_visuals() -> void:
 	if construct_bar_root != null and construct_bar_fill != null:
 		construct_bar_root.visible = not is_constructed
 		construct_bar_fill.size.x = CONSTRUCT_BAR_WIDTH * clampf(construction_progress, 0.0, 1.0)
+
+
+func _apply_enemy_bio_lab_roster() -> void:
+	var trooper_data: UnitData = load(ENEMY_TROOPER_DATA_PATH) as UnitData
+	if trooper_data != null:
+		trainable_unit_data = [trooper_data]
+		trainable_unit_scenes = []
 
 
 func _apply_team_visuals() -> void:

@@ -1,16 +1,13 @@
 class_name SkirmishAICommander
 extends Node
 
-const REFINERY_DATA: BuildingData = preload("res://resources/buildings/silica_refinery_data.tres")
-const RELAY_DATA: BuildingData = preload("res://resources/buildings/bandwidth_relay_data.tres")
-const BIOLAB_DATA: BuildingData = preload("res://resources/buildings/bio_lab_data.tres")
+const REFINERY_DATA_PATH: String = "res://resources/buildings/silica_refinery_data.tres"
+const RELAY_DATA_PATH: String = "res://resources/buildings/bandwidth_relay_data.tres"
+const BIOLAB_DATA_PATH: String = "res://resources/buildings/bio_lab_data.tres"
 
-const WORKER_DATA: UnitData = preload("res://resources/units/worker_unit_data.tres")
-const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker_unit.tscn")
-const HARVESTER_DATA: UnitData = preload("res://resources/units/silica_harvester_data.tres")
-const HARVESTER_SCENE: PackedScene = preload("res://scenes/units/silica_harvester.tscn")
-const TROOPER_DATA: UnitData = preload("res://resources/units/enemy_trooper_data.tres")
-const TROOPER_SCENE: PackedScene = preload("res://scenes/units/enemy_trooper.tscn")
+const WORKER_DATA_PATH: String = "res://resources/units/worker_unit_data.tres"
+const HARVESTER_DATA_PATH: String = "res://resources/units/silica_harvester_data.tres"
+const TROOPER_DATA_PATH: String = "res://resources/units/enemy_trooper_data.tres"
 
 @export var ai_team: Unit.Team = Unit.Team.ENEMY
 @export var enabled: bool = true
@@ -23,6 +20,13 @@ const TROOPER_SCENE: PackedScene = preload("res://scenes/units/enemy_trooper.tsc
 @export var base_defense_radius: float = 440.0
 @export var arena_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 
+var _refinery_data: BuildingData = null
+var _relay_data: BuildingData = null
+var _biolab_data: BuildingData = null
+var _worker_data: UnitData = null
+var _harvester_data: UnitData = null
+var _trooper_data: UnitData = null
+
 var _decision_timer: float = 0.0
 var _wave_timer: float = 0.0
 var _wave_number: int = 0
@@ -31,6 +35,12 @@ var _dispatched_wave_units: Dictionary = {}
 
 func _ready() -> void:
 	add_to_group("skirmish_ai")
+	_refinery_data = load(REFINERY_DATA_PATH) as BuildingData
+	_relay_data = load(RELAY_DATA_PATH) as BuildingData
+	_biolab_data = load(BIOLAB_DATA_PATH) as BuildingData
+	_worker_data = load(WORKER_DATA_PATH) as UnitData
+	_harvester_data = load(HARVESTER_DATA_PATH) as UnitData
+	_trooper_data = load(TROOPER_DATA_PATH) as UnitData
 	call_deferred("_setup_initial_rallies")
 
 
@@ -206,66 +216,66 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 
 	# Priority 1: Ensure baseline worker core (3 workers).
 	if total_workers < 3:
-		if core.get_training_queue_size() < 2 and core.can_train_unit_data(WORKER_DATA, WORKER_SCENE):
-			core.queue_unit_data(WORKER_DATA, WORKER_SCENE)
+		if _worker_data != null and core.get_training_queue_size() < 2 and core.can_train_unit_data(_worker_data):
+			core.queue_unit_data(_worker_data)
 		return
 
 	# Priority 2: Build Silica Refinery near enemy Silica Vein.
 	if refineries.is_empty():
-		if econ.can_afford(ai_team, REFINERY_DATA.get_cost_dict()):
+		if _refinery_data != null and econ.can_afford(ai_team, _refinery_data.get_cost_dict()):
 			var vein: ResourceNode = _find_nearest_resource(core.global_position, &"silica")
 			var anchor: Vector2 = core.global_position.lerp(vein.global_position, 0.58) if vein != null else (core.global_position + Vector2(-120.0, 180.0))
-			_try_place_and_build(REFINERY_DATA, anchor, core.global_position)
+			_try_place_and_build(_refinery_data, anchor, core.global_position)
 		return
 
 	# Priority 3: Expand Bandwidth cap before hitting population block.
 	if needs_relay:
-		if econ.can_afford(ai_team, RELAY_DATA.get_cost_dict()):
+		if _relay_data != null and econ.can_afford(ai_team, _relay_data.get_cost_dict()):
 			var away_dir: Vector2 = (core.global_position - Vector2.ZERO).normalized()
 			var relay_anchor: Vector2 = core.global_position + away_dir * 125.0
-			_try_place_and_build(RELAY_DATA, relay_anchor, core.global_position)
+			_try_place_and_build(_relay_data, relay_anchor, core.global_position)
 		return
 
 	# Priority 4: Train automated Silica Harvester once Refinery is online.
 	var desired_harvesters: int = 2 if constructed_bio_labs.size() >= 1 else 1
-	if constructed_refinery != null and total_harvesters < desired_harvesters:
-		var trainer: Building = constructed_refinery if constructed_refinery.can_train_unit_data(HARVESTER_DATA, HARVESTER_SCENE) else core
-		if trainer.get_training_queue_size() < 2 and trainer.can_train_unit_data(HARVESTER_DATA, HARVESTER_SCENE):
-			trainer.queue_unit_data(HARVESTER_DATA, HARVESTER_SCENE)
+	if _harvester_data != null and constructed_refinery != null and total_harvesters < desired_harvesters:
+		var trainer: Building = constructed_refinery if constructed_refinery.can_train_unit_data(_harvester_data) else core
+		if trainer.get_training_queue_size() < 2 and trainer.can_train_unit_data(_harvester_data):
+			trainer.queue_unit_data(_harvester_data)
 			return
 
 	# Priority 5: Construct primary Bio-Lab on the forward edge facing the map center.
-	if bio_labs.is_empty():
-		if econ.can_afford(ai_team, BIOLAB_DATA.get_cost_dict()):
+	if bio_labs.is_empty() and _biolab_data != null:
+		if econ.can_afford(ai_team, _biolab_data.get_cost_dict()):
 			var to_center: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var lab_anchor: Vector2 = core.global_position + to_center * 175.0
-			var built_lab: Building = _try_place_and_build(BIOLAB_DATA, lab_anchor, core.global_position)
+			var built_lab: Building = _try_place_and_build(_biolab_data, lab_anchor, core.global_position)
 			if built_lab != null:
 				built_lab.set_rally_position(core.global_position.lerp(Vector2.ZERO, 0.34))
 			return
 		# If we already have enough Silica for Bio-Lab, hold Biomass to build it immediately.
-		if silica >= BIOLAB_DATA.silica_cost and biomass < BIOLAB_DATA.biomass_cost:
+		if silica >= _biolab_data.silica_cost and biomass < _biolab_data.biomass_cost:
 			return
 
 	# Priority 6: Saturate workers up to target_worker_count.
-	if total_workers < target_worker_count:
-		if core.get_training_queue_size() < 2 and core.can_train_unit_data(WORKER_DATA, WORKER_SCENE):
-			core.queue_unit_data(WORKER_DATA, WORKER_SCENE)
+	if _worker_data != null and total_workers < target_worker_count:
+		if core.get_training_queue_size() < 2 and core.can_train_unit_data(_worker_data):
+			core.queue_unit_data(_worker_data)
 
 	# Priority 7: Train Hostile Troopers continuously from constructed Bio-Labs.
 	for lab: Building in constructed_bio_labs:
 		if not lab.has_rally():
 			lab.set_rally_position(core.global_position.lerp(Vector2.ZERO, 0.34))
-		if lab.get_training_queue_size() < 2 and lab.can_train_unit_data(TROOPER_DATA, TROOPER_SCENE):
-			lab.queue_unit_data(TROOPER_DATA, TROOPER_SCENE)
+		if _trooper_data != null and lab.get_training_queue_size() < 2 and lab.can_train_unit_data(_trooper_data):
+			lab.queue_unit_data(_trooper_data)
 
 	# Priority 8: Late-game second Bio-Lab when floating surplus resources.
-	if bio_labs.size() < max_bio_labs and biomass >= 260 and silica >= 100:
-		if econ.can_afford(ai_team, BIOLAB_DATA.get_cost_dict()):
+	if _biolab_data != null and bio_labs.size() < max_bio_labs and biomass >= 260 and silica >= 100:
+		if econ.can_afford(ai_team, _biolab_data.get_cost_dict()):
 			var to_center2: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var perp: Vector2 = Vector2(-to_center2.y, to_center2.x)
 			var lab_anchor2: Vector2 = core.global_position + to_center2 * 180.0 + perp * 130.0
-			var second_lab: Building = _try_place_and_build(BIOLAB_DATA, lab_anchor2, core.global_position)
+			var second_lab: Building = _try_place_and_build(_biolab_data, lab_anchor2, core.global_position)
 			if second_lab != null:
 				second_lab.set_rally_position(core.global_position.lerp(Vector2.ZERO, 0.34))
 
