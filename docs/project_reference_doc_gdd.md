@@ -49,18 +49,33 @@ Three distinct resources plus a population cap, each tied to a different gatheri
 
 ## 6. Tech Stack & Development Workflow
 * **Target Platform:** Desktop (PC)
-* **Engine:** **Godot 4** (leveraging `NavigationServer2D`, Node/Signal architecture, 2D lighting/shaders, and plain-text `.tscn`/`.tres`/script files for clean Git diffs).
+* **Engine:** **Godot 4.7** (`Forward Plus`, strictly typed GDScript, `NavigationServer2D`, Node/Signal architecture, 2D lighting/shaders, and plain-text `.tscn`/`.tres`/`.gd` files for clean Git diffs).
+* **Repository & Project Layout (Flattened Root):**
+  * Godot project root (`project.godot`) lives directly at the repository root alongside `docs/`.
+  * By-type top-level folder layout with feature subfolders:
+    * `scenes/` (`test/`, `units/`, `maps/`, `buildings/`, `world/`)
+    * `scripts/` (`camera/`, `controllers/`, `units/`, `buildings/`, `systems/`, `data/`)
+    * `resources/` (`units/`, `buildings/`, `themes/`) — data-driven `.tres` configs (`UnitData`, future `BuildingData`, `AbilityData`)
+    * `ui/` (`hud/`, `overlays/`)
+    * `assets/` (`sprites/`, `audio/`, `shaders/`)
 * **IDE & AI Pipeline:**
   * **VS Code** configured as Godot's external editor.
   * **Gemini Notebook** for living GDD, balance tables, and lore/design specs.
   * **GitHub + `agy` CLI** inside VS Code for multi-file scaffolding, diff reviews (`/diff`), and version-controlled milestones.
+  * See `docs/technical_glossary_and_specs.md` for shared engine/RTS stat terminology and data schemas.
 
 ---
 
 ## 7. Milestones & Scope Boundaries
 
-### Milestone 0: Technical Spike (Dev Setup)
-* Install Godot 4, configure VS Code external editor integration, initialize GitHub repo with `docs/GDD.md`, and verify a basic test scene runs with box-selection and click-to-move on a `NavigationRegion2D`.
+### Milestone 0: Technical Spike (Dev Setup) — *Completed*
+* **Completed Architecture & Verified Test Scene (`res://scenes/test/milestone_0_test.tscn`):**
+  * Godot 4.7.2 project flattened to the repository root with clean starter folder hierarchy and `run/main_scene` configured.
+  * **RTS Camera (`RTSCamera`):** `WASD`/Arrow pan (via `camera_pan_*` InputMap actions), 1:1 middle-mouse drag pan, clamped smooth scroll-wheel zoom (`0.5`–`2.0`), and arena bounds clamping.
+  * **Navigation Arena (`NavigationRegion2D`):** `1280×720` walkable arena with a central `StaticBody2D` obstacle cutout, pre-baked into 4 convex polygons (`agent_radius = 20px`) and verified to preserve obstacle avoidance when re-baked in the editor.
+  * **Selectable Unit (`TestUnit` + `UnitData` `.tres`):** `CharacterBody2D` in `"selectable_units"` group with `NavigationAgent2D` (`CORRIDORFUNNEL` shortest-path routing + map-sync guard), snappy acceleration/turning, glowing cyan selection ring, and directional chevron visuals.
+  * **Selection & Orders (`SelectionController`):** `_unhandled_input`-based single left-click and left-drag box selection (`SelectionBox` overlay) plus right-click move commands with transient `MoveMarker` target pulse feedback.
+* **Remaining Dev-Environment Step (Optional/Local):** Verify VS Code external editor integration and commit Milestone 0 baseline to GitHub.
 
 ### Milestone 1: Vertical Slice (Design Validation Prototype)
 * **Factions:** 1 playable faction (mirrored 1v1 against a basic scripted AI opponent on 1 symmetric map).

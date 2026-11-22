@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+display_name = "Test Unit"
+move_speed = 260.0
+acceleration = 1800.0
+turn_speed = 14.0
+selection_radius = 20.0
