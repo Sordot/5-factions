@@ -7,6 +7,7 @@ const DEPOSIT_PULSE_DURATION: float = 0.25
 
 signal selection_changed(building: Building, selected: bool)
 signal health_changed(building: Building, current_hp: float, max_hp: float)
+signal status_changed(building: Building)
 signal destroyed(building: Building)
 signal construction_progress_changed(building: Building, progress: float, is_constructed: bool)
 signal construction_completed(building: Building)
@@ -146,6 +147,7 @@ func advance_construction(delta: float) -> bool:
 	_update_health_bar()
 	health_changed.emit(self, current_hp, max_hp)
 	construction_progress_changed.emit(self, construction_progress, false)
+	status_changed.emit(self)
 
 	if _construction_elapsed >= total_time:
 		_complete_construction()
@@ -168,6 +170,7 @@ func _complete_construction() -> void:
 	health_changed.emit(self, current_hp, max_hp)
 	construction_progress_changed.emit(self, 1.0, true)
 	construction_completed.emit(self)
+	status_changed.emit(self)
 
 
 func set_selected(selected: bool) -> void:
@@ -214,6 +217,7 @@ func assign_engineer(engineer: Unit) -> bool:
 	_update_staff_slot_visuals()
 	pulse_deposit_feedback()
 	staffing_changed.emit(self, assigned_engineers.size(), max_staff_slots)
+	status_changed.emit(self)
 	return true
 
 
@@ -236,6 +240,7 @@ func eject_engineers() -> Array[Unit]:
 	_compute_tick_timer = 0.0
 	_update_staff_slot_visuals()
 	staffing_changed.emit(self, 0, max_staff_slots)
+	status_changed.emit(self)
 	return released
 
 
@@ -276,6 +281,7 @@ func queue_unit_training(slot_index: int) -> bool:
 		"duration": maxf(0.5, unit_data.build_time),
 	})
 	training_changed.emit(self)
+	status_changed.emit(self)
 	return true
 
 
@@ -306,8 +312,147 @@ func take_damage(amount: float) -> void:
 	current_hp = maxf(0.0, current_hp - amount)
 	_update_health_bar()
 	health_changed.emit(self, current_hp, max_hp)
+	status_changed.emit(self)
 	if current_hp <= 0.0:
 		_destroy()
+
+
+func get_inspection_data() -> Dictionary:
+	var accent: Color = Color(0.22, 0.88, 0.94, 1.0)
+	if building_type_id == &"silica_refinery":
+		accent = Color(0.98, 0.78, 0.28, 1.0)
+	elif building_type_id == &"compute_node":
+		accent = Color(0.32, 0.84, 1.0, 1.0)
+	elif building_type_id == &"bandwidth_relay":
+		accent = Color(0.76, 0.58, 1.0, 1.0)
+	elif team == Unit.Team.ENEMY:
+		accent = Color(1.0, 0.36, 0.26, 1.0)
+
+	var affil: StringName = &"player" if team == Unit.Team.PLAYER else &"enemy"
+	var stats: Array[Dictionary] = []
+
+	if not is_constructed:
+		var pct: int = int(round(construction_progress * 100.0))
+		var has_builder: bool = _has_active_builder()
+		stats.append({"label": "Construction", "value": "%d%% Complete" % pct})
+		stats.append({"label": "Builder", "value": "Worker Active" if has_builder else "Awaiting Worker"})
+		stats.append({"label": "Build Time", "value": "%.1fs Total" % build_time})
+		stats.append({"label": "Hull Integrity", "value": "%d / %d" % [int(round(current_hp)), int(round(max_hp))]})
+		return {
+			"title": display_name,
+			"subtitle": "UNDER CONSTRUCTION",
+			"affiliation": affil,
+			"accent_color": accent,
+			"ring_color": accent,
+			"show_hp_bar": true,
+			"hp_current": current_hp,
+			"hp_max": max_hp,
+			"show_primary_bar": true,
+			"primary_bar_label": "Building: %d%% — Under Construction" % pct,
+			"primary_bar_value": construction_progress * 100.0,
+			"primary_bar_max": 100.0,
+			"primary_bar_color": Color(0.32, 0.96, 1.0, 1.0),
+			"stats": stats,
+			"is_commandable": false,
+			"readonly_label": "CONSTRUCTION IN PROGRESS",
+		}
+
+	var econ: EconomyManager = _get_economy_manager()
+	var show_primary: bool = false
+	var primary_label: String = ""
+	var primary_val: float = 0.0
+	var primary_max: float = 1.0
+	var primary_col: Color = accent
+	var subtitle: String = "FRIENDLY STRUCTURE" if team == Unit.Team.PLAYER else "HOSTILE STRUCTURE"
+	var has_commands: bool = (team == Unit.Team.PLAYER) and (max_staff_slots > 0 or not trainable_unit_data.is_empty())
+
+	if max_staff_slots > 0:
+		subtitle = "FRIENDLY FACILITY"
+		var staffed: int = get_assigned_engineer_count()
+		var rate: int = staffed * compute_per_engineer
+		show_primary = true
+		primary_label = "Engineers: %d / %d Staffed" % [staffed, max_staff_slots]
+		primary_val = float(staffed)
+		primary_max = float(maxi(1, max_staff_slots))
+		primary_col = Color(0.32, 0.88, 1.0, 1.0)
+		var rate_str: String = "+%d / %.1fs" % [rate, compute_tick_interval] if staffed > 0 else "0 / %.1fs (Assign Eng)" % compute_tick_interval
+		stats.append({"label": "Compute Rate", "value": rate_str})
+		stats.append({"label": "Vent Status", "value": "Active Thermal Vent"})
+		stats.append({"label": "Staff Slots", "value": "%d / %d Engineers" % [staffed, max_staff_slots]})
+		stats.append({"label": "Construction", "value": "Operational"})
+	elif building_type_id == &"command_core":
+		subtitle = "COMMAND HEADQUARTERS"
+		var bw_str: String = "%d / %d" % [econ.get_bandwidth_used(team), econ.get_bandwidth_cap(team)] if econ != null else "--"
+		stats.append({"label": "Drop-Off", "value": "Biomass"})
+		stats.append({"label": "Bandwidth", "value": "+%d Capacity" % bandwidth_provided})
+		stats.append({"label": "Network", "value": bw_str})
+		var train_st: Dictionary = get_active_training_status()
+		if not train_st.is_empty():
+			stats.append({"label": "Training", "value": "%s (%d%%)" % [String(train_st["display_name"]), int(round(float(train_st["progress"]) * 100.0))]})
+		else:
+			stats.append({"label": "Status", "value": "Operational"})
+	elif building_type_id == &"silica_refinery":
+		subtitle = "FRIENDLY FACILITY"
+		var harvesters: int = _count_friendly_harvesters()
+		stats.append({"label": "Drop-Off", "value": "Silica"})
+		stats.append({"label": "Harvesters", "value": "%d Active" % harvesters})
+		var train_st_r: Dictionary = get_active_training_status()
+		if not train_st_r.is_empty():
+			stats.append({"label": "Training", "value": "%s (%d%%)" % [String(train_st_r["display_name"]), int(round(float(train_st_r["progress"]) * 100.0))]})
+		else:
+			stats.append({"label": "Status", "value": "Operational"})
+		stats.append({"label": "Throughput", "value": "25 Silica / Trip"})
+	elif building_type_id == &"bandwidth_relay":
+		subtitle = "INFRASTRUCTURE NODE"
+		var bw_net: String = "%d / %d" % [econ.get_bandwidth_used(team), econ.get_bandwidth_cap(team)] if econ != null else "--"
+		stats.append({"label": "Bandwidth", "value": "+%d Capacity" % bandwidth_provided})
+		stats.append({"label": "Network", "value": bw_net})
+		stats.append({"label": "Status", "value": "Online"})
+		stats.append({"label": "Role", "value": "Population Relay"})
+	else:
+		stats.append({"label": "Status", "value": "Operational"})
+
+	return {
+		"title": display_name,
+		"subtitle": subtitle,
+		"affiliation": affil,
+		"accent_color": accent,
+		"ring_color": accent,
+		"show_hp_bar": true,
+		"hp_current": current_hp,
+		"hp_max": max_hp,
+		"show_primary_bar": show_primary,
+		"primary_bar_label": primary_label,
+		"primary_bar_value": primary_val,
+		"primary_bar_max": primary_max,
+		"primary_bar_color": primary_col,
+		"stats": stats,
+		"is_commandable": has_commands,
+		"readonly_label": "PASSIVE INFRASTRUCTURE" if team == Unit.Team.PLAYER else "READ-ONLY TELEMETRY",
+	}
+
+
+func _has_active_builder() -> bool:
+	if not is_inside_tree():
+		return false
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if node is Unit and is_instance_valid(node):
+			var u: Unit = node
+			if not u.is_dead and u.command_state == Unit.CommandState.CONSTRUCTING and u._construction_target == self:
+				return true
+	return false
+
+
+func _count_friendly_harvesters() -> int:
+	if not is_inside_tree():
+		return 0
+	var count: int = 0
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if node is Unit and is_instance_valid(node):
+			var u: Unit = node
+			if not u.is_dead and u.team == team and u.get_unit_type_id() == &"silica_harvester":
+				count += 1
+	return count
 
 
 func _destroy() -> void:
@@ -351,6 +496,7 @@ func _tick_unit_training(delta: float) -> void:
 	_training_elapsed += delta
 	if _training_elapsed < duration:
 		training_changed.emit(self)
+		status_changed.emit(self)
 		return
 
 	_training_elapsed = 0.0
@@ -358,6 +504,7 @@ func _tick_unit_training(delta: float) -> void:
 	var unit_scene: PackedScene = front["scene"] as PackedScene
 	_spawn_trained_unit(unit_scene)
 	training_changed.emit(self)
+	status_changed.emit(self)
 
 
 func _spawn_trained_unit(unit_scene: PackedScene) -> void:

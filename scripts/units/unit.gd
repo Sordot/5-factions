@@ -28,6 +28,7 @@ const SETTLE_NO_PROGRESS_TIME: float = 0.45
 
 signal selection_changed(unit: Unit, selected: bool)
 signal health_changed(unit: Unit, current_hp: float, max_hp: float)
+signal status_changed(unit: Unit)
 signal died(unit: Unit)
 signal ability_cooldown_updated(ability_id: StringName, remaining: float, duration: float)
 signal ability_executed(ability_id: StringName, target_pos: Vector2)
@@ -103,6 +104,8 @@ func _ready() -> void:
 			gather_component.cargo_changed.connect(_on_gather_cargo_changed)
 		if not gather_component.gather_progress_changed.is_connected(_on_gather_progress_changed):
 			gather_component.gather_progress_changed.connect(_on_gather_progress_changed)
+		if not gather_component.gather_state_changed.is_connected(_on_gather_state_changed):
+			gather_component.gather_state_changed.connect(_on_gather_state_changed)
 	if cargo_visual != null:
 		cargo_visual.visible = false
 	if gather_bar_root != null:
@@ -360,6 +363,7 @@ func heal(amount: float) -> void:
 	current_hp = next_hp
 	_update_health_bar()
 	health_changed.emit(self, current_hp, data.max_hp)
+	status_changed.emit(self)
 
 
 func command_move(target_pos: Vector2) -> void:
@@ -432,6 +436,7 @@ func take_damage(amount: float, _attacker: Unit = null) -> void:
 		body_visual.modulate = Color(2.2, 2.2, 2.2, 1.0)
 	_update_health_bar()
 	health_changed.emit(self, current_hp, data.max_hp)
+	status_changed.emit(self)
 	if current_hp <= 0.0:
 		_die()
 
@@ -928,6 +933,109 @@ func _on_gather_cargo_changed(resource_type: StringName, amount: int) -> void:
 	if cargo_visual != null:
 		cargo_visual.visible = amount > 0
 	cargo_changed.emit(self, resource_type, amount)
+	status_changed.emit(self)
+
+
+func get_inspection_data() -> Dictionary:
+	var is_enemy: bool = (team == Team.ENEMY)
+	var accent: Color = Color(1.0, 0.36, 0.26, 1.0) if is_enemy else Color(0.24, 0.92, 0.88, 1.0)
+	var subtitle: String = "HOSTILE UNIT" if is_enemy else "FRIENDLY UNIT"
+
+	if not is_enemy and data != null:
+		if data.unit_type_id == &"scout_unit":
+			accent = Color(0.98, 0.78, 0.24, 1.0)
+			subtitle = "RECON UNIT"
+		elif data.unit_type_id == &"silica_harvester":
+			accent = Color(0.96, 0.68, 0.22, 1.0)
+			subtitle = "AUTOMATED HARVESTER"
+		elif data.can_staff_compute:
+			accent = Color(0.32, 0.82, 1.0, 1.0)
+			subtitle = "COMPUTE SPECIALIST"
+		elif data.can_gather:
+			accent = Color(0.28, 0.94, 0.56, 1.0)
+			subtitle = "UTILITY WORKER"
+
+	var max_hp_val: float = data.max_hp if data != null else 100.0
+	var stats: Array[Dictionary] = []
+	var show_primary: bool = false
+	var primary_label: String = ""
+	var primary_val: float = 0.0
+	var primary_max: float = 1.0
+
+	if data != null and data.can_gather:
+		var res_label: String = String(data.allowed_resource).capitalize() if data.allowed_resource != &"" else "Resource"
+		var carried: int = get_carried_amount()
+		show_primary = true
+		primary_label = "Cargo: %d / %d %s" % [carried, data.carry_capacity, res_label]
+		primary_val = float(carried)
+		primary_max = float(maxi(1, data.carry_capacity))
+		stats.append({"label": "Cargo", "value": "%d / %d %s" % [carried, data.carry_capacity, res_label]})
+		stats.append({"label": "Harvest", "value": "%.1fs Cycle" % data.gather_duration})
+		stats.append({"label": "Speed", "value": "%d px/s" % int(round(data.move_speed))})
+		stats.append({"label": "State", "value": _get_command_state_label()})
+	elif data != null and data.can_staff_compute:
+		stats.append({"label": "Role", "value": "Compute Staff"})
+		stats.append({"label": "Output", "value": "+5 Compute / 3.0s"})
+		stats.append({"label": "Speed", "value": "%d px/s" % int(round(data.move_speed))})
+		stats.append({"label": "Bandwidth", "value": "%d BW" % data.bandwidth_cost})
+	elif data != null:
+		stats.append({"label": "Damage", "value": "%d" % int(round(data.attack_damage))})
+		stats.append({"label": "Range", "value": "%d px" % int(round(data.attack_range))})
+		stats.append({"label": "Speed", "value": "%d px/s" % int(round(data.move_speed))})
+		if data.attack_damage > 0.0 and data.attack_cooldown > 0.0:
+			stats.append({"label": "Fire Rate", "value": "%.1f /s" % (1.0 / data.attack_cooldown)})
+		else:
+			stats.append({"label": "Status", "value": "Stationary Target"})
+
+	return {
+		"title": data.display_name if data != null else name,
+		"subtitle": subtitle,
+		"affiliation": &"enemy" if is_enemy else &"player",
+		"accent_color": accent,
+		"ring_color": accent,
+		"show_hp_bar": true,
+		"hp_current": current_hp,
+		"hp_max": max_hp_val,
+		"show_primary_bar": show_primary,
+		"primary_bar_label": primary_label,
+		"primary_bar_value": primary_val,
+		"primary_bar_max": primary_max,
+		"primary_bar_color": accent,
+		"stats": stats,
+		"is_commandable": not is_enemy,
+		"readonly_label": "HOSTILE UNIT  —  READ-ONLY TELEMETRY",
+	}
+
+
+func _get_command_state_label() -> String:
+	match command_state:
+		CommandState.IDLE:
+			return "Idle"
+		CommandState.MOVING:
+			return "Moving"
+		CommandState.ATTACK_MOVING:
+			return "Attack-Moving"
+		CommandState.ATTACKING_TARGET:
+			return "Engaging"
+		CommandState.HOLD_POSITION:
+			return "Holding"
+		CommandState.CASTING_ABILITY:
+			return "Casting"
+		CommandState.GATHERING:
+			if gather_component != null:
+				match gather_component.state:
+					GatherComponent.GatherState.GATHER_MOVING_TO_NODE:
+						return "To Resource"
+					GatherComponent.GatherState.GATHERING:
+						return "Harvesting"
+					GatherComponent.GatherState.GATHER_RETURNING_TO_BASE:
+						return "Returning Cargo"
+			return "Gathering"
+		CommandState.CONSTRUCTING:
+			return "Constructing"
+		CommandState.STAFFING_BUILDING:
+			return "Entering Node"
+	return "Active"
 
 
 func _on_gather_progress_changed(progress: float, is_active: bool) -> void:
@@ -935,6 +1043,10 @@ func _on_gather_progress_changed(progress: float, is_active: bool) -> void:
 		return
 	gather_bar_root.visible = is_active
 	gather_bar_fill.size.x = GATHER_BAR_WIDTH * clampf(progress, 0.0, 1.0)
+
+
+func _on_gather_state_changed(_new_state: GatherComponent.GatherState) -> void:
+	status_changed.emit(self)
 
 
 func _register_with_economy() -> void:

@@ -1,32 +1,18 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
-[ext_resource type="Script" path="res://ui/hud/selection_hud.gd" id="1_hud_script"]
+[ext_resource type="Theme" path="res://resources/themes/technozen_theme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://ui/hud/selection_hud.gd" id="2_hud_script"]
+[ext_resource type="PackedScene" path="res://ui/hud/command_tooltip.tscn" id="3_tooltip"]
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hud"]
-content_margin_left = 14.0
-content_margin_top = 10.0
-content_margin_right = 14.0
-content_margin_bottom = 10.0
-bg_color = Color(0.06, 0.09, 0.13, 0.88)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(0.24, 0.78, 0.84, 0.6)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 4
-corner_radius_bottom_left = 4
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hp_bg"]
-bg_color = Color(0.05, 0.08, 0.12, 0.95)
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hp_fill"]
+bg_color = Color(0.24, 0.94, 0.74, 1)
 corner_radius_top_left = 2
 corner_radius_top_right = 2
 corner_radius_bottom_right = 2
 corner_radius_bottom_left = 2
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hp_fill"]
-bg_color = Color(0.24, 0.94, 0.74, 1)
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_gauge_fill"]
+bg_color = Color(0.32, 0.88, 1, 1)
 corner_radius_top_left = 2
 corner_radius_top_right = 2
 corner_radius_bottom_right = 2
@@ -40,9 +26,10 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-script = ExtResource("1_hud_script")
+theme = ExtResource("1_theme")
+script = ExtResource("2_hud_script")
 
-[node name="BottomAnchor" type="MarginContainer" parent="."]
+[node name="BottomStack" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 7
 anchor_left = 0.5
@@ -50,127 +37,199 @@ anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
 offset_left = -520.0
-offset_top = -128.0
+offset_top = -236.0
 offset_right = 520.0
 offset_bottom = -8.0
 grow_horizontal = 2
 grow_vertical = 0
 mouse_filter = 2
+alignment = 2
+theme_override_constants/separation = 5
 
-[node name="BottomPanel" type="PanelContainer" parent="BottomAnchor"]
+[node name="TopUtilityRow" type="HBoxContainer" parent="BottomStack"]
+layout_mode = 2
+mouse_filter = 2
+alignment = 0
+
+[node name="ControlGroupRow" type="HBoxContainer" parent="BottomStack/TopUtilityRow"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
+size_flags_horizontal = 3
+size_flags_vertical = 8
+mouse_filter = 2
+theme_override_constants/separation = 5
 
-[node name="HBox" type="HBoxContainer" parent="BottomAnchor/BottomPanel"]
+[node name="CommandTooltip" parent="BottomStack/TopUtilityRow" instance=ExtResource("3_tooltip")]
+unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 16
+size_flags_horizontal = 8
+size_flags_vertical = 8
 
-[node name="LeftPanel" type="HBoxContainer" parent="BottomAnchor/BottomPanel/HBox"]
-custom_minimum_size = Vector2(235, 0)
+[node name="BottomPanel" type="PanelContainer" parent="BottomStack"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 118)
+layout_mode = 2
+
+[node name="HBox" type="HBoxContainer" parent="BottomStack/BottomPanel"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="LeftPanel" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox"]
+custom_minimum_size = Vector2(250, 0)
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="PortraitSwatch" type="ColorRect" parent="BottomAnchor/BottomPanel/HBox/LeftPanel"]
+[node name="PortraitSwatch" type="ColorRect" parent="BottomStack/BottomPanel/HBox/LeftPanel"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(46, 46)
 layout_mode = 2
 size_flags_vertical = 4
+mouse_filter = 2
 color = Color(0.24, 0.92, 0.88, 1)
 
-[node name="StatsVBox" type="VBoxContainer" parent="BottomAnchor/BottomPanel/HBox/LeftPanel"]
+[node name="StatsVBox" type="VBoxContainer" parent="BottomStack/BottomPanel/HBox/LeftPanel"]
 layout_mode = 2
 size_flags_horizontal = 3
+size_flags_vertical = 4
 theme_override_constants/separation = 3
 
-[node name="UnitNameLabel" type="Label" parent="BottomAnchor/BottomPanel/HBox/LeftPanel/StatsVBox"]
+[node name="UnitNameLabel" type="Label" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox"]
 unique_name_in_owner = true
 layout_mode = 2
+theme_override_colors/font_color = Color(0.94, 0.99, 1, 1)
+theme_override_font_sizes/font_size = 14
 text = "Test Unit  x1"
 
-[node name="UnitHPLabel" type="Label" parent="BottomAnchor/BottomPanel/HBox/LeftPanel/StatsVBox"]
+[node name="EntitySubtitleLabel" type="Label" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox"]
 unique_name_in_owner = true
 layout_mode = 2
+theme_override_colors/font_color = Color(0.45, 0.86, 0.92, 0.9)
+theme_override_font_sizes/font_size = 10
+text = "FRIENDLY UNIT"
+
+[node name="HPBox" type="VBoxContainer" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="UnitHPLabel" type="Label" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox/HPBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
 text = "HP: 100 / 100"
 
-[node name="UnitHPBar" type="ProgressBar" parent="BottomAnchor/BottomPanel/HBox/LeftPanel/StatsVBox"]
+[node name="UnitHPBar" type="ProgressBar" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox/HPBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 7)
 layout_mode = 2
-theme_override_styles/background = SubResource("StyleBoxFlat_hp_bg")
 theme_override_styles/fill = SubResource("StyleBoxFlat_hp_fill")
 value = 100.0
 show_percentage = false
 
-[node name="UnitStatsLabel" type="Label" parent="BottomAnchor/BottomPanel/HBox/LeftPanel/StatsVBox"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "DMG: 20  |  SPD: 260"
-
-[node name="Sep1" type="VSeparator" parent="BottomAnchor/BottomPanel/HBox"]
-layout_mode = 2
-
-[node name="CenterPanel" type="VBoxContainer" parent="BottomAnchor/BottomPanel/HBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_constants/separation = 6
-
-[node name="SubgroupTabsRow" type="HBoxContainer" parent="BottomAnchor/BottomPanel/HBox/CenterPanel"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="UnitBadgesGrid" type="GridContainer" parent="BottomAnchor/BottomPanel/HBox/CenterPanel"]
-unique_name_in_owner = true
-layout_mode = 2
-columns = 6
-
-[node name="BuildingInfoLabel" type="Label" parent="BottomAnchor/BottomPanel/HBox/CenterPanel"]
+[node name="PrimaryGaugeBox" type="VBoxContainer" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
-theme_override_colors/font_color = Color(0.72, 0.95, 0.98, 0.95)
-text = "Role: Biomass Drop-Off  |  Provides +10 Bandwidth"
+theme_override_constants/separation = 2
 
-[node name="Sep2" type="VSeparator" parent="BottomAnchor/BottomPanel/HBox"]
-layout_mode = 2
-
-[node name="RightPanel" type="VBoxContainer" parent="BottomAnchor/BottomPanel/HBox"]
-custom_minimum_size = Vector2(440, 0)
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="StandardCommandsRow" type="HBoxContainer" parent="BottomAnchor/BottomPanel/HBox/RightPanel"]
+[node name="PrimaryGaugeLabel" type="Label" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox/PrimaryGaugeBox"]
 unique_name_in_owner = true
 layout_mode = 2
+theme_override_colors/font_color = Color(0.74, 0.94, 1, 0.95)
+theme_override_font_sizes/font_size = 11
+text = "Remaining: 1,500 / 1,500"
+
+[node name="PrimaryGaugeBar" type="ProgressBar" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox/PrimaryGaugeBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 7)
+layout_mode = 2
+theme_override_styles/fill = SubResource("StyleBoxFlat_gauge_fill")
+value = 100.0
+show_percentage = false
+
+[node name="Sep1" type="VSeparator" parent="BottomStack/BottomPanel/HBox"]
+layout_mode = 2
+
+[node name="CenterPanel" type="VBoxContainer" parent="BottomStack/BottomPanel/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_constants/separation = 5
+
+[node name="SubgroupTabsRow" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox/CenterPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="UnitBadgesGrid" type="GridContainer" parent="BottomStack/BottomPanel/HBox/CenterPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 3
+columns = 6
+
+[node name="TelemetryGrid" type="GridContainer" parent="BottomStack/BottomPanel/HBox/CenterPanel"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 4
+columns = 2
+
+[node name="Sep2" type="VSeparator" parent="BottomStack/BottomPanel/HBox"]
+layout_mode = 2
+
+[node name="RightPanel" type="VBoxContainer" parent="BottomStack/BottomPanel/HBox"]
+custom_minimum_size = Vector2(436, 0)
+layout_mode = 2
+size_flags_vertical = 4
 theme_override_constants/separation = 6
 
-[node name="BtnCmdMove" type="Button" parent="BottomAnchor/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
+[node name="StandardCommandsRow" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox/RightPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="BtnCmdMove" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
+theme_override_font_sizes/font_size = 11
 text = "Move (RMB)"
 
-[node name="BtnCmdStop" type="Button" parent="BottomAnchor/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
+[node name="BtnCmdStop" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
+theme_override_font_sizes/font_size = 11
 text = "Stop (S)"
 
-[node name="BtnCmdHold" type="Button" parent="BottomAnchor/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
+[node name="BtnCmdHold" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
+theme_override_font_sizes/font_size = 11
 text = "Hold (H)"
 
-[node name="BtnCmdAMove" type="Button" parent="BottomAnchor/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
+[node name="BtnCmdAMove" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
+theme_override_font_sizes/font_size = 11
 text = "Atk-Mv (A)"
 
-[node name="AbilityRow" type="HBoxContainer" parent="BottomAnchor/BottomPanel/HBox/RightPanel"]
+[node name="AbilityRow" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox/RightPanel"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 5
+
+[node name="ReadOnlyLabel" type="Label" parent="BottomStack/BottomPanel/HBox/RightPanel"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.56, 0.68, 0.76, 0.78)
+theme_override_font_sizes/font_size = 12
+text = "READ-ONLY TELEMETRY"
+horizontal_alignment = 1

@@ -12,10 +12,11 @@ const CENTRAL_OBSTACLE_RECT: Rect2 = Rect2(-80.0, -100.0, 160.0, 200.0)
 signal selection_updated(selected_count: int)
 signal selection_changed(selected_units: Array[Unit], subgroups: Array[Dictionary], active_subgroup_index: int)
 signal building_selection_changed(building: Building)
+signal inspection_changed(entity: Node)
 signal control_groups_changed(summary: Dictionary)
 signal ability_targeting_changed(active_ability: AbilityData)
 
-@export var drag_threshold: float = 6.0
+@export var drag_threshold: float = 8.0
 @export var camera_path: NodePath
 
 @onready var selection_box: SelectionBox = $SelectionBox
@@ -24,6 +25,7 @@ signal ability_targeting_changed(active_ability: AbilityData)
 
 var selected_units: Array[Unit] = []
 var selected_building: Building = null
+var inspected_entity: Node = null
 var subgroups: Array[Dictionary] = []
 var active_subgroup_index: int = 0
 var inspected_enemy: Unit = null
@@ -35,6 +37,8 @@ var _drag_start_world: Vector2 = Vector2.ZERO
 var _drag_start_screen: Vector2 = Vector2.ZERO
 var _last_recall_group: int = -1
 var _last_recall_time_ms: int = 0
+var _last_click_unit: Unit = null
+var _last_click_time_ms: int = 0
 var _tracked_death_units: Array[Unit] = []
 
 
@@ -91,6 +95,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_e", "E"):
 		return
+	if event.is_action_pressed("cmd_ability_e") and selected_units.is_empty() and inspected_entity is Building:
+		var b_node: Building = inspected_entity
+		if is_instance_valid(b_node) and b_node.team == Unit.Team.PLAYER and b_node.max_staff_slots > 0 and b_node.get_assigned_engineer_count() > 0:
+			b_node.eject_engineers()
+			get_viewport().set_input_as_handled()
+			return
 
 	if event is InputEventKey:
 		var key_event: InputEventKey = event
@@ -135,7 +145,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_drag_start_world = get_global_mouse_position()
 				_drag_start_screen = mouse_event.position
 			elif _is_dragging:
-				_finish_left_selection(mouse_event.position)
+				_finish_left_selection(mouse_event.position, mouse_event.shift_pressed)
 		elif mouse_event.button_index == MOUSE_BUTTON_RIGHT and mouse_event.pressed:
 			if active_targeting_ability != null:
 				cancel_ability_targeting()
@@ -151,19 +161,18 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func clear_selection() -> void:
 	cancel_ability_targeting()
-	_set_selected_building(null)
-	_set_inspected_enemy(null)
+	_set_inspected_entity(null)
 	_set_selected_units([])
 
 
 func select_in_world_rect(world_rect: Rect2) -> void:
 	cancel_ability_targeting()
-	_select_in_rect(world_rect)
+	_select_in_rect(world_rect, false)
 
 
 func select_at_world_point(world_point: Vector2) -> void:
 	cancel_ability_targeting()
-	_select_at_point(world_point)
+	_select_at_point(world_point, false)
 
 
 func cycle_subgroup() -> void:
@@ -374,8 +383,7 @@ func recall_control_group(group_num: int, allow_double_tap_center: bool = true) 
 
 	control_groups[group_num] = group_units
 	cancel_ability_targeting()
-	_set_selected_building(null)
-	_set_inspected_enemy(null)
+	_set_inspected_entity(null)
 	_set_selected_units(group_units)
 	_emit_control_groups_changed()
 
@@ -472,59 +480,121 @@ func _get_rts_camera() -> RTSCamera:
 	return null
 
 
-func _finish_left_selection(end_screen_pos: Vector2) -> void:
+func _finish_left_selection(end_screen_pos: Vector2, shift_pressed: bool = false) -> void:
 	_is_dragging = false
 	selection_box.update_box(Rect2(), false)
 
 	var end_world_pos: Vector2 = get_global_mouse_position()
 	if end_screen_pos.distance_to(_drag_start_screen) < drag_threshold:
-		_select_at_point(end_world_pos)
+		_select_at_point(end_world_pos, shift_pressed)
 	else:
-		_select_in_rect(_build_world_rect(_drag_start_world, end_world_pos))
+		_select_in_rect(_build_world_rect(_drag_start_world, end_world_pos), shift_pressed)
 
 
-func _select_at_point(world_point: Vector2) -> void:
+func _select_at_point(world_point: Vector2, shift_pressed: bool = false) -> void:
+	# 1. Friendly player unit (supports Shift+Click toggle & Double-Click type select)
 	var clicked_player: Unit = _find_unit_at_point(world_point, Unit.Team.PLAYER)
 	if clicked_player != null:
-		_set_selected_building(null)
-		_set_inspected_enemy(null)
-		_set_selected_units([clicked_player])
+		_set_inspected_entity(null)
+		var now_ms: int = Time.get_ticks_msec()
+		if not shift_pressed and _last_click_unit == clicked_player and (now_ms - _last_click_time_ms) <= DOUBLE_TAP_WINDOW_MS:
+			var same_type: Array[Unit] = _find_visible_units_of_type(clicked_player.get_unit_type_id(), Unit.Team.PLAYER)
+			_last_click_unit = null
+			_last_click_time_ms = 0
+			_set_selected_units(same_type)
+			return
+
+		_last_click_unit = clicked_player
+		_last_click_time_ms = now_ms
+
+		if shift_pressed:
+			var next_sel: Array[Unit] = selected_units.duplicate()
+			if next_sel.has(clicked_player):
+				next_sel.erase(clicked_player)
+			else:
+				next_sel.append(clicked_player)
+			_set_selected_units(next_sel, false)
+		else:
+			_set_selected_units([clicked_player])
 		return
 
+	_last_click_unit = null
+	_last_click_time_ms = 0
+
+	# 2. Friendly player building -> inspect (and command if commandable)
 	var clicked_building: Building = _find_building_at_point(world_point, Unit.Team.PLAYER)
 	if clicked_building != null:
-		_set_inspected_enemy(null)
 		_set_selected_units([])
-		_set_selected_building(clicked_building)
+		_set_inspected_entity(clicked_building)
 		return
 
+	# 3. Enemy unit / TargetDummy -> read-only inspection
 	var clicked_enemy: Unit = _find_unit_at_point(world_point, Unit.Team.ENEMY)
 	if clicked_enemy != null:
-		_set_selected_building(null)
 		_set_selected_units([])
-		_set_inspected_enemy(clicked_enemy)
+		_set_inspected_entity(clicked_enemy)
 		return
 
-	_set_selected_building(null)
-	_set_inspected_enemy(null)
-	_set_selected_units([])
+	# 4. ResourceNode (BiomassNode, SilicaVein, ComputeVent) -> read-only inspection
+	var clicked_resource: ResourceNode = _find_resource_node_at_point(world_point)
+	if clicked_resource != null:
+		_set_selected_units([])
+		_set_inspected_entity(clicked_resource)
+		return
+
+	# 5. Empty ground
+	if not shift_pressed:
+		_set_inspected_entity(null)
+		_set_selected_units([])
 
 
-func _select_in_rect(world_rect: Rect2) -> void:
-	_set_selected_building(null)
-	_set_inspected_enemy(null)
+func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
+	_last_click_unit = null
+	_last_click_time_ms = 0
 	var hits: Array[Unit] = []
 	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
 		if not (node is Unit):
 			continue
 		var unit: Unit = node
-		if not is_instance_valid(unit) or unit.is_dead:
+		if not is_instance_valid(unit) or unit.is_dead or unit.is_staffed:
 			continue
 		if unit.team != Unit.Team.PLAYER:
 			continue
 		if world_rect.has_point(unit.global_position):
 			hits.append(unit)
-	_set_selected_units(hits)
+
+	if shift_pressed and not selected_units.is_empty():
+		var combined: Array[Unit] = selected_units.duplicate()
+		for u: Unit in hits:
+			if not combined.has(u):
+				combined.append(u)
+		_set_inspected_entity(null)
+		_set_selected_units(combined, false)
+	else:
+		_set_inspected_entity(null)
+		_set_selected_units(hits)
+
+
+func _find_visible_units_of_type(type_id: StringName, target_team: Unit.Team) -> Array[Unit]:
+	var matches: Array[Unit] = []
+	var cam: RTSCamera = _get_rts_camera()
+	var view_rect: Rect2 = Rect2()
+	var use_view_rect: bool = false
+	if cam != null:
+		var vp_size: Vector2 = get_viewport_rect().size / cam.zoom
+		view_rect = Rect2(cam.global_position - vp_size * 0.5, vp_size)
+		use_view_rect = true
+	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
+		if not (node is Unit) or not is_instance_valid(node):
+			continue
+		var unit: Unit = node
+		if unit.is_dead or unit.is_staffed or unit.team != target_team:
+			continue
+		if unit.get_unit_type_id() != type_id:
+			continue
+		if not use_view_rect or view_rect.has_point(unit.global_position):
+			matches.append(unit)
+	return matches
 
 
 func _set_selected_units(new_selection: Array[Unit], reset_subgroup_index: bool = true) -> void:
@@ -580,32 +650,67 @@ func _disconnect_death_trackers() -> void:
 	_tracked_death_units.clear()
 
 
-func _set_inspected_enemy(enemy: Unit) -> void:
-	if inspected_enemy != null and is_instance_valid(inspected_enemy) and inspected_enemy != enemy:
-		inspected_enemy.set_selected(false)
-	inspected_enemy = enemy
-	if inspected_enemy != null and is_instance_valid(inspected_enemy):
-		inspected_enemy.set_selected(true)
+func _set_inspected_entity(entity: Node) -> void:
+	var next_entity: Node = null
+	if entity != null and is_instance_valid(entity):
+		if entity is Building and not (entity as Building).is_destroyed:
+			next_entity = entity
+		elif entity is Unit and not (entity as Unit).is_dead:
+			next_entity = entity
+		elif entity is ResourceNode and not (entity as ResourceNode).is_depleted():
+			next_entity = entity
 
-
-func _set_selected_building(building: Building) -> void:
-	var next_building: Building = building if (building != null and is_instance_valid(building) and not building.is_destroyed) else null
-	if selected_building == next_building:
+	if inspected_entity == next_entity:
 		return
-	if selected_building != null and is_instance_valid(selected_building):
-		if selected_building.destroyed.is_connected(_on_selected_building_destroyed):
-			selected_building.destroyed.disconnect(_on_selected_building_destroyed)
-		selected_building.set_selected(false)
-	selected_building = next_building
-	if selected_building != null:
-		selected_building.set_selected(true)
-		if not selected_building.destroyed.is_connected(_on_selected_building_destroyed):
-			selected_building.destroyed.connect(_on_selected_building_destroyed)
-	building_selection_changed.emit(selected_building)
+
+	# Clean up previous inspected entity
+	if inspected_entity != null and is_instance_valid(inspected_entity):
+		if inspected_entity is Building:
+			var prev_b: Building = inspected_entity
+			if prev_b.destroyed.is_connected(_on_inspected_entity_removed):
+				prev_b.destroyed.disconnect(_on_inspected_entity_removed)
+			prev_b.set_selected(false)
+		elif inspected_entity is Unit:
+			var prev_u: Unit = inspected_entity
+			if prev_u.died.is_connected(_on_inspected_entity_removed):
+				prev_u.died.disconnect(_on_inspected_entity_removed)
+			prev_u.set_selected(false)
+		elif inspected_entity is ResourceNode:
+			var prev_r: ResourceNode = inspected_entity
+			if prev_r.depleted.is_connected(_on_inspected_entity_removed):
+				prev_r.depleted.disconnect(_on_inspected_entity_removed)
+			prev_r.set_inspected(false)
+
+	var prev_building: Building = selected_building
+	inspected_entity = next_entity
+	selected_building = inspected_entity as Building if inspected_entity is Building else null
+	inspected_enemy = inspected_entity as Unit if (inspected_entity is Unit and (inspected_entity as Unit).team == Unit.Team.ENEMY) else null
+
+	# Activate visual ring & lifecycle tracker on new inspected entity
+	if inspected_entity != null:
+		if inspected_entity is Building:
+			var b: Building = inspected_entity
+			b.set_selected(true)
+			if not b.destroyed.is_connected(_on_inspected_entity_removed):
+				b.destroyed.connect(_on_inspected_entity_removed)
+		elif inspected_entity is Unit:
+			var u: Unit = inspected_entity
+			u.set_selected(true)
+			if not u.died.is_connected(_on_inspected_entity_removed):
+				u.died.connect(_on_inspected_entity_removed)
+		elif inspected_entity is ResourceNode:
+			var r: ResourceNode = inspected_entity
+			r.set_inspected(true)
+			if not r.depleted.is_connected(_on_inspected_entity_removed):
+				r.depleted.connect(_on_inspected_entity_removed)
+
+	if prev_building != selected_building:
+		building_selection_changed.emit(selected_building)
+	inspection_changed.emit(inspected_entity)
 
 
-func _on_selected_building_destroyed(_building: Building) -> void:
-	_set_selected_building(null)
+func _on_inspected_entity_removed(_entity: Variant = null) -> void:
+	_set_inspected_entity(null)
 
 
 func _handle_right_click(world_pos: Vector2) -> void:
@@ -1017,10 +1122,15 @@ func _prune_invalid_units() -> void:
 				valid.append(unit)
 	if valid.size() != selected_units.size():
 		_set_selected_units(valid, false)
-	if inspected_enemy != null and (not is_instance_valid(inspected_enemy) or inspected_enemy.is_dead):
-		inspected_enemy = null
-	if selected_building != null and (not is_instance_valid(selected_building) or selected_building.is_destroyed):
-		_set_selected_building(null)
+	if inspected_entity != null:
+		if not is_instance_valid(inspected_entity):
+			_set_inspected_entity(null)
+		elif inspected_entity is Building and (inspected_entity as Building).is_destroyed:
+			_set_inspected_entity(null)
+		elif inspected_entity is Unit and (inspected_entity as Unit).is_dead:
+			_set_inspected_entity(null)
+		elif inspected_entity is ResourceNode and (inspected_entity as ResourceNode).is_depleted():
+			_set_inspected_entity(null)
 
 
 func _build_world_rect(a: Vector2, b: Vector2) -> Rect2:

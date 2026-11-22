@@ -3,17 +3,24 @@ extends Control
 
 @export var selection_controller_path: NodePath
 
+@onready var control_group_row: HBoxContainer = %ControlGroupRow
+@onready var command_tooltip: CommandTooltip = %CommandTooltip
 @onready var bottom_panel: PanelContainer = %BottomPanel
 @onready var portrait_swatch: ColorRect = %PortraitSwatch
 @onready var unit_name_label: Label = %UnitNameLabel
+@onready var entity_subtitle_label: Label = %EntitySubtitleLabel
+@onready var hp_box: VBoxContainer = %HPBox
 @onready var unit_hp_label: Label = %UnitHPLabel
 @onready var unit_hp_bar: ProgressBar = %UnitHPBar
-@onready var unit_stats_label: Label = %UnitStatsLabel
+@onready var primary_gauge_box: VBoxContainer = %PrimaryGaugeBox
+@onready var primary_gauge_label: Label = %PrimaryGaugeLabel
+@onready var primary_gauge_bar: ProgressBar = %PrimaryGaugeBar
 @onready var subgroup_tabs_row: HBoxContainer = %SubgroupTabsRow
 @onready var unit_badges_grid: GridContainer = %UnitBadgesGrid
-@onready var building_info_label: Label = %BuildingInfoLabel
+@onready var telemetry_grid: GridContainer = %TelemetryGrid
 @onready var standard_commands_row: HBoxContainer = %StandardCommandsRow
 @onready var ability_row: HBoxContainer = %AbilityRow
+@onready var read_only_label: Label = %ReadOnlyLabel
 @onready var btn_cmd_move: Button = %BtnCmdMove
 @onready var btn_cmd_stop: Button = %BtnCmdStop
 @onready var btn_cmd_hold: Button = %BtnCmdHold
@@ -22,20 +29,25 @@ extends Control
 var _selection_controller: SelectionController = null
 var _economy_manager: EconomyManager = null
 var _connected_units: Array[Unit] = []
-var _selected_building: Building = null
+var _inspected_entity: Node = null
 var _active_subgroup_units: Array[Unit] = []
 var _active_abilities: Array[AbilityData] = []
 var _ability_buttons: Dictionary = {}
 var _building_action_buttons: Array[Dictionary] = []
 var _targeting_ability: AbilityData = null
+var _hp_fill_style: StyleBoxFlat = null
+var _gauge_fill_style: StyleBoxFlat = null
 
 
 func _ready() -> void:
+	_setup_dynamic_bar_styles()
 	_selection_controller = get_node_or_null(selection_controller_path) as SelectionController
 	if _selection_controller != null:
 		_selection_controller.selection_changed.connect(_on_selection_changed)
-		_selection_controller.building_selection_changed.connect(_on_building_selection_changed)
+		_selection_controller.inspection_changed.connect(_on_inspection_changed)
+		_selection_controller.control_groups_changed.connect(_on_control_groups_changed)
 		_selection_controller.ability_targeting_changed.connect(_on_ability_targeting_changed)
+		_on_control_groups_changed(_selection_controller.get_control_groups_summary())
 
 	_connect_economy_manager()
 
@@ -50,7 +62,42 @@ func _ready() -> void:
 	btn_cmd_move.disabled = true
 	btn_cmd_amove.disabled = true
 
+	_bind_static_command_tooltips()
 	bottom_panel.visible = false
+
+
+func _setup_dynamic_bar_styles() -> void:
+	if unit_hp_bar != null:
+		_hp_fill_style = StyleBoxFlat.new()
+		_hp_fill_style.bg_color = Color(0.24, 0.94, 0.74, 1.0)
+		_hp_fill_style.set_corner_radius_all(2)
+		unit_hp_bar.add_theme_stylebox_override("fill", _hp_fill_style)
+	if primary_gauge_bar != null:
+		_gauge_fill_style = StyleBoxFlat.new()
+		_gauge_fill_style.bg_color = Color(0.32, 0.88, 1.0, 1.0)
+		_gauge_fill_style.set_corner_radius_all(2)
+		primary_gauge_bar.add_theme_stylebox_override("fill", _gauge_fill_style)
+
+
+func _bind_static_command_tooltips() -> void:
+	_attach_tooltip(btn_cmd_move, "Move", "RMB", "Right-Click Ground", "Orders selected units to navigate to the target location.")
+	_attach_tooltip(btn_cmd_stop, "Stop", "S", "Immediate", "Cancels current movement, gathering, construction, or target.")
+	_attach_tooltip(btn_cmd_hold, "Hold Position", "H", "Immediate", "Locks unit position while engaging enemies inside attack range.")
+	_attach_tooltip(btn_cmd_amove, "Attack-Move", "A", "Smart-Cast at Cursor", "Moves toward cursor and automatically engages hostile targets along the way.")
+
+
+func _attach_tooltip(btn: Button, title: String, hotkey: String, meta: String, desc: String) -> void:
+	if btn == null:
+		return
+	btn.tooltip_text = ""
+	btn.mouse_entered.connect(func() -> void:
+		if command_tooltip != null:
+			command_tooltip.show_tooltip(title, hotkey, meta, desc)
+	)
+	btn.mouse_exited.connect(func() -> void:
+		if command_tooltip != null:
+			command_tooltip.hide_tooltip()
+	)
 
 
 func _connect_economy_manager() -> void:
@@ -70,15 +117,49 @@ func _on_economy_updated(team: int, _resources: Dictionary) -> void:
 		return
 	if not _active_abilities.is_empty():
 		_refresh_all_ability_states()
-	if _selected_building != null and is_instance_valid(_selected_building):
-		_refresh_building_action_buttons(_selected_building)
+	if _inspected_entity is Building and is_instance_valid(_inspected_entity):
+		_refresh_building_action_buttons(_inspected_entity as Building)
 
 
 func _on_bandwidth_updated(team: int, _used: int, _cap: int) -> void:
 	if team != int(Unit.Team.PLAYER):
 		return
-	if _selected_building != null and is_instance_valid(_selected_building):
-		_refresh_building_action_buttons(_selected_building)
+	if _inspected_entity is Building and is_instance_valid(_inspected_entity):
+		_render_inspected_entity(_inspected_entity, false)
+
+
+func _on_control_groups_changed(summary: Dictionary) -> void:
+	if control_group_row == null:
+		return
+	for child: Node in control_group_row.get_children():
+		child.queue_free()
+
+	if summary.is_empty():
+		control_group_row.visible = false
+		return
+
+	control_group_row.visible = true
+	for num: int in range(1, 10):
+		if not summary.has(num):
+			continue
+		var count: int = int(summary[num])
+		var pill: Button = Button.new()
+		pill.focus_mode = Control.FOCUS_NONE
+		pill.add_theme_font_size_override("font_size", 11)
+		pill.text = "[%d] x%d" % [num, count]
+		var captured_num: int = num
+		pill.pressed.connect(func() -> void:
+			if _selection_controller != null:
+				_selection_controller.recall_control_group(captured_num, true)
+		)
+		_attach_tooltip(
+			pill,
+			"Control Group %d" % num,
+			str(num),
+			"%d Unit(s) Assigned" % count,
+			"Click or press %d to select. Double-tap to center camera. Ctrl+%d to reassign." % [num, num]
+		)
+		control_group_row.add_child(pill)
 
 
 func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Dictionary], active_subgroup_index: int) -> void:
@@ -86,119 +167,166 @@ func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Diction
 	_active_subgroup_units = []
 	_active_abilities = []
 	_building_action_buttons.clear()
+	if command_tooltip != null:
+		command_tooltip.hide_tooltip()
 
 	if selected_units.is_empty() or subgroups.is_empty():
-		if _selected_building != null and is_instance_valid(_selected_building) and not _selected_building.is_destroyed:
-			_show_building_panel(_selected_building)
+		if _inspected_entity != null and is_instance_valid(_inspected_entity):
+			_render_inspected_entity(_inspected_entity, true)
 		else:
 			bottom_panel.visible = false
 		return
 
-	_disconnect_building_signals()
-	_selected_building = null
-	bottom_panel.visible = true
-	subgroup_tabs_row.visible = true
-	unit_badges_grid.visible = true
-	building_info_label.visible = false
-	standard_commands_row.visible = true
-	ability_row.visible = true
+	_disconnect_inspected_signals()
+	_inspected_entity = null
 
+	bottom_panel.visible = true
 	var safe_idx: int = clampi(active_subgroup_index, 0, subgroups.size() - 1)
 	var active_group: Dictionary = subgroups[safe_idx]
 	_active_subgroup_units = active_group["units"]
 
 	_connect_unit_signals(_active_subgroup_units)
-	_rebuild_subgroup_tabs(subgroups, safe_idx)
-	_rebuild_unit_badges(_active_subgroup_units)
+
+	var is_single_unit: bool = (selected_units.size() == 1 and is_instance_valid(selected_units[0]))
+	subgroup_tabs_row.visible = not is_single_unit
+	unit_badges_grid.visible = not is_single_unit
+	telemetry_grid.visible = is_single_unit
+
+	standard_commands_row.visible = true
+	ability_row.visible = true
+	read_only_label.visible = false
+
+	if is_single_unit:
+		var lead_data: Dictionary = InspectionHelper.get_inspection_data(selected_units[0])
+		_apply_left_column(lead_data)
+		_rebuild_telemetry_grid(lead_data["stats"])
+	else:
+		_refresh_squad_left_column(active_group)
+		_rebuild_subgroup_tabs(subgroups, safe_idx)
+		_rebuild_unit_badges(_active_subgroup_units)
+
 	_rebuild_ability_buttons(active_group)
-	_refresh_left_panel(active_group)
 	_refresh_all_ability_states()
 
 
-func _on_building_selection_changed(building: Building) -> void:
-	_disconnect_building_signals()
-	_selected_building = building if (building != null and is_instance_valid(building) and not building.is_destroyed) else null
+func _on_inspection_changed(entity: Node) -> void:
+	_disconnect_inspected_signals()
+	_inspected_entity = entity if (entity != null and is_instance_valid(entity)) else null
+	if command_tooltip != null:
+		command_tooltip.hide_tooltip()
 
-	if _selected_building == null:
+	if _inspected_entity == null:
 		_building_action_buttons.clear()
 		if _active_subgroup_units.is_empty():
 			bottom_panel.visible = false
 		return
 
-	_connect_building_signals(_selected_building)
-	_show_building_panel(_selected_building, true)
+	_connect_inspected_signals(_inspected_entity)
+	_render_inspected_entity(_inspected_entity, true)
 
 
-func _show_building_panel(building: Building, rebuild_actions: bool = false) -> void:
+func _render_inspected_entity(entity: Node, rebuild_actions: bool) -> void:
+	if entity == null or not is_instance_valid(entity):
+		bottom_panel.visible = false
+		return
+
+	var info: Dictionary = InspectionHelper.get_inspection_data(entity)
 	bottom_panel.visible = true
 	subgroup_tabs_row.visible = false
 	unit_badges_grid.visible = false
-	building_info_label.visible = true
+	telemetry_grid.visible = true
 	standard_commands_row.visible = false
 
 	_ability_buttons.clear()
 	_active_abilities.clear()
 
-	if building.building_type_id == &"silica_refinery":
-		portrait_swatch.color = Color(0.98, 0.78, 0.28, 1.0)
-	elif building.building_type_id == &"compute_node":
-		portrait_swatch.color = Color(0.32, 0.84, 1.0, 1.0)
-	elif building.building_type_id == &"bandwidth_relay":
-		portrait_swatch.color = Color(0.76, 0.58, 1.0, 1.0)
+	_apply_left_column(info)
+	_rebuild_telemetry_grid(info["stats"])
+
+	var is_commandable: bool = bool(info.get("is_commandable", false))
+	if is_commandable and entity is Building:
+		var building: Building = entity
+		read_only_label.visible = false
+		if rebuild_actions:
+			_rebuild_building_action_buttons(building)
+		else:
+			_refresh_building_action_buttons(building)
 	else:
-		portrait_swatch.color = Color(0.22, 0.88, 0.94, 1.0)
-
-	unit_name_label.text = building.display_name
-	unit_hp_label.text = "HP: %d / %d" % [int(round(building.current_hp)), int(round(building.max_hp))]
-	if unit_hp_bar != null:
-		unit_hp_bar.max_value = maxf(1.0, building.max_hp)
-		unit_hp_bar.value = clampf(building.current_hp, 0.0, building.max_hp)
-
-	if not building.is_constructed:
-		var pct: int = int(round(building.construction_progress * 100.0))
-		unit_stats_label.text = "Constructing: %d%%" % pct
-		building_info_label.text = "Under Construction (%d%%)  —  Worker building..." % pct
-		ability_row.visible = false
 		if rebuild_actions:
 			_clear_ability_row()
+		ability_row.visible = false
+		read_only_label.visible = true
+		read_only_label.text = String(info.get("readonly_label", "READ-ONLY TELEMETRY"))
+
+
+func _apply_left_column(info: Dictionary) -> void:
+	var accent: Color = info.get("accent_color", Color(0.24, 0.92, 0.88, 1.0))
+	portrait_swatch.color = accent
+	unit_name_label.text = String(info.get("title", "Entity"))
+	entity_subtitle_label.text = String(info.get("subtitle", "TELEMETRY"))
+	entity_subtitle_label.modulate = accent
+
+	var show_hp: bool = bool(info.get("show_hp_bar", false))
+	hp_box.visible = show_hp
+	if show_hp:
+		var cur_hp: float = float(info.get("hp_current", 0.0))
+		var max_hp: float = maxf(1.0, float(info.get("hp_max", 1.0)))
+		unit_hp_label.text = "HP: %s / %s" % [
+			InspectionHelper.format_number(int(round(cur_hp))),
+			InspectionHelper.format_number(int(round(max_hp))),
+		]
+		unit_hp_bar.max_value = max_hp
+		unit_hp_bar.value = clampf(cur_hp, 0.0, max_hp)
+		var is_enemy: bool = (info.get("affiliation", &"neutral") == &"enemy")
+		if _hp_fill_style != null:
+			_hp_fill_style.bg_color = Color(0.96, 0.34, 0.26, 1.0) if is_enemy else Color(0.24, 0.94, 0.74, 1.0)
+
+	var show_primary: bool = bool(info.get("show_primary_bar", false))
+	primary_gauge_box.visible = show_primary
+	if show_primary:
+		primary_gauge_label.text = String(info.get("primary_bar_label", ""))
+		primary_gauge_bar.max_value = maxf(1.0, float(info.get("primary_bar_max", 100.0)))
+		primary_gauge_bar.value = clampf(float(info.get("primary_bar_value", 0.0)), 0.0, primary_gauge_bar.max_value)
+		if _gauge_fill_style != null:
+			_gauge_fill_style.bg_color = info.get("primary_bar_color", accent)
+
+
+func _refresh_squad_left_column(active_group: Dictionary) -> void:
+	var units: Array[Unit] = active_group.get("units", [])
+	if units.is_empty() or not is_instance_valid(units[0]):
 		return
+	var lead_info: Dictionary = InspectionHelper.get_inspection_data(units[0])
+	lead_info["title"] = "%s  x%d" % [String(active_group.get("display_name", "Unit")), units.size()]
+	_apply_left_column(lead_info)
 
-	var stat_parts: PackedStringArray = PackedStringArray()
-	if building.bandwidth_provided > 0:
-		stat_parts.append("+%d Bandwidth" % building.bandwidth_provided)
-	if building.max_staff_slots > 0:
-		stat_parts.append("Engineers: %d / %d" % [building.get_assigned_engineer_count(), building.max_staff_slots])
-	if building.is_resource_dropoff:
-		var res_names: PackedStringArray = PackedStringArray()
-		for r: StringName in building.accepted_resources:
-			res_names.append(String(r).capitalize())
-		stat_parts.append("%s Drop-Off" % "/".join(res_names))
-	unit_stats_label.text = "  |  ".join(stat_parts) if not stat_parts.is_empty() else "Structure"
 
-	var info_parts: PackedStringArray = PackedStringArray()
-	if building.max_staff_slots > 0:
-		var staffed: int = building.get_assigned_engineer_count()
-		var rate: int = staffed * building.compute_per_engineer
-		info_parts.append("Engineers: %d / %d  (+%d Compute / %.0fs)" % [staffed, building.max_staff_slots, rate, building.compute_tick_interval])
-	if building.is_resource_dropoff:
-		var drop_res: PackedStringArray = PackedStringArray()
-		for r: StringName in building.accepted_resources:
-			drop_res.append(String(r).capitalize())
-		info_parts.append("%s Drop-Off" % "/".join(drop_res))
-	if building.bandwidth_provided > 0:
-		info_parts.append("+%d Bandwidth" % building.bandwidth_provided)
+func _rebuild_telemetry_grid(stats: Variant) -> void:
+	for child: Node in telemetry_grid.get_children():
+		child.queue_free()
 
-	var train_status: Dictionary = building.get_active_training_status()
-	if not train_status.is_empty():
-		var t_pct: int = int(round(float(train_status["progress"]) * 100.0))
-		info_parts.append("Training %s (%d%%) [Q:%d]" % [String(train_status["display_name"]), t_pct, int(train_status["queue_size"])])
+	if not (stats is Array):
+		return
+	for item: Variant in stats:
+		if not (item is Dictionary):
+			continue
+		var entry: Dictionary = item
+		var cell: HBoxContainer = HBoxContainer.new()
+		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cell.add_theme_constant_override("separation", 6)
 
-	building_info_label.text = "  |  ".join(info_parts) if not info_parts.is_empty() else "Friendly Structure"
+		var k_label: Label = Label.new()
+		k_label.text = "%s:" % String(entry.get("label", ""))
+		k_label.add_theme_font_size_override("font_size", 11)
+		k_label.add_theme_color_override("font_color", Color(0.56, 0.74, 0.82, 0.9))
+		cell.add_child(k_label)
 
-	if rebuild_actions:
-		_rebuild_building_action_buttons(building)
-	else:
-		_refresh_building_action_buttons(building)
+		var v_label: Label = Label.new()
+		v_label.text = String(entry.get("value", ""))
+		v_label.add_theme_font_size_override("font_size", 12)
+		v_label.add_theme_color_override("font_color", Color(0.92, 0.98, 1.0, 1.0))
+		cell.add_child(v_label)
+
+		telemetry_grid.add_child(cell)
 
 
 func _clear_ability_row() -> void:
@@ -216,18 +344,23 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 
 	var has_buttons: bool = false
 
-	# Compute Node: Eject Engineers button
 	if building.max_staff_slots > 0:
 		has_buttons = true
 		var eject_btn: Button = Button.new()
 		eject_btn.focus_mode = Control.FOCUS_NONE
-		eject_btn.custom_minimum_size = Vector2(150.0, 34.0)
+		eject_btn.custom_minimum_size = Vector2(168.0, 34.0)
 		eject_btn.add_theme_font_size_override("font_size", 12)
-		eject_btn.tooltip_text = "Release all staffed Engineers from this Compute Node."
 		var captured_building: Building = building
 		eject_btn.pressed.connect(func() -> void:
 			if is_instance_valid(captured_building):
 				captured_building.eject_engineers()
+		)
+		_attach_tooltip(
+			eject_btn,
+			"Eject Engineers",
+			"E",
+			"Instant Release",
+			"Releases all Engineers currently staffed inside this Compute Node back onto the battlefield."
 		)
 		ability_row.add_child(eject_btn)
 		_building_action_buttons.append({
@@ -235,7 +368,6 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 			"button": eject_btn,
 		})
 
-	# Production buildings: Trainable unit buttons
 	for i: int in range(mini(building.trainable_unit_data.size(), building.trainable_unit_scenes.size())):
 		var u_data: UnitData = building.trainable_unit_data[i]
 		if u_data == null:
@@ -244,13 +376,20 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 		var train_btn: Button = Button.new()
 		train_btn.focus_mode = Control.FOCUS_NONE
 		train_btn.custom_minimum_size = Vector2(138.0, 34.0)
-		train_btn.add_theme_font_size_override("font_size", 12)
-		train_btn.tooltip_text = "Train %s (%s, %d BW, %.1fs)" % [u_data.display_name, u_data.get_cost_label(), u_data.bandwidth_cost, u_data.build_time]
+		train_btn.add_theme_font_size_override("font_size", 11)
 		var captured_b: Building = building
 		var captured_slot: int = i
 		train_btn.pressed.connect(func() -> void:
 			if is_instance_valid(captured_b):
 				captured_b.queue_unit_training(captured_slot)
+		)
+		var meta_line: String = "Cost: %s  •  %d BW  •  %.1fs" % [u_data.get_cost_label(), u_data.bandwidth_cost, u_data.build_time]
+		_attach_tooltip(
+			train_btn,
+			"Train %s" % u_data.display_name,
+			"",
+			meta_line,
+			"Queues a %s at this structure." % u_data.display_name
 		)
 		ability_row.add_child(train_btn)
 		_building_action_buttons.append({
@@ -274,7 +413,7 @@ func _refresh_building_action_buttons(building: Building) -> void:
 		var kind: String = String(entry["kind"])
 		if kind == "eject":
 			var count: int = building.get_assigned_engineer_count()
-			btn.text = "Eject Engineers (%d)" % count
+			btn.text = "[E] Eject Engineers (%d)" % count
 			btn.disabled = count <= 0
 			btn.modulate = Color(0.55, 0.92, 1.0, 1.0) if count > 0 else Color(0.6, 0.64, 0.7, 0.7)
 		elif kind == "train":
@@ -287,62 +426,82 @@ func _refresh_building_action_buttons(building: Building) -> void:
 			btn.modulate = Color(0.55, 1.0, 0.95, 1.0) if can_train else Color(0.56, 0.6, 0.66, 0.68)
 
 
-func _on_building_health_changed(building: Building, _current_hp: float, _max_hp: float) -> void:
-	if building == _selected_building and is_instance_valid(building):
-		_show_building_panel(building, false)
-
-
-func _on_building_construction_changed(building: Building, _progress: float, constructed: bool) -> void:
-	if building == _selected_building and is_instance_valid(building):
-		_show_building_panel(building, constructed)
-
-
-func _on_building_staffing_changed(building: Building, _assigned: int, _max_slots: int) -> void:
-	if building == _selected_building and is_instance_valid(building):
-		_show_building_panel(building, false)
-
-
-func _on_building_training_changed(building: Building) -> void:
-	if building == _selected_building and is_instance_valid(building):
-		_show_building_panel(building, false)
-
-
-func _on_building_destroyed(building: Building) -> void:
-	if building == _selected_building:
-		_disconnect_building_signals()
-		_selected_building = null
-		_building_action_buttons.clear()
-		if _active_subgroup_units.is_empty():
-			bottom_panel.visible = false
-
-
-func _connect_building_signals(building: Building) -> void:
-	if building == null or not is_instance_valid(building):
+func _on_inspected_entity_updated(_arg1: Variant = null, _arg2: Variant = null, _arg3: Variant = null) -> void:
+	if _inspected_entity == null or not is_instance_valid(_inspected_entity):
+		bottom_panel.visible = false
 		return
-	if not building.health_changed.is_connected(_on_building_health_changed):
-		building.health_changed.connect(_on_building_health_changed)
-	if not building.construction_progress_changed.is_connected(_on_building_construction_changed):
-		building.construction_progress_changed.connect(_on_building_construction_changed)
-	if not building.staffing_changed.is_connected(_on_building_staffing_changed):
-		building.staffing_changed.connect(_on_building_staffing_changed)
-	if not building.training_changed.is_connected(_on_building_training_changed):
-		building.training_changed.connect(_on_building_training_changed)
-	if not building.destroyed.is_connected(_on_building_destroyed):
-		building.destroyed.connect(_on_building_destroyed)
+	_render_inspected_entity(_inspected_entity, false)
 
 
-func _disconnect_building_signals() -> void:
-	if _selected_building != null and is_instance_valid(_selected_building):
-		if _selected_building.health_changed.is_connected(_on_building_health_changed):
-			_selected_building.health_changed.disconnect(_on_building_health_changed)
-		if _selected_building.construction_progress_changed.is_connected(_on_building_construction_changed):
-			_selected_building.construction_progress_changed.disconnect(_on_building_construction_changed)
-		if _selected_building.staffing_changed.is_connected(_on_building_staffing_changed):
-			_selected_building.staffing_changed.disconnect(_on_building_staffing_changed)
-		if _selected_building.training_changed.is_connected(_on_building_training_changed):
-			_selected_building.training_changed.disconnect(_on_building_training_changed)
-		if _selected_building.destroyed.is_connected(_on_building_destroyed):
-			_selected_building.destroyed.disconnect(_on_building_destroyed)
+func _on_inspected_building_construction_changed(building: Building, _progress: float, constructed: bool) -> void:
+	if building == _inspected_entity and is_instance_valid(building):
+		_render_inspected_entity(building, constructed)
+
+
+func _on_inspected_entity_removed(_arg: Variant = null) -> void:
+	_disconnect_inspected_signals()
+	_inspected_entity = null
+	_building_action_buttons.clear()
+	if _active_subgroup_units.is_empty():
+		bottom_panel.visible = false
+
+
+func _connect_inspected_signals(entity: Node) -> void:
+	if entity == null or not is_instance_valid(entity):
+		return
+	if entity is ResourceNode:
+		var res_node: ResourceNode = entity
+		if not res_node.amount_changed.is_connected(_on_inspected_entity_updated):
+			res_node.amount_changed.connect(_on_inspected_entity_updated)
+		if not res_node.status_changed.is_connected(_on_inspected_entity_updated):
+			res_node.status_changed.connect(_on_inspected_entity_updated)
+		if not res_node.depleted.is_connected(_on_inspected_entity_removed):
+			res_node.depleted.connect(_on_inspected_entity_removed)
+	elif entity is Building:
+		var b: Building = entity
+		if not b.status_changed.is_connected(_on_inspected_entity_updated):
+			b.status_changed.connect(_on_inspected_entity_updated)
+		if not b.construction_progress_changed.is_connected(_on_inspected_building_construction_changed):
+			b.construction_progress_changed.connect(_on_inspected_building_construction_changed)
+		if not b.destroyed.is_connected(_on_inspected_entity_removed):
+			b.destroyed.connect(_on_inspected_entity_removed)
+	elif entity is Unit:
+		var u: Unit = entity
+		if not u.health_changed.is_connected(_on_inspected_entity_updated):
+			u.health_changed.connect(_on_inspected_entity_updated)
+		if not u.status_changed.is_connected(_on_inspected_entity_updated):
+			u.status_changed.connect(_on_inspected_entity_updated)
+		if not u.died.is_connected(_on_inspected_entity_removed):
+			u.died.connect(_on_inspected_entity_removed)
+
+
+func _disconnect_inspected_signals() -> void:
+	if _inspected_entity == null or not is_instance_valid(_inspected_entity):
+		return
+	if _inspected_entity is ResourceNode:
+		var res_node: ResourceNode = _inspected_entity
+		if res_node.amount_changed.is_connected(_on_inspected_entity_updated):
+			res_node.amount_changed.disconnect(_on_inspected_entity_updated)
+		if res_node.status_changed.is_connected(_on_inspected_entity_updated):
+			res_node.status_changed.disconnect(_on_inspected_entity_updated)
+		if res_node.depleted.is_connected(_on_inspected_entity_removed):
+			res_node.depleted.disconnect(_on_inspected_entity_removed)
+	elif _inspected_entity is Building:
+		var b: Building = _inspected_entity
+		if b.status_changed.is_connected(_on_inspected_entity_updated):
+			b.status_changed.disconnect(_on_inspected_entity_updated)
+		if b.construction_progress_changed.is_connected(_on_inspected_building_construction_changed):
+			b.construction_progress_changed.disconnect(_on_inspected_building_construction_changed)
+		if b.destroyed.is_connected(_on_inspected_entity_removed):
+			b.destroyed.disconnect(_on_inspected_entity_removed)
+	elif _inspected_entity is Unit:
+		var u: Unit = _inspected_entity
+		if u.health_changed.is_connected(_on_inspected_entity_updated):
+			u.health_changed.disconnect(_on_inspected_entity_updated)
+		if u.status_changed.is_connected(_on_inspected_entity_updated):
+			u.status_changed.disconnect(_on_inspected_entity_updated)
+		if u.died.is_connected(_on_inspected_entity_removed):
+			u.died.disconnect(_on_inspected_entity_removed)
 
 
 func _on_ability_targeting_changed(active_ability: AbilityData) -> void:
@@ -351,12 +510,7 @@ func _on_ability_targeting_changed(active_ability: AbilityData) -> void:
 
 
 func _on_unit_health_changed(_unit: Unit, _current_hp: float, _max_hp: float) -> void:
-	if _selection_controller == null:
-		return
-	var active_group: Dictionary = _selection_controller.get_active_subgroup()
-	if not active_group.is_empty():
-		_refresh_left_panel(active_group)
-		_rebuild_unit_badges(_active_subgroup_units)
+	_refresh_selected_units_display()
 
 
 func _on_unit_ability_cooldown_updated(ability_id: StringName, _remaining: float, _duration: float) -> void:
@@ -364,11 +518,26 @@ func _on_unit_ability_cooldown_updated(ability_id: StringName, _remaining: float
 
 
 func _on_unit_cargo_changed(_unit: Unit, _resource_type: StringName, _amount: int) -> void:
+	_refresh_selected_units_display()
+
+
+func _on_unit_status_changed(_unit: Unit) -> void:
+	_refresh_selected_units_display()
+
+
+func _refresh_selected_units_display() -> void:
 	if _selection_controller == null:
 		return
 	var active_group: Dictionary = _selection_controller.get_active_subgroup()
-	if not active_group.is_empty():
-		_refresh_left_panel(active_group)
+	if active_group.is_empty():
+		return
+	if _selection_controller.selected_units.size() == 1 and is_instance_valid(_selection_controller.selected_units[0]):
+		var lead_info: Dictionary = InspectionHelper.get_inspection_data(_selection_controller.selected_units[0])
+		_apply_left_column(lead_info)
+		_rebuild_telemetry_grid(lead_info["stats"])
+	else:
+		_refresh_squad_left_column(active_group)
+		_rebuild_unit_badges(_active_subgroup_units)
 
 
 func _connect_unit_signals(units: Array[Unit]) -> void:
@@ -382,6 +551,8 @@ func _connect_unit_signals(units: Array[Unit]) -> void:
 			unit.ability_cooldown_updated.connect(_on_unit_ability_cooldown_updated)
 		if not unit.cargo_changed.is_connected(_on_unit_cargo_changed):
 			unit.cargo_changed.connect(_on_unit_cargo_changed)
+		if not unit.status_changed.is_connected(_on_unit_status_changed):
+			unit.status_changed.connect(_on_unit_status_changed)
 		_connected_units.append(unit)
 
 
@@ -395,52 +566,9 @@ func _disconnect_unit_signals() -> void:
 				unit.ability_cooldown_updated.disconnect(_on_unit_ability_cooldown_updated)
 			if unit.cargo_changed.is_connected(_on_unit_cargo_changed):
 				unit.cargo_changed.disconnect(_on_unit_cargo_changed)
+			if unit.status_changed.is_connected(_on_unit_status_changed):
+				unit.status_changed.disconnect(_on_unit_status_changed)
 	_connected_units.clear()
-
-
-func _refresh_left_panel(active_group: Dictionary) -> void:
-	var data: UnitData = active_group.get("data", null) as UnitData
-	var units: Array[Unit] = active_group.get("units", [])
-	var count: int = units.size()
-	var display_name: String = active_group.get("display_name", "Unit")
-	unit_name_label.text = "%s  x%d" % [display_name, count]
-
-	if data != null and data.unit_type_id == &"scout_unit":
-		portrait_swatch.color = Color(0.98, 0.78, 0.24, 1.0)
-	elif data != null and data.unit_type_id == &"silica_harvester":
-		portrait_swatch.color = Color(0.96, 0.68, 0.22, 1.0)
-	elif data != null and data.can_staff_compute:
-		portrait_swatch.color = Color(0.32, 0.82, 1.0, 1.0)
-	elif data != null and data.can_gather:
-		portrait_swatch.color = Color(0.28, 0.94, 0.56, 1.0)
-	else:
-		portrait_swatch.color = Color(0.24, 0.92, 0.88, 1.0)
-
-	if count > 0 and is_instance_valid(units[0]) and data != null:
-		var lead: Unit = units[0]
-		unit_hp_label.text = "HP: %d / %d" % [int(round(lead.current_hp)), int(round(data.max_hp))]
-		if unit_hp_bar != null:
-			unit_hp_bar.max_value = maxf(1.0, data.max_hp)
-			unit_hp_bar.value = clampf(lead.current_hp, 0.0, data.max_hp)
-		if data.can_gather:
-			unit_stats_label.text = "CARRY: %d / %d  |  SPD: %d" % [
-				lead.get_carried_amount(),
-				data.carry_capacity,
-				int(round(data.move_speed)),
-			]
-		elif data.can_staff_compute:
-			unit_stats_label.text = "ROLE: Compute Staff  |  SPD: %d" % int(round(data.move_speed))
-		else:
-			unit_stats_label.text = "DMG: %d  |  SPD: %d  |  RNG: %d" % [
-				int(round(data.attack_damage)),
-				int(round(data.move_speed)),
-				int(round(data.attack_range)),
-			]
-	else:
-		unit_hp_label.text = "HP: --"
-		if unit_hp_bar != null:
-			unit_hp_bar.value = 0.0
-		unit_stats_label.text = ""
 
 
 func _rebuild_subgroup_tabs(subgroups: Array[Dictionary], active_index: int) -> void:
@@ -452,6 +580,7 @@ func _rebuild_subgroup_tabs(subgroups: Array[Dictionary], active_index: int) -> 
 		var group_units: Array[Unit] = group["units"]
 		var btn: Button = Button.new()
 		btn.focus_mode = Control.FOCUS_NONE
+		btn.add_theme_font_size_override("font_size", 11)
 		var prefix: String = "> " if i == active_index else ""
 		btn.text = "%s%s (x%d)" % [prefix, String(group["display_name"]), group_units.size()]
 		if i == active_index:
@@ -468,6 +597,7 @@ func _rebuild_subgroup_tabs(subgroups: Array[Dictionary], active_index: int) -> 
 	if subgroups.size() > 1:
 		var hint: Label = Label.new()
 		hint.text = " [Tab]"
+		hint.add_theme_font_size_override("font_size", 11)
 		hint.modulate = Color(0.55, 0.9, 0.92, 0.85)
 		subgroup_tabs_row.add_child(hint)
 
@@ -485,12 +615,14 @@ func _rebuild_unit_badges(units: Array[Unit]) -> void:
 		var max_hp: float = maxf(1.0, unit.data.max_hp if unit.data != null else 100.0)
 		var pct: int = int(round((unit.current_hp / max_hp) * 100.0))
 		badge.text = "[%d%%]" % pct
+		badge.add_theme_font_size_override("font_size", 11)
 		badge.modulate = Color(0.32, 0.96, 0.76, 1.0) if pct > 50 else Color(1.0, 0.56, 0.28, 1.0)
 		unit_badges_grid.add_child(badge)
 
 	if units.size() > max_badges:
 		var more: Label = Label.new()
 		more.text = "+%d" % (units.size() - max_badges)
+		more.add_theme_font_size_override("font_size", 11)
 		unit_badges_grid.add_child(more)
 
 
@@ -510,19 +642,42 @@ func _rebuild_ability_buttons(active_group: Dictionary) -> void:
 		_active_abilities.append(ability)
 		var btn: Button = Button.new()
 		btn.focus_mode = Control.FOCUS_NONE
-		btn.custom_minimum_size = Vector2(142.0, 34.0)
+		btn.custom_minimum_size = Vector2(140.0, 34.0)
 		btn.add_theme_font_size_override("font_size", 11)
-		btn.tooltip_text = ability.description
 		var captured_ability: AbilityData = ability
 		btn.pressed.connect(func() -> void:
 			if _selection_controller != null:
 				_selection_controller.request_ability_slot(captured_ability)
 		)
+		var meta_line: String = _build_ability_tooltip_meta(ability)
+		_attach_tooltip(btn, ability.display_name, ability.hotkey_label, meta_line, ability.description)
 		ability_row.add_child(btn)
 		_ability_buttons[ability.ability_id] = {
 			"button": btn,
 			"ability": ability,
 		}
+
+
+func _build_ability_tooltip_meta(ability: AbilityData) -> String:
+	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT and ability.building_to_build != null:
+		var b: BuildingData = ability.building_to_build
+		var parts: PackedStringArray = PackedStringArray()
+		parts.append("Cost: %s" % b.get_cost_label())
+		parts.append("Build: %.1fs" % b.build_time)
+		if b.bandwidth_provided > 0:
+			parts.append("+%d BW" % b.bandwidth_provided)
+		if b.requires_vent:
+			parts.append("Requires Compute Vent")
+		return "  •  ".join(parts)
+
+	var ab_parts: PackedStringArray = PackedStringArray()
+	if ability.cooldown_duration > 0.0:
+		ab_parts.append("Cooldown: %.1fs" % ability.cooldown_duration)
+	if ability.cast_range > 0.0:
+		ab_parts.append("Range: %d px" % int(round(ability.cast_range)))
+	if ability.aoe_radius > 0.0 and ability.target_type == AbilityData.TargetType.POINT_AOE:
+		ab_parts.append("Radius: %d px" % int(round(ability.aoe_radius)))
+	return "  •  ".join(ab_parts)
 
 
 func _refresh_all_ability_states() -> void:
