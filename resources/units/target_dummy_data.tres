@@ -4,6 +4,7 @@
 
 [resource]
 script = ExtResource("1_unit_data")
+unit_type_id = &"target_dummy"
 display_name = "Target Dummy"
 max_hp = 100.0
 move_speed = 0.0
@@ -15,3 +16,4 @@ attack_damage = 0.0
 attack_range = 0.0
 aggro_range = 0.0
 attack_cooldown = 1.0
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([])

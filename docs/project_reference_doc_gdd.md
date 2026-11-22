@@ -55,7 +55,7 @@ Three distinct resources plus a population cap, each tied to a different gatheri
   * By-type top-level folder layout with feature subfolders:
     * `scenes/` (`test/`, `units/`, `maps/`, `buildings/`, `world/`)
     * `scripts/` (`camera/`, `controllers/`, `units/`, `buildings/`, `systems/`, `data/`)
-    * `resources/` (`units/`, `buildings/`, `themes/`) — data-driven `.tres` configs (`UnitData`, future `BuildingData`, `AbilityData`)
+    * `resources/` (`units/`, `abilities/`, `buildings/`, `themes/`) — data-driven `.tres` configs (`UnitData`, `AbilityData`, future `BuildingData`)
     * `ui/` (`hud/`, `overlays/`)
     * `assets/` (`sprites/`, `audio/`, `shaders/`)
 * **IDE & AI Pipeline:**
@@ -68,14 +68,24 @@ Three distinct resources plus a population cap, each tied to a different gatheri
 
 ## 7. Milestones & Scope Boundaries
 
-### Milestone 0: Technical Spike (Dev Setup) — *Completed*
-* **Completed Architecture & Verified Test Scene (`res://scenes/test/milestone_0_test.tscn`):**
-  * Godot 4.7.2 project flattened to the repository root with clean starter folder hierarchy and `run/main_scene` configured.
-  * **RTS Camera (`RTSCamera`):** `WASD`/Arrow pan (via `camera_pan_*` InputMap actions), 1:1 middle-mouse drag pan, clamped smooth scroll-wheel zoom (`0.5`–`2.0`), and arena bounds clamping.
-  * **Navigation Arena (`NavigationRegion2D`):** `1280×720` walkable arena with a central `StaticBody2D` obstacle cutout, pre-baked into 4 convex polygons (`agent_radius = 20px`) and verified to preserve obstacle avoidance when re-baked in the editor.
-  * **Selectable Unit (`TestUnit` + `UnitData` `.tres`):** `CharacterBody2D` in `"selectable_units"` group with `NavigationAgent2D` (`CORRIDORFUNNEL` shortest-path routing + map-sync guard), snappy acceleration/turning, glowing cyan selection ring, and directional chevron visuals.
-  * **Selection & Orders (`SelectionController`):** `_unhandled_input`-based single left-click and left-drag box selection (`SelectionBox` overlay) plus right-click move commands with transient `MoveMarker` target pulse feedback.
-* **Remaining Dev-Environment Step (Optional/Local):** Verify VS Code external editor integration and commit Milestone 0 baseline to GitHub.
+### Milestone 0: Technical Spike & Combat Micro Sandbox — *Completed*
+* **M0 Base Spike (`res://scenes/test/milestone_0_test.tscn`):**
+  * Godot 4.7.2 project flattened to the repository root with clean starter folder hierarchy, named physics layers (`Layer 1: World`, `Layer 2: Units`), and `run/main_scene` configured.
+  * **RTS Camera (`RTSCamera`):** Arrow-key pan (`camera_pan_*`), 1:1 middle-mouse drag pan, clamped smooth scroll-wheel zoom (`0.5`–`2.0`), bounds clamping, and `center_on()` for double-tap control-group centering.
+  * **Navigation Arena (`NavigationRegion2D`):** `1280×720` walkable arena with a central `StaticBody2D` obstacle cutout, pre-baked into 4 convex polygons (`agent_radius = 20px`) with `CORRIDORFUNNEL` pathfinding.
+* **M0.5 Combat, Target Dummies & Core Commands:**
+  * **Team Ownership & Combat (`Unit` + `UnitData`):** `Team.PLAYER` vs `Team.ENEMY`, edge-to-edge weapon range/aggro checks, attack cooldowns, hit-flash, `AttackTracer` VFX, health bars, and safe freed-target cleanup.
+  * **Command State Machine:** `IDLE`, `MOVING`, `ATTACK_MOVING`, `ATTACKING_TARGET`, `HOLD_POSITION`, `CASTING_ABILITY` with `RMB` Move/Focus Fire, `S` Stop, `H` Hold Position, and distinct cyan/red `MoveMarker` pulses.
+  * **Sandbox Spawner & Debug Panel (`SandboxSpawner`, `SandboxDebugPanel`):** On-demand spawning of `TestUnit` (`F1`/`F2`), `Recon Scout` (`F5`), and stationary `TargetDummy` (`F3`/`F4`), plus `Del` clear dummies and `R` reset.
+* **M0.6 Collision, Individual Pathing, Control Groups & Smart-Cast `A`:**
+  * **Unit-to-Unit Collision & RVO Avoidance:** `NavigationAgent2D` RVO (`velocity_computed`) on player units, `NavigationObstacle2D` + tangential steering around stationary dummies, soft overlap separation, navmesh-projected concentric ring group destinations (`2.6×` radius spacing), and progress-based arrival settling without jitter.
+  * **Control Groups (`1–9`):** `Ctrl+N` assign, `Shift+N` duplicate-free append, `Alt+N` subset remove, plain `N` recall (with automatic dead-unit pruning), and double-tap `N` camera centering.
+  * **Smart-Cast Attack-Move (`A`):** Immediately Attack-Moves toward cursor (with ring spread) or focus-fires an enemy under cursor without a secondary left-click.
+* **Plan 03 Abilities, Cooldowns, Subgroup `Tab` Cycling & Selection HUD:**
+  * **Data-Driven Abilities (`AbilityData`, `AbilityComponent`, `AbilityEffect`, `AbilityTargetingReticle`):** Supports `POINT_AOE`, `UNIT_TARGET`, and `INSTANT` abilities with per-unit cooldowns, walk-into-range casting, and interrupt cancellation. Live test abilities: `Overcharge Pulse` (`Q`, `6.0s` AoE burst on `TestUnit`) and `Nanite Surge` (`Q`, `4.0s` instant heal on `Recon Scout`).
+  * **Mixed-Unit Subgroup `Tab` Cycling (`SubgroupHelper` + `SelectionController`):** Deterministic grouping by `unit_type_id`, `Tab` (`ui_cycle_subgroup`) cycling, and smart-cast `Q` targeting (closest ready unit in active subgroup; `Esc`/RMB cancels cleanly).
+  * **Signal-Driven Bottom HUD (`SelectionHUD`):** Strictly signal-driven (no `_process()` polling) 3-panel Technozen bar displaying active subgroup portrait/stats, clickable subgroup tabs & unit HP badges, and a Command Card with live ability cooldown countdowns.
+* **Remaining Dev-Environment Step (Optional/Local):** Verify VS Code external editor integration and commit baseline to GitHub.
 
 ### Milestone 1: Vertical Slice (Design Validation Prototype)
 * **Factions:** 1 playable faction (mirrored 1v1 against a basic scripted AI opponent on 1 symmetric map).

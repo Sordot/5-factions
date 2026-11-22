@@ -53,6 +53,12 @@ layout_mode = 2
 focus_mode = 0
 text = "+5 Units (F2)"
 
+[node name="BtnScout1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "+1 Scout (F5)"
+
 [node name="BtnDummy1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -79,4 +85,4 @@ text = "Reset (R)"
 
 [node name="ControlsLabel" type="Label" parent="MarginContainer/PanelContainer/VBox"]
 layout_mode = 2
-text = "LMB/Drag: Select | RMB: Move/Focus | A: Attack-Move (Cursor) | S: Stop | H: Hold | Ctrl/Shift/Alt+1-9: Groups | Arrows/MMB: Pan"
+text = "LMB/Drag: Select | Tab: Subgroup | Q: Ability | RMB: Move/Focus | A: Atk-Move | S: Stop | H: Hold | 1-9: Groups"

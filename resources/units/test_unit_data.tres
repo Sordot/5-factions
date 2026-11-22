@@ -1,9 +1,11 @@
-[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/overcharge_pulse.tres" id="2_overcharge"]
 
 [resource]
 script = ExtResource("1_unit_data")
+unit_type_id = &"test_unit"
 display_name = "Test Unit"
 max_hp = 100.0
 move_speed = 260.0
@@ -15,3 +17,4 @@ attack_damage = 20.0
 attack_range = 180.0
 aggro_range = 280.0
 attack_cooldown = 0.7
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_overcharge")])

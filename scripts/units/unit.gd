@@ -12,9 +12,11 @@ enum CommandState {
 	ATTACK_MOVING,
 	ATTACKING_TARGET,
 	HOLD_POSITION,
+	CASTING_ABILITY,
 }
 
 const ATTACK_TRACER_SCRIPT: GDScript = preload("res://ui/overlays/attack_tracer.gd")
+const ABILITY_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/ability_component.gd")
 const HIT_FLASH_DURATION: float = 0.10
 const HEALTH_BAR_WIDTH: float = 36.0
 const SETTLE_PROXIMITY_RADIUS: float = 160.0
@@ -23,6 +25,8 @@ const SETTLE_NO_PROGRESS_TIME: float = 0.45
 signal selection_changed(unit: Unit, selected: bool)
 signal health_changed(unit: Unit, current_hp: float, max_hp: float)
 signal died(unit: Unit)
+signal ability_cooldown_updated(ability_id: StringName, remaining: float, duration: float)
+signal ability_executed(ability_id: StringName, target_pos: Vector2)
 
 @export var team: Team = Team.PLAYER
 @export var data: UnitData
@@ -39,6 +43,7 @@ var is_dead: bool = false
 var current_hp: float = 100.0
 var command_state: CommandState = CommandState.IDLE
 var current_target: Unit = null
+var ability_component: AbilityComponent = null
 
 var _move_destination: Vector2 = Vector2.ZERO
 var _attack_move_destination: Vector2 = Vector2.ZERO
@@ -68,6 +73,16 @@ func _ready() -> void:
 		if not nav_agent.velocity_computed.is_connected(_on_nav_velocity_computed):
 			nav_agent.velocity_computed.connect(_on_nav_velocity_computed)
 
+	ability_component = ABILITY_COMPONENT_SCRIPT.new()
+	ability_component.name = "AbilityComponent"
+	add_child(ability_component)
+	ability_component.ability_cooldown_updated.connect(func(ability_id: StringName, remaining: float, duration: float) -> void:
+		ability_cooldown_updated.emit(ability_id, remaining, duration)
+	)
+	ability_component.ability_executed.connect(func(ability_id: StringName, target_pos: Vector2) -> void:
+		ability_executed.emit(ability_id, target_pos)
+	)
+
 
 func set_selected(selected: bool) -> void:
 	if is_selected == selected:
@@ -90,9 +105,51 @@ func issue_move_command(target_pos: Vector2) -> void:
 	command_move(target_pos)
 
 
+func get_unit_type_id() -> StringName:
+	return data.unit_type_id if data != null else &"unit"
+
+
+func is_ability_ready(ability: AbilityData) -> bool:
+	return ability_component != null and ability_component.is_ability_ready(ability)
+
+
+func get_ability_remaining_cooldown(ability_id: StringName) -> float:
+	return ability_component.get_remaining_cooldown(ability_id) if ability_component != null else 0.0
+
+
+func command_cast_ability(ability: AbilityData, target_pos: Vector2, target_unit: Unit = null) -> bool:
+	if is_dead or ability_component == null or ability == null:
+		return false
+	var accepted: bool = ability_component.request_cast(self, ability, target_pos, target_unit)
+	if not accepted:
+		return false
+	if ability_component.has_pending_cast():
+		if not _can_move():
+			ability_component.cancel_pending_cast()
+			return false
+		command_state = CommandState.CASTING_ABILITY
+		current_target = null
+		_reset_progress_tracker()
+		_last_nav_target = Vector2.INF
+	return true
+
+
+func heal(amount: float) -> void:
+	if is_dead or amount <= 0.0 or data == null:
+		return
+	var next_hp: float = minf(data.max_hp, current_hp + amount)
+	if is_equal_approx(next_hp, current_hp):
+		return
+	current_hp = next_hp
+	_update_health_bar()
+	health_changed.emit(self, current_hp, data.max_hp)
+
+
 func command_move(target_pos: Vector2) -> void:
 	if is_dead or not _can_move():
 		return
+	if ability_component != null:
+		ability_component.cancel_pending_cast()
 	command_state = CommandState.MOVING
 	current_target = null
 	_move_destination = target_pos
@@ -105,6 +162,8 @@ func command_attack_target(target: Unit) -> void:
 		return
 	if not is_instance_valid(target) or target.is_dead or target.team == team:
 		return
+	if ability_component != null:
+		ability_component.cancel_pending_cast()
 	command_state = CommandState.ATTACKING_TARGET
 	current_target = target
 	_reset_progress_tracker()
@@ -114,6 +173,8 @@ func command_attack_target(target: Unit) -> void:
 func command_attack_move(target_pos: Vector2) -> void:
 	if is_dead or not _can_move():
 		return
+	if ability_component != null:
+		ability_component.cancel_pending_cast()
 	command_state = CommandState.ATTACK_MOVING
 	_attack_move_destination = target_pos
 	_move_destination = target_pos
@@ -125,6 +186,8 @@ func command_attack_move(target_pos: Vector2) -> void:
 func command_stop() -> void:
 	if is_dead:
 		return
+	if ability_component != null:
+		ability_component.cancel_pending_cast()
 	command_state = CommandState.IDLE
 	current_target = null
 	_wants_nav_movement = false
@@ -137,6 +200,8 @@ func command_stop() -> void:
 func command_hold_position() -> void:
 	if is_dead:
 		return
+	if ability_component != null:
+		ability_component.cancel_pending_cast()
 	command_state = CommandState.HOLD_POSITION
 	current_target = null
 	_wants_nav_movement = false
@@ -183,6 +248,9 @@ func _physics_process(delta: float) -> void:
 	if _attack_cooldown_timer > 0.0:
 		_attack_cooldown_timer = maxf(0.0, _attack_cooldown_timer - delta)
 
+	if ability_component != null:
+		ability_component.tick_cooldowns(delta)
+
 	if _hit_flash_timer > 0.0:
 		_hit_flash_timer = maxf(0.0, _hit_flash_timer - delta)
 		if _hit_flash_timer <= 0.0:
@@ -205,6 +273,8 @@ func _physics_process(delta: float) -> void:
 			_process_attacking_target(delta)
 		CommandState.HOLD_POSITION:
 			_process_hold_position(delta)
+		CommandState.CASTING_ABILITY:
+			_process_casting_ability(delta)
 
 	if _can_move() and nav_agent != null and nav_agent.avoidance_enabled:
 		nav_agent.set_velocity(_desired_move_velocity)
@@ -301,6 +371,19 @@ func _process_hold_position(delta: float) -> void:
 	if current_target != null:
 		_face_point(current_target.global_position, delta)
 		_try_fire_at(current_target)
+
+
+func _process_casting_ability(delta: float) -> void:
+	if ability_component == null or not ability_component.has_pending_cast():
+		command_state = CommandState.IDLE
+		return
+	if ability_component.try_complete_pending_cast(self):
+		command_state = CommandState.IDLE
+		velocity = Vector2.ZERO
+		return
+	var dest: Vector2 = ability_component.get_pending_destination()
+	_face_point(dest, delta)
+	_request_nav_toward_point(dest, 8.0)
 
 
 func _request_nav_toward_point(target_point: Vector2, repath_threshold: float) -> void:

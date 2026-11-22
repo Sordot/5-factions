@@ -1,0 +1,145 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://ui/hud/selection_hud.gd" id="1_hud_script"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hud"]
+content_margin_left = 14.0
+content_margin_top = 10.0
+content_margin_right = 14.0
+content_margin_bottom = 10.0
+bg_color = Color(0.06, 0.09, 0.13, 0.88)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.24, 0.78, 0.84, 0.6)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[node name="SelectionHUD" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_hud_script")
+
+[node name="BottomAnchor" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -450.0
+offset_top = -126.0
+offset_right = 450.0
+offset_bottom = -8.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="BottomPanel" type="PanelContainer" parent="BottomAnchor"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
+
+[node name="HBox" type="HBoxContainer" parent="BottomAnchor/BottomPanel"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="LeftPanel" type="HBoxContainer" parent="BottomAnchor/BottomPanel/HBox"]
+custom_minimum_size = Vector2(235, 0)
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PortraitSwatch" type="ColorRect" parent="BottomAnchor/BottomPanel/HBox/LeftPanel"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(46, 46)
+layout_mode = 2
+size_flags_vertical = 4
+color = Color(0.24, 0.92, 0.88, 1)
+
+[node name="StatsVBox" type="VBoxContainer" parent="BottomAnchor/BottomPanel/HBox/LeftPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 3
+
+[node name="UnitNameLabel" type="Label" parent="BottomAnchor/BottomPanel/HBox/LeftPanel/StatsVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Test Unit  x1"
+
+[node name="UnitHPLabel" type="Label" parent="BottomAnchor/BottomPanel/HBox/LeftPanel/StatsVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "HP: 100 / 100"
+
+[node name="UnitStatsLabel" type="Label" parent="BottomAnchor/BottomPanel/HBox/LeftPanel/StatsVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "DMG: 20  |  SPD: 260"
+
+[node name="Sep1" type="VSeparator" parent="BottomAnchor/BottomPanel/HBox"]
+layout_mode = 2
+
+[node name="CenterPanel" type="VBoxContainer" parent="BottomAnchor/BottomPanel/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="SubgroupTabsRow" type="HBoxContainer" parent="BottomAnchor/BottomPanel/HBox/CenterPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="UnitBadgesGrid" type="GridContainer" parent="BottomAnchor/BottomPanel/HBox/CenterPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+columns = 6
+
+[node name="Sep2" type="VSeparator" parent="BottomAnchor/BottomPanel/HBox"]
+layout_mode = 2
+
+[node name="RightPanel" type="VBoxContainer" parent="BottomAnchor/BottomPanel/HBox"]
+custom_minimum_size = Vector2(310, 0)
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="StandardCommandsRow" type="HBoxContainer" parent="BottomAnchor/BottomPanel/HBox/RightPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnCmdMove" type="Button" parent="BottomAnchor/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Move (RMB)"
+
+[node name="BtnCmdStop" type="Button" parent="BottomAnchor/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Stop (S)"
+
+[node name="BtnCmdHold" type="Button" parent="BottomAnchor/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Hold (H)"
+
+[node name="BtnCmdAMove" type="Button" parent="BottomAnchor/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Atk-Mv (A)"
+
+[node name="AbilityRow" type="HBoxContainer" parent="BottomAnchor/BottomPanel/HBox/RightPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6

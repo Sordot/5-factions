@@ -7,25 +7,67 @@ const DEFAULT_UNIT_RADIUS: float = 16.0
 const RING_SPACING_MULTIPLIER: float = 2.6
 
 signal selection_updated(selected_count: int)
+signal selection_changed(selected_units: Array[Unit], subgroups: Array[Dictionary], active_subgroup_index: int)
 signal control_groups_changed(summary: Dictionary)
+signal ability_targeting_changed(active_ability: AbilityData)
 
 @export var drag_threshold: float = 6.0
 @export var camera_path: NodePath
 
 @onready var selection_box: SelectionBox = $SelectionBox
+@onready var ability_reticle: AbilityTargetingReticle = get_node_or_null("AbilityTargetingReticle") as AbilityTargetingReticle
 
 var selected_units: Array[Unit] = []
+var subgroups: Array[Dictionary] = []
+var active_subgroup_index: int = 0
 var inspected_enemy: Unit = null
 var control_groups: Dictionary = {}
+var active_targeting_ability: AbilityData = null
 
 var _is_dragging: bool = false
 var _drag_start_world: Vector2 = Vector2.ZERO
 var _drag_start_screen: Vector2 = Vector2.ZERO
 var _last_recall_group: int = -1
 var _last_recall_time_ms: int = 0
+var _tracked_death_units: Array[Unit] = []
+
+
+func _process(_delta: float) -> void:
+	if active_targeting_ability != null and ability_reticle != null:
+		var cursor_world: Vector2 = get_global_mouse_position()
+		var caster: Unit = SubgroupHelper.find_closest_ready_caster(
+			get_active_subgroup_units(),
+			active_targeting_ability,
+			cursor_world
+		)
+		if caster != null:
+			ability_reticle.set_targeting(active_targeting_ability, caster.global_position, true, cursor_world)
+		else:
+			cancel_ability_targeting()
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("cmd_cancel"):
+		if active_targeting_ability != null:
+			cancel_ability_targeting()
+			get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("ui_cycle_subgroup"):
+		if subgroups.size() > 1:
+			cycle_subgroup()
+			get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("cmd_ability_q"):
+		if event is InputEventKey:
+			var q_key: InputEventKey = event
+			if q_key.ctrl_pressed or q_key.shift_pressed or q_key.alt_pressed or q_key.echo:
+				return
+		if request_ability_by_hotkey("Q"):
+			get_viewport().set_input_as_handled()
+		return
+
 	if event is InputEventKey:
 		var key_event: InputEventKey = event
 		if key_event.pressed and not key_event.echo:
@@ -40,16 +82,19 @@ func _unhandled_input(event: InputEvent) -> void:
 			var a_key: InputEventKey = event
 			if a_key.ctrl_pressed or a_key.shift_pressed or a_key.alt_pressed or a_key.echo:
 				return
+		cancel_ability_targeting()
 		issue_attack_move_at(get_global_mouse_position())
 		get_viewport().set_input_as_handled()
 		return
 
 	if event.is_action_pressed("cmd_stop"):
+		cancel_ability_targeting()
 		issue_stop_command()
 		get_viewport().set_input_as_handled()
 		return
 
 	if event.is_action_pressed("cmd_hold"):
+		cancel_ability_targeting()
 		issue_hold_command()
 		get_viewport().set_input_as_handled()
 		return
@@ -58,12 +103,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mouse_event: InputEventMouseButton = event
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
 			if mouse_event.pressed:
+				if active_targeting_ability != null:
+					confirm_ability_target_at(get_global_mouse_position())
+					get_viewport().set_input_as_handled()
+					return
 				_is_dragging = true
 				_drag_start_world = get_global_mouse_position()
 				_drag_start_screen = mouse_event.position
 			elif _is_dragging:
 				_finish_left_selection(mouse_event.position)
 		elif mouse_event.button_index == MOUSE_BUTTON_RIGHT and mouse_event.pressed:
+			if active_targeting_ability != null:
+				cancel_ability_targeting()
+				get_viewport().set_input_as_handled()
+				return
 			_handle_right_click(get_global_mouse_position())
 	elif event is InputEventMouseMotion and _is_dragging:
 		var motion_event: InputEventMouseMotion = event
@@ -73,16 +126,119 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func clear_selection() -> void:
+	cancel_ability_targeting()
 	_set_inspected_enemy(null)
 	_set_selected_units([])
 
 
 func select_in_world_rect(world_rect: Rect2) -> void:
+	cancel_ability_targeting()
 	_select_in_rect(world_rect)
 
 
 func select_at_world_point(world_point: Vector2) -> void:
+	cancel_ability_targeting()
 	_select_at_point(world_point)
+
+
+func cycle_subgroup() -> void:
+	if subgroups.size() <= 1:
+		return
+	cancel_ability_targeting()
+	active_subgroup_index = (active_subgroup_index + 1) % subgroups.size()
+	selection_changed.emit(selected_units, subgroups, active_subgroup_index)
+
+
+func set_active_subgroup(index: int) -> void:
+	if index < 0 or index >= subgroups.size():
+		return
+	if active_subgroup_index == index:
+		return
+	cancel_ability_targeting()
+	active_subgroup_index = index
+	selection_changed.emit(selected_units, subgroups, active_subgroup_index)
+
+
+func get_active_subgroup() -> Dictionary:
+	if active_subgroup_index < 0 or active_subgroup_index >= subgroups.size():
+		return {}
+	return subgroups[active_subgroup_index]
+
+
+func get_active_subgroup_units() -> Array[Unit]:
+	var active: Dictionary = get_active_subgroup()
+	if active.is_empty():
+		return []
+	return active["units"]
+
+
+func request_ability_by_hotkey(hotkey: String) -> bool:
+	var active: Dictionary = get_active_subgroup()
+	if active.is_empty():
+		return false
+	var ability: AbilityData = SubgroupHelper.find_ability_by_hotkey(active, hotkey)
+	if ability == null:
+		return false
+	return request_ability_slot(ability)
+
+
+func request_ability_slot(ability: AbilityData) -> bool:
+	if ability == null:
+		return false
+	_prune_invalid_units()
+	var subgroup_units: Array[Unit] = get_active_subgroup_units()
+	if subgroup_units.is_empty():
+		return false
+	if not SubgroupHelper.has_any_ready_caster(subgroup_units, ability):
+		return false
+
+	if ability.target_type == AbilityData.TargetType.INSTANT:
+		cancel_ability_targeting()
+		var caster: Unit = SubgroupHelper.find_closest_ready_caster(
+			subgroup_units,
+			ability,
+			get_global_mouse_position()
+		)
+		if caster != null:
+			return caster.command_cast_ability(ability, caster.global_position, caster)
+		return false
+
+	active_targeting_ability = ability
+	Input.set_default_cursor_shape(Input.CURSOR_CROSS)
+	ability_targeting_changed.emit(active_targeting_ability)
+	return true
+
+
+func confirm_ability_target_at(world_pos: Vector2) -> bool:
+	if active_targeting_ability == null:
+		return false
+	var ability: AbilityData = active_targeting_ability
+	var subgroup_units: Array[Unit] = get_active_subgroup_units()
+	var target_enemy: Unit = _find_unit_at_point(world_pos, Unit.Team.ENEMY)
+
+	if ability.target_type == AbilityData.TargetType.UNIT_TARGET and target_enemy == null:
+		return false
+
+	var caster: Unit = SubgroupHelper.find_closest_ready_caster(subgroup_units, ability, world_pos)
+	cancel_ability_targeting()
+	if caster == null:
+		return false
+
+	var cast_point: Vector2 = target_enemy.global_position if target_enemy != null else world_pos
+	var accepted: bool = caster.command_cast_ability(ability, cast_point, target_enemy)
+	if accepted:
+		_spawn_move_marker(cast_point, MoveMarker.MarkerStyle.ATTACK)
+	return accepted
+
+
+func cancel_ability_targeting() -> void:
+	if active_targeting_ability == null:
+		return
+	active_targeting_ability = null
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	if ability_reticle != null:
+		ability_reticle.clear_targeting()
+	ability_targeting_changed.emit(null)
 
 
 func issue_right_click_at(world_point: Vector2) -> void:
@@ -171,6 +327,7 @@ func recall_control_group(group_num: int, allow_double_tap_center: bool = true) 
 		return
 
 	control_groups[group_num] = group_units
+	cancel_ability_targeting()
 	_set_inspected_enemy(null)
 	_set_selected_units(group_units)
 	_emit_control_groups_changed()
@@ -312,13 +469,14 @@ func _select_in_rect(world_rect: Rect2) -> void:
 	_set_selected_units(hits)
 
 
-func _set_selected_units(new_selection: Array[Unit]) -> void:
+func _set_selected_units(new_selection: Array[Unit], reset_subgroup_index: bool = true) -> void:
 	for item: Variant in selected_units:
 		if is_instance_valid(item) and item is Unit:
 			var prev_unit: Unit = item
 			if not new_selection.has(prev_unit):
 				prev_unit.set_selected(false)
 
+	_disconnect_death_trackers()
 	selected_units = []
 	for item: Variant in new_selection:
 		if is_instance_valid(item) and item is Unit:
@@ -326,8 +484,34 @@ func _set_selected_units(new_selection: Array[Unit]) -> void:
 			if not unit.is_dead and unit.team == Unit.Team.PLAYER:
 				selected_units.append(unit)
 				unit.set_selected(true)
+				if not unit.died.is_connected(_on_selected_unit_died):
+					unit.died.connect(_on_selected_unit_died)
+				_tracked_death_units.append(unit)
+
+	subgroups = SubgroupHelper.build_subgroups(selected_units)
+	if reset_subgroup_index or subgroups.is_empty():
+		active_subgroup_index = 0
+	else:
+		active_subgroup_index = clampi(active_subgroup_index, 0, subgroups.size() - 1)
+
+	if selected_units.is_empty():
+		cancel_ability_targeting()
 
 	selection_updated.emit(selected_units.size())
+	selection_changed.emit(selected_units, subgroups, active_subgroup_index)
+
+
+func _on_selected_unit_died(_dead_unit: Unit) -> void:
+	_prune_invalid_units()
+
+
+func _disconnect_death_trackers() -> void:
+	for item: Variant in _tracked_death_units:
+		if is_instance_valid(item) and item is Unit:
+			var unit: Unit = item
+			if unit.died.is_connected(_on_selected_unit_died):
+				unit.died.disconnect(_on_selected_unit_died)
+	_tracked_death_units.clear()
 
 
 func _set_inspected_enemy(enemy: Unit) -> void:
@@ -372,7 +556,6 @@ func _assign_group_destinations(units: Array[Unit], center_pos: Vector2) -> Arra
 	var spacing: float = unit_radius * RING_SPACING_MULTIPLIER
 	var slots: Array[Vector2] = _generate_ring_slots(count, center_pos, spacing, map_rid, has_map)
 
-	# Greedy nearest-slot assignment avoids units crisscrossing through each other.
 	var used: Array[bool] = []
 	used.resize(slots.size())
 	used.fill(false)
@@ -460,8 +643,7 @@ func _prune_invalid_units() -> void:
 			if not unit.is_dead and unit.team == Unit.Team.PLAYER:
 				valid.append(unit)
 	if valid.size() != selected_units.size():
-		selected_units = valid
-		selection_updated.emit(selected_units.size())
+		_set_selected_units(valid, false)
 	if inspected_enemy != null and (not is_instance_valid(inspected_enemy) or inspected_enemy.is_dead):
 		inspected_enemy = null
 

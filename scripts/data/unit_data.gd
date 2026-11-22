@@ -1,6 +1,7 @@
 class_name UnitData
 extends Resource
 
+@export var unit_type_id: StringName = &"test_unit"
 @export var display_name: String = "Test Unit"
 @export var max_hp: float = 100.0
 @export var move_speed: float = 260.0
@@ -12,3 +13,4 @@ extends Resource
 @export var attack_range: float = 180.0
 @export var aggro_range: float = 280.0
 @export var attack_cooldown: float = 0.7
+@export var abilities: Array[AbilityData] = []

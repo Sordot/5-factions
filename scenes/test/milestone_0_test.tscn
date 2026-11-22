@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
 [ext_resource type="PackedScene" path="res://scenes/units/test_unit.tscn" id="2_test_unit"]
@@ -7,6 +7,8 @@
 [ext_resource type="PackedScene" path="res://scenes/units/target_dummy.tscn" id="5_target_dummy"]
 [ext_resource type="Script" path="res://scripts/controllers/sandbox_spawner.gd" id="6_spawner"]
 [ext_resource type="PackedScene" path="res://ui/hud/sandbox_debug_panel.tscn" id="7_debug_panel"]
+[ext_resource type="Script" path="res://ui/overlays/ability_targeting_reticle.gd" id="8_ability_reticle"]
+[ext_resource type="PackedScene" path="res://ui/hud/selection_hud.tscn" id="9_selection_hud"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_arena"]
 vertices = PackedVector2Array(-640, -360, 640, -360, 640, 360, -640, 360, -100, -120, 100, -120, 100, 120, -100, 120)
@@ -65,6 +67,10 @@ camera_path = NodePath("../RTSCamera")
 z_index = 100
 script = ExtResource("4_sel_box")
 
+[node name="AbilityTargetingReticle" type="Node2D" parent="SelectionController"]
+z_index = 95
+script = ExtResource("8_ability_reticle")
+
 [node name="SandboxSpawner" type="Node2D" parent="."]
 script = ExtResource("6_spawner")
 units_container_path = NodePath("../Units")
@@ -74,4 +80,7 @@ selection_controller_path = NodePath("../SelectionController")
 
 [node name="SandboxDebugPanel" parent="DebugHUD" instance=ExtResource("7_debug_panel")]
 spawner_path = NodePath("../../SandboxSpawner")
+selection_controller_path = NodePath("../../SelectionController")
+
+[node name="SelectionHUD" parent="DebugHUD" instance=ExtResource("9_selection_hud")]
 selection_controller_path = NodePath("../../SelectionController")

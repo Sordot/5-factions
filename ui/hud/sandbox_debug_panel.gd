@@ -8,6 +8,7 @@ extends Control
 @onready var groups_label: Label = %GroupsLabel
 @onready var btn_unit_1: Button = %BtnUnit1
 @onready var btn_unit_5: Button = %BtnUnit5
+@onready var btn_scout_1: Button = %BtnScout1
 @onready var btn_dummy_1: Button = %BtnDummy1
 @onready var btn_dummy_3: Button = %BtnDummy3
 @onready var btn_clear_dummies: Button = %BtnClearDummies
@@ -28,6 +29,10 @@ func _ready() -> void:
 	btn_unit_5.pressed.connect(func() -> void:
 		if _spawner != null:
 			_spawner.spawn_player_units(5)
+	)
+	btn_scout_1.pressed.connect(func() -> void:
+		if _spawner != null:
+			_spawner.spawn_scout_units(1)
 	)
 	btn_dummy_1.pressed.connect(func() -> void:
 		if _spawner != null:
