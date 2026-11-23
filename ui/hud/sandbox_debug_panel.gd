@@ -238,7 +238,8 @@ func _refresh_aggro_ai_button() -> void:
 	if btn_toggle_aggro_ai == null:
 		return
 	var aggro_on: bool = MatchManager.is_aggro_ai_enabled(get_tree() if is_inside_tree() else null)
-	btn_toggle_aggro_ai.text = "Aggro AI: ON (F10)" if aggro_on else "Aggro AI: OFF (F10)"
+	var hk: String = SettingsManager.get_action_key_label(&"debug_toggle_aggro_ai") if SettingsManager != null else "F10"
+	btn_toggle_aggro_ai.text = ("Aggro AI: ON (%s)" % hk) if aggro_on else ("Aggro AI: OFF (%s)" % hk)
 	btn_toggle_aggro_ai.modulate = Color(0.42, 0.98, 0.78, 1.0) if aggro_on else Color(1.0, 0.64, 0.28, 1.0)
 
 
@@ -254,7 +255,8 @@ func _refresh_edge_pan_button() -> void:
 	if btn_toggle_edge_pan == null:
 		return
 	var enabled: bool = _camera.edge_pan_enabled if _camera != null else true
-	btn_toggle_edge_pan.text = "Edge Pan: ON (F12)" if enabled else "Edge Pan: OFF (F12)"
+	var hk: String = SettingsManager.get_action_key_label(&"camera_toggle_edge_pan") if SettingsManager != null else "F12"
+	btn_toggle_edge_pan.text = ("Edge Pan: ON (%s)" % hk) if enabled else ("Edge Pan: OFF (%s)" % hk)
 	btn_toggle_edge_pan.modulate = Color(0.55, 1.0, 0.92, 1.0) if enabled else Color(0.76, 0.72, 0.72, 0.85)
 
 
@@ -267,7 +269,8 @@ func _refresh_fullscreen_button() -> void:
 	else:
 		var mode: DisplayServer.WindowMode = DisplayServer.window_get_mode()
 		is_fs = (mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
-	btn_toggle_fullscreen.text = "Fullscreen: ON (F11)" if is_fs else "Fullscreen: OFF (F11)"
+	var hk: String = SettingsManager.get_action_key_label(&"camera_toggle_fullscreen") if SettingsManager != null else "F11"
+	btn_toggle_fullscreen.text = ("Fullscreen: ON (%s)" % hk) if is_fs else ("Fullscreen: OFF (%s)" % hk)
 	btn_toggle_fullscreen.modulate = Color(0.55, 1.0, 0.92, 1.0) if is_fs else Color(0.76, 0.82, 0.88, 0.9)
 
 

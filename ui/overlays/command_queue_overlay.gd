@@ -51,6 +51,11 @@ func _draw() -> void:
 		var unit: Unit = item
 		if unit.is_dead or unit.is_staffed or unit.team != Unit.Team.PLAYER:
 			continue
+
+		# Render active Patrol loops with cyan/gold directional loop indicators.
+		if unit.command_state == Unit.CommandState.PATROLLING and unit.patrol_waypoints.size() >= 2:
+			_draw_patrol_loop(unit, font, font_size)
+
 		if unit.command_queue.is_empty():
 			continue
 
@@ -111,6 +116,33 @@ func _draw() -> void:
 			step_idx += 1
 
 
+func _draw_patrol_loop(unit: Unit, font: Font, font_size: int) -> void:
+	var pts: Array[Vector2] = unit.patrol_waypoints
+	var count: int = pts.size()
+	if count < 2:
+		return
+	var cyan: Color = Color(0.26, 0.96, 0.92, 0.88)
+	var gold: Color = Color(1.0, 0.84, 0.30, 0.92)
+	var active_idx: int = clampi(unit.patrol_index, 0, count - 1)
+	var active_local: Vector2 = to_local(pts[active_idx])
+	draw_line(to_local(unit.global_position), active_local, Color(gold.r, gold.g, gold.b, 0.55), 1.8, true)
+
+	for i: int in range(count):
+		var a: Vector2 = to_local(pts[i])
+		var b: Vector2 = to_local(pts[(i + 1) % count])
+		var seg_col: Color = gold if (i == count - 1) else cyan
+		draw_line(a, b, Color(seg_col.r, seg_col.g, seg_col.b, 0.22), 4.2, true)
+		draw_line(a, b, seg_col, 1.9, true)
+
+		var pulse: float = 1.0 * sin(_pulse_time * 4.5 + float(i))
+		var r: float = 7.5 + pulse
+		draw_circle(a, r * 0.72, Color(0.05, 0.09, 0.14, 0.84))
+		draw_arc(a, r, 0.0, TAU, 20, gold if i == active_idx else cyan, 2.0, true)
+		var lbl: String = "P%d" % (i + 1)
+		var t_sz: Vector2 = font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
+		draw_string(font, a + Vector2(-t_sz.x * 0.5, t_sz.y * 0.35), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, gold)
+
+
 func _resolve_cmd_pos(cmd: Dictionary, anchor_world: Vector2) -> Variant:
 	var cmd_type: StringName = cmd.get("type", &"move")
 	if cmd_type == &"cast_ability":
@@ -160,5 +192,7 @@ func _color_for_command(cmd: Dictionary) -> Color:
 			return Color(0.88, 0.36, 1.0, 0.96)
 		&"staff", &"return_cargo":
 			return Color(1.0, 0.80, 0.28, 0.92)
+		&"patrol":
+			return Color(1.0, 0.86, 0.32, 0.95)
 		_:
 			return Color(0.24, 0.94, 1.0, 0.90)

@@ -1,6 +1,8 @@
 class_name MainMenu
 extends Control
 
+const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.tscn")
+
 @onready var btn_audio_mute: Button = %BtnAudioMute
 @onready var map_option: OptionButton = %MapOption
 @onready var btn_ai_standard: Button = %BtnAIStandard
@@ -10,6 +12,7 @@ extends Control
 @onready var summary_label: Label = %MatchSummaryLabel
 @onready var dossier_notice_label: Label = %DossierNoticeLabel
 @onready var btn_launch: Button = %BtnLaunch
+@onready var btn_settings: Button = %BtnSettings
 @onready var btn_quit: Button = %BtnQuit
 @onready var locked_slot_2: Button = %LockedSlot2
 @onready var locked_slot_3: Button = %LockedSlot3
@@ -20,6 +23,7 @@ var _selected_map_path: String = GameConfig.MAP_SKIRMISH_01
 var _aggro_ai_enabled: bool = true
 var _resource_preset: StringName = GameConfig.PRESET_STANDARD
 var _bg_time: float = 0.0
+var _settings_instance: SettingsMenu = null
 
 
 func _ready() -> void:
@@ -75,6 +79,8 @@ func _ready() -> void:
 
 	if btn_launch != null:
 		btn_launch.pressed.connect(_on_launch_pressed)
+	if btn_settings != null:
+		btn_settings.pressed.connect(_on_settings_pressed)
 	if btn_quit != null:
 		btn_quit.pressed.connect(_on_quit_pressed)
 
@@ -186,6 +192,19 @@ func _on_launch_pressed() -> void:
 	AudioManager.play_sfx(&"build_complete", -3.0, 0.0)
 	GameConfig.set_match_config(_selected_map_path, _aggro_ai_enabled, _resource_preset, &"genesis_v2")
 	get_tree().change_scene_to_file(_selected_map_path)
+
+
+func _on_settings_pressed() -> void:
+	if _settings_instance != null and is_instance_valid(_settings_instance):
+		return
+	AudioManager.play_ui_click()
+	_settings_instance = SETTINGS_MENU_SCENE.instantiate() as SettingsMenu
+	if _settings_instance != null:
+		_settings_instance.closed.connect(func() -> void:
+			_settings_instance = null
+			_refresh_audio_button()
+		)
+		add_child(_settings_instance)
 
 
 func _on_quit_pressed() -> void:

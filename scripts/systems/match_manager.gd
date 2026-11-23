@@ -1,8 +1,14 @@
 class_name MatchManager
 extends Node
 
+const PAUSE_MENU_SCENE: PackedScene = preload("res://scenes/ui/pause_menu.tscn")
+const ALERT_REGION_RADIUS: float = 260.0
+const ALERT_DAMAGE_THROTTLE_S: float = 4.0
+const MAX_RECENT_ALERTS: int = 3
+
 signal match_ended(winner_team: int, stats: Dictionary)
 signal aggro_ai_toggled(enabled: bool)
+signal tactical_alert_recorded(world_pos: Vector2, message: String)
 
 static var _global_aggro_ai_enabled: bool = true
 
@@ -25,6 +31,9 @@ var _eval_timer: float = 0.0
 var _tracked_buildings: Dictionary = {}
 var _tracked_units: Dictionary = {}
 var _tracked_prod: Dictionary = {}
+var _recent_alerts: Array[Dictionary] = []
+var _damage_alert_log: Array[Dictionary] = []
+var _pause_menu: PauseMenu = null
 
 
 func _ready() -> void:
@@ -32,16 +41,79 @@ func _ready() -> void:
 	if GameConfig != null and GameConfig.configured_from_menu:
 		aggro_ai_enabled = GameConfig.aggro_ai_enabled
 	_global_aggro_ai_enabled = aggro_ai_enabled
+	call_deferred("_ensure_pause_menu")
 	call_deferred("_hook_initial_entities")
 	if not get_tree().node_added.is_connected(_on_tree_node_added):
 		get_tree().node_added.connect(_on_tree_node_added)
+
+
+func _ensure_pause_menu() -> void:
+	if not is_inside_tree():
+		return
+	var existing: Node = get_tree().get_first_node_in_group("pause_menu")
+	if existing is PauseMenu:
+		_pause_menu = existing as PauseMenu
+		return
+	var host: Node = get_tree().current_scene
+	if host == null:
+		return
+	_pause_menu = PAUSE_MENU_SCENE.instantiate() as PauseMenu
+	if _pause_menu != null:
+		host.add_child(_pause_menu)
+
+
+func record_tactical_alert(world_pos: Vector2, category: StringName, message: String = "") -> void:
+	if is_match_over:
+		return
+	var now_s: float = float(Time.get_ticks_msec()) * 0.001
+	if category == &"damage":
+		# Prune stale throttle entries and skip duplicate damage alerts in the same 260px region within 4.0s.
+		var kept: Array[Dictionary] = []
+		var r_sq: float = ALERT_REGION_RADIUS * ALERT_REGION_RADIUS
+		for item: Dictionary in _damage_alert_log:
+			if now_s - float(item["time"]) < ALERT_DAMAGE_THROTTLE_S:
+				kept.append(item)
+				if (item["pos"] as Vector2).distance_squared_to(world_pos) <= r_sq:
+					_damage_alert_log = kept
+					return
+		kept.append({"pos": world_pos, "time": now_s})
+		_damage_alert_log = kept
+
+	var label: String = message
+	if label.is_empty():
+		match category:
+			&"damage":
+				label = "Forces Under Attack"
+			&"construction":
+				label = "Structure Complete"
+			&"upgrade":
+				label = "Upgrade Complete"
+			&"uplink":
+				label = "Hyper-Uplink Alert"
+			_:
+				label = "Tactical Alert"
+
+	_recent_alerts.push_front({
+		"pos": world_pos,
+		"category": category,
+		"message": label,
+		"time": now_s,
+	})
+	while _recent_alerts.size() > MAX_RECENT_ALERTS:
+		_recent_alerts.pop_back()
+
+	tactical_alert_recorded.emit(world_pos, label)
+
+
+func get_recent_alerts() -> Array[Dictionary]:
+	return _recent_alerts
 
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key_ev: InputEventKey = event
 		if key_ev.pressed and not key_ev.echo and not key_ev.ctrl_pressed and not key_ev.alt_pressed and not key_ev.shift_pressed:
-			if key_ev.keycode == KEY_F10 or key_ev.physical_keycode == KEY_F10 or event.is_action_pressed("debug_toggle_aggro_ai"):
+			if event.is_action_pressed("debug_toggle_aggro_ai"):
 				toggle_aggro_ai()
 				get_viewport().set_input_as_handled()
 				return

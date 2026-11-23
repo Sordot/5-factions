@@ -1,0 +1,462 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Theme" path="res://resources/themes/technozen_theme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://scripts/ui/settings_menu.gd" id="2_script"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_capture"]
+content_margin_left = 10.0
+content_margin_top = 6.0
+content_margin_right = 10.0
+content_margin_bottom = 6.0
+bg_color = Color(0.18, 0.14, 0.04, 0.94)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(1, 0.82, 0.28, 0.95)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[node name="SettingsMenu" type="CanvasLayer"]
+layer = 25
+script = ExtResource("2_script")
+
+[node name="RootControl" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_theme")
+
+[node name="Backdrop" type="ColorRect" parent="RootControl"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.035, 0.055, 0.82)
+
+[node name="CenterContainer" type="CenterContainer" parent="RootControl"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ModalPanel" type="PanelContainer" parent="RootControl/CenterContainer"]
+custom_minimum_size = Vector2(760, 540)
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HeaderRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.92, 0.99, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "SYSTEM SETTINGS // KERNEL CONFIGURATION"
+
+[node name="PathHint" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/HeaderRow"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.42, 0.82, 0.9, 0.85)
+theme_override_font_sizes/font_size = 11
+text = "user://settings.cfg"
+
+[node name="TabRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TabBtnControls" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TabRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+text = "CONTROLS / KEYBINDS"
+
+[node name="TabBtnCamera" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TabRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+text = "CAMERA"
+
+[node name="TabBtnAudio" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TabRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+text = "AUDIO"
+
+[node name="TabBtnDisplay" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TabRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+text = "DISPLAY"
+
+[node name="SepTop" type="HSeparator" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+layout_mode = 2
+
+[node name="ContentArea" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="PanelControls" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="CaptureBanner" type="PanelContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelControls"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_capture")
+
+[node name="CaptureLabel" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelControls/CaptureBanner"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.92, 0.56, 1)
+theme_override_font_sizes/font_size = 12
+text = "Press any key... (Esc to cancel)"
+horizontal_alignment = 1
+
+[node name="ControlsHint" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelControls"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.58, 0.78, 0.86, 0.9)
+theme_override_font_sizes/font_size = 11
+text = "Click any keybind to rebind. Right-Click issues smart Move/Attack/Gather orders; Shift chains commands. F5–F8 remain Godot-safe."
+
+[node name="Scroll" type="ScrollContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelControls"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="KeybindList" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelControls/Scroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="PanelCamera" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 14
+
+[node name="EdgePanRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/EdgePanRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Edge-Pan Enabled"
+
+[node name="ChkEdgePan" type="CheckButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/EdgePanRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+button_pressed = true
+text = "Active"
+
+[node name="EdgeSpeedRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/EdgeSpeedRow"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+text = "Edge-Pan Speed"
+
+[node name="SldEdgeSpeed" type="HSlider" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/EdgeSpeedRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 300.0
+max_value = 1800.0
+step = 25.0
+value = 900.0
+
+[node name="ValEdgeSpeed" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/EdgeSpeedRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(82, 0)
+layout_mode = 2
+text = "900 px/s"
+horizontal_alignment = 2
+
+[node name="EdgeMarginRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/EdgeMarginRow"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+text = "Edge-Pan Margin"
+
+[node name="SldEdgeMargin" type="HSlider" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/EdgeMarginRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 8.0
+max_value = 64.0
+step = 2.0
+value = 24.0
+
+[node name="ValEdgeMargin" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/EdgeMarginRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(82, 0)
+layout_mode = 2
+text = "24 px"
+horizontal_alignment = 2
+
+[node name="KbSpeedRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/KbSpeedRow"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+text = "Keyboard Pan Speed"
+
+[node name="SldKbSpeed" type="HSlider" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/KbSpeedRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 250.0
+max_value = 1400.0
+step = 25.0
+value = 650.0
+
+[node name="ValKbSpeed" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/KbSpeedRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(82, 0)
+layout_mode = 2
+text = "650 px/s"
+horizontal_alignment = 2
+
+[node name="ZoomSpeedRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/ZoomSpeedRow"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+text = "Zoom Step Speed"
+
+[node name="SldZoomSpeed" type="HSlider" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/ZoomSpeedRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.05
+max_value = 0.3
+step = 0.01
+value = 0.12
+
+[node name="ValZoomSpeed" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/ZoomSpeedRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(82, 0)
+layout_mode = 2
+text = "0.12"
+horizontal_alignment = 2
+
+[node name="PanelAudio" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 14
+
+[node name="MasterRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/MasterRow"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+text = "Master Volume"
+
+[node name="SldMasterVol" type="HSlider" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/MasterRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 100.0
+step = 1.0
+value = 72.0
+
+[node name="ValMasterVol" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/MasterRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "72%"
+horizontal_alignment = 2
+
+[node name="SfxRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/SfxRow"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+text = "SFX / Combat Volume"
+
+[node name="SldSfxVol" type="HSlider" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/SfxRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 100.0
+step = 1.0
+value = 85.0
+
+[node name="ValSfxVol" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/SfxRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "85%"
+horizontal_alignment = 2
+
+[node name="UiRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/UiRow"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+text = "UI / Alert Volume"
+
+[node name="SldUiVol" type="HSlider" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/UiRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 100.0
+step = 1.0
+value = 85.0
+
+[node name="ValUiVol" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/UiRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "85%"
+horizontal_alignment = 2
+
+[node name="MuteRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/MuteRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Mute All Audio"
+
+[node name="ChkMuteAll" type="CheckButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/MuteRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Muted"
+
+[node name="BtnTestAudio" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 32)
+layout_mode = 2
+size_flags_horizontal = 0
+focus_mode = 0
+text = "Test Audio Chime"
+
+[node name="PanelDisplay" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 14
+
+[node name="WindowModeRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/WindowModeRow"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+text = "Window Mode"
+
+[node name="OptWindowMode" type="OptionButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/WindowModeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(260, 32)
+layout_mode = 2
+focus_mode = 0
+
+[node name="ResolutionRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/ResolutionRow"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+text = "Windowed Resolution"
+
+[node name="OptResolution" type="OptionButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/ResolutionRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(260, 32)
+layout_mode = 2
+focus_mode = 0
+
+[node name="DisplayHint" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.56, 0.78, 0.86, 0.88)
+theme_override_font_sizes/font_size = 11
+text = "Resolution presets apply in Windowed mode. Use F11 (or your rebound Fullscreen key) to toggle fullscreen during a match."
+autowrap_mode = 3
+
+[node name="SepBottom" type="HSeparator" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+layout_mode = 2
+
+[node name="FooterRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="BtnResetTab" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/FooterRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 34)
+layout_mode = 2
+focus_mode = 0
+text = "Reset Tab Defaults"
+
+[node name="BtnResetAll" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/FooterRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 34)
+layout_mode = 2
+focus_mode = 0
+text = "Reset All Defaults"
+
+[node name="Spacer" type="Control" parent="RootControl/CenterContainer/ModalPanel/VBox/FooterRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BtnClose" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/FooterRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 34)
+layout_mode = 2
+focus_mode = 0
+text = "Apply & Close"

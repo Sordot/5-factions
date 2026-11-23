@@ -266,8 +266,12 @@ func _complete_construction() -> void:
 	var econ_done: EconomyManager = _get_economy_manager()
 	if econ_done != null:
 		econ_done.notify_building_tech_changed(team)
-	if team == Unit.Team.PLAYER and AudioManager != null:
-		AudioManager.play_sfx(&"build_complete", -2.5, 0.0)
+	if team == Unit.Team.PLAYER:
+		if AudioManager != null:
+			AudioManager.play_sfx(&"build_complete", -2.5, 0.0)
+		var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+		if mm != null:
+			mm.record_tactical_alert(global_position, &"construction", "%s Complete" % display_name)
 	health_changed.emit(self, current_hp, max_hp)
 	construction_progress_changed.emit(self, 1.0, true)
 	construction_completed.emit(self)
@@ -499,6 +503,10 @@ func take_damage(amount: float) -> void:
 	if is_node_ready() and body_visual != null:
 		body_visual.modulate = Color(1.9, 2.2, 2.3, 1.0)
 	_update_health_bar()
+	if team == Unit.Team.PLAYER and is_inside_tree():
+		var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+		if mm != null:
+			mm.record_tactical_alert(global_position, &"damage", "%s Under Attack!" % display_name)
 	health_changed.emit(self, current_hp, max_hp)
 	status_changed.emit(self)
 	if current_hp <= 0.0:

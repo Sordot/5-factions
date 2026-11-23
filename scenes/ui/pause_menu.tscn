@@ -1,0 +1,89 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Theme" path="res://resources/themes/technozen_theme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://scripts/ui/pause_menu.gd" id="2_script"]
+
+[node name="PauseMenu" type="CanvasLayer"]
+layer = 20
+script = ExtResource("2_script")
+
+[node name="RootControl" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_theme")
+
+[node name="Backdrop" type="ColorRect" parent="RootControl"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.04, 0.06, 0.72)
+
+[node name="CenterContainer" type="CenterContainer" parent="RootControl"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ModalPanel" type="PanelContainer" parent="RootControl/CenterContainer"]
+custom_minimum_size = Vector2(340, 0)
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="TitleLabel" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.28, 0.96, 0.9, 1)
+theme_override_font_sizes/font_size = 22
+text = "MATCH PAUSED"
+horizontal_alignment = 1
+
+[node name="SubtitleLabel" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.62, 0.82, 0.9, 0.88)
+theme_override_font_sizes/font_size = 11
+text = "SOVEREIGN KERNEL // TACTICAL SUSPENSION"
+horizontal_alignment = 1
+
+[node name="Sep" type="HSeparator" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+layout_mode = 2
+
+[node name="BtnResume" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+focus_mode = 0
+text = "Resume Match  (Esc)"
+
+[node name="BtnSettings" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+focus_mode = 0
+text = "Settings & Keybinds"
+
+[node name="BtnRestart" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+focus_mode = 0
+text = "Restart Skirmish"
+
+[node name="BtnMainMenu" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+focus_mode = 0
+text = "Quit to Main Menu"

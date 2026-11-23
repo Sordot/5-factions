@@ -16,6 +16,7 @@ enum CommandState {
 	GATHERING,
 	CONSTRUCTING,
 	STAFFING_BUILDING,
+	PATROLLING,
 }
 
 enum Stance {
@@ -75,6 +76,8 @@ var ability_component: AbilityComponent = null
 var combat_component: CombatComponent = null
 var command_queue: Array[Dictionary] = []
 var active_command: Dictionary = {}
+var patrol_waypoints: Array[Vector2] = []
+var patrol_index: int = 0
 
 var _construction_target: Building = null
 var _move_destination: Vector2 = Vector2.ZERO
@@ -409,6 +412,8 @@ func _execute_command(cmd: Dictionary) -> int:
 			var raw_t: Variant = cmd.get("target", null)
 			var t_unit: Unit = raw_t as Unit if (raw_t != null and is_instance_valid(raw_t) and raw_t is Unit) else null
 			result = _start_cast_ability(ab, cmd.get("pos", global_position) as Vector2, t_unit)
+		&"patrol":
+			result = CMD_EXEC_ACTIVE if _start_patrol(cmd.get("pos", global_position) as Vector2) else CMD_EXEC_FAILED
 	if result == CMD_EXEC_ACTIVE:
 		active_command = cmd.duplicate()
 		command_queue_changed.emit(self)
@@ -439,6 +444,9 @@ func get_active_command_destination() -> Variant:
 		CommandState.STAFFING_BUILDING:
 			if staff_component != null and is_instance_valid(staff_component.target_building):
 				return staff_component.target_building.global_position
+		CommandState.PATROLLING:
+			if not patrol_waypoints.is_empty():
+				return patrol_waypoints[clampi(patrol_index, 0, patrol_waypoints.size() - 1)]
 	return null
 
 
@@ -638,6 +646,40 @@ func command_attack_move(target_pos: Vector2, append_to_queue: bool = false) -> 
 	issue_command({"type": &"attack_move", "pos": target_pos}, append_to_queue)
 
 
+func command_patrol(target_pos: Vector2, append_to_queue: bool = false) -> void:
+	if is_dead or is_staffed or not _can_move():
+		return
+	if append_to_queue and command_state == CommandState.PATROLLING and command_queue.is_empty() and not patrol_waypoints.is_empty():
+		patrol_waypoints.append(target_pos)
+		command_queue_changed.emit(self)
+		status_changed.emit(self)
+		return
+	issue_command({"type": &"patrol", "pos": target_pos}, append_to_queue)
+
+
+func _start_patrol(first_target: Vector2) -> bool:
+	if is_dead or is_staffed or not _can_move():
+		return false
+	if stance != Stance.AGGRESSIVE:
+		stance = Stance.AGGRESSIVE
+		stance_changed.emit(self, stance)
+	_cancel_active_tasks(false)
+	patrol_waypoints = [global_position, first_target]
+	while not command_queue.is_empty() and command_queue[0].get("type", &"") == &"patrol":
+		var extra: Dictionary = command_queue.pop_front()
+		var extra_pos: Vector2 = extra.get("pos", first_target) as Vector2
+		if patrol_waypoints[patrol_waypoints.size() - 1].distance_squared_to(extra_pos) > 16.0:
+			patrol_waypoints.append(extra_pos)
+	patrol_index = 1
+	command_state = CommandState.PATROLLING
+	current_target = null
+	_reset_progress_tracker()
+	_set_nav_target(patrol_waypoints[patrol_index])
+	command_queue_changed.emit(self)
+	status_changed.emit(self)
+	return true
+
+
 func _start_attack_move(target_pos: Vector2) -> bool:
 	if is_dead or is_staffed or not _can_move():
 		return false
@@ -709,6 +751,11 @@ func take_damage(amount: float, attacker: Unit = null) -> void:
 	if is_node_ready():
 		body_visual.modulate = Color(1.95, 2.25, 2.35, 1.0)
 	_update_health_bar()
+	if team == Team.PLAYER and is_inside_tree():
+		var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+		if mm != null:
+			var unit_label: String = data.display_name if data != null else "Unit"
+			mm.record_tactical_alert(global_position, &"damage", "%s Under Attack!" % unit_label)
 	health_changed.emit(self, current_hp, data.max_hp)
 	status_changed.emit(self)
 
@@ -889,6 +936,8 @@ func _physics_process(delta: float) -> void:
 			_process_constructing(delta)
 		CommandState.STAFFING_BUILDING:
 			_process_staffing_building(delta)
+		CommandState.PATROLLING:
+			_process_patrolling(delta)
 
 	_update_worker_collision_passing()
 	_apply_anti_stuck_steering(delta)
@@ -1109,6 +1158,57 @@ func _process_staffing_building(delta: float) -> void:
 	staff_component.tick(self, delta)
 
 
+func _process_patrolling(delta: float) -> void:
+	if patrol_waypoints.size() < 2:
+		patrol_waypoints.clear()
+		patrol_index = 0
+		_advance_command_queue()
+		return
+
+	if current_target != null and not is_instance_valid(current_target):
+		current_target = null
+
+	var aggro_on: bool = MatchManager.is_aggro_ai_enabled(get_tree())
+	if aggro_on and _can_attack() and combat_component != null:
+		var leash_range: float = maxf(data.aggro_range, data.attack_range) * 1.25
+		if current_target != null and not combat_component.is_valid_target_in_range(self, current_target, leash_range):
+			current_target = null
+		if current_target == null:
+			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
+	elif not aggro_on:
+		current_target = null
+
+	if current_target != null and is_instance_valid(current_target) and combat_component != null:
+		_reset_progress_tracker()
+		if combat_component.is_within_attack_envelope(self, current_target):
+			_face_point(current_target.global_position, delta)
+			combat_component.try_fire_at(self, current_target)
+			return
+		if combat_component.is_target_inside_min_range(self, current_target):
+			current_target = null
+		else:
+			_request_nav_toward_point(current_target.global_position, 8.0)
+			return
+
+	if nav_agent == null:
+		patrol_waypoints.clear()
+		_advance_command_queue()
+		return
+
+	patrol_index = clampi(patrol_index, 0, patrol_waypoints.size() - 1)
+	var dest: Vector2 = patrol_waypoints[patrol_index]
+	if _last_nav_target == Vector2.INF or _last_nav_target.distance_squared_to(dest) > 1.0:
+		_set_nav_target(dest)
+	if not _is_nav_map_ready():
+		return
+	if _should_settle_at_destination(dest, delta):
+		_reset_progress_tracker()
+		patrol_index = (patrol_index + 1) % patrol_waypoints.size()
+		_set_nav_target(patrol_waypoints[patrol_index])
+		return
+	_compute_nav_desired_velocity()
+
+
 func _cancel_active_tasks(keep_gather: bool) -> void:
 	if ability_component != null:
 		ability_component.cancel_pending_cast()
@@ -1116,6 +1216,8 @@ func _cancel_active_tasks(keep_gather: bool) -> void:
 		gather_component.cancel()
 	if staff_component != null:
 		staff_component.cancel()
+	patrol_waypoints.clear()
+	patrol_index = 0
 	if _construction_target != null:
 		_construction_target = null
 		if gather_bar_root != null:
@@ -1634,6 +1736,8 @@ func _get_command_state_label() -> String:
 			return "Constructing"
 		CommandState.STAFFING_BUILDING:
 			return "Entering Node"
+		CommandState.PATROLLING:
+			return "Patrolling"
 	return "Active"
 
 

@@ -52,28 +52,28 @@ unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+1 Clone (Ctrl+F1)"
+text = "+1 Clone"
 
 [node name="BtnUnit5" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+5 Clones (F2)"
+text = "+5 Clones"
 
 [node name="BtnScout1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+1 Stinger (F5)"
+text = "+1 Stinger"
 
 [node name="BtnWorker1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+1 Worker (F6)"
+text = "+1 Worker"
 
 [node name="BtnToggleAggroAI" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
 unique_name_in_owner = true
@@ -98,14 +98,14 @@ unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+1 Harv (F7)"
+text = "+1 Harv"
 
 [node name="BtnEngineer1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+1 Eng (F8)"
+text = "+1 Eng"
 
 [node name="BtnGrantRes" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
 unique_name_in_owner = true
@@ -144,14 +144,14 @@ unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+1 Dummy (F3)"
+text = "+1 Dummy"
 
 [node name="BtnDummy3" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow2"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+3 Dum (F4)"
+text = "+3 Dum"
 
 [node name="BtnEnemy1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow2"]
 unique_name_in_owner = true
@@ -224,4 +224,4 @@ text = "+Structure"
 layout_mode = 2
 theme_override_colors/font_color = Color(0.56, 0.72, 0.8, 0.85)
 theme_override_font_sizes/font_size = 10
-text = "LMB: Select/Inspect | Q/W/E/R/T/Y/F: Ability/Build | RMB: Command/Rally | Tab: Subgroup | A/S/H | 1-9"
+text = "LMB: Select | RMB: Order | A/S/H/P | F1-F4: Cam Bookmarks (Ctrl=Save) | Bksp: Base | Space: Alert | Esc: Menu"

@@ -71,6 +71,10 @@ func _process(delta: float) -> void:
 
 	if not is_equal_approx(prev_progress, capture_progress) or prev_contested != is_contested:
 		capture_state_changed.emit(capture_progress, is_contested, controlling_team)
+		if is_contested and not prev_contested:
+			var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+			if mm != null:
+				mm.record_tactical_alert(global_position, &"uplink", "Hyper-Uplink Contested!")
 
 	queue_redraw()
 
@@ -82,6 +86,10 @@ func _set_controller(next_team: int) -> void:
 	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 	if econ != null:
 		econ.set_uplink_controller(controlling_team, production_bonus_pct)
+	var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+	if mm != null and controlling_team >= 0:
+		var msg: String = "Hyper-Uplink Captured (+5%%)" if controlling_team == int(Unit.Team.PLAYER) else "Hostile Captured Hyper-Uplink!"
+		mm.record_tactical_alert(global_position, &"uplink", msg)
 	controller_changed.emit(controlling_team)
 
 

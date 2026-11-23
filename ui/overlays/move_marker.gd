@@ -6,6 +6,7 @@ enum MarkerStyle {
 	ATTACK,
 	GATHER,
 	INTERACT,
+	PATROL,
 }
 
 @export var style: MarkerStyle = MarkerStyle.MOVE
@@ -25,6 +26,8 @@ func configure(marker_style: MarkerStyle) -> void:
 			color = Color(0.26, 1.0, 0.56, 0.96)
 		MarkerStyle.INTERACT:
 			color = Color(1.0, 0.78, 0.28, 0.96)
+		MarkerStyle.PATROL:
+			color = Color(0.32, 0.96, 0.92, 0.96)
 		_:
 			color = Color(0.24, 0.94, 1.0, 0.95)
 	queue_redraw()
@@ -72,6 +75,12 @@ func _draw() -> void:
 				hex.append(Vector2.RIGHT.rotated(ang) * hex_r)
 			draw_polyline(hex, ring_color, 2.0, true)
 			draw_circle(Vector2.ZERO, lerpf(3.5, 1.0, t), ring_color)
+		MarkerStyle.PATROL:
+			var gold: Color = Color(1.0, 0.84, 0.30, (1.0 - t) * 0.95)
+			var spin: float = t * PI
+			var inner_p: float = lerpf(max_radius * 0.72, 6.0, t)
+			draw_arc(Vector2.ZERO, inner_p, spin, spin + PI * 0.8, 16, gold, 2.2, true)
+			draw_arc(Vector2.ZERO, inner_p, spin + PI, spin + PI * 1.8, 16, gold, 2.2, true)
 		_:
 			var dot_r: float = lerpf(4.0, 1.0, t)
 			draw_circle(Vector2.ZERO, dot_r, ring_color)

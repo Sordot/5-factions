@@ -36,17 +36,42 @@ func _ready() -> void:
 		)
 	if AudioManager != null and not AudioManager.mute_changed.is_connected(_on_audio_mute_changed):
 		AudioManager.mute_changed.connect(_on_audio_mute_changed)
+	if SettingsManager != null and not SettingsManager.keybind_changed.is_connected(_on_keybind_changed):
+		SettingsManager.keybind_changed.connect(_on_keybind_changed)
 	if btn_idle_workers != null:
 		btn_idle_workers.add_to_group("blocks_edge_pan")
 		btn_idle_workers.pressed.connect(_on_idle_workers_pressed)
 	_connect_economy_manager()
 	_connect_encroaching_zone()
 	_connect_match_manager()
+	call_deferred("_connect_camera_toasts")
 	call_deferred("_connect_selection_controller")
 	_refresh_from_economy()
 	_refresh_aggro_badge()
 	_refresh_audio_button()
 	_on_idle_workers_updated(0)
+
+
+func _connect_camera_toasts() -> void:
+	if not is_inside_tree():
+		return
+	var cam: RTSCamera = get_tree().get_first_node_in_group("rts_camera") as RTSCamera
+	if cam != null and not cam.camera_toast.is_connected(_on_hud_toast):
+		cam.camera_toast.connect(_on_hud_toast)
+
+
+func _on_keybind_changed(_action_name: StringName) -> void:
+	var count: int = _selection_controller.idle_worker_count if _selection_controller != null else 0
+	_on_idle_workers_updated(count)
+	_refresh_aggro_badge()
+
+
+func _on_hud_toast(message: String) -> void:
+	_alert_timer = 1.85
+	if resource_alert_label != null:
+		resource_alert_label.text = message.to_upper()
+		resource_alert_label.visible = true
+		resource_alert_label.modulate = Color(0.38, 0.98, 0.90, 1.0)
 
 
 func _process(delta: float) -> void:
@@ -135,7 +160,8 @@ func _on_idle_workers_pressed() -> void:
 func _on_idle_workers_updated(count: int) -> void:
 	if btn_idle_workers == null:
 		return
-	btn_idle_workers.text = "Idle Workers: %d [F1]" % count
+	var hk: String = SettingsManager.get_action_key_label(&"cmd_select_idle_worker") if SettingsManager != null else "`"
+	btn_idle_workers.text = "Idle Workers: %d [%s]" % [count, hk]
 	btn_idle_workers.disabled = count <= 0
 	if count > 0:
 		btn_idle_workers.modulate = Color(1.0, 0.84, 0.28, 1.0)
@@ -147,8 +173,20 @@ func _connect_match_manager() -> void:
 	if not is_inside_tree():
 		return
 	_match_manager = get_tree().get_first_node_in_group("match_manager") as MatchManager
-	if _match_manager != null and not _match_manager.aggro_ai_toggled.is_connected(_on_aggro_ai_toggled):
-		_match_manager.aggro_ai_toggled.connect(_on_aggro_ai_toggled)
+	if _match_manager != null:
+		if not _match_manager.aggro_ai_toggled.is_connected(_on_aggro_ai_toggled):
+			_match_manager.aggro_ai_toggled.connect(_on_aggro_ai_toggled)
+		if not _match_manager.tactical_alert_recorded.is_connected(_on_tactical_alert_recorded):
+			_match_manager.tactical_alert_recorded.connect(_on_tactical_alert_recorded)
+
+
+func _on_tactical_alert_recorded(_world_pos: Vector2, message: String) -> void:
+	var hk: String = SettingsManager.get_action_key_label(&"jump_last_alert") if SettingsManager != null else "Space"
+	_alert_timer = 2.2
+	if resource_alert_label != null:
+		resource_alert_label.text = "%s  [%s]" % [message.to_upper(), hk]
+		resource_alert_label.visible = true
+		resource_alert_label.modulate = Color(1.0, 0.82, 0.34, 1.0)
 
 
 func _on_aggro_ai_toggled(_enabled: bool) -> void:

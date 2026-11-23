@@ -6,8 +6,24 @@ signal volume_changed(volume_linear: float)
 const SAMPLE_RATE: int = 22050
 const POOL_SIZE: int = 16
 
+const UI_SFX_IDS: Array = [
+	&"ui_click",
+	&"unit_select",
+	&"order_move",
+	&"order_attack",
+	&"order_gather",
+	&"build_complete",
+	&"upgrade_complete",
+	&"unit_ready",
+	&"error_insufficient",
+	&"match_victory",
+	&"match_defeat",
+]
+
 var is_muted: bool = false
 var master_volume_linear: float = 0.72
+var sfx_volume_linear: float = 0.85
+var ui_volume_linear: float = 0.85
 
 var _streams: Dictionary = {}
 var _players: Array[AudioStreamPlayer] = []
@@ -46,13 +62,39 @@ func _ready() -> void:
 		add_child(player)
 		_players.append(player)
 	_generate_procedural_library()
+	_sync_from_settings()
+	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
+		SettingsManager.settings_changed.connect(_on_settings_changed)
 	_apply_master_bus_settings()
+
+
+func _on_settings_changed(category: StringName) -> void:
+	if category == &"audio" or category == &"all":
+		_sync_from_settings()
+
+
+func _sync_from_settings() -> void:
+	if SettingsManager == null:
+		return
+	var prev_muted: bool = is_muted
+	var prev_master: float = master_volume_linear
+	master_volume_linear = clampf(SettingsManager.master_volume, 0.0, 1.0)
+	sfx_volume_linear = clampf(SettingsManager.sfx_volume, 0.0, 1.0)
+	ui_volume_linear = clampf(SettingsManager.ui_volume, 0.0, 1.0)
+	is_muted = SettingsManager.muted
+	_apply_master_bus_settings()
+	if prev_muted != is_muted:
+		mute_changed.emit(is_muted)
+	if not is_equal_approx(prev_master, master_volume_linear):
+		volume_changed.emit(master_volume_linear)
 
 
 func set_muted(muted: bool) -> void:
 	if is_muted == muted:
 		return
 	is_muted = muted
+	if SettingsManager != null and SettingsManager.muted != is_muted:
+		SettingsManager.set_audio_settings(master_volume_linear, sfx_volume_linear, ui_volume_linear, is_muted)
 	_apply_master_bus_settings()
 	mute_changed.emit(is_muted)
 
@@ -66,12 +108,17 @@ func toggle_mute() -> bool:
 
 func set_volume(linear: float) -> void:
 	master_volume_linear = clampf(linear, 0.0, 1.0)
+	if SettingsManager != null:
+		SettingsManager.set_audio_settings(master_volume_linear, sfx_volume_linear, ui_volume_linear, is_muted)
 	_apply_master_bus_settings()
 	volume_changed.emit(master_volume_linear)
 
 
 func play_sfx(sfx_id: StringName, volume_db_offset: float = 0.0, pitch_jitter: float = 0.0) -> void:
 	if is_muted or master_volume_linear <= 0.001:
+		return
+	var channel_linear: float = ui_volume_linear if UI_SFX_IDS.has(sfx_id) else sfx_volume_linear
+	if channel_linear <= 0.001:
 		return
 	if not _streams.has(sfx_id):
 		return
@@ -86,7 +133,7 @@ func play_sfx(sfx_id: StringName, volume_db_offset: float = 0.0, pitch_jitter: f
 	if player == null:
 		return
 	player.stream = _streams[sfx_id] as AudioStreamWAV
-	player.volume_db = volume_db_offset
+	player.volume_db = volume_db_offset + linear_to_db(channel_linear)
 	if pitch_jitter > 0.0:
 		player.pitch_scale = 1.0 + randf_range(-pitch_jitter, pitch_jitter)
 	else:

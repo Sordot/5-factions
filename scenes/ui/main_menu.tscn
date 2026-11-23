@@ -429,6 +429,13 @@ theme_override_font_sizes/font_size = 16
 theme_override_styles/normal = SubResource("StyleBoxFlat_launch_btn")
 text = "LAUNCH SKIRMISH"
 
+[node name="BtnSettings" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+focus_mode = 0
+text = "SETTINGS & KEYBINDS"
+
 [node name="BtnQuit" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 32)

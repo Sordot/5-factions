@@ -28,17 +28,21 @@ extends Control
 @onready var btn_cmd_move: Button = %BtnCmdMove
 @onready var btn_cmd_stop: Button = %BtnCmdStop
 @onready var btn_cmd_hold: Button = %BtnCmdHold
+@onready var btn_cmd_patrol: Button = %BtnCmdPatrol
 @onready var btn_cmd_amove: Button = %BtnCmdAMove
 
 var _selection_controller: SelectionController = null
 var _economy_manager: EconomyManager = null
 var _connected_units: Array[Unit] = []
 var _inspected_entity: Node = null
+var _selected_buildings: Array[Building] = []
+var _connected_buildings: Array[Building] = []
 var _active_subgroup_units: Array[Unit] = []
 var _active_abilities: Array[AbilityData] = []
 var _ability_buttons: Dictionary = {}
 var _building_action_buttons: Array[Dictionary] = []
 var _targeting_ability: AbilityData = null
+var _patrol_targeting: bool = false
 var _hp_fill_style: StyleBoxFlat = null
 var _gauge_fill_style: StyleBoxFlat = null
 
@@ -49,9 +53,14 @@ func _ready() -> void:
 	if _selection_controller != null:
 		_selection_controller.selection_changed.connect(_on_selection_changed)
 		_selection_controller.inspection_changed.connect(_on_inspection_changed)
+		_selection_controller.buildings_selection_changed.connect(_on_buildings_selection_changed)
 		_selection_controller.control_groups_changed.connect(_on_control_groups_changed)
 		_selection_controller.ability_targeting_changed.connect(_on_ability_targeting_changed)
+		_selection_controller.patrol_targeting_changed.connect(_on_patrol_targeting_changed)
 		_on_control_groups_changed(_selection_controller.get_control_groups_summary())
+
+	if SettingsManager != null and not SettingsManager.keybind_changed.is_connected(_on_keybind_changed):
+		SettingsManager.keybind_changed.connect(_on_keybind_changed)
 
 	_connect_economy_manager()
 
@@ -67,10 +76,16 @@ func _ready() -> void:
 		if _selection_controller != null:
 			_selection_controller.issue_hold_command()
 	)
+	if btn_cmd_patrol != null:
+		btn_cmd_patrol.pressed.connect(func() -> void:
+			if _selection_controller != null:
+				_selection_controller.begin_patrol_targeting()
+		)
 	btn_cmd_move.disabled = true
 	btn_cmd_amove.disabled = true
 
 	_bind_static_command_tooltips()
+	_refresh_dynamic_command_labels()
 	bottom_panel.visible = false
 	call_deferred("_adjust_layout_for_minimap")
 	if get_viewport() != null and not get_viewport().size_changed.is_connected(_adjust_layout_for_minimap):
@@ -120,9 +135,68 @@ func _setup_dynamic_bar_styles() -> void:
 
 func _bind_static_command_tooltips() -> void:
 	_attach_tooltip(btn_cmd_move, "Move", "RMB", "Right-Click Ground", "Orders selected units to navigate to the target location.")
-	_attach_tooltip(btn_cmd_stop, "Stop", "S", "Immediate", "Cancels current movement, gathering, construction, or target.")
-	_attach_tooltip(btn_cmd_hold, "Hold Position", "H", "Immediate", "Locks unit position while engaging enemies inside attack range.")
-	_attach_tooltip(btn_cmd_amove, "Attack-Move", "A", "Smart-Cast at Cursor", "Moves toward cursor and automatically engages hostile targets along the way.")
+	_attach_dynamic_action_tooltip(btn_cmd_stop, "Stop", &"cmd_stop", "Immediate", "Cancels current movement, patrol, gathering, construction, or target and flushes command queue.")
+	_attach_dynamic_action_tooltip(btn_cmd_hold, "Hold Position", &"cmd_hold", "Immediate", "Locks unit position while engaging enemies inside attack range.")
+	_attach_dynamic_action_tooltip(btn_cmd_patrol, "Patrol", &"cmd_patrol", "Click Waypoint (Shift Chains Loop)", "Loops units continuously between waypoints while engaging enemies encountered along the path.")
+	_attach_dynamic_action_tooltip(btn_cmd_amove, "Attack-Move", &"cmd_attack_move", "Smart-Cast at Cursor", "Moves toward cursor and automatically engages hostile targets along the way.")
+
+
+func _attach_dynamic_action_tooltip(btn: Button, title: String, action_name: StringName, meta: String, desc: String) -> void:
+	if btn == null:
+		return
+	btn.tooltip_text = ""
+	btn.mouse_entered.connect(func() -> void:
+		if command_tooltip != null:
+			var hk: String = SettingsManager.get_action_key_label(action_name) if SettingsManager != null else ""
+			command_tooltip.show_tooltip(title, hk, meta, desc)
+	)
+	btn.mouse_exited.connect(func() -> void:
+		if command_tooltip != null:
+			command_tooltip.hide_tooltip()
+	)
+
+
+func _on_keybind_changed(_action_name: StringName) -> void:
+	_refresh_dynamic_command_labels()
+	_refresh_stance_button()
+
+
+func _refresh_dynamic_command_labels() -> void:
+	var k_stop: String = SettingsManager.get_action_key_label(&"cmd_stop") if SettingsManager != null else "S"
+	var k_patrol: String = SettingsManager.get_action_key_label(&"cmd_patrol") if SettingsManager != null else "P"
+	var k_amove: String = SettingsManager.get_action_key_label(&"cmd_attack_move") if SettingsManager != null else "A"
+	if btn_cmd_stop != null:
+		btn_cmd_stop.text = "Stop (%s)" % k_stop
+	if btn_cmd_patrol != null:
+		btn_cmd_patrol.text = ("Patrol* (%s)" % k_patrol) if _patrol_targeting else ("Patrol (%s)" % k_patrol)
+		btn_cmd_patrol.modulate = Color(1.0, 0.86, 0.30, 1.0) if _patrol_targeting else Color.WHITE
+	if btn_cmd_amove != null:
+		btn_cmd_amove.text = "Atk-Mv (%s)" % k_amove
+
+
+func _on_patrol_targeting_changed(active: bool) -> void:
+	_patrol_targeting = active
+	_refresh_dynamic_command_labels()
+
+
+func _on_buildings_selection_changed(buildings: Array[Building]) -> void:
+	_disconnect_multi_building_signals()
+	_selected_buildings = buildings.duplicate()
+	for b: Building in _selected_buildings:
+		if is_instance_valid(b) and not b.is_destroyed:
+			if not b.status_changed.is_connected(_on_inspected_entity_updated):
+				b.status_changed.connect(_on_inspected_entity_updated)
+			_connected_buildings.append(b)
+	if not _selected_buildings.is_empty() and is_instance_valid(_selected_buildings[0]):
+		_inspected_entity = _selected_buildings[0]
+		_render_inspected_entity(_inspected_entity, true)
+
+
+func _disconnect_multi_building_signals() -> void:
+	for b: Building in _connected_buildings:
+		if is_instance_valid(b) and b.status_changed.is_connected(_on_inspected_entity_updated):
+			b.status_changed.disconnect(_on_inspected_entity_updated)
+	_connected_buildings.clear()
 
 
 func _attach_tooltip(btn: Button, title: String, hotkey: String, meta: String, desc: String) -> void:
@@ -283,6 +357,20 @@ func _render_inspected_entity(entity: Node, rebuild_actions: bool) -> void:
 		return
 
 	var info: Dictionary = InspectionHelper.get_inspection_data(entity)
+	if entity is Building and _selected_buildings.size() > 1:
+		var lead_b: Building = entity as Building
+		var same_type_count: int = 0
+		var total_queued: int = 0
+		for sb: Building in _selected_buildings:
+			if is_instance_valid(sb) and not sb.is_destroyed:
+				if sb.building_type_id == lead_b.building_type_id:
+					same_type_count += 1
+				total_queued += sb.get_training_queue_size()
+		if same_type_count == _selected_buildings.size():
+			info["title"] = "%s  x%d" % [lead_b.display_name, _selected_buildings.size()]
+		else:
+			info["title"] = "%s (+%d)" % [lead_b.display_name, _selected_buildings.size() - 1]
+		info["subtitle"] = "MULTI-PRODUCTION GROUP (%d QUEUED)" % total_queued
 	bottom_panel.visible = true
 	subgroup_tabs_row.visible = false
 	unit_badges_grid.visible = false
@@ -493,7 +581,9 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 		eject_btn.pressed.connect(func() -> void:
 			if AudioManager != null:
 				AudioManager.play_ui_click()
-			if is_instance_valid(captured_building):
+			if _selection_controller != null and _selected_buildings.size() > 1:
+				_selection_controller.eject_engineers_from_selected_buildings()
+			elif is_instance_valid(captured_building):
 				captured_building.eject_engineers()
 		)
 		_attach_tooltip(
@@ -522,7 +612,9 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 		var captured_slot: int = i
 		var captured_u: UnitData = u_data
 		train_btn.pressed.connect(func() -> void:
-			if is_instance_valid(captured_b):
+			if _selection_controller != null and _selected_buildings.size() > 1:
+				_selection_controller.queue_unit_distributed(captured_u)
+			elif is_instance_valid(captured_b):
 				captured_b.queue_unit_training(captured_slot)
 		)
 		train_btn.tooltip_text = ""
@@ -755,14 +847,15 @@ func _refresh_stance_button() -> void:
 		living_count += 1
 		if u.stance == Unit.Stance.HOLD_POSITION:
 			hold_count += 1
+	var k_hold: String = SettingsManager.get_action_key_label(&"cmd_hold") if SettingsManager != null else "H"
 	if living_count > 0 and hold_count == living_count:
-		btn_cmd_hold.text = "Hold: ON (H)"
+		btn_cmd_hold.text = "Hold: ON (%s)" % k_hold
 		btn_cmd_hold.modulate = Color(1.0, 0.84, 0.32, 1.0)
 	elif hold_count > 0:
-		btn_cmd_hold.text = "Hold* (H)"
+		btn_cmd_hold.text = "Hold* (%s)" % k_hold
 		btn_cmd_hold.modulate = Color(1.0, 0.90, 0.56, 1.0)
 	else:
-		btn_cmd_hold.text = "Hold (H)"
+		btn_cmd_hold.text = "Hold (%s)" % k_hold
 		btn_cmd_hold.modulate = Color.WHITE
 
 

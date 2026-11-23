@@ -258,8 +258,12 @@ func tick(owner_building: Building, delta: float) -> void:
 		if upg != null and econ != null:
 			econ.complete_upgrade(owner_building.team, upg.upgrade_id)
 			owner_building.pulse_deposit_feedback()
-			if owner_building.team == Unit.Team.PLAYER and AudioManager != null:
-				AudioManager.play_sfx(&"upgrade_complete", -2.0, 0.0)
+			if owner_building.team == Unit.Team.PLAYER:
+				if AudioManager != null:
+					AudioManager.play_sfx(&"upgrade_complete", -2.0, 0.0)
+				var mm: MatchManager = owner_building.get_tree().get_first_node_in_group("match_manager") as MatchManager
+				if mm != null:
+					mm.record_tactical_alert(owner_building.global_position, &"upgrade", "%s Researched" % upg.display_name)
 			upgrade_researched.emit(upg)
 		_emit_queue_changed()
 		return

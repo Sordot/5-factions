@@ -9,13 +9,19 @@ const VENT_SNAP_RADIUS: float = 64.0
 @export var buildable_bounds: Rect2 = Rect2(-640.0, -360.0, 1280.0, 720.0)
 
 
-func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspected_entity: Node, shift_queued: bool = false) -> void:
-	# 1. Rally point assignment when inspecting a friendly rally-capable building.
+func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspected_entity: Node, shift_queued: bool = false, selected_buildings: Array[Building] = []) -> void:
+	# 1. Rally point assignment when inspecting/selecting friendly rally-capable building(s).
 	if selected_units.is_empty():
-		if inspected_entity is Building and is_instance_valid(inspected_entity):
+		var rally_buildings: Array[Building] = []
+		for b: Building in selected_buildings:
+			if is_instance_valid(b) and not b.is_destroyed and b.team == Unit.Team.PLAYER and b.is_constructed and b.can_set_rally:
+				rally_buildings.append(b)
+		if rally_buildings.is_empty() and inspected_entity is Building and is_instance_valid(inspected_entity):
 			var building: Building = inspected_entity
 			if building.team == Unit.Team.PLAYER and building.is_constructed and building.can_set_rally:
-				_handle_building_rally_right_click(building, world_pos)
+				rally_buildings.append(building)
+		if not rally_buildings.is_empty():
+			_handle_multi_building_rally_right_click(rally_buildings, world_pos)
 		return
 
 	# 2. Attack hostile unit or hostile building.
@@ -175,21 +181,49 @@ func _assign_building_perimeter_destinations(units: Array[Unit], building: Build
 	return out
 
 
-func _handle_building_rally_right_click(building: Building, world_pos: Vector2) -> void:
+func _handle_multi_building_rally_right_click(buildings: Array[Building], world_pos: Vector2) -> void:
 	var clicked_res: ResourceNode = find_resource_node_at_point(world_pos)
 	if clicked_res != null and not clicked_res.is_vent:
-		building.set_rally_target(clicked_res)
+		for b: Building in buildings:
+			b.set_rally_target(clicked_res)
+		if AudioManager != null:
+			AudioManager.play_sfx(&"order_gather", -4.5, 0.04)
 		spawn_move_marker(clicked_res.global_position, MoveMarker.MarkerStyle.GATHER)
 		return
 
 	var clicked_friendly_building: Building = find_building_at_point(world_pos, Unit.Team.PLAYER)
-	if clicked_friendly_building != null and clicked_friendly_building != building and clicked_friendly_building.max_staff_slots > 0:
-		building.set_rally_target(clicked_friendly_building)
-		spawn_move_marker(clicked_friendly_building.global_position, MoveMarker.MarkerStyle.INTERACT)
-		return
+	if clicked_friendly_building != null and clicked_friendly_building.max_staff_slots > 0:
+		var applied_any: bool = false
+		for b: Building in buildings:
+			if b != clicked_friendly_building:
+				b.set_rally_target(clicked_friendly_building)
+				applied_any = true
+		if applied_any:
+			if AudioManager != null:
+				AudioManager.play_sfx(&"order_gather", -4.5, 0.04)
+			spawn_move_marker(clicked_friendly_building.global_position, MoveMarker.MarkerStyle.INTERACT)
+			return
 
-	building.set_rally_position(world_pos)
+	for b: Building in buildings:
+		b.set_rally_position(world_pos)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"order_move", -4.5, 0.04)
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.MOVE)
+
+
+func _handle_building_rally_right_click(building: Building, world_pos: Vector2) -> void:
+	_handle_multi_building_rally_right_click([building], world_pos)
+
+
+func issue_patrol_order(selected_units: Array[Unit], world_pos: Vector2, shift_queued: bool = false) -> void:
+	if selected_units.is_empty():
+		return
+	var targets: Array[Vector2] = assign_group_destinations(selected_units, world_pos)
+	for i: int in range(selected_units.size()):
+		selected_units[i].command_patrol(targets[i], shift_queued)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"order_move", -3.5, 0.05)
+	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.PATROL)
 
 
 func issue_attack_move(world_pos: Vector2, selected_units: Array[Unit], shift_queued: bool = false) -> void:

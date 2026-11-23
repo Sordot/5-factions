@@ -5,6 +5,7 @@ const DASH_LENGTH: float = 12.0
 const GAP_LENGTH: float = 8.0
 
 var _inspected_building: Building = null
+var _selected_buildings: Array[Building] = []
 var _pulse_time: float = 0.0
 
 
@@ -18,16 +19,34 @@ func bind_selection_controller(controller: Node) -> void:
 		return
 	if controller.has_signal("inspection_changed") and not controller.is_connected("inspection_changed", _on_inspection_changed):
 		controller.connect("inspection_changed", _on_inspection_changed)
+	if controller.has_signal("buildings_selection_changed") and not controller.is_connected("buildings_selection_changed", _on_buildings_selection_changed):
+		controller.connect("buildings_selection_changed", _on_buildings_selection_changed)
 	var current_entity: Node = controller.get("inspected_entity") as Node
 	_on_inspection_changed(current_entity)
 
 
+func _on_buildings_selection_changed(buildings: Array[Building]) -> void:
+	_disconnect_buildings()
+	for b: Building in buildings:
+		if is_instance_valid(b) and not b.is_destroyed and b.team == Unit.Team.PLAYER and b.can_set_rally:
+			_selected_buildings.append(b)
+			if not b.rally_changed.is_connected(_on_building_changed):
+				b.rally_changed.connect(_on_building_changed)
+			if not b.destroyed.is_connected(_on_building_destroyed):
+				b.destroyed.connect(_on_building_destroyed)
+	_inspected_building = _selected_buildings[0] if not _selected_buildings.is_empty() else null
+	queue_redraw()
+
+
 func _on_inspection_changed(entity: Node) -> void:
-	_disconnect_building()
+	if not _selected_buildings.is_empty() and entity == _selected_buildings[0]:
+		return
+	_disconnect_buildings()
 	if entity != null and is_instance_valid(entity) and entity is Building:
 		var b: Building = entity
 		if not b.is_destroyed and b.team == Unit.Team.PLAYER and b.can_set_rally:
 			_inspected_building = b
+			_selected_buildings = [b]
 			if not b.rally_changed.is_connected(_on_building_changed):
 				b.rally_changed.connect(_on_building_changed)
 			if not b.destroyed.is_connected(_on_building_destroyed):
@@ -39,43 +58,49 @@ func _on_building_changed(_building: Building) -> void:
 	queue_redraw()
 
 
-func _on_building_destroyed(_building: Building) -> void:
-	_disconnect_building()
+func _on_building_destroyed(building: Building) -> void:
+	_selected_buildings.erase(building)
+	if _inspected_building == building:
+		_inspected_building = _selected_buildings[0] if not _selected_buildings.is_empty() else null
 	queue_redraw()
 
 
-func _disconnect_building() -> void:
-	if _inspected_building != null and is_instance_valid(_inspected_building):
-		if _inspected_building.rally_changed.is_connected(_on_building_changed):
-			_inspected_building.rally_changed.disconnect(_on_building_changed)
-		if _inspected_building.destroyed.is_connected(_on_building_destroyed):
-			_inspected_building.destroyed.disconnect(_on_building_destroyed)
+func _disconnect_buildings() -> void:
+	for b: Building in _selected_buildings:
+		if is_instance_valid(b):
+			if b.rally_changed.is_connected(_on_building_changed):
+				b.rally_changed.disconnect(_on_building_changed)
+			if b.destroyed.is_connected(_on_building_destroyed):
+				b.destroyed.disconnect(_on_building_destroyed)
+	_selected_buildings.clear()
 	_inspected_building = null
 
 
 func _process(delta: float) -> void:
-	if _inspected_building == null:
+	if _selected_buildings.is_empty():
 		return
-	if not is_instance_valid(_inspected_building) or _inspected_building.is_destroyed:
-		_disconnect_building()
-		queue_redraw()
-		return
-	if _inspected_building.has_rally():
+	var any_rally: bool = false
+	for b: Building in _selected_buildings:
+		if is_instance_valid(b) and not b.is_destroyed and b.has_rally():
+			any_rally = true
+			break
+	if any_rally:
 		_pulse_time += delta
 		queue_redraw()
 
 
 func _draw() -> void:
-	if _inspected_building == null or not is_instance_valid(_inspected_building):
-		return
-	if _inspected_building.is_destroyed or not _inspected_building.is_constructed or not _inspected_building.has_rally():
-		return
+	for b: Building in _selected_buildings:
+		if is_instance_valid(b) and not b.is_destroyed and b.is_constructed and b.has_rally():
+			_draw_building_rally(b)
 
-	var start_world: Vector2 = _inspected_building.global_position
-	var end_world: Vector2 = _inspected_building.get_rally_world_position()
+
+func _draw_building_rally(building: Building) -> void:
+	var start_world: Vector2 = building.global_position
+	var end_world: Vector2 = building.get_rally_world_position()
 	var p0: Vector2 = to_local(start_world)
 	var p1: Vector2 = to_local(end_world)
-	var rally_target: Node2D = _inspected_building.get_rally_target()
+	var rally_target: Node2D = building.get_rally_target()
 
 	var rally_col: Color = Color(0.24, 0.94, 1.0, 0.92)
 	var tag_text: String = "RALLY"
@@ -102,7 +127,7 @@ func _draw() -> void:
 	var total_len: float = diff.length()
 	if total_len > 6.0:
 		var dir: Vector2 = diff / total_len
-		var start_offset: float = minf(_inspected_building.footprint_radius * 0.7, total_len * 0.4)
+		var start_offset: float = minf(building.footprint_radius * 0.7, total_len * 0.4)
 		var seg_origin: Vector2 = p0 + dir * start_offset
 		var draw_len: float = maxf(0.0, total_len - start_offset)
 

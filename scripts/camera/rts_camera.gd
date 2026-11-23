@@ -3,9 +3,11 @@ extends Camera2D
 
 signal edge_pan_toggled(enabled: bool)
 signal fullscreen_toggled(enabled: bool)
+signal camera_toast(message: String)
 
 const EDGE_BOUNDS_TOLERANCE_PX: float = 4.0
 const MAX_FRAME_DELTA: float = 0.05
+const ALERT_CYCLE_WINDOW_MS: int = 2500
 
 @export var pan_speed: float = 650.0
 @export var edge_pan_enabled: bool = true
@@ -20,18 +22,44 @@ const MAX_FRAME_DELTA: float = 0.05
 @export var zoom_smoothness: float = 14.0
 @export var pan_bounds: Rect2 = Rect2(-960.0, -540.0, 1920.0, 1080.0)
 
+var camera_bookmarks: Dictionary = {}
+
 var _target_position: Vector2 = Vector2.ZERO
 var _target_zoom: float = 1.0
 var _is_middle_dragging: bool = false
 var _mouse_in_window: bool = true
+var _base_hub_cycle_index: int = -1
+var _alert_cycle_index: int = -1
+var _last_alert_jump_ms: int = 0
 
 
 func _ready() -> void:
 	add_to_group("rts_camera")
+	_sync_from_settings()
+	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
+		SettingsManager.settings_changed.connect(_on_settings_changed)
 	_target_zoom = clampf(zoom.x, min_zoom, max_zoom)
 	zoom = Vector2(_target_zoom, _target_zoom)
 	_target_position = _clamp_point(global_position)
 	global_position = _target_position
+
+
+func _on_settings_changed(category: StringName) -> void:
+	if category == &"camera" or category == &"all":
+		_sync_from_settings()
+
+
+func _sync_from_settings() -> void:
+	if SettingsManager == null:
+		return
+	var prev_edge: bool = edge_pan_enabled
+	edge_pan_enabled = SettingsManager.edge_pan_enabled
+	edge_pan_speed = SettingsManager.edge_pan_speed
+	edge_margin_px = SettingsManager.edge_pan_margin
+	pan_speed = SettingsManager.keyboard_pan_speed
+	zoom_step = SettingsManager.zoom_speed
+	if prev_edge != edge_pan_enabled:
+		edge_pan_toggled.emit(edge_pan_enabled)
 
 
 func _notification(what: int) -> void:
@@ -54,9 +82,9 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key_ev: InputEventKey = event
 		if key_ev.pressed and not key_ev.echo:
-			var is_f11: bool = key_ev.keycode == KEY_F11 or key_ev.physical_keycode == KEY_F11 or event.is_action_pressed("camera_toggle_fullscreen")
+			var is_fs_action: bool = event.is_action_pressed("camera_toggle_fullscreen")
 			var is_alt_enter: bool = key_ev.alt_pressed and (key_ev.keycode == KEY_ENTER or key_ev.keycode == KEY_KP_ENTER)
-			if is_f11 or is_alt_enter:
+			if is_fs_action or is_alt_enter:
 				toggle_fullscreen()
 				get_viewport().set_input_as_handled()
 				return
@@ -108,6 +136,29 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
+	if event is InputEventKey:
+		var key_ev: InputEventKey = event
+		if key_ev.pressed and not key_ev.echo:
+			for slot: int in range(1, 5):
+				var act_name: StringName = StringName("cam_bookmark_%d" % slot)
+				if event.is_action_pressed(act_name):
+					if key_ev.ctrl_pressed or Input.is_key_pressed(KEY_CTRL):
+						save_camera_bookmark(slot)
+					else:
+						recall_camera_bookmark(slot)
+					get_viewport().set_input_as_handled()
+					return
+
+			if not key_ev.ctrl_pressed and not key_ev.alt_pressed:
+				if event.is_action_pressed("jump_base_hub"):
+					jump_to_next_base_hub()
+					get_viewport().set_input_as_handled()
+					return
+				if event.is_action_pressed("jump_last_alert"):
+					jump_to_last_alert()
+					get_viewport().set_input_as_handled()
+					return
+
 	if event is InputEventMouseButton:
 		var mouse_event: InputEventMouseButton = event
 		if mouse_event.button_index == MOUSE_BUTTON_MIDDLE:
@@ -128,12 +179,93 @@ func set_edge_pan_enabled(enabled: bool) -> void:
 	if edge_pan_enabled == enabled:
 		return
 	edge_pan_enabled = enabled
+	if SettingsManager != null and SettingsManager.edge_pan_enabled != edge_pan_enabled:
+		SettingsManager.set_camera_settings(
+			edge_pan_enabled,
+			SettingsManager.edge_pan_speed,
+			SettingsManager.edge_pan_margin,
+			SettingsManager.keyboard_pan_speed,
+			SettingsManager.zoom_speed
+		)
 	edge_pan_toggled.emit(edge_pan_enabled)
 
 
 func toggle_edge_pan() -> bool:
 	set_edge_pan_enabled(not edge_pan_enabled)
 	return edge_pan_enabled
+
+
+func save_camera_bookmark(slot: int) -> void:
+	if slot < 1 or slot > 4:
+		return
+	camera_bookmarks[slot] = global_position
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	camera_toast.emit("Camera Bookmark %d Saved" % slot)
+
+
+func recall_camera_bookmark(slot: int) -> bool:
+	if not camera_bookmarks.has(slot):
+		if AudioManager != null:
+			AudioManager.play_error()
+		camera_toast.emit("Bookmark %d Empty (Ctrl+%s to Save)" % [slot, SettingsManager.get_action_key_label(StringName("cam_bookmark_%d" % slot)) if SettingsManager != null else ("F%d" % slot)])
+		return false
+	var target_pos: Vector2 = camera_bookmarks[slot] as Vector2
+	smooth_center_on(target_pos)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"unit_select", -6.0, 0.03)
+	return true
+
+
+func jump_to_next_base_hub() -> bool:
+	if not is_inside_tree():
+		return false
+	var hubs: Array[Building] = []
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not (node is Building) or not is_instance_valid(node):
+			continue
+		var b: Building = node
+		if b.is_destroyed or b.is_queued_for_deletion() or b.team != Unit.Team.PLAYER:
+			continue
+		if b.is_core_hub or b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core":
+			hubs.append(b)
+	if hubs.is_empty():
+		return false
+	hubs.sort_custom(func(a: Building, b: Building) -> bool:
+		return a.get_instance_id() < b.get_instance_id()
+	)
+	_base_hub_cycle_index = (_base_hub_cycle_index + 1) % hubs.size()
+	smooth_center_on(hubs[_base_hub_cycle_index].global_position)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"unit_select", -6.0, 0.02)
+	return true
+
+
+func jump_to_last_alert() -> bool:
+	if not is_inside_tree():
+		return false
+	var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+	if mm == null:
+		return false
+	var alerts: Array[Dictionary] = mm.get_recent_alerts()
+	if alerts.is_empty():
+		return false
+	var now_ms: int = Time.get_ticks_msec()
+	if (now_ms - _last_alert_jump_ms) <= ALERT_CYCLE_WINDOW_MS and alerts.size() > 1:
+		_alert_cycle_index = (_alert_cycle_index + 1) % alerts.size()
+	else:
+		_alert_cycle_index = 0
+	_last_alert_jump_ms = now_ms
+	var chosen: Dictionary = alerts[_alert_cycle_index]
+	smooth_center_on(chosen["pos"] as Vector2)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"unit_select", -5.0, 0.03)
+	camera_toast.emit("Alert: %s" % String(chosen.get("message", "Tactical Alert")))
+	return true
+
+
+func smooth_center_on(world_pos: Vector2) -> void:
+	_target_position = _clamp_point(world_pos)
 
 
 func is_fullscreen() -> bool:

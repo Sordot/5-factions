@@ -9,9 +9,11 @@ const DOUBLE_TAP_WINDOW_MS: int = 350
 signal selection_updated(selected_count: int)
 signal selection_changed(selected_units: Array[Unit], subgroups: Array[Dictionary], active_subgroup_index: int)
 signal building_selection_changed(building: Building)
+signal buildings_selection_changed(buildings: Array[Building])
 signal inspection_changed(entity: Node)
 signal control_groups_changed(summary: Dictionary)
 signal ability_targeting_changed(active_ability: AbilityData)
+signal patrol_targeting_changed(active: bool)
 signal idle_workers_changed(idle_workers: Array[Unit])
 signal idle_workers_updated(count: int)
 
@@ -28,12 +30,14 @@ signal idle_workers_updated(count: int)
 var command_router: CommandRouter = null
 var selected_units: Array[Unit] = []
 var selected_building: Building = null
+var selected_buildings: Array[Building] = []
 var inspected_entity: Node = null
 var subgroups: Array[Dictionary] = []
 var active_subgroup_index: int = 0
 var inspected_enemy: Unit = null
 var control_groups: Dictionary = {}
 var active_targeting_ability: AbilityData = null
+var is_patrol_targeting: bool = false
 var idle_worker_count: int = 0
 
 var _is_dragging: bool = false
@@ -42,6 +46,7 @@ var _drag_start_screen: Vector2 = Vector2.ZERO
 var _last_recall_group: int = -1
 var _last_recall_time_ms: int = 0
 var _last_click_unit: Unit = null
+var _last_click_building: Building = null
 var _last_click_time_ms: int = 0
 var _click_was_double_click: bool = false
 var _click_ctrl_pressed: bool = false
@@ -132,6 +137,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		if active_targeting_ability != null:
 			cancel_ability_targeting()
 			get_viewport().set_input_as_handled()
+			return
+		if is_patrol_targeting:
+			cancel_patrol_targeting()
+			get_viewport().set_input_as_handled()
+			return
+		var pause_menu: PauseMenu = get_tree().get_first_node_in_group("pause_menu") as PauseMenu
+		if pause_menu != null and not pause_menu.is_settings_open():
+			pause_menu.toggle_pause()
+			get_viewport().set_input_as_handled()
 		return
 
 	if event.is_action_pressed("ui_cycle_subgroup"):
@@ -190,18 +204,31 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 			shift_amove = a_key.shift_pressed or shift_amove
 		cancel_ability_targeting()
+		cancel_patrol_targeting()
 		issue_attack_move_at(get_global_mouse_position(), shift_amove)
 		get_viewport().set_input_as_handled()
 		return
 
+	if event.is_action_pressed("cmd_patrol"):
+		if event is InputEventKey:
+			var p_key: InputEventKey = event
+			if p_key.ctrl_pressed or p_key.alt_pressed or p_key.echo:
+				return
+		if not selected_units.is_empty():
+			begin_patrol_targeting()
+			get_viewport().set_input_as_handled()
+		return
+
 	if event.is_action_pressed("cmd_stop"):
 		cancel_ability_targeting()
+		cancel_patrol_targeting()
 		issue_stop_command()
 		get_viewport().set_input_as_handled()
 		return
 
 	if event.is_action_pressed("cmd_hold"):
 		cancel_ability_targeting()
+		cancel_patrol_targeting()
 		issue_hold_command()
 		get_viewport().set_input_as_handled()
 		return
@@ -212,6 +239,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			if mouse_event.pressed:
 				if active_targeting_ability != null:
 					confirm_ability_target_at(get_global_mouse_position(), mouse_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT))
+					get_viewport().set_input_as_handled()
+					return
+				if is_patrol_targeting:
+					var shift_patrol: bool = mouse_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT)
+					confirm_patrol_target_at(get_global_mouse_position(), shift_patrol)
 					get_viewport().set_input_as_handled()
 					return
 				_is_dragging = true
@@ -231,6 +263,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				cancel_ability_targeting()
 				get_viewport().set_input_as_handled()
 				return
+			if is_patrol_targeting:
+				cancel_patrol_targeting()
+				get_viewport().set_input_as_handled()
+				return
 			var shift_order: bool = mouse_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT)
 			issue_right_click_at(get_global_mouse_position(), shift_order)
 	elif event is InputEventMouseMotion and _is_dragging:
@@ -242,6 +278,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func clear_selection() -> void:
 	cancel_ability_targeting()
+	cancel_patrol_targeting()
+	_set_selected_buildings([])
 	_set_inspected_entity(null)
 	_set_selected_units([])
 
@@ -373,7 +411,8 @@ func cancel_ability_targeting() -> void:
 	if active_targeting_ability == null:
 		return
 	active_targeting_ability = null
-	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	if not is_patrol_targeting:
+		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 	if ability_reticle != null:
 		ability_reticle.clear_targeting()
 	if build_ghost_preview != null:
@@ -381,10 +420,40 @@ func cancel_ability_targeting() -> void:
 	ability_targeting_changed.emit(null)
 
 
+func begin_patrol_targeting() -> void:
+	_prune_invalid_units()
+	if selected_units.is_empty():
+		return
+	cancel_ability_targeting()
+	is_patrol_targeting = true
+	Input.set_default_cursor_shape(Input.CURSOR_CROSS)
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	patrol_targeting_changed.emit(true)
+
+
+func cancel_patrol_targeting() -> void:
+	if not is_patrol_targeting:
+		return
+	is_patrol_targeting = false
+	if active_targeting_ability == null:
+		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	patrol_targeting_changed.emit(false)
+
+
+func confirm_patrol_target_at(world_pos: Vector2, shift_queued: bool = false) -> void:
+	_prune_invalid_units()
+	if command_router != null and not selected_units.is_empty():
+		command_router.issue_patrol_order(selected_units, world_pos, shift_queued)
+	if not shift_queued:
+		cancel_patrol_targeting()
+	_refresh_idle_workers(false)
+
+
 func issue_right_click_at(world_point: Vector2, shift_queued: bool = false) -> void:
 	_prune_invalid_units()
 	if command_router != null:
-		command_router.handle_right_click(world_point, selected_units, inspected_entity, shift_queued)
+		command_router.handle_right_click(world_point, selected_units, inspected_entity, shift_queued, selected_buildings)
 	_refresh_idle_workers(false)
 
 
@@ -427,6 +496,8 @@ func select_next_idle_worker(focus_camera: bool = true) -> Unit:
 	_idle_cycle_index = next_idx
 	var chosen: Unit = idle_list[next_idx]
 	cancel_ability_targeting()
+	cancel_patrol_targeting()
+	_set_selected_buildings([])
 	_set_inspected_entity(null)
 	_set_selected_units([chosen])
 
@@ -533,6 +604,8 @@ func recall_control_group(group_num: int, allow_double_tap_center: bool = true) 
 
 	control_groups[group_num] = group_units
 	cancel_ability_targeting()
+	cancel_patrol_targeting()
+	_set_selected_buildings([])
 	_set_inspected_entity(null)
 	_set_selected_units(group_units)
 	_emit_control_groups_changed()
@@ -648,6 +721,7 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 
 	var clicked_player: Unit = command_router.find_unit_at_point(world_point, Unit.Team.PLAYER)
 	if clicked_player != null:
+		_set_selected_buildings([])
 		_set_inspected_entity(null)
 		var now_ms: int = Time.get_ticks_msec()
 		var rapid_second_click: bool = (_last_click_unit == clicked_player and (now_ms - _last_click_time_ms) <= DOUBLE_TAP_WINDOW_MS)
@@ -683,35 +757,59 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 
 	var clicked_building: Building = command_router.find_building_at_point(world_point, Unit.Team.PLAYER)
 	if clicked_building != null:
+		var now_b_ms: int = Time.get_ticks_msec()
+		var rapid_second_b: bool = (_last_click_building == clicked_building and (now_b_ms - _last_click_time_ms) <= DOUBLE_TAP_WINDOW_MS)
 		_set_selected_units([])
-		_set_inspected_entity(clicked_building)
+		if is_double_click or ctrl_pressed or (not shift_pressed and rapid_second_b):
+			var same_b: Array[Building] = _find_visible_buildings_of_type(clicked_building.building_type_id, Unit.Team.PLAYER)
+			_last_click_building = null
+			_last_click_time_ms = 0
+			_set_selected_buildings(same_b)
+		elif shift_pressed:
+			var next_b: Array[Building] = selected_buildings.duplicate()
+			if next_b.has(clicked_building):
+				next_b.erase(clicked_building)
+			else:
+				next_b.append(clicked_building)
+			_set_selected_buildings(next_b)
+		else:
+			_last_click_building = clicked_building
+			_last_click_time_ms = now_b_ms
+			_set_selected_buildings([clicked_building])
 		return
+
+	_last_click_building = null
 
 	var clicked_enemy: Unit = command_router.find_unit_at_point(world_point, Unit.Team.ENEMY)
 	if clicked_enemy != null:
 		_set_selected_units([])
+		_set_selected_buildings([])
 		_set_inspected_entity(clicked_enemy)
 		return
 
 	var clicked_enemy_building: Building = command_router.find_building_at_point(world_point, Unit.Team.ENEMY)
 	if clicked_enemy_building != null:
 		_set_selected_units([])
+		_set_selected_buildings([])
 		_set_inspected_entity(clicked_enemy_building)
 		return
 
 	var clicked_resource: ResourceNode = command_router.find_resource_node_at_point(world_point)
 	if clicked_resource != null:
 		_set_selected_units([])
+		_set_selected_buildings([])
 		_set_inspected_entity(clicked_resource)
 		return
 
 	if not shift_pressed:
+		_set_selected_buildings([])
 		_set_inspected_entity(null)
 		_set_selected_units([])
 
 
 func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
 	_last_click_unit = null
+	_last_click_building = null
 	_last_click_time_ms = 0
 	var hits: Array[Unit] = []
 	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
@@ -723,18 +821,157 @@ func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
 		if world_rect.has_point(unit.global_position):
 			hits.append(unit)
 
-	if shift_pressed:
-		if hits.is_empty():
-			return
-		var combined: Array[Unit] = selected_units.duplicate()
-		for u: Unit in hits:
-			if not combined.has(u):
-				combined.append(u)
+	if not hits.is_empty():
+		if shift_pressed:
+			var combined: Array[Unit] = selected_units.duplicate()
+			for u: Unit in hits:
+				if not combined.has(u):
+					combined.append(u)
+			_set_selected_buildings([])
+			_set_inspected_entity(null)
+			_set_selected_units(combined, false)
+		else:
+			_set_selected_buildings([])
+			_set_inspected_entity(null)
+			_set_selected_units(hits)
+		return
+
+	# If no player units are inside the box, allow box-selecting friendly buildings for multi-building production.
+	var b_hits: Array[Building] = []
+	for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
+		if not (node is Building) or not is_instance_valid(node):
+			continue
+		var b: Building = node
+		if b.is_destroyed or b.team != Unit.Team.PLAYER:
+			continue
+		if world_rect.has_point(b.global_position):
+			b_hits.append(b)
+
+	if not b_hits.is_empty():
+		if shift_pressed:
+			var merged_b: Array[Building] = selected_buildings.duplicate()
+			for b: Building in b_hits:
+				if not merged_b.has(b):
+					merged_b.append(b)
+			_set_selected_units([])
+			_set_selected_buildings(merged_b)
+		else:
+			_set_selected_units([])
+			_set_selected_buildings(b_hits)
+		return
+
+	if not shift_pressed:
+		_set_selected_buildings([])
 		_set_inspected_entity(null)
-		_set_selected_units(combined, false)
-	else:
+		_set_selected_units([])
+
+
+func _find_visible_buildings_of_type(type_id: StringName, target_team: Unit.Team) -> Array[Building]:
+	var matches: Array[Building] = []
+	var cam: RTSCamera = _get_rts_camera()
+	var view_rect: Rect2 = Rect2()
+	var use_view_rect: bool = false
+	if cam != null:
+		var vp_size: Vector2 = get_viewport_rect().size / cam.zoom
+		view_rect = Rect2(cam.global_position - vp_size * 0.5, vp_size)
+		use_view_rect = true
+	for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
+		if not (node is Building) or not is_instance_valid(node):
+			continue
+		var b: Building = node
+		if b.is_destroyed or b.team != target_team or b.building_type_id != type_id:
+			continue
+		if not use_view_rect or view_rect.has_point(b.global_position):
+			matches.append(b)
+	return matches
+
+
+func _set_selected_buildings(buildings: Array[Building]) -> void:
+	for prev: Building in selected_buildings:
+		if is_instance_valid(prev):
+			if prev.destroyed.is_connected(_on_selected_building_destroyed):
+				prev.destroyed.disconnect(_on_selected_building_destroyed)
+			prev.set_selected(false)
+
+	selected_buildings = []
+	for item: Variant in buildings:
+		if is_instance_valid(item) and item is Building:
+			var b: Building = item
+			if not b.is_destroyed and b.team == Unit.Team.PLAYER and not selected_buildings.has(b):
+				selected_buildings.append(b)
+
+	if selected_buildings.is_empty():
 		_set_inspected_entity(null)
-		_set_selected_units(hits)
+		buildings_selection_changed.emit(selected_buildings)
+		return
+
+	for b: Building in selected_buildings:
+		b.set_selected(true)
+		if not b.destroyed.is_connected(_on_selected_building_destroyed):
+			b.destroyed.connect(_on_selected_building_destroyed)
+
+	_set_inspected_entity(selected_buildings[0])
+	# Re-ensure every multi-selected building stays visibly selected after _set_inspected_entity.
+	for b: Building in selected_buildings:
+		if is_instance_valid(b):
+			b.set_selected(true)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"unit_select", -5.0, 0.03)
+	buildings_selection_changed.emit(selected_buildings)
+
+
+func _on_selected_building_destroyed(dead_b: Building) -> void:
+	if selected_buildings.has(dead_b):
+		var rem: Array[Building] = []
+		for b: Building in selected_buildings:
+			if is_instance_valid(b) and b != dead_b and not b.is_destroyed:
+				rem.append(b)
+		_set_selected_buildings(rem)
+
+
+func queue_unit_distributed(unit_data: UnitData) -> bool:
+	if unit_data == null:
+		return false
+	var candidates: Array[Building] = []
+	for b: Building in selected_buildings:
+		if is_instance_valid(b) and not b.is_destroyed and b.is_constructed and b.team == Unit.Team.PLAYER:
+			if b.trainable_unit_data.has(unit_data):
+				candidates.append(b)
+	if candidates.is_empty() and selected_building != null and is_instance_valid(selected_building):
+		if selected_building.trainable_unit_data.has(unit_data):
+			candidates.append(selected_building)
+	if candidates.is_empty():
+		return false
+
+	# Choose the capable building with the shortest active queue (breaking ties by fewest remaining seconds).
+	var best: Building = null
+	var best_score: float = INF
+	for b: Building in candidates:
+		if b.production_component == null or b.production_component.is_queue_full():
+			continue
+		var q_size: int = b.get_training_queue_size()
+		var active_rem: float = 0.0
+		if q_size > 0:
+			var st: Dictionary = b.get_active_training_status()
+			active_rem = (1.0 - float(st.get("progress", 0.0))) * float(st.get("duration", 1.0))
+		var score: float = float(q_size) * 100.0 + active_rem
+		if score < best_score:
+			best_score = score
+			best = b
+
+	if best == null:
+		# All queues full; fallback to first candidate so standard error/feedback still runs.
+		best = candidates[0]
+	return best.queue_unit_data(unit_data)
+
+
+func eject_engineers_from_selected_buildings() -> void:
+	if not selected_buildings.is_empty():
+		for b: Building in selected_buildings:
+			if is_instance_valid(b) and b.max_staff_slots > 0:
+				b.eject_engineers()
+	elif selected_building != null and is_instance_valid(selected_building):
+		selected_building.eject_engineers()
 
 
 func _find_visible_units_of_type(type_id: StringName, target_team: Unit.Team) -> Array[Unit]:
