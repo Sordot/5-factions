@@ -11,6 +11,7 @@ extends CanvasLayer
 @onready var lost_value: Label = %LostValue
 @onready var destroyed_value: Label = %DestroyedValue
 @onready var btn_play_again: Button = %BtnPlayAgain
+@onready var btn_main_menu: Button = %BtnMainMenu
 @onready var btn_sandbox_mode: Button = %BtnSandboxMode
 
 
@@ -21,12 +22,16 @@ func _ready() -> void:
 		root_control.visible = false
 	if btn_play_again != null:
 		btn_play_again.pressed.connect(_on_play_again_pressed)
+	if btn_main_menu != null:
+		btn_main_menu.pressed.connect(_on_main_menu_pressed)
 	if btn_sandbox_mode != null:
 		btn_sandbox_mode.pressed.connect(_on_sandbox_mode_pressed)
 
 
 func show_summary(stats: Dictionary) -> void:
 	var is_victory: bool = bool(stats.get("is_victory", false))
+	if AudioManager != null:
+		AudioManager.play_sfx(&"match_victory" if is_victory else &"match_defeat", -2.0, 0.0)
 	if title_label != null:
 		title_label.text = "VICTORY" if is_victory else "DEFEAT"
 		title_label.add_theme_color_override(
@@ -58,11 +63,22 @@ func hide_summary() -> void:
 
 
 func _on_play_again_pressed() -> void:
+	if AudioManager != null:
+		AudioManager.play_ui_click()
 	if is_inside_tree():
 		get_tree().reload_current_scene()
 
 
+func _on_main_menu_pressed() -> void:
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	if is_inside_tree():
+		get_tree().change_scene_to_file(GameConfig.MAIN_MENU_SCENE)
+
+
 func _on_sandbox_mode_pressed() -> void:
+	if AudioManager != null:
+		AudioManager.play_ui_click()
 	hide_summary()
 	if is_inside_tree():
 		var match_mgr: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager

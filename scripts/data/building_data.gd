@@ -24,6 +24,7 @@ extends Resource
 @export var batch_production_count: int = 1
 @export var base_batch_cost_multiplier: float = 1.0
 @export var required_building_id: StringName = &""
+@export var is_core_hub: bool = false
 
 
 func resolve_scene() -> PackedScene:

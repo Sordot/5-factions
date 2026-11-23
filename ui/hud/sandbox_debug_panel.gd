@@ -23,12 +23,19 @@ extends Control
 @onready var btn_enemy_1: Button = %BtnEnemy1
 @onready var btn_clear_dummies: Button = %BtnClearDummies
 @onready var btn_reset: Button = %BtnReset
+@onready var btn_main_menu: Button = %BtnMainMenu
+@onready var btn_spawn_team: Button = %BtnSpawnTeam
+@onready var unit_catalog_option: OptionButton = %UnitCatalogOption
+@onready var btn_spawn_catalog_unit: Button = %BtnSpawnCatalogUnit
+@onready var building_catalog_option: OptionButton = %BuildingCatalogOption
+@onready var btn_spawn_catalog_building: Button = %BtnSpawnCatalogBuilding
 
 var _spawner: SandboxSpawner = null
 var _selection_controller: SelectionController = null
 var _camera: RTSCamera = null
 var _match_manager: MatchManager = null
 var _zone: EncroachingZone = null
+var _catalog_team: Unit.Team = Unit.Team.PLAYER
 
 
 func _ready() -> void:
@@ -127,15 +134,68 @@ func _ready() -> void:
 			_spawner.clear_dummies()
 	)
 	btn_reset.pressed.connect(func() -> void:
+		if AudioManager != null:
+			AudioManager.play_ui_click()
 		if _spawner != null:
 			_spawner.reset_sandbox()
 	)
+	if btn_main_menu != null:
+		btn_main_menu.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			if is_inside_tree():
+				get_tree().change_scene_to_file(GameConfig.MAIN_MENU_SCENE)
+		)
+
+	_setup_genesis_catalog_controls()
 
 	_refresh_edge_pan_button()
 	_refresh_fullscreen_button()
 	_refresh_aggro_ai_button()
 	_refresh_zone_button()
 	_refresh_status()
+
+
+func _setup_genesis_catalog_controls() -> void:
+	if unit_catalog_option != null:
+		unit_catalog_option.clear()
+		for i: int in range(SandboxSpawner.GENESIS_UNIT_CATALOG.size()):
+			unit_catalog_option.add_item(String(SandboxSpawner.GENESIS_UNIT_CATALOG[i]["label"]), i)
+	if building_catalog_option != null:
+		building_catalog_option.clear()
+		for i: int in range(SandboxSpawner.GENESIS_BUILDING_CATALOG.size()):
+			building_catalog_option.add_item(String(SandboxSpawner.GENESIS_BUILDING_CATALOG[i]["label"]), i)
+
+	if btn_spawn_team != null:
+		btn_spawn_team.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			_catalog_team = Unit.Team.ENEMY if _catalog_team == Unit.Team.PLAYER else Unit.Team.PLAYER
+			_refresh_catalog_team_button()
+		)
+	if btn_spawn_catalog_unit != null:
+		btn_spawn_catalog_unit.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			if _spawner != null and unit_catalog_option != null:
+				_spawner.spawn_genesis_unit_by_index(unit_catalog_option.selected, _catalog_team, 1)
+		)
+	if btn_spawn_catalog_building != null:
+		btn_spawn_catalog_building.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			if _spawner != null and building_catalog_option != null:
+				_spawner.spawn_genesis_building_by_index(building_catalog_option.selected, _catalog_team)
+		)
+	_refresh_catalog_team_button()
+
+
+func _refresh_catalog_team_button() -> void:
+	if btn_spawn_team == null:
+		return
+	var is_player: bool = (_catalog_team == Unit.Team.PLAYER)
+	btn_spawn_team.text = "Team: PLAYER" if is_player else "Team: ENEMY"
+	btn_spawn_team.modulate = Color(0.42, 0.98, 0.88, 1.0) if is_player else Color(1.0, 0.44, 0.34, 1.0)
 
 
 func _connect_zone() -> void:

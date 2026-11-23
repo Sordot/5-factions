@@ -81,6 +81,8 @@ func issue_move_order(selected_units: Array[Unit], world_pos: Vector2, shift_que
 	var targets: Array[Vector2] = assign_group_destinations(selected_units, world_pos)
 	for i: int in range(selected_units.size()):
 		selected_units[i].command_move(targets[i], shift_queued)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"order_move", -4.0, 0.05)
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.MOVE)
 
 
@@ -89,6 +91,8 @@ func issue_attack_target_order(selected_units: Array[Unit], target: Node2D, shif
 		return
 	for unit: Unit in selected_units:
 		unit.command_attack_target(target, shift_queued)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"order_attack", -3.5, 0.04)
 	spawn_move_marker(target.global_position, MoveMarker.MarkerStyle.ATTACK)
 
 
@@ -105,6 +109,8 @@ func issue_gather_order(selected_units: Array[Unit], resource_node: ResourceNode
 		var escort_targets: Array[Vector2] = assign_group_destinations(non_gatherers, resource_node.global_position)
 		for i: int in range(non_gatherers.size()):
 			non_gatherers[i].command_move(escort_targets[i], shift_queued)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
 	spawn_move_marker(resource_node.global_position, MoveMarker.MarkerStyle.GATHER)
 
 
@@ -119,6 +125,8 @@ func issue_build_order(selected_units: Array[Unit], building: Building, shift_qu
 		return false
 	for worker: Unit in builders:
 		worker.command_construct_building(building, shift_queued)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
 	spawn_move_marker(building.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 
@@ -141,6 +149,8 @@ func issue_staff_order(selected_units: Array[Unit], building: Building, shift_qu
 		var move_targets: Array[Vector2] = _assign_building_perimeter_destinations(others, building) if fallback_pos == Vector2.ZERO else assign_group_destinations(others, fallback_pos)
 		for i: int in range(others.size()):
 			others[i].command_move(move_targets[i], shift_queued)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
 	spawn_move_marker(building.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 
@@ -206,6 +216,8 @@ func issue_attack_move_order(selected_units: Array[Unit], world_pos: Vector2, sh
 	var targets: Array[Vector2] = assign_group_destinations(selected_units, world_pos)
 	for i: int in range(selected_units.size()):
 		selected_units[i].command_attack_move(targets[i], shift_queued)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"order_attack", -3.5, 0.04)
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.ATTACK)
 
 
@@ -362,6 +374,13 @@ func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_
 
 	var eval: Dictionary = evaluate_build_placement(building_data, world_pos)
 	if not bool(eval["valid"]):
+		var econ_fail: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+		if econ_fail != null and not econ_fail.can_afford(Unit.Team.PLAYER, building_data.get_cost_dict()):
+			var missing: StringName = econ_fail.find_missing_resource(Unit.Team.PLAYER, building_data.get_cost_dict(), 0)
+			if missing != &"":
+				econ_fail.notify_insufficient(Unit.Team.PLAYER, missing)
+		elif AudioManager != null:
+			AudioManager.play_error()
 		return false
 
 	var builder: Unit = find_closest_builder(subgroup_units, eval["pos"])
@@ -370,6 +389,9 @@ func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_
 
 	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 	if econ != null and not econ.spend_resources(Unit.Team.PLAYER, building_data.get_cost_dict()):
+		var missing2: StringName = econ.find_missing_resource(Unit.Team.PLAYER, building_data.get_cost_dict(), 0)
+		if missing2 != &"":
+			econ.notify_insufficient(Unit.Team.PLAYER, missing2)
 		return false
 
 	var scene_root: Node = get_tree().current_scene
@@ -392,6 +414,8 @@ func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_
 	_nudge_units_out_of_building(new_building)
 
 	builder.command_construct_building(new_building, shift_queued)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"order_gather", -3.5, 0.04)
 	spawn_move_marker(new_building.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 

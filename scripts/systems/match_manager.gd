@@ -29,6 +29,8 @@ var _tracked_prod: Dictionary = {}
 
 func _ready() -> void:
 	add_to_group("match_manager")
+	if GameConfig != null and GameConfig.configured_from_menu:
+		aggro_ai_enabled = GameConfig.aggro_ai_enabled
 	_global_aggro_ai_enabled = aggro_ai_enabled
 	call_deferred("_hook_initial_entities")
 	if not get_tree().node_added.is_connected(_on_tree_node_added):
@@ -130,11 +132,11 @@ func evaluate_match_state() -> void:
 			continue
 		if b.team == Unit.Team.PLAYER:
 			player_buildings += 1
-			if b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core":
+			if b.is_core_hub or b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core":
 				player_cores += 1
 		elif b.team == Unit.Team.ENEMY:
 			enemy_buildings += 1
-			if b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core":
+			if b.is_core_hub or b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core":
 				enemy_cores += 1
 
 	var enemy_defeated: bool = (enemy_cores == 0) if victory_on_command_core_loss else (enemy_buildings == 0)

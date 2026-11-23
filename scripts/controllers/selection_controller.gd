@@ -306,16 +306,25 @@ func request_ability_slot(ability: AbilityData, shift_queued: bool = false) -> b
 	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
 		if ability.building_to_build == null:
 			return false
+		var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 		if ability.building_to_build.required_building_id != &"":
-			var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 			if econ == null or not econ.has_constructed_building(Unit.Team.PLAYER, ability.building_to_build.required_building_id):
+				if AudioManager != null:
+					AudioManager.play_error()
 				return false
+		if econ != null and not econ.can_afford(Unit.Team.PLAYER, ability.building_to_build.get_cost_dict()):
+			var missing: StringName = econ.find_missing_resource(Unit.Team.PLAYER, ability.building_to_build.get_cost_dict(), 0)
+			if missing != &"":
+				econ.notify_insufficient(Unit.Team.PLAYER, missing)
+			return false
 		if command_router.find_closest_builder(subgroup_units, get_global_mouse_position()) == null:
 			return false
 		active_targeting_ability = ability
 		Input.set_default_cursor_shape(Input.CURSOR_CROSS)
 		if ability_reticle != null:
 			ability_reticle.clear_targeting()
+		if AudioManager != null:
+			AudioManager.play_ui_click()
 		ability_targeting_changed.emit(active_targeting_ability)
 		return true
 
@@ -777,6 +786,8 @@ func _set_selected_units(new_selection: Array[Unit], reset_subgroup_index: bool 
 
 	if selected_units.is_empty():
 		cancel_ability_targeting()
+	elif AudioManager != null:
+		AudioManager.play_sfx(&"unit_select", -4.5, 0.04)
 
 	selection_updated.emit(selected_units.size())
 	selection_changed.emit(selected_units, subgroups, active_subgroup_index)

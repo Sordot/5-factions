@@ -30,6 +30,7 @@ const CMD_EXEC_IMMEDIATE_DONE: int = 2
 const ABILITY_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/ability_component.gd")
 const COMBAT_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/combat_component.gd")
 const HEAL_AURA_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/heal_aura_component.gd")
+const ENTITY_VISUALS_SCRIPT: GDScript = preload("res://ui/overlays/entity_visuals.gd")
 const HIT_FLASH_DURATION: float = 0.08
 const HEALTH_BAR_WIDTH: float = 36.0
 const GATHER_BAR_WIDTH: float = 32.0
@@ -97,6 +98,9 @@ var _adrenal_attack_speed_bonus: float = 0.0
 var _slow_timer: float = 0.0
 var _slow_move_penalty: float = 0.0
 var _slow_attack_penalty: float = 0.0
+var _entity_visuals: EntityVisuals = null
+var _trail_points: Array[Vector2] = []
+var _trail_sample_timer: float = 0.0
 
 
 func _ready() -> void:
@@ -106,6 +110,7 @@ func _ready() -> void:
 		data = UnitData.new()
 	current_hp = data.max_hp
 	selection_ring.visible = is_selected
+	_setup_procedural_visuals()
 	_apply_team_visuals()
 	_update_health_bar()
 
@@ -740,6 +745,9 @@ func apply_slow_debuff(duration: float, move_penalty: float, attack_penalty: flo
 
 func on_team_upgrade_completed(_upgrade_id: StringName) -> void:
 	_sync_nav_max_speed()
+	if _entity_visuals != null:
+		_entity_visuals.queue_redraw()
+	queue_redraw()
 	status_changed.emit(self)
 
 
@@ -792,6 +800,21 @@ func _get_economy_manager() -> EconomyManager:
 
 
 func _draw() -> void:
+	var type_id: StringName = get_unit_type_id()
+	# Elevated ground shadow for Arc-Lancer Colossus Stride readability
+	if type_id == &"arc_lancer":
+		draw_circle(Vector2(5.0, 11.0), 17.5, Color(0.02, 0.04, 0.06, 0.42))
+		draw_arc(Vector2(5.0, 11.0), 17.5, 0.0, TAU, 24, Color(0.28, 0.92, 1.0, 0.22) if team == Team.PLAYER else Color(1.0, 0.36, 0.26, 0.22), 1.2, true)
+
+	# Speed-dart motion trail for Stingers
+	if type_id == &"stinger" and _trail_points.size() >= 2:
+		var trail_base: Color = Color(0.98, 0.80, 0.24, 1.0) if team == Team.PLAYER else Color(1.0, 0.46, 0.24, 1.0)
+		for i: int in range(1, _trail_points.size()):
+			var t: float = float(i) / float(_trail_points.size())
+			var p0: Vector2 = to_local(_trail_points[i - 1])
+			var p1: Vector2 = to_local(_trail_points[i])
+			draw_line(p0, p1, Color(trail_base.r, trail_base.g, trail_base.b, t * 0.45), 1.4 + t * 2.2, true)
+
 	var r: float = (data.collision_radius + 6.0) if data != null else 22.0
 	if _adrenal_timer > 0.0:
 		draw_arc(Vector2.ZERO, r, 0.0, TAU, 24, Color(0.28, 1.0, 0.72, 0.88), 2.4, true)
@@ -813,6 +836,8 @@ func _die() -> void:
 	velocity = Vector2.ZERO
 	set_selected(false)
 	_unregister_from_economy()
+	if AudioManager != null and (team == Team.PLAYER or visible):
+		AudioManager.play_sfx(&"entity_destroyed", -6.0, 0.10)
 	died.emit(self)
 	queue_free()
 
@@ -835,6 +860,9 @@ func _physics_process(delta: float) -> void:
 		_hit_flash_timer = maxf(0.0, _hit_flash_timer - delta)
 		if _hit_flash_timer <= 0.0:
 			body_visual.modulate = Color.WHITE
+
+	if get_unit_type_id() == &"stinger":
+		_update_stinger_trail(delta)
 
 	if not _can_move() and not _can_attack():
 		return
@@ -1380,13 +1408,54 @@ func _update_health_bar() -> void:
 	health_bar_root.visible = always_show_health_bar or is_selected or ratio < 0.999
 
 
+func _setup_procedural_visuals() -> void:
+	if body_visual == null:
+		return
+	var type_id: StringName = get_unit_type_id()
+	if type_id == &"target_dummy":
+		return
+	if body_visual is Polygon2D:
+		(body_visual as Polygon2D).color = Color(1.0, 1.0, 1.0, 0.0)
+	for child: Node in body_visual.get_children():
+		if child == cargo_visual or child == _entity_visuals:
+			continue
+		if child is CanvasItem:
+			(child as CanvasItem).visible = false
+	if _entity_visuals == null:
+		_entity_visuals = ENTITY_VISUALS_SCRIPT.new()
+		_entity_visuals.name = "EntityVisuals"
+		body_visual.add_child(_entity_visuals)
+	_entity_visuals.bind_unit(self)
+	if type_id == &"arc_lancer":
+		body_visual.position = Vector2(0.0, -6.0)
+		queue_redraw()
+
+
+func _update_stinger_trail(delta: float) -> void:
+	_trail_sample_timer += delta
+	if _trail_sample_timer < 0.04:
+		return
+	_trail_sample_timer = 0.0
+	if velocity.length_squared() > 900.0:
+		_trail_points.append(global_position)
+		if _trail_points.size() > 7:
+			_trail_points.pop_front()
+		queue_redraw()
+	elif not _trail_points.is_empty():
+		_trail_points.pop_front()
+		queue_redraw()
+
+
 func _apply_team_visuals() -> void:
+	if _entity_visuals != null:
+		_entity_visuals.team = int(team)
+		_entity_visuals.queue_redraw()
 	if team != Team.ENEMY:
 		return
 	var type_id: StringName = get_unit_type_id()
 	if type_id == &"enemy_trooper" or type_id == &"target_dummy":
 		return
-	if body_visual is Polygon2D:
+	if _entity_visuals == null and body_visual is Polygon2D:
 		(body_visual as Polygon2D).color = Color(0.84, 0.28, 0.26, 1.0)
 	var core_accent: Polygon2D = body_visual.get_node_or_null("CoreAccent") as Polygon2D if body_visual != null else null
 	if core_accent != null:

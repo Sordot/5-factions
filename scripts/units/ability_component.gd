@@ -138,6 +138,9 @@ func execute_ability(owner_unit: Unit, ability: AbilityData, target_pos: Vector2
 		AbilityData.TargetType.INSTANT:
 			_execute_instant(owner_unit, ability)
 
+	if AudioManager != null and (owner_unit.team == Unit.Team.PLAYER or owner_unit.visible):
+		AudioManager.play_ability_sfx(ability.ability_id)
+
 	ability_executed.emit(ability.ability_id, target_pos)
 
 

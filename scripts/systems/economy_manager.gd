@@ -10,6 +10,7 @@ signal bandwidth_changed(team: int, used: int, cap: int)
 signal production_bonus_changed(team: int, multiplier: float)
 signal upgrade_completed(team: int, upgrade_id: StringName)
 signal tech_changed(team: int)
+signal resource_insufficient(team: int, missing_key: StringName)
 
 @export var starting_biomass: int = 50
 @export var starting_silica: int = 0
@@ -32,6 +33,11 @@ func _ready() -> void:
 	add_to_group("economy_manager")
 	if not upgrade_manager.upgrade_completed.is_connected(_on_upgrade_manager_completed):
 		upgrade_manager.upgrade_completed.connect(_on_upgrade_manager_completed)
+	if GameConfig != null and GameConfig.configured_from_menu:
+		var preset_res: Dictionary = GameConfig.get_starting_resources()
+		starting_biomass = int(preset_res.get("biomass", starting_biomass))
+		starting_silica = int(preset_res.get("silica", starting_silica))
+		starting_compute = int(preset_res.get("compute", starting_compute))
 	_init_team_state(Unit.Team.PLAYER, starting_biomass, starting_silica, starting_compute)
 	if enemy_matches_starting_resources:
 		_init_team_state(Unit.Team.ENEMY, starting_biomass, starting_silica, starting_compute)
@@ -121,6 +127,26 @@ func can_afford(team: int, costs: Dictionary) -> bool:
 		if int(team_res.get(res_key, 0)) < cost_amount:
 			return false
 	return true
+
+
+func find_missing_resource(team: int, costs: Dictionary, bandwidth_cost: int = 0) -> StringName:
+	_ensure_team(team)
+	var team_res: Dictionary = _resources[team]
+	for key: StringName in [RESOURCE_BIOMASS, RESOURCE_SILICA, RESOURCE_COMPUTE]:
+		var needed: int = int(costs.get(key, 0))
+		if needed > 0 and int(team_res.get(key, 0)) < needed:
+			return key
+	if bandwidth_cost > 0 and not has_bandwidth(team, bandwidth_cost):
+		return &"bandwidth"
+	return &""
+
+
+func notify_insufficient(team: int, missing_key: StringName) -> void:
+	if missing_key == &"":
+		return
+	resource_insufficient.emit(team, missing_key)
+	if team == int(Unit.Team.PLAYER) and AudioManager != null:
+		AudioManager.play_error()
 
 
 func spend_resources(team: int, costs: Dictionary) -> bool:

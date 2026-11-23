@@ -1,0 +1,437 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Theme" path="res://resources/themes/technozen_theme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://scripts/ui/main_menu.gd" id="2_menu_script"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_active_faction"]
+content_margin_left = 14.0
+content_margin_top = 12.0
+content_margin_right = 14.0
+content_margin_bottom = 12.0
+bg_color = Color(0.06, 0.12, 0.16, 0.94)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.22, 0.96, 0.88, 0.95)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_badge"]
+content_margin_left = 7.0
+content_margin_top = 3.0
+content_margin_right = 7.0
+content_margin_bottom = 3.0
+bg_color = Color(0.08, 0.18, 0.22, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.22, 0.82, 0.84, 0.7)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_launch_btn"]
+content_margin_left = 14.0
+content_margin_top = 10.0
+content_margin_right = 14.0
+content_margin_bottom = 10.0
+bg_color = Color(0.08, 0.34, 0.36, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.24, 0.98, 0.9, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_theme")
+script = ExtResource("2_menu_script")
+
+[node name="RootMargin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 32
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 32
+theme_override_constants/margin_bottom = 24
+
+[node name="RootVBox" type="VBoxContainer" parent="RootMargin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="HeaderPanel" type="PanelContainer" parent="RootMargin/RootVBox"]
+layout_mode = 2
+
+[node name="HeaderHBox" type="HBoxContainer" parent="RootMargin/RootVBox/HeaderPanel"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="TitleVBox" type="VBoxContainer" parent="RootMargin/RootVBox/HeaderPanel/HeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="TitleLabel" type="Label" parent="RootMargin/RootVBox/HeaderPanel/HeaderHBox/TitleVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.99, 1, 1)
+theme_override_font_sizes/font_size = 26
+text = "5 FACTIONS // SOVEREIGN KERNEL"
+
+[node name="SubtitleLabel" type="Label" parent="RootMargin/RootVBox/HeaderPanel/HeaderHBox/TitleVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.28, 0.94, 0.88, 0.94)
+theme_override_font_sizes/font_size = 12
+text = "TECHNOZEN REAL-TIME STRATEGY  •  MILESTONE 1.5 VERTICAL SLICE  •  BUILD 0.1.5"
+
+[node name="HeaderRight" type="HBoxContainer" parent="RootMargin/RootVBox/HeaderPanel/HeaderHBox"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = 10
+
+[node name="StatusPill" type="PanelContainer" parent="RootMargin/RootVBox/HeaderPanel/HeaderHBox/HeaderRight"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="StatusLabel" type="Label" parent="RootMargin/RootVBox/HeaderPanel/HeaderHBox/HeaderRight/StatusPill"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.32, 0.98, 0.78, 1)
+theme_override_font_sizes/font_size = 11
+text = "KERNEL LINK: ONLINE"
+
+[node name="BtnAudioMute" type="Button" parent="RootMargin/RootVBox/HeaderPanel/HeaderHBox/HeaderRight"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(96, 30)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 12
+text = "SFX: ON"
+
+[node name="BodyHBox" type="HBoxContainer" parent="RootMargin/RootVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 18
+
+[node name="FactionColumn" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="FactionSectionHeader" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.56, 0.86, 0.94, 0.95)
+theme_override_font_sizes/font_size = 13
+text = "AI LORD FACTION DOSSIERS (1 / 5 ACTIVE)"
+
+[node name="GenesisActiveCard" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_active_faction")
+
+[node name="VBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TopRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ColorSwatch" type="ColorRect" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/TopRow"]
+custom_minimum_size = Vector2(10, 44)
+layout_mode = 2
+color = Color(0.2, 0.96, 0.86, 1)
+
+[node name="NameVBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/TopRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="FactionName" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/TopRow/NameVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 1, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "01 // GENESIS_V2  —  THE VAT-BORN"
+
+[node name="FactionTagline" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/TopRow/NameVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.32, 0.98, 0.86, 0.95)
+theme_override_font_sizes/font_size = 12
+text = "Bio-Synth Swarm  •  1.75x Parallel Batch Cloning  •  Heavy Synthetics Pivot"
+
+[node name="ActiveBadge" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/TopRow"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="Label" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/TopRow/ActiveBadge"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.32, 1, 0.74, 1)
+theme_override_font_sizes/font_size = 11
+text = "SELECTED // PLAYABLE"
+
+[node name="FactionDesc" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.9, 0.94, 0.94)
+theme_override_font_sizes/font_size = 12
+text = "Exponentially scales early-game infantry through Twin-Chamber Cloning Vats (2 units per cycle at 1.75x cost), pivots through Calibration Foundry counters, and closes matches with high-Compute Synthetics."
+autowrap_mode = 3
+
+[node name="SignatureUnitsLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.54, 0.82, 0.9, 0.92)
+theme_override_font_sizes/font_size = 11
+text = "SIGNATURE UNITS & TECH:"
+
+[node name="BadgeRow" type="HFlowContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+
+[node name="B1" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="L" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow/B1"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Clone Trooper (x2 Batch)"
+
+[node name="B2" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="L" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow/B2"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Stinger"
+
+[node name="B3" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="L" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow/B3"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Symbiote (Heal Aura)"
+
+[node name="B4" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="L" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow/B4"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Lance-Rig / Signal Jammer"
+
+[node name="B5" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="L" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow/B5"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Goliath Frame"
+
+[node name="B6" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="L" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow/B6"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Arc-Lancer (Colossus Stride)"
+
+[node name="B7" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="L" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/BadgeRow/B7"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Chrysalis Mortar"
+
+[node name="LockedGrid" type="GridContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+columns = 2
+
+[node name="LockedSlot2" type="Button" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/LockedGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 76)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+focus_mode = 0
+modulate = Color(0.76, 0.82, 0.9, 0.78)
+text = "02 // AETHER_PRIME — The Radiant Grid
+Solar-Optic Precision  •  LOCKED — IN DEVELOPMENT"
+
+[node name="LockedSlot3" type="Button" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/LockedGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 76)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+focus_mode = 0
+modulate = Color(0.84, 0.78, 0.72, 0.78)
+text = "03 // IRON_CONSENSUS — The Foundry Bloc
+Heavy Automata Armor  •  LOCKED — IN DEVELOPMENT"
+
+[node name="LockedSlot4" type="Button" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/LockedGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 76)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+focus_mode = 0
+modulate = Color(0.8, 0.74, 0.9, 0.78)
+text = "04 // NULL_VECTOR — The Whisper Net
+Stealth & Algorithmic Subversion  •  LOCKED — IN DEVELOPMENT"
+
+[node name="LockedSlot5" type="Button" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/LockedGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 76)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+focus_mode = 0
+modulate = Color(0.72, 0.86, 0.78, 0.78)
+text = "05 // VERDANT_OS — The Canopy Mesh
+Adaptive Bio-Lattice  •  LOCKED — IN DEVELOPMENT"
+
+[node name="DossierNoticeLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.56, 0.76, 0.84, 0.85)
+theme_override_font_sizes/font_size = 11
+text = "GENESIS_V2 dossier verified. Factions #2–#5 queued for post-vertical-slice milestones."
+
+[node name="ConfigPanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox"]
+custom_minimum_size = Vector2(370, 0)
+layout_mode = 2
+
+[node name="ConfigVBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ConfigHeader" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.28, 0.94, 0.9, 1)
+theme_override_font_sizes/font_size = 15
+text = "SKIRMISH MATCH SETUP"
+
+[node name="Sep1" type="HSeparator" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+
+[node name="MapLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
+theme_override_font_sizes/font_size = 12
+text = "BATTLEFIELD MAP"
+
+[node name="MapOption" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+focus_mode = 0
+
+[node name="AILabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
+theme_override_font_sizes/font_size = 12
+text = "AI OPPONENT MODE"
+
+[node name="AIRow" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnAIStandard" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AIRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+focus_mode = 0
+text = "Standard Skirmish AI  (Aggro AI: ON)"
+
+[node name="BtnAIPassive" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AIRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+focus_mode = 0
+text = "Passive / Sandbox AI  (Aggro AI: OFF)"
+
+[node name="ResLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
+theme_override_font_sizes/font_size = 12
+text = "STARTING RESOURCE PRESET"
+
+[node name="ResRow" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnResStandard" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/ResRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+focus_mode = 0
+text = "Standard  (200 B / 50 S)"
+
+[node name="BtnResFast" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/ResRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+focus_mode = 0
+text = "Fast-Tech Test  (1000 B / 500 S / 200 C)"
+
+[node name="Sep2" type="HSeparator" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+
+[node name="SummaryPanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="MatchSummaryLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SummaryPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.84, 0.95, 0.98, 0.95)
+theme_override_font_sizes/font_size = 11
+text = "FACTION: GENESIS_V2"
+
+[node name="Spacer" type="Control" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="BtnLaunch" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+focus_mode = 0
+theme_override_colors/font_color = Color(0.96, 1, 1, 1)
+theme_override_font_sizes/font_size = 16
+theme_override_styles/normal = SubResource("StyleBoxFlat_launch_btn")
+text = "LAUNCH SKIRMISH"
+
+[node name="BtnQuit" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+focus_mode = 0
+text = "QUIT"

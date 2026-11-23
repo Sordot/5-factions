@@ -2,6 +2,7 @@ class_name Building
 extends StaticBody2D
 
 const PRODUCTION_COMPONENT_SCRIPT: GDScript = preload("res://scripts/buildings/production_component.gd")
+const ENTITY_VISUALS_SCRIPT: GDScript = preload("res://ui/overlays/entity_visuals.gd")
 const ENEMY_TROOPER_DATA_PATH: String = "res://resources/units/enemy_trooper_data.tres"
 const HEALTH_BAR_WIDTH: float = 76.0
 const CONSTRUCT_BAR_WIDTH: float = 68.0
@@ -35,6 +36,7 @@ signal rally_changed(building: Building)
 @export var compute_tick_interval: float = 3.0
 @export var compute_per_engineer: int = 5
 @export var can_set_rally: bool = true
+@export var is_core_hub: bool = false
 @export var batch_production_count: int = 1
 @export var base_batch_cost_multiplier: float = 1.0
 @export var trainable_unit_data: Array[UnitData] = []
@@ -67,11 +69,14 @@ var _deposit_pulse_timer: float = 0.0
 var _hit_flash_timer: float = 0.0
 var _base_core_color: Color = Color(0.22, 0.94, 0.88, 1.0)
 var _compute_tick_timer: float = 0.0
+var _entity_visuals: EntityVisuals = null
 
 
 func _ready() -> void:
 	add_to_group("buildings")
 	add_to_group("selectable_buildings")
+	if building_type_id == &"nexus_vat" or building_type_id == &"command_core":
+		is_core_hub = true
 	if is_constructed:
 		current_hp = max_hp
 		construction_progress = 1.0
@@ -82,6 +87,7 @@ func _ready() -> void:
 		_construction_elapsed = 0.0
 	if team == Unit.Team.ENEMY and building_type_id == &"bio_lab":
 		_apply_enemy_bio_lab_roster()
+	_setup_procedural_visuals()
 	_apply_team_visuals()
 	if core_glow != null:
 		_base_core_color = core_glow.color
@@ -184,6 +190,7 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 		accepted_resources = data.accepted_resources.duplicate()
 		max_staff_slots = data.max_staff_slots
 		can_set_rally = data.can_set_rally
+		is_core_hub = data.is_core_hub or building_type_id == &"nexus_vat" or building_type_id == &"command_core"
 		batch_production_count = maxi(1, data.batch_production_count)
 		base_batch_cost_multiplier = maxf(1.0, data.base_batch_cost_multiplier)
 		var resolved_units: Array[UnitData] = data.resolve_trainable_units()
@@ -259,6 +266,8 @@ func _complete_construction() -> void:
 	var econ_done: EconomyManager = _get_economy_manager()
 	if econ_done != null:
 		econ_done.notify_building_tech_changed(team)
+	if team == Unit.Team.PLAYER and AudioManager != null:
+		AudioManager.play_sfx(&"build_complete", -2.5, 0.0)
 	health_changed.emit(self, current_hp, max_hp)
 	construction_progress_changed.emit(self, 1.0, true)
 	construction_completed.emit(self)
@@ -664,6 +673,8 @@ func _destroy() -> void:
 	if econ_dead != null:
 		econ_dead.notify_building_tech_changed(team)
 	_request_navmesh_rebake()
+	if AudioManager != null and (team == Unit.Team.PLAYER or visible):
+		AudioManager.play_sfx(&"entity_destroyed", -2.5, 0.06)
 	destroyed.emit(self)
 	queue_free()
 
@@ -732,16 +743,24 @@ func _prune_assigned_engineers() -> void:
 	assigned_engineers = valid
 
 
+func _setup_procedural_visuals() -> void:
+	if body_visual == null:
+		return
+	for child: Node in body_visual.get_children():
+		if child is CanvasItem and child != _entity_visuals:
+			(child as CanvasItem).visible = false
+	if _entity_visuals == null:
+		_entity_visuals = ENTITY_VISUALS_SCRIPT.new()
+		_entity_visuals.name = "EntityVisuals"
+		body_visual.add_child(_entity_visuals)
+	_entity_visuals.bind_building(self)
+
+
 func _update_construction_visuals() -> void:
 	if body_visual != null:
-		if is_constructed:
-			body_visual.modulate = Color.WHITE
-		else:
-			var alpha: float = lerpf(0.48, 0.92, construction_progress)
-			if team == Unit.Team.ENEMY:
-				body_visual.modulate = Color(1.0, 0.62, 0.56, alpha)
-			else:
-				body_visual.modulate = Color(0.62, 0.88, 0.96, alpha)
+		body_visual.modulate = Color.WHITE
+	if _entity_visuals != null:
+		_entity_visuals.queue_redraw()
 	if construct_bar_root != null and construct_bar_fill != null:
 		construct_bar_root.visible = not is_constructed
 		construct_bar_fill.size.x = CONSTRUCT_BAR_WIDTH * clampf(construction_progress, 0.0, 1.0)
@@ -785,16 +804,12 @@ func _apply_team_visuals() -> void:
 
 
 func _update_staff_slot_visuals() -> void:
+	if _entity_visuals != null:
+		_entity_visuals.queue_redraw()
 	if staff_slots_root == null:
 		return
-	staff_slots_root.visible = is_constructed and max_staff_slots > 0
-	var count: int = assigned_engineers.size()
-	var idx: int = 0
-	for child: Node in staff_slots_root.get_children():
-		if child is ColorRect:
-			var pip: ColorRect = child
-			pip.color = Color(0.32, 0.92, 1.0, 1.0) if idx < count else Color(0.16, 0.24, 0.32, 0.95)
-			idx += 1
+	# EntityVisuals renders integrated staffing pips directly on the Wetware Mainframe silhouette.
+	staff_slots_root.visible = false
 
 
 func _update_health_bar() -> void:

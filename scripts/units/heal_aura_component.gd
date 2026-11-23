@@ -9,6 +9,7 @@ const PULSE_VISUAL_DURATION: float = 0.42
 
 var _tick_timer: float = 0.0
 var _pulse_timer: float = 0.0
+var _ambient_time: float = 0.0
 
 
 func _process(delta: float) -> void:
@@ -16,11 +17,10 @@ func _process(delta: float) -> void:
 	if owner_unit == null or owner_unit.is_dead or owner_unit.is_staffed:
 		return
 
+	_ambient_time += delta
 	if _pulse_timer > 0.0:
 		_pulse_timer = maxf(0.0, _pulse_timer - delta)
-		queue_redraw()
-	elif owner_unit.is_selected:
-		queue_redraw()
+	queue_redraw()
 
 	_tick_timer += delta
 	if _tick_timer < TICK_INTERVAL:
@@ -64,12 +64,15 @@ func _draw() -> void:
 	if radius <= 0.0:
 		return
 
-	if owner_unit.is_selected:
-		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 40, Color(0.26, 0.96, 0.68, 0.28), 1.4, true)
+	var aura_col: Color = Color(0.26, 0.98, 0.68, 1.0) if owner_unit.team == Unit.Team.PLAYER else Color(1.0, 0.44, 0.36, 1.0)
+	var ambient_pulse: float = 0.5 + 0.5 * sin(_ambient_time * 2.6)
+	var base_alpha: float = 0.32 if owner_unit.is_selected else (0.10 + ambient_pulse * 0.07)
+	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 44, Color(aura_col.r, aura_col.g, aura_col.b, base_alpha), 1.5 if owner_unit.is_selected else 1.1, true)
+	draw_circle(Vector2.ZERO, radius, Color(aura_col.r, aura_col.g, aura_col.b, 0.035 if owner_unit.is_selected else 0.018))
 
 	if _pulse_timer > 0.0:
 		var t: float = 1.0 - (_pulse_timer / PULSE_VISUAL_DURATION)
 		var ring_r: float = lerpf(16.0, radius, t)
 		var alpha: float = (1.0 - t) * 0.45
-		draw_arc(Vector2.ZERO, ring_r, 0.0, TAU, 36, Color(0.28, 1.0, 0.72, alpha), 2.0, true)
-		draw_circle(Vector2.ZERO, ring_r * 0.65, Color(0.24, 0.96, 0.68, alpha * 0.16))
+		draw_arc(Vector2.ZERO, ring_r, 0.0, TAU, 36, Color(aura_col.r, aura_col.g, aura_col.b, alpha), 2.0, true)
+		draw_circle(Vector2.ZERO, ring_r * 0.65, Color(aura_col.r, aura_col.g, aura_col.b, alpha * 0.16))

@@ -157,14 +157,21 @@ alignment = 1
 
 [node name="BtnPlayAgain" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(150, 34)
+custom_minimum_size = Vector2(130, 34)
 layout_mode = 2
 focus_mode = 0
 text = "Play Again"
 
+[node name="BtnMainMenu" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(130, 34)
+layout_mode = 2
+focus_mode = 0
+text = "Main Menu"
+
 [node name="BtnSandboxMode" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(150, 34)
+custom_minimum_size = Vector2(130, 34)
 layout_mode = 2
 focus_mode = 0
 text = "Sandbox Mode"

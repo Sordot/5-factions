@@ -113,10 +113,15 @@ func can_queue_unit(owner_building: Building, unit_data: UnitData, unit_scene_ov
 
 
 func enqueue_unit(owner_building: Building, unit_data: UnitData, unit_scene_override: PackedScene = null) -> bool:
+	var econ: EconomyManager = _get_economy_manager(owner_building)
 	if not can_queue_unit(owner_building, unit_data, unit_scene_override):
+		if owner_building != null and owner_building.team == Unit.Team.PLAYER and econ != null and unit_data != null and not is_queue_full():
+			var fail_info: Dictionary = get_effective_unit_batch_info(owner_building, unit_data)
+			var missing: StringName = econ.find_missing_resource(owner_building.team, fail_info["costs"], int(fail_info["bandwidth_cost"]))
+			if missing != &"":
+				econ.notify_insufficient(owner_building.team, missing)
 		return false
 	var scene: PackedScene = unit_scene_override if unit_scene_override != null else unit_data.resolve_unit_scene()
-	var econ: EconomyManager = _get_economy_manager(owner_building)
 	if econ == null:
 		return false
 	var info: Dictionary = get_effective_unit_batch_info(owner_building, unit_data)
@@ -136,6 +141,8 @@ func enqueue_unit(owner_building: Building, unit_data: UnitData, unit_scene_over
 		"batch_count": int(info["batch_count"]),
 		"duration": float(info["duration"]),
 	})
+	if owner_building.team == Unit.Team.PLAYER and AudioManager != null:
+		AudioManager.play_ui_click()
 	_emit_queue_changed()
 	return true
 
@@ -154,9 +161,13 @@ func can_queue_upgrade(owner_building: Building, upgrade_data: UpgradeData) -> b
 
 
 func enqueue_upgrade(owner_building: Building, upgrade_data: UpgradeData) -> bool:
-	if not can_queue_upgrade(owner_building, upgrade_data):
-		return false
 	var econ: EconomyManager = _get_economy_manager(owner_building)
+	if not can_queue_upgrade(owner_building, upgrade_data):
+		if owner_building != null and owner_building.team == Unit.Team.PLAYER and econ != null and upgrade_data != null and econ.can_start_upgrade(owner_building.team, upgrade_data):
+			var missing: StringName = econ.find_missing_resource(owner_building.team, upgrade_data.get_cost_dict(), 0)
+			if missing != &"":
+				econ.notify_insufficient(owner_building.team, missing)
+		return false
 	if econ == null:
 		return false
 	var costs: Dictionary = upgrade_data.get_cost_dict()
@@ -174,6 +185,8 @@ func enqueue_upgrade(owner_building: Building, upgrade_data: UpgradeData) -> boo
 		"batch_count": 1,
 		"duration": maxf(0.5, upgrade_data.research_time),
 	})
+	if owner_building.team == Unit.Team.PLAYER and AudioManager != null:
+		AudioManager.play_ui_click()
 	_emit_queue_changed()
 	return true
 
@@ -245,6 +258,8 @@ func tick(owner_building: Building, delta: float) -> void:
 		if upg != null and econ != null:
 			econ.complete_upgrade(owner_building.team, upg.upgrade_id)
 			owner_building.pulse_deposit_feedback()
+			if owner_building.team == Unit.Team.PLAYER and AudioManager != null:
+				AudioManager.play_sfx(&"upgrade_complete", -2.0, 0.0)
 			upgrade_researched.emit(upg)
 		_emit_queue_changed()
 		return
@@ -259,6 +274,8 @@ func tick(owner_building: Building, delta: float) -> void:
 	for spawned: Unit in spawned_units:
 		owner_building.apply_rally_to_unit(spawned)
 		unit_produced.emit(spawned)
+	if not spawned_units.is_empty() and owner_building.team == Unit.Team.PLAYER and AudioManager != null:
+		AudioManager.play_sfx(&"unit_ready", -4.0, 0.04)
 	_emit_queue_changed()
 
 
@@ -294,7 +311,7 @@ func _spawn_unit_batch(owner_building: Building, unit_scene: PackedScene, batch_
 		unit.team = owner_building.team
 		var lateral_offset: Vector2 = Vector2.ZERO
 		if batch_count > 1:
-			var spacing: float = (unit.data.collision_radius * 2.2) if unit.data != null else 30.0
+			var spacing: float = maxf(36.0, (unit.data.collision_radius * 2.4) if unit.data != null else 36.0)
 			var centered: float = float(i) - float(batch_count - 1) * 0.5
 			lateral_offset = perp * (centered * spacing)
 		unit.global_position = base_exit_pos + lateral_offset

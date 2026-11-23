@@ -66,5 +66,7 @@ func _draw() -> void:
 		var pulse_r: float = lerpf(8.0, _radius, t)
 		var ring_col: Color = _color
 		ring_col.a = fade * 0.95
-		draw_arc(target_local, pulse_r, 0.0, TAU, 32, ring_col, 2.8, true)
-		draw_circle(target_local, pulse_r * 0.65, Color(_color.r, _color.g, _color.b, fade * 0.18))
+		draw_arc(target_local, pulse_r, 0.0, TAU, 36, ring_col, 3.0, true)
+		draw_arc(target_local, pulse_r * 0.76, t * 2.0, t * 2.0 + PI * 0.75, 16, Color(_color.r, _color.g, _color.b, fade * 0.65), 2.0, true)
+		draw_arc(target_local, pulse_r * 0.76, t * 2.0 + PI, t * 2.0 + PI * 1.75, 16, Color(_color.r, _color.g, _color.b, fade * 0.65), 2.0, true)
+		draw_circle(target_local, pulse_r * 0.65, Color(_color.r, _color.g, _color.b, fade * 0.16))

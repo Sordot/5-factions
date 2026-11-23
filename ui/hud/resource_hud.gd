@@ -8,21 +8,34 @@ extends CanvasLayer
 @onready var silica_value_label: Label = %SilicaValueLabel
 @onready var compute_value_label: Label = %ComputeValueLabel
 @onready var bandwidth_value_label: Label = %BandwidthValueLabel
+@onready var btn_audio_mute: Button = %BtnAudioMute
 @onready var btn_idle_workers: Button = %BtnIdleWorkers
 @onready var aggro_paused_badge: Label = %AggroPausedBadge
 @onready var uplink_bonus_label: Label = %UplinkBonusLabel
 @onready var zone_status_label: Label = %ZoneStatusLabel
+@onready var resource_alert_label: Label = %ResourceAlertLabel
 
 var _economy_manager: EconomyManager = null
 var _encroaching_zone: EncroachingZone = null
 var _match_manager: MatchManager = null
 var _selection_controller: SelectionController = null
+var _flash_timers: Dictionary = {}
+var _alert_timer: float = 0.0
 
 
 func _ready() -> void:
 	var res_panel: Control = get_node_or_null("RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel") as Control
 	if res_panel != null:
 		res_panel.add_to_group("blocks_edge_pan")
+	if btn_audio_mute != null:
+		btn_audio_mute.add_to_group("blocks_edge_pan")
+		btn_audio_mute.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.toggle_mute()
+			_refresh_audio_button()
+		)
+	if AudioManager != null and not AudioManager.mute_changed.is_connected(_on_audio_mute_changed):
+		AudioManager.mute_changed.connect(_on_audio_mute_changed)
 	if btn_idle_workers != null:
 		btn_idle_workers.add_to_group("blocks_edge_pan")
 		btn_idle_workers.pressed.connect(_on_idle_workers_pressed)
@@ -32,7 +45,73 @@ func _ready() -> void:
 	call_deferred("_connect_selection_controller")
 	_refresh_from_economy()
 	_refresh_aggro_badge()
+	_refresh_audio_button()
 	_on_idle_workers_updated(0)
+
+
+func _process(delta: float) -> void:
+	if _alert_timer > 0.0:
+		_alert_timer = maxf(0.0, _alert_timer - delta)
+		if resource_alert_label != null:
+			resource_alert_label.visible = _alert_timer > 0.0
+			resource_alert_label.modulate.a = clampf(_alert_timer / 0.45, 0.0, 1.0)
+	if not _flash_timers.is_empty():
+		var done_keys: Array[StringName] = []
+		for key: Variant in _flash_timers.keys():
+			var k: StringName = key as StringName
+			var rem: float = maxf(0.0, float(_flash_timers[k]) - delta)
+			_flash_timers[k] = rem
+			var lbl: Label = _get_resource_label(k)
+			if lbl != null:
+				if rem <= 0.0:
+					lbl.modulate = Color.WHITE
+					if k == &"bandwidth" and _economy_manager != null:
+						_on_bandwidth_changed(tracked_team, _economy_manager.get_bandwidth_used(tracked_team), _economy_manager.get_bandwidth_cap(tracked_team))
+					done_keys.append(k)
+				else:
+					var pulse: float = 0.5 + 0.5 * sin(rem * 28.0)
+					lbl.modulate = Color.WHITE.lerp(Color(1.0, 0.34, 0.24, 1.0), 0.55 + pulse * 0.45)
+		for dk: StringName in done_keys:
+			_flash_timers.erase(dk)
+
+
+func _on_audio_mute_changed(_muted: bool) -> void:
+	_refresh_audio_button()
+
+
+func _refresh_audio_button() -> void:
+	if btn_audio_mute == null:
+		return
+	var muted: bool = AudioManager != null and AudioManager.is_muted
+	btn_audio_mute.text = "SFX: MUTE" if muted else "SFX: ON"
+	btn_audio_mute.modulate = Color(1.0, 0.52, 0.42, 0.92) if muted else Color(0.46, 0.98, 0.90, 1.0)
+
+
+func _get_resource_label(key: StringName) -> Label:
+	match key:
+		EconomyManager.RESOURCE_BIOMASS:
+			return biomass_value_label
+		EconomyManager.RESOURCE_SILICA:
+			return silica_value_label
+		EconomyManager.RESOURCE_COMPUTE:
+			return compute_value_label
+		&"bandwidth":
+			return bandwidth_value_label
+	return null
+
+
+func _on_resource_insufficient(team: int, missing_key: StringName) -> void:
+	if team != int(tracked_team):
+		return
+	_flash_timers[missing_key] = 0.75
+	_alert_timer = 1.35
+	if resource_alert_label != null:
+		if missing_key == &"bandwidth":
+			resource_alert_label.text = "BANDWIDTH LIMIT REACHED — BUILD SYNAPSE PYLON"
+		else:
+			resource_alert_label.text = "INSUFFICIENT %s" % String(missing_key).to_upper()
+		resource_alert_label.visible = true
+		resource_alert_label.modulate = Color(1.0, 0.44, 0.34, 1.0)
 
 
 func _connect_selection_controller() -> void:
@@ -95,6 +174,8 @@ func _connect_economy_manager() -> void:
 		_economy_manager.bandwidth_changed.connect(_on_bandwidth_changed)
 	if not _economy_manager.production_bonus_changed.is_connected(_on_production_bonus_changed):
 		_economy_manager.production_bonus_changed.connect(_on_production_bonus_changed)
+	if not _economy_manager.resource_insufficient.is_connected(_on_resource_insufficient):
+		_economy_manager.resource_insufficient.connect(_on_resource_insufficient)
 
 
 func _connect_encroaching_zone() -> void:

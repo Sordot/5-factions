@@ -24,3 +24,4 @@ can_set_rally = true
 batch_production_count = 1
 base_batch_cost_multiplier = 1.0
 required_building_id = &""
+is_core_hub = true

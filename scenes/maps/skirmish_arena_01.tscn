@@ -42,7 +42,8 @@ agent_radius = 24.0
 
 [node name="EconomyManager" type="Node" parent="."]
 script = ExtResource("10_econ_mgr")
-starting_biomass = 150
+starting_biomass = 200
+starting_silica = 50
 enemy_matches_starting_resources = true
 
 [node name="RTSCamera" type="Camera2D" parent="."]
@@ -233,6 +234,10 @@ team = 1
 
 [node name="EnemyCloneTrooper2" parent="Units" instance=ExtResource("2_clone_trooper")]
 position = Vector2(720, -520)
+team = 1
+
+[node name="EnemyStinger1" parent="Units" instance=ExtResource("5_stinger")]
+position = Vector2(660, -380)
 team = 1
 
 [node name="FogOfWarSystem" type="Node" parent="."]

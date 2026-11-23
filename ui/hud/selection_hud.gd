@@ -56,10 +56,14 @@ func _ready() -> void:
 	_connect_economy_manager()
 
 	btn_cmd_stop.pressed.connect(func() -> void:
+		if AudioManager != null:
+			AudioManager.play_ui_click()
 		if _selection_controller != null:
 			_selection_controller.issue_stop_command()
 	)
 	btn_cmd_hold.pressed.connect(func() -> void:
+		if AudioManager != null:
+			AudioManager.play_ui_click()
 		if _selection_controller != null:
 			_selection_controller.issue_hold_command()
 	)
@@ -347,6 +351,8 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 		var captured_b: Building = building
 		var captured_idx: int = i
 		slot_btn.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
 			if is_instance_valid(captured_b):
 				captured_b.cancel_queued_unit(captured_idx)
 		)
@@ -485,6 +491,8 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 		eject_btn.add_theme_font_size_override("font_size", 12)
 		var captured_building: Building = building
 		eject_btn.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
 			if is_instance_valid(captured_building):
 				captured_building.eject_engineers()
 		)
@@ -523,10 +531,12 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 				return
 			var b_info: Dictionary = captured_b.get_unit_batch_info(captured_u)
 			var b_cnt: int = int(b_info["batch_count"])
-			var meta_line: String = "Cost: %s  •  %d BW  •  %.1fs" % [String(b_info["cost_label"]), int(b_info["bandwidth_cost"]), float(b_info["duration"])]
+			var meta_line: String = "Cost: %s / %d BW  •  %.1fs" % [String(b_info["cost_label"]), int(b_info["bandwidth_cost"]), float(b_info["duration"])]
 			var desc: String = "Queues a %s (max 5 in queue). Reserves Bandwidth immediately." % captured_u.display_name
 			if b_cnt > 1:
-				desc = "Parallel Batch Cloning: spawns %d %ss simultaneously for %.2fx single-unit cost." % [b_cnt, captured_u.display_name, float(b_info["cost_multiplier"])]
+				var mult_val: float = float(b_info["cost_multiplier"])
+				var eff_note: String = " (Batch Efficiency Active)" if mult_val <= 1.55 else " (1.75x Batch Cost)"
+				desc = "Parallel Batch Cloning: spawns %d %ss simultaneously for %.2fx single-unit cost%s." % [b_cnt, captured_u.display_name, mult_val, eff_note]
 			command_tooltip.show_tooltip(
 				("Clone %s (x%d)" % [captured_u.display_name, b_cnt]) if b_cnt > 1 else ("Train %s" % captured_u.display_name),
 				"",
@@ -605,7 +615,7 @@ func _refresh_building_action_buttons(building: Building) -> void:
 			var batch_tag: String = " x%d" % b_cnt if b_cnt > 1 else ""
 			btn.text = "%s%s (%s | %dBW)" % [short_name, batch_tag, String(b_info["cost_label"]), int(b_info["bandwidth_cost"])]
 			var can_train: bool = building.can_train_unit(slot)
-			btn.disabled = not can_train
+			btn.disabled = false
 			btn.modulate = Color(0.55, 1.0, 0.95, 1.0) if can_train else Color(0.56, 0.6, 0.66, 0.68)
 		elif kind == "upgrade":
 			var u_slot: int = int(entry["slot"])
@@ -624,7 +634,7 @@ func _refresh_building_action_buttons(building: Building) -> void:
 			else:
 				var can_res: bool = building.can_research_upgrade(u_slot)
 				btn.text = "%s (%s)" % [short_upg, upg.get_cost_label()]
-				btn.disabled = not can_res
+				btn.disabled = false
 				btn.modulate = Color(1.0, 0.86, 0.42, 1.0) if can_res else Color(0.62, 0.60, 0.54, 0.68)
 
 
@@ -876,10 +886,10 @@ func _rebuild_ability_buttons(active_group: Dictionary) -> void:
 	for ab: AbilityData in data.abilities:
 		if ab != null:
 			valid_count += 1
-	var use_compact: bool = valid_count > 4
-	ability_row.columns = 3 if use_compact else 2
-	var ab_min_size: Vector2 = Vector2(146.0, 26.0) if use_compact else Vector2(214.0, 29.0)
-	var ab_font_size: int = 10 if use_compact else 11
+	var use_grid_4x2: bool = valid_count > 4
+	ability_row.columns = 4 if use_grid_4x2 else 2
+	var ab_min_size: Vector2 = Vector2(114.0, 27.0) if use_grid_4x2 else Vector2(214.0, 29.0)
+	var ab_font_size: int = 10 if use_grid_4x2 else 11
 
 	for ability: AbilityData in data.abilities:
 		if ability == null:
@@ -888,14 +898,23 @@ func _rebuild_ability_buttons(active_group: Dictionary) -> void:
 		var btn: Button = Button.new()
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = ab_min_size
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.add_theme_font_size_override("font_size", ab_font_size)
 		var captured_ability: AbilityData = ability
 		btn.pressed.connect(func() -> void:
 			if _selection_controller != null:
 				_selection_controller.request_ability_slot(captured_ability, Input.is_key_pressed(KEY_SHIFT))
 		)
-		var meta_line: String = _build_ability_tooltip_meta(ability)
-		_attach_tooltip(btn, ability.display_name, ability.hotkey_label, meta_line, ability.description)
+		btn.tooltip_text = ""
+		btn.mouse_entered.connect(func() -> void:
+			if command_tooltip != null:
+				var dynamic_meta: String = _build_ability_tooltip_meta(captured_ability)
+				command_tooltip.show_tooltip(captured_ability.display_name, captured_ability.hotkey_label, dynamic_meta, captured_ability.description)
+		)
+		btn.mouse_exited.connect(func() -> void:
+			if command_tooltip != null:
+				command_tooltip.hide_tooltip()
+		)
 		ability_row.add_child(btn)
 		_ability_buttons[ability.ability_id] = {
 			"button": btn,
@@ -912,9 +931,11 @@ func _build_ability_tooltip_meta(ability: AbilityData) -> String:
 		if b.bandwidth_provided > 0:
 			parts.append("+%d BW" % b.bandwidth_provided)
 		if b.requires_vent:
-			parts.append("Requires Compute Vent")
+			parts.append("Requires: Compute Vent")
 		if b.required_building_id != &"":
-			parts.append("Requires %s" % String(b.required_building_id).replace("_", " ").capitalize())
+			var req_name: String = String(b.required_building_id).replace("_", " ").capitalize()
+			var has_req: bool = _economy_manager != null and _economy_manager.has_constructed_building(Unit.Team.PLAYER, b.required_building_id)
+			parts.append(("Requires: %s [OK]" % req_name) if has_req else ("LOCKED — Requires: %s" % req_name))
 		return "  •  ".join(parts)
 
 	var ab_parts: PackedStringArray = PackedStringArray()
@@ -957,19 +978,19 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 				has_prereq = _economy_manager.has_constructed_building(Unit.Team.PLAYER, b_data.required_building_id)
 
 		if not has_prereq:
-			btn.disabled = true
-			btn.text = "[%s] %s (LOCKED)" % [ability.hotkey_label, short_b]
+			btn.disabled = false
+			btn.text = "[%s] %s (LOCK)" % [ability.hotkey_label, short_b]
 			btn.modulate = Color(0.64, 0.44, 0.44, 0.68)
 		elif is_targeting:
 			btn.disabled = false
-			btn.text = "[%s] %s (PLACE)" % [ability.hotkey_label, short_b]
+			btn.text = "[%s] %s*" % [ability.hotkey_label, short_b]
 			btn.modulate = Color(1.0, 0.85, 0.32, 1.0)
 		elif can_afford:
 			btn.disabled = false
 			btn.text = "[%s] %s (%s)" % [ability.hotkey_label, short_b, cost_text]
 			btn.modulate = Color(0.55, 1.0, 0.95, 1.0)
 		else:
-			btn.disabled = true
+			btn.disabled = false
 			btn.text = "[%s] %s (%s)" % [ability.hotkey_label, short_b, cost_text]
 			btn.modulate = Color(0.56, 0.6, 0.66, 0.68)
 		return

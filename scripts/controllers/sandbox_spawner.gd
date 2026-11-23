@@ -1,6 +1,30 @@
 class_name SandboxSpawner
 extends Node2D
 
+const GENESIS_UNIT_CATALOG: Array = [
+	{"id": &"worker", "label": "Worker Drone", "scene": "res://scenes/units/worker_unit.tscn"},
+	{"id": &"silica_harvester", "label": "Silica Harvester", "scene": "res://scenes/units/silica_harvester.tscn"},
+	{"id": &"engineer", "label": "Systems Engineer", "scene": "res://scenes/units/engineer_unit.tscn"},
+	{"id": &"clone_trooper", "label": "Clone Trooper", "scene": "res://scenes/units/clone_trooper.tscn"},
+	{"id": &"stinger", "label": "Stinger", "scene": "res://scenes/units/stinger.tscn"},
+	{"id": &"symbiote", "label": "Symbiote", "scene": "res://scenes/units/symbiote.tscn"},
+	{"id": &"lance_rig", "label": "Lance-Rig", "scene": "res://scenes/units/lance_rig.tscn"},
+	{"id": &"signal_jammer", "label": "Signal Jammer", "scene": "res://scenes/units/signal_jammer.tscn"},
+	{"id": &"goliath_frame", "label": "Goliath Frame", "scene": "res://scenes/units/goliath_frame.tscn"},
+	{"id": &"arc_lancer", "label": "Arc-Lancer", "scene": "res://scenes/units/arc_lancer.tscn"},
+	{"id": &"chrysalis_mortar", "label": "Chrysalis Mortar", "scene": "res://scenes/units/chrysalis_mortar.tscn"},
+]
+
+const GENESIS_BUILDING_CATALOG: Array = [
+	{"id": &"nexus_vat", "label": "Nexus Vat", "scene": "res://scenes/buildings/nexus_vat.tscn"},
+	{"id": &"synapse_pylon", "label": "Synapse Pylon", "scene": "res://scenes/buildings/synapse_pylon.tscn"},
+	{"id": &"silica_condenser", "label": "Silica Condenser", "scene": "res://scenes/buildings/silica_condenser.tscn"},
+	{"id": &"wetware_mainframe", "label": "Wetware Mainframe", "scene": "res://scenes/buildings/wetware_mainframe.tscn"},
+	{"id": &"cloning_vat", "label": "Cloning Vat", "scene": "res://scenes/buildings/cloning_vat.tscn"},
+	{"id": &"calibration_foundry", "label": "Calibration Foundry", "scene": "res://scenes/buildings/calibration_foundry.tscn"},
+	{"id": &"synthetics_fabricator", "label": "Synthetics Fabricator", "scene": "res://scenes/buildings/synthetics_fabricator.tscn"},
+]
+
 @export var arena_safe_bounds: Rect2 = Rect2(-580.0, -300.0, 1160.0, 600.0)
 @export var reload_scene_on_reset: bool = false
 
@@ -206,6 +230,68 @@ func _clamp_to_walkable_arena(pos: Vector2) -> Vector2:
 		clampf(pos.x, arena_safe_bounds.position.x, arena_safe_bounds.end.x),
 		clampf(pos.y, arena_safe_bounds.position.y, arena_safe_bounds.end.y)
 	)
+
+
+func spawn_genesis_unit_by_index(catalog_index: int, target_team: Unit.Team, count: int = 1, origin: Vector2 = Vector2.INF) -> Array[Unit]:
+	if catalog_index < 0 or catalog_index >= GENESIS_UNIT_CATALOG.size():
+		return []
+	var entry: Dictionary = GENESIS_UNIT_CATALOG[catalog_index]
+	var scene: PackedScene = load(String(entry["scene"])) as PackedScene
+	var default_origin: Vector2 = player_spawn_origin if target_team == Unit.Team.PLAYER else enemy_spawn_origin
+	var base_pos: Vector2 = _resolve_origin(origin, default_origin)
+	return _spawn_batch(scene, count, base_pos, 46.0, int(target_team))
+
+
+func spawn_genesis_building_by_index(catalog_index: int, target_team: Unit.Team, origin: Vector2 = Vector2.INF) -> Building:
+	if catalog_index < 0 or catalog_index >= GENESIS_BUILDING_CATALOG.size():
+		return null
+	var entry: Dictionary = GENESIS_BUILDING_CATALOG[catalog_index]
+	var scene: PackedScene = load(String(entry["scene"])) as PackedScene
+	if scene == null:
+		return null
+	var container: Node = _get_buildings_container()
+	if container == null:
+		return null
+	var node: Node = scene.instantiate()
+	if not (node is Building):
+		node.queue_free()
+		return null
+	var building: Building = node
+	building.team = target_team
+	building.is_constructed = true
+	var default_origin: Vector2 = (player_spawn_origin + Vector2(90.0, -70.0)) if target_team == Unit.Team.PLAYER else (enemy_spawn_origin + Vector2(-90.0, 70.0))
+	var spawn_pos: Vector2 = _find_open_building_spot(_resolve_origin(origin, default_origin), building.footprint_radius)
+	building.global_position = spawn_pos
+	container.add_child(building)
+	entities_changed.emit()
+	return building
+
+
+func _find_open_building_spot(anchor: Vector2, radius: float) -> Vector2:
+	var radii: PackedFloat32Array = PackedFloat32Array([0.0, 95.0, 155.0, 220.0, 290.0])
+	for r: float in radii:
+		var steps: int = 1 if r <= 0.1 else 10
+		for k: int in range(steps):
+			var candidate: Vector2 = _clamp_to_walkable_arena(anchor + Vector2.RIGHT.rotated(TAU * float(k) / float(steps)) * r)
+			var clear: bool = true
+			for node: Node in get_tree().get_nodes_in_group("buildings"):
+				if node is Building and is_instance_valid(node) and not (node as Building).is_destroyed:
+					var min_d: float = (node as Building).footprint_radius + radius + 16.0
+					if (node as Building).global_position.distance_squared_to(candidate) < min_d * min_d:
+						clear = false
+						break
+			if clear:
+				return candidate
+	return _clamp_to_walkable_arena(anchor)
+
+
+func _get_buildings_container() -> Node:
+	var root: Node = get_tree().current_scene
+	if root != null:
+		var b_cont: Node = root.get_node_or_null("Buildings")
+		if b_cont != null:
+			return b_cont
+	return get_parent()
 
 
 func _get_units_container() -> Node:

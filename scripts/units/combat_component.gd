@@ -135,6 +135,9 @@ func try_fire_at(owner_unit: Unit, target: Variant) -> bool:
 	var aoe_radius: float = owner_unit.data.aoe_attack_radius
 	var pierce_width: float = owner_unit.data.line_pierce_width
 
+	if AudioManager != null and _is_pos_audible(owner_unit, tracer_origin, tracer_end):
+		AudioManager.play_weapon_for_unit(owner_unit.get_unit_type_id())
+
 	if aoe_radius > 0.0:
 		# Arcing caustic mortar shell with splash AoE.
 		var mortar_col: Color = Color(0.46, 1.0, 0.54, 0.95) if owner_unit.team == Unit.Team.PLAYER else Color(1.0, 0.44, 0.24, 0.95)
@@ -266,3 +269,14 @@ func _spawn_aoe_blast(owner_unit: Unit, center: Vector2, radius: float, blast_co
 	fx.z_index = 52
 	owner_unit.get_parent().add_child(fx)
 	fx.setup_self_pulse(center, radius, blast_color)
+
+
+func _is_pos_audible(owner_unit: Unit, from_pos: Vector2, to_pos: Vector2) -> bool:
+	if owner_unit == null or not owner_unit.is_inside_tree():
+		return false
+	if owner_unit.team == Unit.Team.PLAYER:
+		return true
+	var fog: Node = owner_unit.get_tree().get_first_node_in_group("fog_of_war")
+	if fog != null and fog.has_method("is_world_pos_visible") and fog.get("fog_enabled"):
+		return fog.is_world_pos_visible(from_pos) or fog.is_world_pos_visible(to_pos)
+	return true
