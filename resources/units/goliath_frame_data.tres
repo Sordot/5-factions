@@ -1,0 +1,30 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/seismic_slam.tres" id="2_seismic_slam"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"goliath_frame"
+display_name = "Goliath Frame"
+max_hp = 420.0
+move_speed = 175.0
+acceleration = 1300.0
+turn_speed = 9.0
+selection_radius = 29.0
+collision_radius = 23.0
+attack_damage = 34.0
+attack_range = 140.0
+aggro_range = 290.0
+vision_range = 380.0
+attack_cooldown = 1.15
+is_armored = true
+damage_reduction = 0.15
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_seismic_slam")])
+bandwidth_cost = 4
+biomass_cost = 225
+silica_cost = 150
+compute_cost = 75
+build_time = 12.0
+train_time = 12.0
+unit_scene_path = "res://scenes/units/goliath_frame.tscn"

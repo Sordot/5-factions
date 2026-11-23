@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/adrenal_surge.tres" id="2_adrenal"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"clone_trooper"
+display_name = "Clone Trooper"
+max_hp = 65.0
+move_speed = 250.0
+acceleration = 1850.0
+turn_speed = 16.0
+selection_radius = 19.0
+collision_radius = 15.0
+attack_damage = 9.0
+attack_range = 170.0
+aggro_range = 280.0
+vision_range = 350.0
+attack_cooldown = 0.55
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_adrenal")])
+bandwidth_cost = 1
+biomass_cost = 50
+silica_cost = 0
+compute_cost = 0
+build_time = 5.0
+train_time = 5.0
+unit_scene_path = "res://scenes/units/clone_trooper.tscn"

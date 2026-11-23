@@ -2,6 +2,7 @@ class_name SelectionController
 extends Node2D
 
 const COMMAND_ROUTER_SCRIPT: GDScript = preload("res://scripts/controllers/command_router.gd")
+const RALLY_POINT_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/rally_point_overlay.gd")
 const DOUBLE_TAP_WINDOW_MS: int = 350
 
 signal selection_updated(selected_count: int)
@@ -18,6 +19,7 @@ signal ability_targeting_changed(active_ability: AbilityData)
 @onready var selection_box: SelectionBox = $SelectionBox
 @onready var ability_reticle: AbilityTargetingReticle = get_node_or_null("AbilityTargetingReticle") as AbilityTargetingReticle
 @onready var build_ghost_preview: BuildGhostPreview = get_node_or_null("BuildGhostPreview") as BuildGhostPreview
+@onready var rally_point_overlay: Node2D = get_node_or_null("RallyPointOverlay") as Node2D
 
 var command_router: CommandRouter = null
 var selected_units: Array[Unit] = []
@@ -36,6 +38,8 @@ var _last_recall_group: int = -1
 var _last_recall_time_ms: int = 0
 var _last_click_unit: Unit = null
 var _last_click_time_ms: int = 0
+var _click_was_double_click: bool = false
+var _click_ctrl_pressed: bool = false
 var _tracked_death_units: Array[Unit] = []
 
 
@@ -46,6 +50,13 @@ func _ready() -> void:
 		command_router.name = "CommandRouter"
 		add_child(command_router)
 	command_router.buildable_bounds = buildable_bounds
+
+	if rally_point_overlay == null:
+		rally_point_overlay = RALLY_POINT_OVERLAY_SCRIPT.new() as Node2D
+		rally_point_overlay.name = "RallyPointOverlay"
+		add_child(rally_point_overlay)
+	if rally_point_overlay != null and rally_point_overlay.has_method("bind_selection_controller"):
+		rally_point_overlay.call("bind_selection_controller", self)
 
 
 func _process(_delta: float) -> void:
@@ -114,6 +125,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_r", "R"):
 		return
+	if _try_handle_ability_hotkey_event(event, "cmd_ability_t", "T"):
+		return
+	if _try_handle_ability_hotkey_event(event, "cmd_ability_y", "Y"):
+		return
+	if _try_handle_ability_hotkey_event(event, "cmd_ability_f", "F"):
+		return
 
 	if event.is_action_pressed("cmd_ability_e") and selected_units.is_empty() and inspected_entity is Building:
 		var b_node: Building = inspected_entity
@@ -164,8 +181,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_is_dragging = true
 				_drag_start_world = get_global_mouse_position()
 				_drag_start_screen = mouse_event.position
+				_click_was_double_click = mouse_event.double_click
+				_click_ctrl_pressed = mouse_event.ctrl_pressed or Input.is_key_pressed(KEY_CTRL)
 			elif _is_dragging:
-				_finish_left_selection(mouse_event.position, mouse_event.shift_pressed)
+				_finish_left_selection(mouse_event.position, mouse_event.shift_pressed, _click_was_double_click, _click_ctrl_pressed or mouse_event.ctrl_pressed)
 		elif mouse_event.button_index == MOUSE_BUTTON_RIGHT and mouse_event.pressed:
 			if active_targeting_ability != null:
 				cancel_ability_targeting()
@@ -245,6 +264,10 @@ func request_ability_slot(ability: AbilityData) -> bool:
 	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
 		if ability.building_to_build == null:
 			return false
+		if ability.building_to_build.required_building_id != &"":
+			var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+			if econ == null or not econ.has_constructed_building(Unit.Team.PLAYER, ability.building_to_build.required_building_id):
+				return false
 		if command_router.find_closest_builder(subgroup_units, get_global_mouse_position()) == null:
 			return false
 		active_targeting_ability = ability
@@ -259,6 +282,13 @@ func request_ability_slot(ability: AbilityData) -> bool:
 
 	if ability.target_type == AbilityData.TargetType.INSTANT:
 		cancel_ability_targeting()
+		if ability.cast_on_all_ready:
+			var cast_any: bool = false
+			for u: Unit in subgroup_units:
+				if is_instance_valid(u) and not u.is_dead and u.is_ability_ready(ability):
+					if u.command_cast_ability(ability, u.global_position, u):
+						cast_any = true
+			return cast_any
 		var caster: Unit = SubgroupHelper.find_closest_ready_caster(subgroup_units, ability, get_global_mouse_position())
 		if caster != null:
 			return caster.command_cast_ability(ability, caster.global_position, caster)
@@ -342,6 +372,7 @@ func assign_control_group(group_num: int) -> void:
 	if selected_units.is_empty():
 		return
 	control_groups[group_num] = selected_units.duplicate()
+	_watch_control_group_units(selected_units)
 	_emit_control_groups_changed()
 
 
@@ -357,6 +388,18 @@ func append_control_group(group_num: int) -> void:
 			group_units.append(unit)
 	if not group_units.is_empty():
 		control_groups[group_num] = group_units
+		_watch_control_group_units(group_units)
+	_emit_control_groups_changed()
+
+
+func _watch_control_group_units(units: Array[Unit]) -> void:
+	for u: Unit in units:
+		if is_instance_valid(u) and not u.is_dead:
+			if not u.died.is_connected(_on_control_group_unit_removed):
+				u.died.connect(_on_control_group_unit_removed)
+
+
+func _on_control_group_unit_removed(_unit: Unit) -> void:
 	_emit_control_groups_changed()
 
 
@@ -484,17 +527,19 @@ func _get_rts_camera() -> RTSCamera:
 	return null
 
 
-func _finish_left_selection(end_screen_pos: Vector2, shift_pressed: bool = false) -> void:
+func _finish_left_selection(end_screen_pos: Vector2, shift_pressed: bool = false, is_double_click: bool = false, ctrl_pressed: bool = false) -> void:
 	_is_dragging = false
+	_click_was_double_click = false
+	_click_ctrl_pressed = false
 	selection_box.update_box(Rect2(), false)
 	var end_world_pos: Vector2 = get_global_mouse_position()
 	if end_screen_pos.distance_to(_drag_start_screen) < drag_threshold:
-		_select_at_point(end_world_pos, shift_pressed)
+		_select_at_point(end_world_pos, shift_pressed, is_double_click, ctrl_pressed)
 	else:
 		_select_in_rect(_build_world_rect(_drag_start_world, end_world_pos), shift_pressed)
 
 
-func _select_at_point(world_point: Vector2, shift_pressed: bool = false) -> void:
+func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_double_click: bool = false, ctrl_pressed: bool = false) -> void:
 	if command_router == null:
 		return
 
@@ -502,11 +547,19 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false) -> void
 	if clicked_player != null:
 		_set_inspected_entity(null)
 		var now_ms: int = Time.get_ticks_msec()
-		if not shift_pressed and _last_click_unit == clicked_player and (now_ms - _last_click_time_ms) <= DOUBLE_TAP_WINDOW_MS:
+		var rapid_second_click: bool = (_last_click_unit == clicked_player and (now_ms - _last_click_time_ms) <= DOUBLE_TAP_WINDOW_MS)
+		if is_double_click or ctrl_pressed or (not shift_pressed and rapid_second_click):
 			var same_type: Array[Unit] = _find_visible_units_of_type(clicked_player.get_unit_type_id(), Unit.Team.PLAYER)
 			_last_click_unit = null
 			_last_click_time_ms = 0
-			_set_selected_units(same_type)
+			if shift_pressed and not selected_units.is_empty():
+				var merged: Array[Unit] = selected_units.duplicate()
+				for u: Unit in same_type:
+					if not merged.has(u):
+						merged.append(u)
+				_set_selected_units(merged, false)
+			else:
+				_set_selected_units(same_type)
 			return
 
 		_last_click_unit = clicked_player
@@ -635,10 +688,12 @@ func _set_selected_units(new_selection: Array[Unit], reset_subgroup_index: bool 
 
 func _on_selected_unit_died(_dead_unit: Unit) -> void:
 	_prune_invalid_units()
+	_emit_control_groups_changed()
 
 
 func _on_selected_unit_staffed(_unit: Unit, _staffed: bool) -> void:
 	_prune_invalid_units()
+	_emit_control_groups_changed()
 
 
 func _disconnect_death_trackers() -> void:

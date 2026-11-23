@@ -36,10 +36,10 @@ func _process(delta: float) -> void:
 	var radius_sq: float = capture_radius * capture_radius
 
 	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not (node is Unit) or not is_instance_valid(node):
+		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var unit: Unit = node
-		if unit.is_dead or unit.is_staffed:
+		if unit.is_dead or unit.is_staffed or unit.is_queued_for_deletion():
 			continue
 		if global_position.distance_squared_to(unit.global_position) <= radius_sq:
 			if unit.team == Unit.Team.PLAYER:
@@ -103,36 +103,46 @@ func _draw() -> void:
 		base_col = Color(1.0, 0.78, 0.24, blink)
 		status_text = "DATA HYPER-UPLINK  —  CONTESTED"
 	elif controlling_team == int(Unit.Team.PLAYER):
-		base_col = Color(0.18, 0.96, 0.90, 0.92)
-		status_text = "HYPER-UPLINK CONTROLLED  (+%d%% PROD)" % int(round(production_bonus_pct * 100.0))
+		base_col = Color(0.18, 0.96, 0.90, 0.95)
+		status_text = "HYPER-UPLINK CONTROLLED  (+%d%% SPEED)" % int(round(production_bonus_pct * 100.0))
 	elif controlling_team == int(Unit.Team.ENEMY):
-		base_col = Color(1.0, 0.34, 0.28, 0.92)
+		base_col = Color(1.0, 0.34, 0.28, 0.95)
 		status_text = "HYPER-UPLINK  —  HOSTILE CONTROL"
 	elif capture_progress > 0.01:
-		base_col = Color(0.24, 0.92, 0.86, 0.85)
+		base_col = Color(0.24, 0.92, 0.86, 0.9)
 		status_text = "CAPTURING UPLINK  %d%%" % int(round(capture_progress * 100.0))
 	elif capture_progress < -0.01:
-		base_col = Color(1.0, 0.42, 0.32, 0.85)
+		base_col = Color(1.0, 0.42, 0.32, 0.9)
 		status_text = "HOSTILE CAPTURE  %d%%" % int(round(absf(capture_progress) * 100.0))
 
-	# Outer capture ring + subtle fill
-	draw_circle(Vector2.ZERO, capture_radius, Color(base_col.r, base_col.g, base_col.b, 0.06))
-	draw_arc(Vector2.ZERO, capture_radius, 0.0, TAU, 64, Color(base_col.r, base_col.g, base_col.b, 0.55), 2.0, true)
+	# Outer capture zone fill, perimeter ring, and 8 radial tactical ticks
+	draw_circle(Vector2.ZERO, capture_radius, Color(base_col.r, base_col.g, base_col.b, 0.07))
+	draw_arc(Vector2.ZERO, capture_radius, 0.0, TAU, 64, Color(base_col.r, base_col.g, base_col.b, 0.65), 2.2, true)
+	draw_arc(Vector2.ZERO, capture_radius - 6.0, 0.0, TAU, 64, Color(0.08, 0.14, 0.2, 0.55), 5.0, true)
+	for i: int in range(8):
+		var ang: float = TAU * float(i) / 8.0
+		var d: Vector2 = Vector2.RIGHT.rotated(ang)
+		draw_line(d * (capture_radius - 10.0), d * (capture_radius + 4.0), Color(base_col.r, base_col.g, base_col.b, 0.72), 1.8, true)
 
 	# Progress arc around perimeter (only when live vision covers the uplink)
 	var mag: float = clampf(absf(capture_progress), 0.0, 1.0)
 	if has_live_vision and mag > 0.01:
-		var arc_col: Color = Color(0.18, 0.98, 0.92, 0.95) if capture_progress > 0.0 else Color(1.0, 0.34, 0.26, 0.95)
-		draw_arc(Vector2.ZERO, capture_radius - 5.0, -PI * 0.5, -PI * 0.5 + TAU * mag, 56, arc_col, 4.0, true)
+		var arc_col: Color = Color(0.18, 0.98, 0.92, 0.98) if capture_progress > 0.0 else Color(1.0, 0.34, 0.26, 0.98)
+		draw_arc(Vector2.ZERO, capture_radius - 6.0, -PI * 0.5, -PI * 0.5 + TAU * mag, 56, arc_col, 5.0, true)
 
 	# Central uplink pylon geometry
 	var inner_pulse: float = 18.0 + 2.5 * sin(_pulse_time * 3.0)
-	draw_circle(Vector2.ZERO, 26.0, Color(0.08, 0.13, 0.19, 0.95))
-	draw_arc(Vector2.ZERO, 26.0, 0.0, TAU, 24, base_col, 2.2, true)
-	draw_circle(Vector2.ZERO, inner_pulse * 0.55, Color(base_col.r, base_col.g, base_col.b, 0.88))
+	draw_circle(Vector2.ZERO, 28.0, Color(0.07, 0.12, 0.18, 0.95))
+	draw_arc(Vector2.ZERO, 28.0, 0.0, TAU, 24, base_col, 2.5, true)
+	draw_circle(Vector2.ZERO, inner_pulse * 0.58, Color(base_col.r, base_col.g, base_col.b, 0.92))
 
+	# High-contrast pill label above capture ring
 	var font: Font = ThemeDB.fallback_font
 	var font_size: int = 11
 	var text_size: Vector2 = font.get_string_size(status_text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
-	var label_pos: Vector2 = Vector2(-text_size.x * 0.5, -capture_radius - 8.0)
-	draw_string(font, label_pos, status_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, base_col)
+	var pill_w: float = text_size.x + 16.0
+	var pill_h: float = text_size.y + 8.0
+	var pill_pos: Vector2 = Vector2(-pill_w * 0.5, -capture_radius - pill_h - 8.0)
+	draw_rect(Rect2(pill_pos, Vector2(pill_w, pill_h)), Color(0.04, 0.08, 0.12, 0.88), true)
+	draw_rect(Rect2(pill_pos, Vector2(pill_w, pill_h)), Color(base_col.r, base_col.g, base_col.b, 0.8), false, 1.2)
+	draw_string(font, pill_pos + Vector2(8.0, pill_h - 6.0), status_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, base_col)

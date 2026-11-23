@@ -94,19 +94,19 @@ func refresh_visibility() -> void:
 
 	# Stamp live vision circles for all living Team.PLAYER units.
 	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not (node is Unit) or not is_instance_valid(node):
+		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var unit: Unit = node
-		if unit.is_dead or unit.is_staffed or unit.team != Unit.Team.PLAYER:
+		if unit.is_dead or unit.is_staffed or unit.is_queued_for_deletion() or unit.team != Unit.Team.PLAYER:
 			continue
 		_reveal_circle(unit.global_position, unit.get_vision_range())
 
 	# Stamp live vision circles for all living Team.PLAYER buildings.
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
-		if not (node is Building) or not is_instance_valid(node):
+		if not is_instance_valid(node) or not (node is Building):
 			continue
 		var building: Building = node
-		if building.is_destroyed or building.team != Unit.Team.PLAYER:
+		if building.is_destroyed or building.is_queued_for_deletion() or building.team != Unit.Team.PLAYER:
 			continue
 		_reveal_circle(building.global_position, building.get_vision_range())
 
@@ -190,18 +190,18 @@ func _sync_texture_if_dirty() -> void:
 
 func _apply_enemy_visibility(force_reveal_all: bool) -> void:
 	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not (node is Unit) or not is_instance_valid(node):
+		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var unit: Unit = node
-		if unit.is_dead or unit.is_staffed or unit.team != Unit.Team.ENEMY:
+		if unit.is_dead or unit.is_staffed or unit.is_queued_for_deletion() or unit.team != Unit.Team.ENEMY:
 			continue
 		unit.visible = true if force_reveal_all else is_world_pos_visible(unit.global_position)
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
-		if not (node is Building) or not is_instance_valid(node):
+		if not is_instance_valid(node) or not (node is Building):
 			continue
 		var building: Building = node
-		if building.is_destroyed or building.team != Unit.Team.ENEMY:
+		if building.is_destroyed or building.is_queued_for_deletion() or building.team != Unit.Team.ENEMY:
 			continue
 		if force_reveal_all:
 			building.visible = true

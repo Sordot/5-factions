@@ -142,39 +142,102 @@ func execute_ability(owner_unit: Unit, ability: AbilityData, target_pos: Vector2
 
 
 func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vector2) -> void:
-	_spawn_aoe_effect(owner_unit, target_pos, ability.aoe_radius)
+	_spawn_aoe_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
 	for node: Node in owner_unit.get_tree().get_nodes_in_group("units"):
-		if not (node is Unit):
+		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var candidate: Unit = node
-		if not is_instance_valid(candidate) or candidate.is_dead or candidate.team == owner_unit.team:
+		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or candidate.team == owner_unit.team:
 			continue
 		var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
 		if candidate.global_position.distance_to(target_pos) <= ability.aoe_radius + enemy_r:
-			candidate.take_damage(ability.damage_or_value, owner_unit)
+			if ability.damage_or_value > 0.0:
+				candidate.take_damage(ability.damage_or_value, owner_unit)
+			if ability.effect_duration > 0.0 and (ability.move_speed_modifier < 0.0 or ability.attack_speed_modifier < 0.0):
+				candidate.apply_slow_debuff(ability.effect_duration, absf(ability.move_speed_modifier), absf(ability.attack_speed_modifier))
+
+	if ability.damage_or_value > 0.0:
+		for node: Node in owner_unit.get_tree().get_nodes_in_group("buildings"):
+			if not is_instance_valid(node) or not (node is Building):
+				continue
+			var b: Building = node
+			if b.is_destroyed or b.is_queued_for_deletion() or b.team == owner_unit.team:
+				continue
+			if b.global_position.distance_to(target_pos) <= ability.aoe_radius + b.footprint_radius:
+				b.take_damage(ability.damage_or_value)
 
 
 func _execute_unit_target(owner_unit: Unit, ability: AbilityData, target_unit: Unit) -> void:
 	if target_unit == null or not is_instance_valid(target_unit) or target_unit.is_dead:
 		return
-	_spawn_aoe_effect(owner_unit, target_unit.global_position, maxf(24.0, ability.aoe_radius))
+	_spawn_aoe_effect(owner_unit, target_unit.global_position, maxf(24.0, ability.aoe_radius), ability.effect_color)
 	target_unit.take_damage(ability.damage_or_value, owner_unit)
 
 
 func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
-	owner_unit.heal(ability.damage_or_value)
+	var ab_id: StringName = ability.ability_id
+
+	if ab_id == &"adrenal_surge":
+		var econ: EconomyManager = owner_unit.get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+		var base_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 4.0
+		var base_atk: float = ability.attack_speed_modifier if ability.attack_speed_modifier > 0.0 else 0.30
+		var move_bonus: float = ability.move_speed_modifier if ability.move_speed_modifier > 0.0 else 0.35
+		var duration: float = econ.get_adrenal_duration(owner_unit.team, base_dur) if econ != null else base_dur
+		var atk_bonus: float = econ.get_adrenal_attack_speed_bonus(owner_unit.team, base_atk) if econ != null else base_atk
+		owner_unit.apply_adrenal_surge(duration, move_bonus, atk_bonus)
+		_spawn_self_pulse(owner_unit, maxf(32.0, ability.aoe_radius), ability.effect_color)
+		return
+
+	if ab_id == &"static_pulse" or ab_id == &"seismic_slam":
+		var radius: float = maxf(32.0, ability.aoe_radius)
+		var origin: Vector2 = owner_unit.global_position
+		_spawn_self_pulse(owner_unit, radius, ability.effect_color)
+		for node: Node in owner_unit.get_tree().get_nodes_in_group("units"):
+			if not is_instance_valid(node) or not (node is Unit):
+				continue
+			var enemy: Unit = node
+			if enemy.is_dead or enemy.is_staffed or enemy.is_queued_for_deletion() or enemy.team == owner_unit.team:
+				continue
+			var enemy_r: float = enemy.data.collision_radius if enemy.data != null else 16.0
+			if enemy.global_position.distance_to(origin) <= radius + enemy_r:
+				if ability.damage_or_value > 0.0:
+					enemy.take_damage(ability.damage_or_value, owner_unit)
+				if ability.effect_duration > 0.0 and (ability.move_speed_modifier < 0.0 or ability.attack_speed_modifier < 0.0):
+					enemy.apply_slow_debuff(
+						ability.effect_duration,
+						absf(ability.move_speed_modifier),
+						absf(ability.attack_speed_modifier)
+					)
+		if ability.damage_or_value > 0.0:
+			for node: Node in owner_unit.get_tree().get_nodes_in_group("buildings"):
+				if not is_instance_valid(node) or not (node is Building):
+					continue
+				var b: Building = node
+				if b.is_destroyed or b.is_queued_for_deletion() or b.team == owner_unit.team:
+					continue
+				if b.global_position.distance_to(origin) <= radius + b.footprint_radius:
+					b.take_damage(ability.damage_or_value)
+		return
+
+	# Default instant heal (e.g. Nanite Surge)
+	if ability.damage_or_value > 0.0:
+		owner_unit.heal(ability.damage_or_value)
+	_spawn_self_pulse(owner_unit, maxf(32.0, ability.aoe_radius), ability.effect_color)
+
+
+func _spawn_self_pulse(owner_unit: Unit, radius: float, effect_color: Color) -> void:
 	if owner_unit.get_parent() == null:
 		return
 	var fx: AbilityEffect = ABILITY_EFFECT_SCRIPT.new()
 	fx.z_index = 55
 	owner_unit.get_parent().add_child(fx)
-	fx.setup_self_pulse(owner_unit.global_position, maxf(32.0, ability.aoe_radius))
+	fx.setup_self_pulse(owner_unit.global_position, radius, effect_color)
 
 
-func _spawn_aoe_effect(owner_unit: Unit, target_pos: Vector2, radius: float) -> void:
+func _spawn_aoe_effect(owner_unit: Unit, target_pos: Vector2, radius: float, effect_color: Color = Color(0.42, 0.88, 1.0, 0.95)) -> void:
 	if owner_unit.get_parent() == null:
 		return
 	var fx: AbilityEffect = ABILITY_EFFECT_SCRIPT.new()
 	fx.z_index = 55
 	owner_unit.get_parent().add_child(fx)
-	fx.setup_aoe(owner_unit.global_position, target_pos, radius)
+	fx.setup_aoe(owner_unit.global_position, target_pos, radius, effect_color)

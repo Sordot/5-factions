@@ -181,6 +181,15 @@ mouse_filter = 2
 alignment = 2
 theme_override_constants/separation = 10
 
+[node name="AggroPausedBadge" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 0.68, 0.28, 1)
+theme_override_font_sizes/font_size = 11
+text = "AGGRO AI: PAUSED (F10)"
+
 [node name="UplinkBonusLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
 unique_name_in_owner = true
 visible = false
@@ -188,7 +197,7 @@ layout_mode = 2
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.24, 0.98, 0.9, 1)
 theme_override_font_sizes/font_size = 11
-text = "UPLINK: +5% PROD"
+text = "UPLINK: +5% SPEED"
 
 [node name="ZoneStatusLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
 unique_name_in_owner = true

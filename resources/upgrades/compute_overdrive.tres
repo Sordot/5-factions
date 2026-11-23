@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="UpgradeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/upgrade_data.gd" id="1_upg"]
+
+[resource]
+script = ExtResource("1_upg")
+upgrade_id = &"compute_overdrive"
+display_name = "Compute Overdrive"
+description = "Hardens Goliath Frame neural-chassis integration, granting +20% movement speed and -15% additional incoming damage reduction."
+hotkey_label = "U"
+biomass_cost = 150
+silica_cost = 125
+compute_cost = 100
+research_time = 15.0
+modifier_key = &"goliath_overdrive"
+modifier_value = 0.2

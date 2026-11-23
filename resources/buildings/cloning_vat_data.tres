@@ -1,0 +1,33 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/cloning_vat.tscn" id="2_scene"]
+[ext_resource type="Resource" path="res://resources/units/clone_trooper_data.tres" id="3_clone"]
+[ext_resource type="Resource" path="res://resources/units/stinger_data.tres" id="4_stinger"]
+[ext_resource type="Resource" path="res://resources/units/symbiote_data.tres" id="5_symbiote"]
+[ext_resource type="Resource" path="res://resources/upgrades/batch_efficiency.tres" id="6_upg_batch"]
+[ext_resource type="Resource" path="res://resources/upgrades/adrenal_potency.tres" id="7_upg_adrenal"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"cloning_vat"
+display_name = "Cloning Vat"
+scene = ExtResource("2_scene")
+biomass_cost = 150
+silica_cost = 0
+compute_cost = 0
+build_time = 8.0
+footprint_size = Vector2(88, 88)
+max_hp = 950.0
+vision_range = 380.0
+bandwidth_provided = 0
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+requires_vent = false
+max_staff_slots = 0
+trainable_units = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("3_clone"), ExtResource("4_stinger"), ExtResource("5_symbiote")])
+researchable_upgrades = Array[Resource("res://scripts/data/upgrade_data.gd")]([ExtResource("6_upg_batch"), ExtResource("7_upg_adrenal")])
+can_set_rally = true
+batch_production_count = 2
+base_batch_cost_multiplier = 1.75
+required_building_id = &"nexus_vat"

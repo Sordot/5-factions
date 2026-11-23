@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"lance_rig"
+display_name = "Lance-Rig"
+max_hp = 160.0
+move_speed = 195.0
+acceleration = 1450.0
+turn_speed = 11.0
+selection_radius = 23.0
+collision_radius = 18.0
+attack_damage = 28.0
+attack_range = 220.0
+aggro_range = 310.0
+vision_range = 380.0
+attack_cooldown = 1.55
+is_armored = true
+bonus_vs_armored = 15.0
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([])
+bandwidth_cost = 2
+biomass_cost = 120
+silica_cost = 90
+compute_cost = 0
+build_time = 8.0
+train_time = 8.0
+unit_scene_path = "res://scenes/units/lance_rig.tscn"

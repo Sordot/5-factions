@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"nexus_vat"
+display_name = "Nexus Vat"
+scene_path = "res://scenes/buildings/nexus_vat.tscn"
+biomass_cost = 400
+silica_cost = 0
+compute_cost = 0
+build_time = 20.0
+footprint_size = Vector2(96, 96)
+max_hp = 1500.0
+vision_range = 460.0
+bandwidth_provided = 10
+is_dropoff = true
+accepted_resources = Array[StringName]([&"biomass"])
+requires_vent = false
+max_staff_slots = 0
+trainable_unit_paths = PackedStringArray("res://resources/units/worker_unit_data.tres", "res://resources/units/engineer_data.tres", "res://resources/units/silica_harvester_data.tres")
+can_set_rally = true
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &""

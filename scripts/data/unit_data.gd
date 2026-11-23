@@ -11,9 +11,18 @@ extends Resource
 @export var collision_radius: float = 16.0
 @export var attack_damage: float = 20.0
 @export var attack_range: float = 180.0
+@export var min_attack_range: float = 0.0
+@export var aoe_attack_radius: float = 0.0
+@export var line_pierce_width: float = 0.0
 @export var aggro_range: float = 280.0
 @export var vision_range: float = 360.0
 @export var attack_cooldown: float = 0.7
+@export var is_armored: bool = false
+@export var bonus_vs_armored: float = 0.0
+@export var damage_reduction: float = 0.0
+@export var ignore_friendly_unit_collision: bool = false
+@export var heal_aura_rate: float = 0.0
+@export var heal_aura_radius: float = 0.0
 @export var abilities: Array[AbilityData] = []
 @export var bandwidth_cost: int = 1
 @export var can_gather: bool = false
@@ -42,22 +51,35 @@ func resolve_unit_scene() -> PackedScene:
 
 
 func get_cost_dict() -> Dictionary:
+	return get_scaled_cost_dict(1.0)
+
+
+func get_scaled_cost_dict(multiplier: float) -> Dictionary:
 	var costs: Dictionary = {}
+	var mult: float = maxf(0.0, multiplier)
 	if biomass_cost > 0:
-		costs[EconomyManager.RESOURCE_BIOMASS] = biomass_cost
+		costs[EconomyManager.RESOURCE_BIOMASS] = int(floor(float(biomass_cost) * mult + 0.5))
 	if silica_cost > 0:
-		costs[EconomyManager.RESOURCE_SILICA] = silica_cost
+		costs[EconomyManager.RESOURCE_SILICA] = int(floor(float(silica_cost) * mult + 0.5))
 	if compute_cost > 0:
-		costs[EconomyManager.RESOURCE_COMPUTE] = compute_cost
+		costs[EconomyManager.RESOURCE_COMPUTE] = int(floor(float(compute_cost) * mult + 0.5))
 	return costs
 
 
 func get_cost_label() -> String:
+	return get_scaled_cost_label(1.0)
+
+
+func get_scaled_cost_label(multiplier: float) -> String:
+	var costs: Dictionary = get_scaled_cost_dict(multiplier)
 	var parts: PackedStringArray = PackedStringArray()
-	if biomass_cost > 0:
-		parts.append("%dB" % biomass_cost)
-	if silica_cost > 0:
-		parts.append("%dS" % silica_cost)
-	if compute_cost > 0:
-		parts.append("%dC" % compute_cost)
+	var b: int = int(costs.get(EconomyManager.RESOURCE_BIOMASS, 0))
+	var s: int = int(costs.get(EconomyManager.RESOURCE_SILICA, 0))
+	var c: int = int(costs.get(EconomyManager.RESOURCE_COMPUTE, 0))
+	if b > 0:
+		parts.append("%dB" % b)
+	if s > 0:
+		parts.append("%dS" % s)
+	if c > 0:
+		parts.append("%dC" % c)
 	return " / ".join(parts) if not parts.is_empty() else "Free"

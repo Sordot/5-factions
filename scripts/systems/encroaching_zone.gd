@@ -8,6 +8,7 @@ enum ZoneState {
 }
 
 signal zone_updated(phase_index: int, state_label: String, time_remaining: float, current_radius: float)
+signal zone_toggled(enabled: bool)
 
 @export var zone_center: Vector2 = Vector2.ZERO
 @export var initial_radius: float = 760.0
@@ -42,11 +43,31 @@ func reset_zone() -> void:
 	_shrink_start_radius = initial_radius
 	_phase_timer = phase_wait_times[0] if phase_wait_times.size() > 0 else 180.0
 	_damage_tick_timer = 0.0
+	visible = active
 	_emit_zone_status()
 	queue_redraw()
 
 
+func set_zone_enabled(enabled: bool) -> void:
+	if active == enabled:
+		visible = active
+		return
+	active = enabled
+	visible = active
+	_damage_tick_timer = 0.0
+	_emit_zone_status()
+	zone_toggled.emit(active)
+	queue_redraw()
+
+
+func toggle_zone() -> bool:
+	set_zone_enabled(not active)
+	return active
+
+
 func trigger_next_phase_now() -> void:
+	if not active:
+		return
 	if state == ZoneState.WAITING and current_phase < phase_target_radii.size():
 		_start_shrinking_phase()
 	elif state == ZoneState.SHRINKING:
@@ -120,25 +141,27 @@ func _apply_hazard_damage(damage_amount: float) -> void:
 	var world_center: Vector2 = global_position + zone_center
 
 	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not (node is Unit) or not is_instance_valid(node):
+		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var unit: Unit = node
-		if unit.is_dead or unit.is_staffed:
+		if unit.is_dead or unit.is_staffed or unit.is_queued_for_deletion():
 			continue
 		if unit.global_position.distance_squared_to(world_center) > safe_r_sq:
 			unit.take_damage(damage_amount, null)
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
-		if not (node is Building) or not is_instance_valid(node):
+		if not is_instance_valid(node) or not (node is Building):
 			continue
 		var b: Building = node
-		if b.is_destroyed:
+		if b.is_destroyed or b.is_queued_for_deletion():
 			continue
 		if b.global_position.distance_squared_to(world_center) > safe_r_sq:
 			b.take_damage(damage_amount)
 
 
 func get_state_label() -> String:
+	if not active:
+		return "ZONE OFF"
 	match state:
 		ZoneState.WAITING:
 			return "ZONE P%d" % (current_phase + 1)
@@ -154,17 +177,31 @@ func _emit_zone_status() -> void:
 
 
 func _draw() -> void:
-	var pulse: float = 0.72 + 0.28 * sin(_pulse_time * 4.5)
-	var ring_col: Color = Color(1.0, 0.24, 0.36, 0.85 * pulse) if state == ZoneState.SHRINKING else Color(1.0, 0.36, 0.42, 0.58)
-	draw_arc(zone_center, current_radius, 0.0, TAU, 96, ring_col, 3.0, true)
-	draw_arc(zone_center, current_radius + 6.0, 0.0, TAU, 96, Color(ring_col.r, ring_col.g, ring_col.b, 0.22), 8.0, true)
+	if not active:
+		return
+	var is_shrinking: bool = (state == ZoneState.SHRINKING)
+	var pulse: float = 0.68 + 0.32 * sin(_pulse_time * (6.5 if is_shrinking else 3.2))
+	var ring_col: Color = Color(1.0, 0.22, 0.34, 0.94 * pulse) if is_shrinking else Color(1.0, 0.38, 0.44, 0.72)
+
+	# High-contrast hazard perimeter + soft outer glow band
+	draw_arc(zone_center, current_radius, 0.0, TAU, 108, ring_col, 3.6 if is_shrinking else 2.8, true)
+	draw_arc(zone_center, current_radius + 8.0, 0.0, TAU, 108, Color(ring_col.r, ring_col.g, ring_col.b, 0.26), 12.0, true)
+
+	# Animated caution dashes just outside the boundary for high visibility
+	var dash_count: int = 64
+	var rot_offset: float = _pulse_time * (0.18 if is_shrinking else 0.04)
+	var dash_col: Color = Color(1.0, 0.54, 0.28, 0.82 * pulse) if is_shrinking else Color(1.0, 0.46, 0.48, 0.42)
+	for i: int in range(0, dash_count, 2):
+		var a0: float = rot_offset + TAU * float(i) / float(dash_count)
+		var a1: float = rot_offset + TAU * float(i + 0.85) / float(dash_count)
+		draw_arc(zone_center, current_radius + 14.0, a0, a1, 4, dash_col, 2.4, true)
 
 	# Show next target perimeter preview while waiting or shrinking
 	if current_phase < phase_target_radii.size():
 		var next_r: float = phase_target_radii[current_phase]
-		var preview_col: Color = Color(1.0, 0.72, 0.28, 0.32)
-		var segs: int = 48
+		var preview_col: Color = Color(1.0, 0.78, 0.30, 0.48)
+		var segs: int = 56
 		for i: int in range(0, segs, 2):
 			var a0: float = TAU * float(i) / float(segs)
 			var a1: float = TAU * float(i + 1) / float(segs)
-			draw_arc(zone_center, next_r, a0, a1, 4, preview_col, 1.5, true)
+			draw_arc(zone_center, next_r, a0, a1, 4, preview_col, 1.8, true)

@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="AbilityData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ability_data.gd" id="1_ab"]
+[ext_resource type="Resource" path="res://resources/buildings/synthetics_fabricator_data.tres" id="2_bdata"]
+
+[resource]
+script = ExtResource("1_ab")
+ability_id = &"build_synthetics_fabricator"
+display_name = "Synthetics Fabricator"
+hotkey_label = "Y"
+cooldown_duration = 0.0
+cast_range = 0.0
+target_type = 3
+damage_or_value = 0.0
+aoe_radius = 0.0
+description = "Construct a Tier-2 Synthetics Fabricator (200B, 150S, 50C). Requires Cloning Vat. Produces heavy Compute constructs (Goliath Frame, Arc-Lancer, Chrysalis Mortar)."
+building_to_build = ExtResource("2_bdata")

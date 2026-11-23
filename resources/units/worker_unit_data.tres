@@ -1,10 +1,13 @@
-[gd_resource type="Resource" script_class="UnitData" load_steps=6 format=3]
+[gd_resource type="Resource" script_class="UnitData" load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
-[ext_resource type="Resource" path="res://resources/abilities/build_silica_refinery.tres" id="2_build_refinery"]
-[ext_resource type="Resource" path="res://resources/abilities/build_compute_node.tres" id="3_build_compute"]
-[ext_resource type="Resource" path="res://resources/abilities/build_bandwidth_relay.tres" id="4_build_relay"]
-[ext_resource type="Resource" path="res://resources/abilities/build_bio_lab.tres" id="5_build_biolab"]
+[ext_resource type="Resource" path="res://resources/abilities/build_silica_condenser.tres" id="2_build_condenser"]
+[ext_resource type="Resource" path="res://resources/abilities/build_wetware_mainframe.tres" id="3_build_mainframe"]
+[ext_resource type="Resource" path="res://resources/abilities/build_synapse_pylon.tres" id="4_build_pylon"]
+[ext_resource type="Resource" path="res://resources/abilities/build_cloning_vat.tres" id="5_build_cloning_vat"]
+[ext_resource type="Resource" path="res://resources/abilities/build_calibration_foundry.tres" id="6_build_foundry"]
+[ext_resource type="Resource" path="res://resources/abilities/build_synthetics_fabricator.tres" id="7_build_fabricator"]
+[ext_resource type="Resource" path="res://resources/abilities/build_nexus_vat.tres" id="8_build_nexus_vat"]
 
 [resource]
 script = ExtResource("1_unit_data")
@@ -21,7 +24,7 @@ attack_range = 80.0
 aggro_range = 130.0
 vision_range = 300.0
 attack_cooldown = 1.0
-abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_build_refinery"), ExtResource("3_build_compute"), ExtResource("4_build_relay"), ExtResource("5_build_biolab")])
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_build_condenser"), ExtResource("3_build_mainframe"), ExtResource("4_build_pylon"), ExtResource("5_build_cloning_vat"), ExtResource("6_build_foundry"), ExtResource("7_build_fabricator"), ExtResource("8_build_nexus_vat")])
 bandwidth_cost = 1
 can_gather = true
 gather_duration = 3.0

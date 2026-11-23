@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="AbilityData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ability_data.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+ability_id = &"spore_barrage"
+display_name = "Spore Barrage"
+hotkey_label = "Q"
+cooldown_duration = 14.0
+cast_range = 460.0
+target_type = 0
+damage_or_value = 85.0
+aoe_radius = 130.0
+effect_duration = 2.5
+move_speed_modifier = -0.2
+attack_speed_modifier = 0.0
+effect_color = Color(0.46, 1, 0.54, 0.95)
+cast_on_all_ready = false
+description = "Launches a high-impact caustic cluster shell at target ground (130px radius), dealing 85 AoE damage and briefly slowing enemies."

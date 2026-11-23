@@ -1,17 +1,17 @@
 [gd_scene load_steps=31 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
-[ext_resource type="PackedScene" path="res://scenes/units/test_unit.tscn" id="2_test_unit"]
+[ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
 [ext_resource type="Script" path="res://scripts/controllers/selection_controller.gd" id="3_sel_ctrl"]
 [ext_resource type="Script" path="res://ui/overlays/selection_box.gd" id="4_sel_box"]
-[ext_resource type="PackedScene" path="res://scenes/units/enemy_trooper.tscn" id="5_enemy_trooper"]
+[ext_resource type="PackedScene" path="res://scenes/units/stinger.tscn" id="5_stinger"]
 [ext_resource type="Script" path="res://scripts/controllers/sandbox_spawner.gd" id="6_spawner"]
 [ext_resource type="PackedScene" path="res://ui/hud/sandbox_debug_panel.tscn" id="7_debug_panel"]
 [ext_resource type="Script" path="res://ui/overlays/ability_targeting_reticle.gd" id="8_ability_reticle"]
 [ext_resource type="PackedScene" path="res://ui/hud/selection_hud.tscn" id="9_selection_hud"]
 [ext_resource type="Script" path="res://scripts/systems/economy_manager.gd" id="10_econ_mgr"]
 [ext_resource type="PackedScene" path="res://scenes/world/biomass_node.tscn" id="11_biomass_node"]
-[ext_resource type="PackedScene" path="res://scenes/buildings/command_core.tscn" id="12_command_core"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/nexus_vat.tscn" id="12_nexus_vat"]
 [ext_resource type="PackedScene" path="res://scenes/units/worker_unit.tscn" id="13_worker_unit"]
 [ext_resource type="PackedScene" path="res://ui/hud/resource_hud.tscn" id="14_resource_hud"]
 [ext_resource type="PackedScene" path="res://scenes/world/silica_vein.tscn" id="15_silica_vein"]
@@ -20,7 +20,6 @@
 [ext_resource type="Script" path="res://scripts/controllers/command_router.gd" id="18_cmd_router"]
 [ext_resource type="PackedScene" path="res://scenes/world/hyper_uplink.tscn" id="19_hyper_uplink"]
 [ext_resource type="Script" path="res://scripts/systems/encroaching_zone.gd" id="20_enc_zone"]
-[ext_resource type="PackedScene" path="res://scenes/units/scout_unit.tscn" id="21_scout_unit"]
 [ext_resource type="Script" path="res://scripts/world/arena_nav_region.gd" id="22_arena_nav"]
 [ext_resource type="Script" path="res://scripts/world/terrain_obstacle.gd" id="23_terrain_obstacle"]
 [ext_resource type="Script" path="res://scripts/systems/fog_of_war.gd" id="24_fog_of_war"]
@@ -29,6 +28,7 @@
 [ext_resource type="Script" path="res://scripts/systems/match_manager.gd" id="27_match_manager"]
 [ext_resource type="PackedScene" path="res://ui/hud/minimap.tscn" id="28_minimap"]
 [ext_resource type="PackedScene" path="res://ui/hud/match_end_overlay.tscn" id="29_match_end_overlay"]
+[ext_resource type="Script" path="res://ui/overlays/rally_point_overlay.gd" id="30_rally_overlay"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_skirmish"]
 vertices = PackedVector2Array(-1300, -950, 1300, -950, 1300, 950, -1300, 950)
@@ -185,14 +185,14 @@ position = Vector2(660, 720)
 
 [node name="Buildings" type="Node2D" parent="."]
 
-[node name="PlayerCommandCore" parent="Buildings" instance=ExtResource("12_command_core")]
+[node name="PlayerNexusVat" parent="Buildings" instance=ExtResource("12_nexus_vat")]
 position = Vector2(-880, 530)
 team = 0
 
-[node name="EnemyCommandCore" parent="Buildings" instance=ExtResource("12_command_core")]
+[node name="EnemyNexusVat" parent="Buildings" instance=ExtResource("12_nexus_vat")]
 position = Vector2(880, -530)
 team = 1
-display_name = "Hostile Command Core"
+display_name = "Hostile Nexus Vat"
 
 [node name="Units" type="Node2D" parent="."]
 
@@ -205,13 +205,13 @@ position = Vector2(-975, 575)
 [node name="PlayerWorker3" parent="Units" instance=ExtResource("13_worker_unit")]
 position = Vector2(-920, 635)
 
-[node name="PlayerInfantry1" parent="Units" instance=ExtResource("2_test_unit")]
+[node name="PlayerCloneTrooper1" parent="Units" instance=ExtResource("2_clone_trooper")]
 position = Vector2(-720, 440)
 
-[node name="PlayerInfantry2" parent="Units" instance=ExtResource("2_test_unit")]
+[node name="PlayerCloneTrooper2" parent="Units" instance=ExtResource("2_clone_trooper")]
 position = Vector2(-720, 520)
 
-[node name="PlayerScout1" parent="Units" instance=ExtResource("21_scout_unit")]
+[node name="PlayerStinger1" parent="Units" instance=ExtResource("5_stinger")]
 position = Vector2(-660, 380)
 
 [node name="EnemyWorker1" parent="Units" instance=ExtResource("13_worker_unit")]
@@ -226,11 +226,13 @@ team = 1
 position = Vector2(920, -635)
 team = 1
 
-[node name="EnemyTrooper1" parent="Units" instance=ExtResource("5_enemy_trooper")]
+[node name="EnemyCloneTrooper1" parent="Units" instance=ExtResource("2_clone_trooper")]
 position = Vector2(720, -440)
+team = 1
 
-[node name="EnemyTrooper2" parent="Units" instance=ExtResource("5_enemy_trooper")]
+[node name="EnemyCloneTrooper2" parent="Units" instance=ExtResource("2_clone_trooper")]
 position = Vector2(720, -520)
+team = 1
 
 [node name="FogOfWarSystem" type="Node" parent="."]
 script = ExtResource("24_fog_of_war")
@@ -272,6 +274,10 @@ script = ExtResource("8_ability_reticle")
 [node name="BuildGhostPreview" type="Node2D" parent="SelectionController"]
 z_index = 96
 script = ExtResource("17_build_ghost")
+
+[node name="RallyPointOverlay" type="Node2D" parent="SelectionController"]
+z_index = 85
+script = ExtResource("30_rally_overlay")
 
 [node name="SandboxSpawner" type="Node2D" parent="."]
 script = ExtResource("6_spawner")

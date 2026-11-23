@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/synapse_pylon.tscn" id="2_scene"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"synapse_pylon"
+display_name = "Synapse Pylon"
+scene = ExtResource("2_scene")
+biomass_cost = 75
+silica_cost = 0
+compute_cost = 0
+build_time = 4.0
+footprint_size = Vector2(56, 56)
+max_hp = 400.0
+vision_range = 340.0
+bandwidth_provided = 8
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+requires_vent = false
+max_staff_slots = 0
+can_set_rally = false
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &""

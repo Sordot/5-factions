@@ -2,6 +2,7 @@ class_name RTSCamera
 extends Camera2D
 
 signal edge_pan_toggled(enabled: bool)
+signal fullscreen_toggled(enabled: bool)
 
 const EDGE_BOUNDS_TOLERANCE_PX: float = 4.0
 const MAX_FRAME_DELTA: float = 0.05
@@ -48,6 +49,17 @@ func _input(event: InputEvent) -> void:
 		var vp: Viewport = get_viewport()
 		if vp != null and vp.get_visible_rect().grow(EDGE_BOUNDS_TOLERANCE_PX).has_point((event as InputEventMouseMotion).position):
 			_mouse_in_window = true
+		return
+
+	if event is InputEventKey:
+		var key_ev: InputEventKey = event
+		if key_ev.pressed and not key_ev.echo:
+			var is_f11: bool = key_ev.keycode == KEY_F11 or key_ev.physical_keycode == KEY_F11 or event.is_action_pressed("camera_toggle_fullscreen")
+			var is_alt_enter: bool = key_ev.alt_pressed and (key_ev.keycode == KEY_ENTER or key_ev.keycode == KEY_KP_ENTER)
+			if is_f11 or is_alt_enter:
+				toggle_fullscreen()
+				get_viewport().set_input_as_handled()
+				return
 
 
 func _process(delta: float) -> void:
@@ -96,18 +108,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	if event.is_action_pressed("camera_toggle_fullscreen"):
-		toggle_fullscreen()
-		get_viewport().set_input_as_handled()
-		return
-
-	if event is InputEventKey:
-		var key_ev: InputEventKey = event
-		if key_ev.pressed and not key_ev.echo and key_ev.alt_pressed and (key_ev.keycode == KEY_ENTER or key_ev.keycode == KEY_KP_ENTER):
-			toggle_fullscreen()
-			get_viewport().set_input_as_handled()
-			return
-
 	if event is InputEventMouseButton:
 		var mouse_event: InputEventMouseButton = event
 		if mouse_event.button_index == MOUSE_BUTTON_MIDDLE:
@@ -136,12 +136,28 @@ func toggle_edge_pan() -> bool:
 	return edge_pan_enabled
 
 
-func toggle_fullscreen() -> void:
+func is_fullscreen() -> bool:
+	var win: Window = get_window()
+	if win != null:
+		if win.mode == Window.MODE_FULLSCREEN or win.mode == Window.MODE_EXCLUSIVE_FULLSCREEN:
+			return true
 	var mode: DisplayServer.WindowMode = DisplayServer.window_get_mode()
-	if mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-	else:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	return mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+
+
+func set_fullscreen(enabled: bool) -> void:
+	var target_win_mode: Window.Mode = Window.MODE_FULLSCREEN if enabled else Window.MODE_WINDOWED
+	var target_ds_mode: DisplayServer.WindowMode = DisplayServer.WINDOW_MODE_FULLSCREEN if enabled else DisplayServer.WINDOW_MODE_WINDOWED
+	var win: Window = get_window()
+	if win != null:
+		win.mode = target_win_mode
+	DisplayServer.window_set_mode(target_ds_mode)
+	fullscreen_toggled.emit(is_fullscreen())
+
+
+func toggle_fullscreen() -> bool:
+	set_fullscreen(not is_fullscreen())
+	return is_fullscreen()
 
 
 func center_on(world_pos: Vector2) -> void:

@@ -8,11 +8,15 @@ const RESOURCE_COMPUTE: StringName = &"compute"
 signal resources_changed(team: int, resources: Dictionary)
 signal bandwidth_changed(team: int, used: int, cap: int)
 signal production_bonus_changed(team: int, multiplier: float)
+signal upgrade_completed(team: int, upgrade_id: StringName)
+signal tech_changed(team: int)
 
 @export var starting_biomass: int = 50
 @export var starting_silica: int = 0
 @export var starting_compute: int = 0
 @export var enemy_matches_starting_resources: bool = true
+
+var upgrade_manager: UpgradeManager = UpgradeManager.new()
 
 var _resources: Dictionary = {}
 var _bandwidth_used: Dictionary = {}
@@ -26,6 +30,8 @@ var _uplink_bonus_pct: float = 0.05
 
 func _ready() -> void:
 	add_to_group("economy_manager")
+	if not upgrade_manager.upgrade_completed.is_connected(_on_upgrade_manager_completed):
+		upgrade_manager.upgrade_completed.connect(_on_upgrade_manager_completed)
 	_init_team_state(Unit.Team.PLAYER, starting_biomass, starting_silica, starting_compute)
 	if enemy_matches_starting_resources:
 		_init_team_state(Unit.Team.ENEMY, starting_biomass, starting_silica, starting_compute)
@@ -73,11 +79,14 @@ func reset_economy() -> void:
 	}
 	_bandwidth_reserved[Unit.Team.PLAYER] = 0
 	_bandwidth_reserved[Unit.Team.ENEMY] = 0
+	upgrade_manager.reset()
 	set_uplink_controller(-1, _uplink_bonus_pct)
 	recalculate_bandwidth(Unit.Team.PLAYER)
 	recalculate_bandwidth(Unit.Team.ENEMY)
 	resources_changed.emit(Unit.Team.PLAYER, get_resources(Unit.Team.PLAYER))
 	resources_changed.emit(Unit.Team.ENEMY, get_resources(Unit.Team.ENEMY))
+	tech_changed.emit(Unit.Team.PLAYER)
+	tech_changed.emit(Unit.Team.ENEMY)
 
 
 func add_resource(team: int, resource_type: StringName, amount: int) -> void:
@@ -240,7 +249,7 @@ func recalculate_bandwidth(team: int, excluded_node: Node = null) -> void:
 
 	if is_inside_tree():
 		for node: Node in get_tree().get_nodes_in_group("units"):
-			if node == excluded_node or not (node is Unit) or not is_instance_valid(node):
+			if node == excluded_node or not is_instance_valid(node) or not (node is Unit):
 				continue
 			var unit: Unit = node
 			if unit.is_dead or unit.is_queued_for_deletion() or unit.team != team:
@@ -249,7 +258,7 @@ func recalculate_bandwidth(team: int, excluded_node: Node = null) -> void:
 			used += maxi(0, cost)
 
 		for node: Node in get_tree().get_nodes_in_group("buildings"):
-			if node == excluded_node or not (node is Building) or not is_instance_valid(node):
+			if node == excluded_node or not is_instance_valid(node) or not (node is Building):
 				continue
 			var building: Building = node
 			if building.is_destroyed or building.is_queued_for_deletion() or not building.is_constructed or building.team != team:
@@ -269,3 +278,88 @@ func recalculate_bandwidth(team: int, excluded_node: Node = null) -> void:
 	_bandwidth_used[team] = used + reserved
 	_bandwidth_cap[team] = cap
 	bandwidth_changed.emit(team, _bandwidth_used[team], cap)
+
+
+func _on_upgrade_manager_completed(team: int, upgrade_id: StringName) -> void:
+	upgrade_completed.emit(team, upgrade_id)
+	tech_changed.emit(team)
+	if is_inside_tree():
+		for node: Node in get_tree().get_nodes_in_group("units"):
+			if node is Unit and is_instance_valid(node):
+				var u: Unit = node
+				if not u.is_dead and u.team == team and u.has_method("on_team_upgrade_completed"):
+					u.on_team_upgrade_completed(upgrade_id)
+
+
+func notify_building_tech_changed(team: int) -> void:
+	tech_changed.emit(team)
+
+
+func has_constructed_building(team: int, required_building_id: StringName) -> bool:
+	if required_building_id == &"":
+		return true
+	if not is_inside_tree():
+		return false
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not (node is Building) or not is_instance_valid(node):
+			continue
+		var b: Building = node
+		if b.is_destroyed or b.is_queued_for_deletion() or not b.is_constructed or b.team != team:
+			continue
+		if b.building_type_id == required_building_id:
+			return true
+		if required_building_id == &"nexus_vat" and b.building_type_id == &"command_core":
+			return true
+	return false
+
+
+func has_upgrade(team: int, upgrade_id: StringName) -> bool:
+	return upgrade_manager.has_upgrade(team, upgrade_id)
+
+
+func is_upgrade_in_progress(team: int, upgrade_id: StringName) -> bool:
+	return upgrade_manager.is_upgrade_in_progress(team, upgrade_id)
+
+
+func can_start_upgrade(team: int, upgrade: UpgradeData) -> bool:
+	if upgrade == null:
+		return false
+	return upgrade_manager.can_start_research(team, upgrade.upgrade_id)
+
+
+func reserve_upgrade_research(team: int, upgrade_id: StringName) -> void:
+	upgrade_manager.reserve_research(team, upgrade_id)
+	tech_changed.emit(team)
+
+
+func release_upgrade_research(team: int, upgrade_id: StringName) -> void:
+	upgrade_manager.release_research(team, upgrade_id)
+	tech_changed.emit(team)
+
+
+func complete_upgrade(team: int, upgrade_id: StringName) -> bool:
+	return upgrade_manager.complete_upgrade(team, upgrade_id)
+
+
+func get_batch_cost_multiplier(team: int, base_multiplier: float = 1.75) -> float:
+	return upgrade_manager.get_batch_cost_multiplier(team, base_multiplier)
+
+
+func get_batch_time_multiplier(team: int) -> float:
+	return upgrade_manager.get_batch_time_multiplier(team)
+
+
+func get_adrenal_duration(team: int, base_duration: float = 4.0) -> float:
+	return upgrade_manager.get_adrenal_duration(team, base_duration)
+
+
+func get_adrenal_attack_speed_bonus(team: int, base_bonus: float = 0.30) -> float:
+	return upgrade_manager.get_adrenal_attack_speed_bonus(team, base_bonus)
+
+
+func get_goliath_speed_multiplier(team: int) -> float:
+	return upgrade_manager.get_goliath_speed_multiplier(team)
+
+
+func get_goliath_extra_damage_reduction(team: int) -> float:
+	return upgrade_manager.get_goliath_extra_damage_reduction(team)

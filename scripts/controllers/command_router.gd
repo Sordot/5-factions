@@ -60,7 +60,7 @@ func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspect
 			if not builders.is_empty():
 				for worker: Unit in builders:
 					worker.command_construct_building(clicked_building)
-				spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.GATHER)
+				spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.INTERACT)
 				return
 
 		if clicked_building.is_constructed and clicked_building.max_staff_slots > 0:
@@ -78,7 +78,7 @@ func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspect
 					var move_targets_eng: Array[Vector2] = assign_group_destinations(others, world_pos)
 					for i: int in range(others.size()):
 						others[i].command_move(move_targets_eng[i])
-				spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.GATHER)
+				spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.INTERACT)
 				return
 
 		if clicked_building.is_constructed and clicked_building.is_resource_dropoff:
@@ -96,7 +96,7 @@ func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspect
 					var move_targets: Array[Vector2] = assign_group_destinations(other_units, world_pos)
 					for i: int in range(other_units.size()):
 						other_units[i].command_move(move_targets[i])
-				spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.GATHER)
+				spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.INTERACT)
 				return
 
 	# 5. Ground Move with concentric ring formation offsets.
@@ -116,7 +116,7 @@ func _handle_building_rally_right_click(building: Building, world_pos: Vector2) 
 	var clicked_friendly_building: Building = find_building_at_point(world_pos, Unit.Team.PLAYER)
 	if clicked_friendly_building != null and clicked_friendly_building != building and clicked_friendly_building.max_staff_slots > 0:
 		building.set_rally_target(clicked_friendly_building)
-		spawn_move_marker(clicked_friendly_building.global_position, MoveMarker.MarkerStyle.GATHER)
+		spawn_move_marker(clicked_friendly_building.global_position, MoveMarker.MarkerStyle.INTERACT)
 		return
 
 	building.set_rally_position(world_pos)
@@ -163,7 +163,7 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 		"reason": "",
 		"vent": null,
 	}
-	if building_data == null or building_data.scene == null:
+	if building_data == null or building_data.resolve_scene() == null:
 		result["reason"] = "Invalid building"
 		return result
 
@@ -227,6 +227,12 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 			return result
 
 	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	if building_data.required_building_id != &"":
+		if econ == null or not econ.has_constructed_building(target_team, building_data.required_building_id):
+			var req_name: String = String(building_data.required_building_id).replace("_", " ").capitalize()
+			result["reason"] = "Requires %s" % req_name
+			return result
+
 	if econ != null and not econ.can_afford(target_team, building_data.get_cost_dict()):
 		result["reason"] = "Need %s" % building_data.get_cost_label()
 		return result
@@ -238,7 +244,8 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 
 func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_units: Array[Unit]) -> bool:
 	var building_data: BuildingData = ability.building_to_build
-	if building_data == null or building_data.scene == null:
+	var building_scene: PackedScene = building_data.resolve_scene() if building_data != null else null
+	if building_data == null or building_scene == null:
 		return false
 
 	var eval: Dictionary = evaluate_build_placement(building_data, world_pos)
@@ -260,7 +267,7 @@ func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_
 	if buildings_container == null:
 		return false
 
-	var instance: Node = building_data.scene.instantiate()
+	var instance: Node = building_scene.instantiate()
 	if not (instance is Building):
 		instance.queue_free()
 		return false
@@ -273,7 +280,7 @@ func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_
 	_nudge_units_out_of_building(new_building)
 
 	builder.command_construct_building(new_building)
-	spawn_move_marker(new_building.global_position, MoveMarker.MarkerStyle.GATHER)
+	spawn_move_marker(new_building.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 
 

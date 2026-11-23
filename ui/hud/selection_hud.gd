@@ -95,6 +95,8 @@ func _adjust_layout_for_minimap() -> void:
 
 
 func _setup_dynamic_bar_styles() -> void:
+	if bottom_panel != null:
+		bottom_panel.add_to_group("blocks_edge_pan")
 	if unit_hp_bar != null:
 		_hp_fill_style = StyleBoxFlat.new()
 		_hp_fill_style.bg_color = Color(0.24, 0.94, 0.74, 1.0)
@@ -105,6 +107,11 @@ func _setup_dynamic_bar_styles() -> void:
 		_gauge_fill_style.bg_color = Color(0.32, 0.88, 1.0, 1.0)
 		_gauge_fill_style.set_corner_radius_all(2)
 		primary_gauge_bar.add_theme_stylebox_override("fill", _gauge_fill_style)
+	if production_bar != null:
+		var prod_fill: StyleBoxFlat = StyleBoxFlat.new()
+		prod_fill.bg_color = Color(0.24, 0.96, 0.86, 1.0)
+		prod_fill.set_corner_radius_all(2)
+		production_bar.add_theme_stylebox_override("fill", prod_fill)
 
 
 func _bind_static_command_tooltips() -> void:
@@ -138,6 +145,8 @@ func _connect_economy_manager() -> void:
 		_economy_manager.resources_changed.connect(_on_economy_updated)
 	if not _economy_manager.bandwidth_changed.is_connected(_on_bandwidth_updated):
 		_economy_manager.bandwidth_changed.connect(_on_bandwidth_updated)
+	if not _economy_manager.tech_changed.is_connected(_on_tech_updated):
+		_economy_manager.tech_changed.connect(_on_tech_updated)
 
 
 func _on_economy_updated(team: int, _resources: Dictionary) -> void:
@@ -152,6 +161,15 @@ func _on_economy_updated(team: int, _resources: Dictionary) -> void:
 func _on_bandwidth_updated(team: int, _used: int, _cap: int) -> void:
 	if team != int(Unit.Team.PLAYER):
 		return
+	if _inspected_entity is Building and is_instance_valid(_inspected_entity):
+		_render_inspected_entity(_inspected_entity, false)
+
+
+func _on_tech_updated(team: int) -> void:
+	if team != int(Unit.Team.PLAYER):
+		return
+	if not _active_abilities.is_empty():
+		_refresh_all_ability_states()
 	if _inspected_entity is Building and is_instance_valid(_inspected_entity):
 		_render_inspected_entity(_inspected_entity, false)
 
@@ -303,7 +321,15 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 	production_queue_box.visible = true
 	var status: Dictionary = building.get_active_training_status()
 	var pct: int = int(round(float(status.get("progress", 0.0)) * 100.0))
-	production_label.text = "Training %s  (%d%%)" % [String(status.get("display_name", "Unit")), pct]
+	var kind: StringName = status.get("kind", ProductionComponent.KIND_UNIT)
+	var active_name: String = String(status.get("display_name", "Unit"))
+	var batch_cnt: int = int(status.get("batch_count", 1))
+	if kind == ProductionComponent.KIND_UPGRADE:
+		production_label.text = "Researching %s  (%d%%)" % [active_name, pct]
+	elif batch_cnt > 1:
+		production_label.text = "Cloning %s x%d  (%d%%)" % [active_name, batch_cnt, pct]
+	else:
+		production_label.text = "Training %s  (%d%%)" % [active_name, pct]
 	production_bar.max_value = 100.0
 	production_bar.value = float(pct)
 
@@ -313,33 +339,50 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 	var queue: Array[Dictionary] = building.production_component.get_queue()
 	for i: int in range(queue.size()):
 		var entry: Dictionary = queue[i]
-		var u_data: UnitData = entry["data"] as UnitData
-		var short_name: String = _shorten_unit_name(u_data.display_name) if u_data != null else "Unit"
+		var entry_kind: StringName = entry.get("kind", ProductionComponent.KIND_UNIT)
 		var slot_btn: Button = Button.new()
 		slot_btn.focus_mode = Control.FOCUS_NONE
 		slot_btn.add_theme_font_size_override("font_size", 10)
-		slot_btn.text = "[%d] %s" % [i + 1, short_name]
-		slot_btn.modulate = Color(0.45, 0.98, 0.92, 1.0) if i == 0 else Color(0.76, 0.86, 0.92, 0.9)
 		var captured_b: Building = building
 		var captured_idx: int = i
 		slot_btn.pressed.connect(func() -> void:
 			if is_instance_valid(captured_b):
 				captured_b.cancel_queued_unit(captured_idx)
 		)
-		var refund_str: String = u_data.get_cost_label() if u_data != null else "100%"
-		var bw_val: int = u_data.bandwidth_cost if u_data != null else 1
-		_attach_tooltip(
-			slot_btn,
-			"Cancel %s" % (u_data.display_name if u_data != null else "Unit"),
-			"LMB",
-			"100%% Refund: %s  •  Frees %d BW" % [refund_str, bw_val],
-			"Click to cancel this queued unit and refund 100% of resources and reserved Bandwidth."
-		)
+
+		if entry_kind == ProductionComponent.KIND_UPGRADE:
+			var upg: UpgradeData = entry.get("data", null) as UpgradeData
+			var upg_name: String = upg.display_name if upg != null else "Upgrade"
+			slot_btn.text = "[%d] %s" % [i + 1, _shorten_unit_name(upg_name)]
+			slot_btn.modulate = Color(1.0, 0.86, 0.42, 1.0) if i == 0 else Color(0.88, 0.78, 0.56, 0.9)
+			var refund_upg: String = String(entry.get("cost_label", "100%"))
+			_attach_tooltip(
+				slot_btn,
+				"Cancel %s" % upg_name,
+				"LMB",
+				"100%% Refund: %s" % refund_upg,
+				"Click to cancel this queued upgrade and refund 100% of resources."
+			)
+		else:
+			var u_data: UnitData = entry.get("data", null) as UnitData
+			var b_cnt: int = int(entry.get("batch_count", 1))
+			var short_name: String = _shorten_unit_name(u_data.display_name) if u_data != null else "Unit"
+			slot_btn.text = "[%d] %s%s" % [i + 1, short_name, (" x%d" % b_cnt) if b_cnt > 1 else ""]
+			slot_btn.modulate = Color(0.45, 0.98, 0.92, 1.0) if i == 0 else Color(0.76, 0.86, 0.92, 0.9)
+			var refund_str: String = String(entry.get("cost_label", u_data.get_cost_label() if u_data != null else "100%"))
+			var bw_val: int = int(entry.get("bandwidth_cost", u_data.bandwidth_cost if u_data != null else 1))
+			_attach_tooltip(
+				slot_btn,
+				"Cancel %s%s" % [u_data.display_name if u_data != null else "Unit", (" (x%d)" % b_cnt) if b_cnt > 1 else ""],
+				"LMB",
+				"100%% Refund: %s  •  Frees %d BW" % [refund_str, bw_val],
+				"Click to cancel this queued production and refund 100% of resources and reserved Bandwidth."
+			)
 		queue_slots_row.add_child(slot_btn)
 
 
 func _shorten_unit_name(full_name: String) -> String:
-	return full_name.replace("Worker Drone", "Worker").replace("Systems Engineer", "Engineer").replace("Silica Harvester", "Harvester").replace("Recon Scout", "Scout").replace("Test Unit", "Infantry")
+	return full_name.replace("Worker Drone", "Worker").replace("Systems Engineer", "Engineer").replace("Silica Harvester", "Harvester").replace("Recon Scout", "Scout").replace("Test Unit", "Infantry").replace("Clone Trooper", "Clone").replace("Signal Jammer", "Jammer").replace("Goliath Frame", "Goliath").replace("Chrysalis Mortar", "Mortar").replace("Batch Efficiency", "Batch Eff.").replace("Adrenal Potency", "Adrenal Pot.").replace("Compute Overdrive", "Overdrive")
 
 
 func _apply_left_column(info: Dictionary) -> void:
@@ -425,6 +468,12 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 		ability_row.visible = false
 		return
 
+	var total_actions: int = (1 if building.max_staff_slots > 0 else 0) + building.trainable_unit_data.size() + building.researchable_upgrades.size()
+	var use_compact: bool = total_actions > 4
+	ability_row.columns = 3 if use_compact else 2
+	var btn_min_size: Vector2 = Vector2(146.0, 28.0) if use_compact else Vector2(214.0, 29.0)
+	var btn_font_size: int = 10 if use_compact else 11
+
 	var has_buttons: bool = false
 
 	if building.max_staff_slots > 0:
@@ -443,7 +492,7 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 			"Eject Engineers",
 			"E",
 			"Instant Release",
-			"Releases all Engineers currently staffed inside this Compute Node back onto the battlefield."
+			"Releases all Engineers currently staffed inside this Wetware Mainframe back onto the battlefield."
 		)
 		ability_row.add_child(eject_btn)
 		_building_action_buttons.append({
@@ -458,22 +507,35 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 		has_buttons = true
 		var train_btn: Button = Button.new()
 		train_btn.focus_mode = Control.FOCUS_NONE
-		train_btn.custom_minimum_size = Vector2(208.0, 29.0)
-		train_btn.add_theme_font_size_override("font_size", 11)
+		train_btn.custom_minimum_size = btn_min_size
+		train_btn.add_theme_font_size_override("font_size", btn_font_size)
 		var captured_b: Building = building
 		var captured_slot: int = i
+		var captured_u: UnitData = u_data
 		train_btn.pressed.connect(func() -> void:
 			if is_instance_valid(captured_b):
 				captured_b.queue_unit_training(captured_slot)
 		)
-		var t_time: float = u_data.train_time if u_data.train_time > 0.0 else u_data.build_time
-		var meta_line: String = "Cost: %s  •  %d BW  •  %.1fs" % [u_data.get_cost_label(), u_data.bandwidth_cost, t_time]
-		_attach_tooltip(
-			train_btn,
-			"Train %s" % u_data.display_name,
-			"",
-			meta_line,
-			"Queues a %s (max 5 in queue). Reserves Bandwidth immediately." % u_data.display_name
+		train_btn.tooltip_text = ""
+		train_btn.mouse_entered.connect(func() -> void:
+			if command_tooltip == null or not is_instance_valid(captured_b):
+				return
+			var b_info: Dictionary = captured_b.get_unit_batch_info(captured_u)
+			var b_cnt: int = int(b_info["batch_count"])
+			var meta_line: String = "Cost: %s  •  %d BW  •  %.1fs" % [String(b_info["cost_label"]), int(b_info["bandwidth_cost"]), float(b_info["duration"])]
+			var desc: String = "Queues a %s (max 5 in queue). Reserves Bandwidth immediately." % captured_u.display_name
+			if b_cnt > 1:
+				desc = "Parallel Batch Cloning: spawns %d %ss simultaneously for %.2fx single-unit cost." % [b_cnt, captured_u.display_name, float(b_info["cost_multiplier"])]
+			command_tooltip.show_tooltip(
+				("Clone %s (x%d)" % [captured_u.display_name, b_cnt]) if b_cnt > 1 else ("Train %s" % captured_u.display_name),
+				"",
+				meta_line,
+				desc
+			)
+		)
+		train_btn.mouse_exited.connect(func() -> void:
+			if command_tooltip != null:
+				command_tooltip.hide_tooltip()
 		)
 		ability_row.add_child(train_btn)
 		_building_action_buttons.append({
@@ -483,6 +545,37 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 			"button": train_btn,
 		})
 
+	for j: int in range(building.researchable_upgrades.size()):
+		var upg: UpgradeData = building.researchable_upgrades[j]
+		if upg == null:
+			continue
+		has_buttons = true
+		var upg_btn: Button = Button.new()
+		upg_btn.focus_mode = Control.FOCUS_NONE
+		upg_btn.custom_minimum_size = btn_min_size
+		upg_btn.add_theme_font_size_override("font_size", btn_font_size)
+		var captured_b_u: Building = building
+		var captured_upg_idx: int = j
+		upg_btn.pressed.connect(func() -> void:
+			if is_instance_valid(captured_b_u):
+				captured_b_u.queue_upgrade_research(captured_upg_idx)
+		)
+		var upg_meta: String = "Upgrade  •  Cost: %s  •  %.1fs" % [upg.get_cost_label(), upg.research_time]
+		_attach_tooltip(
+			upg_btn,
+			"Research: %s" % upg.display_name,
+			upg.hotkey_label,
+			upg_meta,
+			upg.description
+		)
+		ability_row.add_child(upg_btn)
+		_building_action_buttons.append({
+			"kind": "upgrade",
+			"slot": j,
+			"data": upg,
+			"button": upg_btn,
+		})
+
 	ability_row.visible = has_buttons
 	_refresh_building_action_buttons(building)
 
@@ -490,6 +583,8 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 func _refresh_building_action_buttons(building: Building) -> void:
 	if building == null or not is_instance_valid(building):
 		return
+	if _economy_manager == null:
+		_connect_economy_manager()
 	for entry: Dictionary in _building_action_buttons:
 		var btn: Button = entry["button"] as Button
 		if btn == null or not is_instance_valid(btn):
@@ -503,11 +598,33 @@ func _refresh_building_action_buttons(building: Building) -> void:
 		elif kind == "train":
 			var slot: int = int(entry["slot"])
 			var u_data: UnitData = entry["data"] as UnitData
+			var b_info: Dictionary = building.get_unit_batch_info(u_data)
+			var b_cnt: int = int(b_info["batch_count"])
 			var short_name: String = _shorten_unit_name(u_data.display_name)
-			btn.text = "%s (%s | %dBW)" % [short_name, u_data.get_cost_label(), u_data.bandwidth_cost]
+			var batch_tag: String = " x%d" % b_cnt if b_cnt > 1 else ""
+			btn.text = "%s%s (%s | %dBW)" % [short_name, batch_tag, String(b_info["cost_label"]), int(b_info["bandwidth_cost"])]
 			var can_train: bool = building.can_train_unit(slot)
 			btn.disabled = not can_train
 			btn.modulate = Color(0.55, 1.0, 0.95, 1.0) if can_train else Color(0.56, 0.6, 0.66, 0.68)
+		elif kind == "upgrade":
+			var u_slot: int = int(entry["slot"])
+			var upg: UpgradeData = entry["data"] as UpgradeData
+			var short_upg: String = _shorten_unit_name(upg.display_name)
+			var is_done: bool = _economy_manager != null and _economy_manager.has_upgrade(building.team, upg.upgrade_id)
+			var is_prog: bool = _economy_manager != null and _economy_manager.is_upgrade_in_progress(building.team, upg.upgrade_id)
+			if is_done:
+				btn.text = "%s [DONE]" % short_upg
+				btn.disabled = true
+				btn.modulate = Color(0.36, 0.98, 0.64, 0.85)
+			elif is_prog:
+				btn.text = "%s [ACTIVE]" % short_upg
+				btn.disabled = true
+				btn.modulate = Color(1.0, 0.86, 0.42, 0.85)
+			else:
+				var can_res: bool = building.can_research_upgrade(u_slot)
+				btn.text = "%s (%s)" % [short_upg, upg.get_cost_label()]
+				btn.disabled = not can_res
+				btn.modulate = Color(1.0, 0.86, 0.42, 1.0) if can_res else Color(0.62, 0.60, 0.54, 0.68)
 
 
 func _on_inspected_entity_updated(_arg1: Variant = null, _arg2: Variant = null, _arg3: Variant = null) -> void:
@@ -720,14 +837,23 @@ func _rebuild_ability_buttons(active_group: Dictionary) -> void:
 	if data == null:
 		return
 
+	var valid_count: int = 0
+	for ab: AbilityData in data.abilities:
+		if ab != null:
+			valid_count += 1
+	var use_compact: bool = valid_count > 4
+	ability_row.columns = 3 if use_compact else 2
+	var ab_min_size: Vector2 = Vector2(146.0, 26.0) if use_compact else Vector2(214.0, 29.0)
+	var ab_font_size: int = 10 if use_compact else 11
+
 	for ability: AbilityData in data.abilities:
 		if ability == null:
 			continue
 		_active_abilities.append(ability)
 		var btn: Button = Button.new()
 		btn.focus_mode = Control.FOCUS_NONE
-		btn.custom_minimum_size = Vector2(208.0, 29.0)
-		btn.add_theme_font_size_override("font_size", 11)
+		btn.custom_minimum_size = ab_min_size
+		btn.add_theme_font_size_override("font_size", ab_font_size)
 		var captured_ability: AbilityData = ability
 		btn.pressed.connect(func() -> void:
 			if _selection_controller != null:
@@ -752,6 +878,8 @@ func _build_ability_tooltip_meta(ability: AbilityData) -> String:
 			parts.append("+%d BW" % b.bandwidth_provided)
 		if b.requires_vent:
 			parts.append("Requires Compute Vent")
+		if b.required_building_id != &"":
+			parts.append("Requires %s" % String(b.required_building_id).replace("_", " ").capitalize())
 		return "  •  ".join(parts)
 
 	var ab_parts: PackedStringArray = PackedStringArray()
@@ -759,8 +887,10 @@ func _build_ability_tooltip_meta(ability: AbilityData) -> String:
 		ab_parts.append("Cooldown: %.1fs" % ability.cooldown_duration)
 	if ability.cast_range > 0.0:
 		ab_parts.append("Range: %d px" % int(round(ability.cast_range)))
-	if ability.aoe_radius > 0.0 and ability.target_type == AbilityData.TargetType.POINT_AOE:
+	if ability.aoe_radius > 0.0 and (ability.target_type == AbilityData.TargetType.POINT_AOE or ability.ability_id == &"static_pulse" or ability.ability_id == &"seismic_slam"):
 		ab_parts.append("Radius: %d px" % int(round(ability.aoe_radius)))
+	if ability.effect_duration > 0.0:
+		ab_parts.append("Duration: %.1fs" % ability.effect_duration)
 	return "  •  ".join(ab_parts)
 
 
@@ -781,23 +911,31 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT and ability.building_to_build != null:
 		var b_data: BuildingData = ability.building_to_build
 		var cost_text: String = b_data.get_cost_label()
+		var short_b: String = ability.display_name.replace("Silica Condenser", "Condenser").replace("Wetware Mainframe", "Mainframe").replace("Synapse Pylon", "Pylon").replace("Calibration Foundry", "Foundry").replace("Synthetics Fabricator", "Fabricator")
 		var can_afford: bool = true
+		var has_prereq: bool = true
 		if _economy_manager == null:
 			_connect_economy_manager()
 		if _economy_manager != null:
 			can_afford = _economy_manager.can_afford(Unit.Team.PLAYER, b_data.get_cost_dict())
+			if b_data.required_building_id != &"":
+				has_prereq = _economy_manager.has_constructed_building(Unit.Team.PLAYER, b_data.required_building_id)
 
-		if is_targeting:
+		if not has_prereq:
+			btn.disabled = true
+			btn.text = "[%s] %s (LOCKED)" % [ability.hotkey_label, short_b]
+			btn.modulate = Color(0.64, 0.44, 0.44, 0.68)
+		elif is_targeting:
 			btn.disabled = false
-			btn.text = "[%s] %s (PLACE)" % [ability.hotkey_label, ability.display_name]
+			btn.text = "[%s] %s (PLACE)" % [ability.hotkey_label, short_b]
 			btn.modulate = Color(1.0, 0.85, 0.32, 1.0)
 		elif can_afford:
 			btn.disabled = false
-			btn.text = "[%s] %s (%s)" % [ability.hotkey_label, ability.display_name, cost_text]
+			btn.text = "[%s] %s (%s)" % [ability.hotkey_label, short_b, cost_text]
 			btn.modulate = Color(0.55, 1.0, 0.95, 1.0)
 		else:
 			btn.disabled = true
-			btn.text = "[%s] %s (%s)" % [ability.hotkey_label, ability.display_name, cost_text]
+			btn.text = "[%s] %s (%s)" % [ability.hotkey_label, short_b, cost_text]
 			btn.modulate = Color(0.56, 0.6, 0.66, 0.68)
 		return
 

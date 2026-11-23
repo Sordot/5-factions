@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/static_pulse.tres" id="2_static_pulse"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"signal_jammer"
+display_name = "Signal Jammer"
+max_hp = 120.0
+move_speed = 215.0
+acceleration = 1600.0
+turn_speed = 13.0
+selection_radius = 22.0
+collision_radius = 17.0
+attack_damage = 6.0
+attack_range = 160.0
+aggro_range = 270.0
+vision_range = 400.0
+attack_cooldown = 1.0
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_static_pulse")])
+bandwidth_cost = 2
+biomass_cost = 90
+silica_cost = 80
+compute_cost = 25
+build_time = 7.5
+train_time = 7.5
+unit_scene_path = "res://scenes/units/signal_jammer.tscn"

@@ -2,9 +2,13 @@ class_name MatchManager
 extends Node
 
 signal match_ended(winner_team: int, stats: Dictionary)
+signal aggro_ai_toggled(enabled: bool)
+
+static var _global_aggro_ai_enabled: bool = true
 
 @export var victory_on_command_core_loss: bool = true
 @export var match_end_overlay_path: NodePath
+@export var aggro_ai_enabled: bool = true
 
 var match_elapsed: float = 0.0
 var player_uplink_time: float = 0.0
@@ -15,7 +19,7 @@ var enemy_units_destroyed: int = 0
 var enemy_structures_destroyed: int = 0
 
 var is_match_over: bool = false
-var sandbox_mode_active: bool = false
+@export var sandbox_mode_active: bool = false
 
 var _eval_timer: float = 0.0
 var _tracked_buildings: Dictionary = {}
@@ -25,9 +29,57 @@ var _tracked_prod: Dictionary = {}
 
 func _ready() -> void:
 	add_to_group("match_manager")
+	_global_aggro_ai_enabled = aggro_ai_enabled
 	call_deferred("_hook_initial_entities")
 	if not get_tree().node_added.is_connected(_on_tree_node_added):
 		get_tree().node_added.connect(_on_tree_node_added)
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey:
+		var key_ev: InputEventKey = event
+		if key_ev.pressed and not key_ev.echo and not key_ev.ctrl_pressed and not key_ev.alt_pressed and not key_ev.shift_pressed:
+			if key_ev.keycode == KEY_F10 or key_ev.physical_keycode == KEY_F10 or event.is_action_pressed("debug_toggle_aggro_ai"):
+				toggle_aggro_ai()
+				get_viewport().set_input_as_handled()
+				return
+
+
+static func is_aggro_ai_enabled(tree: SceneTree = null) -> bool:
+	if tree != null:
+		var mm: MatchManager = tree.get_first_node_in_group("match_manager") as MatchManager
+		if mm != null and is_instance_valid(mm):
+			return mm.aggro_ai_enabled
+	return _global_aggro_ai_enabled
+
+
+func set_aggro_ai_enabled(enabled: bool) -> void:
+	if aggro_ai_enabled == enabled:
+		_global_aggro_ai_enabled = enabled
+		return
+	aggro_ai_enabled = enabled
+	_global_aggro_ai_enabled = enabled
+	if not aggro_ai_enabled and is_inside_tree():
+		_calm_idle_and_ai_units()
+	aggro_ai_toggled.emit(aggro_ai_enabled)
+
+
+func toggle_aggro_ai() -> bool:
+	set_aggro_ai_enabled(not aggro_ai_enabled)
+	return aggro_ai_enabled
+
+
+func _calm_idle_and_ai_units() -> void:
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node) or not (node is Unit):
+			continue
+		var u: Unit = node
+		if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
+			continue
+		if u.command_state == Unit.CommandState.IDLE:
+			u.current_target = null
+		elif u.team == Unit.Team.ENEMY and (u.command_state == Unit.CommandState.ATTACK_MOVING or u.command_state == Unit.CommandState.ATTACKING_TARGET):
+			u.command_stop()
 
 
 func _exit_tree() -> void:
@@ -78,11 +130,11 @@ func evaluate_match_state() -> void:
 			continue
 		if b.team == Unit.Team.PLAYER:
 			player_buildings += 1
-			if b.building_type_id == &"command_core":
+			if b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core":
 				player_cores += 1
 		elif b.team == Unit.Team.ENEMY:
 			enemy_buildings += 1
-			if b.building_type_id == &"command_core":
+			if b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core":
 				enemy_cores += 1
 
 	var enemy_defeated: bool = (enemy_cores == 0) if victory_on_command_core_loss else (enemy_buildings == 0)
@@ -94,9 +146,9 @@ func evaluate_match_state() -> void:
 		player_defeated = true
 
 	if enemy_defeated:
-		_finish_match(Unit.Team.PLAYER, "Hostile Command Core Neutralized")
+		_finish_match(Unit.Team.PLAYER, "Hostile Nexus Vat Neutralized")
 	elif player_defeated:
-		_finish_match(Unit.Team.ENEMY, "Player Command Core Destroyed")
+		_finish_match(Unit.Team.ENEMY, "Player Nexus Vat Destroyed")
 
 
 func _finish_match(winner_team: Unit.Team, reason: String) -> void:

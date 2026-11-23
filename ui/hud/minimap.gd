@@ -211,7 +211,7 @@ func _on_map_viewport_draw() -> void:
 		if b.team == Unit.Team.ENEMY and not b.visible:
 			continue
 		var bp: Vector2 = _world_to_minimap(b.global_position)
-		var sz: float = 6.5 if b.building_type_id == &"command_core" else 4.6
+		var sz: float = 6.5 if (b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core") else 4.6
 		var col: Color = Color(0.22, 0.96, 0.88, 1.0) if b.team == Unit.Team.PLAYER else Color(1.0, 0.32, 0.26, 0.95)
 		if b.team == Unit.Team.ENEMY and _fog_system != null and _fog_system.fog_enabled and not _fog_system.is_world_pos_visible(b.global_position):
 			col = Color(0.82, 0.32, 0.28, 0.65)
@@ -231,7 +231,7 @@ func _on_map_viewport_draw() -> void:
 		if u.team == Unit.Team.PLAYER:
 			if u.get_unit_type_id() == &"worker" or u.get_unit_type_id() == &"silica_harvester":
 				ucol = Color(0.32, 0.98, 0.60, 1.0)
-			elif u.get_unit_type_id() == &"scout_unit":
+			elif u.get_unit_type_id() == &"scout_unit" or u.get_unit_type_id() == &"stinger":
 				ucol = Color(0.98, 0.86, 0.32, 1.0)
 			else:
 				ucol = Color(0.26, 0.96, 1.0, 1.0)

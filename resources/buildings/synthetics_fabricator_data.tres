@@ -1,0 +1,32 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/synthetics_fabricator.tscn" id="2_scene"]
+[ext_resource type="Resource" path="res://resources/units/goliath_frame_data.tres" id="3_goliath"]
+[ext_resource type="Resource" path="res://resources/units/arc_lancer_data.tres" id="4_arclancer"]
+[ext_resource type="Resource" path="res://resources/units/chrysalis_mortar_data.tres" id="5_mortar"]
+[ext_resource type="Resource" path="res://resources/upgrades/compute_overdrive.tres" id="6_upg_overdrive"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"synthetics_fabricator"
+display_name = "Synthetics Fabricator"
+scene = ExtResource("2_scene")
+biomass_cost = 200
+silica_cost = 150
+compute_cost = 50
+build_time = 14.0
+footprint_size = Vector2(100, 100)
+max_hp = 1250.0
+vision_range = 400.0
+bandwidth_provided = 0
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+requires_vent = false
+max_staff_slots = 0
+trainable_units = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("3_goliath"), ExtResource("4_arclancer"), ExtResource("5_mortar")])
+researchable_upgrades = Array[Resource("res://scripts/data/upgrade_data.gd")]([ExtResource("6_upg_overdrive")])
+can_set_rally = true
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &"cloning_vat"

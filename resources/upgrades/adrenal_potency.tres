@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="UpgradeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/upgrade_data.gd" id="1_upg"]
+
+[resource]
+script = ExtResource("1_upg")
+upgrade_id = &"adrenal_potency"
+display_name = "Adrenal Potency"
+description = "Increases Clone Trooper Adrenal Surge duration from 4.0s to 6.0s and adds +15% extra attack speed while active."
+hotkey_label = "I"
+biomass_cost = 100
+silica_cost = 50
+compute_cost = 50
+research_time = 12.0
+modifier_key = &"adrenal_duration"
+modifier_value = 6.0

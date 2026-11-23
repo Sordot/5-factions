@@ -16,5 +16,10 @@ enum TargetType {
 @export var target_type: TargetType = TargetType.POINT_AOE
 @export var damage_or_value: float = 35.0
 @export var aoe_radius: float = 64.0
+@export var effect_duration: float = 0.0
+@export var move_speed_modifier: float = 0.0
+@export var attack_speed_modifier: float = 0.0
+@export var effect_color: Color = Color(0.42, 0.88, 1.0, 0.95)
+@export var cast_on_all_ready: bool = false
 @export_multiline var description: String = ""
 @export var building_to_build: BuildingData = null

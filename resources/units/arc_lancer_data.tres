@@ -1,0 +1,30 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"arc_lancer"
+display_name = "Arc-Lancer"
+max_hp = 260.0
+move_speed = 205.0
+acceleration = 1500.0
+turn_speed = 11.0
+selection_radius = 28.0
+collision_radius = 22.0
+attack_damage = 48.0
+attack_range = 280.0
+line_pierce_width = 26.0
+aggro_range = 360.0
+vision_range = 420.0
+attack_cooldown = 1.45
+is_armored = true
+ignore_friendly_unit_collision = true
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([])
+bandwidth_cost = 4
+biomass_cost = 200
+silica_cost = 175
+compute_cost = 100
+build_time = 13.0
+train_time = 13.0
+unit_scene_path = "res://scenes/units/arc_lancer.tscn"

@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="AbilityData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ability_data.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+ability_id = &"adrenal_surge"
+display_name = "Adrenal Surge"
+hotkey_label = "Q"
+cooldown_duration = 10.0
+cast_range = 0.0
+target_type = 2
+damage_or_value = 0.0
+aoe_radius = 36.0
+effect_duration = 4.0
+move_speed_modifier = 0.35
+attack_speed_modifier = 0.3
+effect_color = Color(0.28, 1, 0.72, 0.95)
+cast_on_all_ready = true
+description = "Injects bio-stimulants, boosting move speed (+35%) and attack speed (+30%) for 4.0s (extended to 6.0s and +45% attack speed with Adrenal Potency)."

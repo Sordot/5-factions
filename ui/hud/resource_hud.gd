@@ -8,17 +8,42 @@ extends CanvasLayer
 @onready var silica_value_label: Label = %SilicaValueLabel
 @onready var compute_value_label: Label = %ComputeValueLabel
 @onready var bandwidth_value_label: Label = %BandwidthValueLabel
+@onready var aggro_paused_badge: Label = %AggroPausedBadge
 @onready var uplink_bonus_label: Label = %UplinkBonusLabel
 @onready var zone_status_label: Label = %ZoneStatusLabel
 
 var _economy_manager: EconomyManager = null
 var _encroaching_zone: EncroachingZone = null
+var _match_manager: MatchManager = null
 
 
 func _ready() -> void:
+	var res_panel: Control = get_node_or_null("RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel") as Control
+	if res_panel != null:
+		res_panel.add_to_group("blocks_edge_pan")
 	_connect_economy_manager()
 	_connect_encroaching_zone()
+	_connect_match_manager()
 	_refresh_from_economy()
+	_refresh_aggro_badge()
+
+
+func _connect_match_manager() -> void:
+	if not is_inside_tree():
+		return
+	_match_manager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+	if _match_manager != null and not _match_manager.aggro_ai_toggled.is_connected(_on_aggro_ai_toggled):
+		_match_manager.aggro_ai_toggled.connect(_on_aggro_ai_toggled)
+
+
+func _on_aggro_ai_toggled(_enabled: bool) -> void:
+	_refresh_aggro_badge()
+
+
+func _refresh_aggro_badge() -> void:
+	if aggro_paused_badge == null:
+		return
+	aggro_paused_badge.visible = not MatchManager.is_aggro_ai_enabled(get_tree() if is_inside_tree() else null)
 
 
 func _connect_economy_manager() -> void:
@@ -87,13 +112,17 @@ func _on_production_bonus_changed(team: int, multiplier: float) -> void:
 		return
 	var pct: int = int(round((multiplier - 1.0) * 100.0))
 	uplink_bonus_label.visible = pct > 0
-	uplink_bonus_label.text = "UPLINK: +%d%% PROD" % pct
+	uplink_bonus_label.text = "UPLINK: +%d%% SPEED" % pct
 
 
 func _on_zone_updated(_phase_index: int, state_label: String, time_remaining: float, _current_radius: float) -> void:
 	if zone_status_label == null:
 		return
 	zone_status_label.visible = true
+	if state_label == "ZONE OFF":
+		zone_status_label.text = "ZONE: OFF"
+		zone_status_label.modulate = Color(0.56, 0.64, 0.70, 0.78)
+		return
 	var mins: int = int(time_remaining) / 60
 	var secs: int = int(time_remaining) % 60
 	if state_label.begins_with("SHRINK"):

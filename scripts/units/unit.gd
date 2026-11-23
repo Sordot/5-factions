@@ -20,7 +20,8 @@ enum CommandState {
 
 const ABILITY_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/ability_component.gd")
 const COMBAT_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/combat_component.gd")
-const HIT_FLASH_DURATION: float = 0.10
+const HEAL_AURA_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/heal_aura_component.gd")
+const HIT_FLASH_DURATION: float = 0.08
 const HEALTH_BAR_WIDTH: float = 36.0
 const GATHER_BAR_WIDTH: float = 32.0
 const SETTLE_PROXIMITY_RADIUS: float = 160.0
@@ -70,6 +71,12 @@ var _desired_move_velocity: Vector2 = Vector2.ZERO
 var _last_delta: float = 1.0 / 60.0
 var _no_progress_timer: float = 0.0
 var _best_dist_to_goal: float = INF
+var _adrenal_timer: float = 0.0
+var _adrenal_speed_bonus: float = 0.0
+var _adrenal_attack_speed_bonus: float = 0.0
+var _slow_timer: float = 0.0
+var _slow_move_penalty: float = 0.0
+var _slow_attack_penalty: float = 0.0
 
 
 func _ready() -> void:
@@ -82,9 +89,17 @@ func _ready() -> void:
 	_apply_team_visuals()
 	_update_health_bar()
 
+	if data.ignore_friendly_unit_collision:
+		# Colossus Stride: collide only with World terrain/buildings, walking cleanly over smaller units.
+		collision_layer = 0
+		collision_mask = 1
+		z_index = maxi(z_index, 8)
+
 	if nav_agent != null:
-		nav_agent.max_speed = maxf(1.0, data.move_speed)
+		nav_agent.max_speed = maxf(1.0, get_effective_move_speed())
 		nav_agent.radius = data.collision_radius + 2.0
+		if data.ignore_friendly_unit_collision:
+			nav_agent.avoidance_enabled = false
 		if not nav_agent.velocity_computed.is_connected(_on_nav_velocity_computed):
 			nav_agent.velocity_computed.connect(_on_nav_velocity_computed)
 
@@ -93,6 +108,13 @@ func _ready() -> void:
 		combat_component = COMBAT_COMPONENT_SCRIPT.new()
 		combat_component.name = "CombatComponent"
 		add_child(combat_component)
+
+	if data.heal_aura_rate > 0.0 and get_node_or_null("HealAuraComponent") == null:
+		var heal_aura: HealAuraComponent = HEAL_AURA_COMPONENT_SCRIPT.new()
+		heal_aura.name = "HealAuraComponent"
+		heal_aura.heal_per_second = data.heal_aura_rate
+		heal_aura.aura_radius = data.heal_aura_radius
+		add_child(heal_aura)
 
 	ability_component = ABILITY_COMPONENT_SCRIPT.new()
 	ability_component.name = "AbilityComponent"
@@ -322,7 +344,7 @@ func request_component_navigation(target_point: Vector2, repath_threshold: float
 		if to_target.length_squared() > 4.0:
 			var dir: Vector2 = _steer_around_static_units(to_target.normalized())
 			_wants_nav_movement = true
-			_desired_move_velocity = dir * data.move_speed
+			_desired_move_velocity = dir * get_effective_move_speed()
 
 
 func face_world_point(world_point: Vector2, delta: float) -> void:
@@ -412,21 +434,110 @@ func command_hold_position() -> void:
 func take_damage(amount: float, attacker: Unit = null) -> void:
 	if is_dead or amount <= 0.0:
 		return
-	current_hp = maxf(0.0, current_hp - amount)
+	var mitigation: float = get_effective_damage_reduction()
+	var effective_damage: float = amount * (1.0 - mitigation)
+	if effective_damage <= 0.0:
+		return
+	current_hp = maxf(0.0, current_hp - effective_damage)
 	_hit_flash_timer = HIT_FLASH_DURATION
 	if is_node_ready():
-		body_visual.modulate = Color(2.2, 2.2, 2.2, 1.0)
+		body_visual.modulate = Color(1.95, 2.25, 2.35, 1.0)
 	_update_health_bar()
 	health_changed.emit(self, current_hp, data.max_hp)
 	status_changed.emit(self)
 
-	# Idle enemy combatants retaliate against attackers even if attacked from beyond aggro range.
-	if team == Team.ENEMY and command_state == CommandState.IDLE and current_target == null and attacker != null and _can_attack():
+	# Idle enemy combatants retaliate against attackers even if attacked from beyond aggro range (when Aggro AI is ON).
+	if team == Team.ENEMY and MatchManager.is_aggro_ai_enabled(get_tree()) and command_state == CommandState.IDLE and (current_target == null or not is_instance_valid(current_target)) and attacker != null and is_instance_valid(attacker) and _can_attack():
 		if combat_component != null and combat_component.is_valid_target(self, attacker):
 			current_target = attacker
 
 	if current_hp <= 0.0:
 		_die()
+
+
+func apply_adrenal_surge(duration: float, speed_bonus: float, attack_speed_bonus: float) -> void:
+	if is_dead or duration <= 0.0:
+		return
+	_adrenal_timer = maxf(_adrenal_timer, duration)
+	_adrenal_speed_bonus = maxf(_adrenal_speed_bonus, speed_bonus)
+	_adrenal_attack_speed_bonus = maxf(_adrenal_attack_speed_bonus, attack_speed_bonus)
+	_sync_nav_max_speed()
+	queue_redraw()
+	status_changed.emit(self)
+
+
+func apply_slow_debuff(duration: float, move_penalty: float, attack_penalty: float) -> void:
+	if is_dead or duration <= 0.0:
+		return
+	_slow_timer = maxf(_slow_timer, duration)
+	_slow_move_penalty = clampf(maxf(_slow_move_penalty, move_penalty), 0.0, 0.75)
+	_slow_attack_penalty = clampf(maxf(_slow_attack_penalty, attack_penalty), 0.0, 0.75)
+	_sync_nav_max_speed()
+	queue_redraw()
+	status_changed.emit(self)
+
+
+func on_team_upgrade_completed(_upgrade_id: StringName) -> void:
+	_sync_nav_max_speed()
+	status_changed.emit(self)
+
+
+func get_effective_move_speed() -> float:
+	if data == null or data.move_speed <= 0.0:
+		return 0.0
+	var spd: float = data.move_speed
+	if data.unit_type_id == &"goliath_frame":
+		var econ: EconomyManager = _get_economy_manager()
+		if econ != null:
+			spd *= econ.get_goliath_speed_multiplier(team)
+	if _adrenal_timer > 0.0:
+		spd *= (1.0 + _adrenal_speed_bonus)
+	if _slow_timer > 0.0:
+		spd *= maxf(0.25, 1.0 - _slow_move_penalty)
+	return spd
+
+
+func get_effective_attack_cooldown() -> float:
+	if data == null or data.attack_cooldown <= 0.0:
+		return 1.0
+	var rate_mult: float = 1.0
+	if _adrenal_timer > 0.0:
+		rate_mult *= (1.0 + _adrenal_attack_speed_bonus)
+	if _slow_timer > 0.0:
+		rate_mult *= maxf(0.35, 1.0 - _slow_attack_penalty)
+	return data.attack_cooldown / maxf(0.25, rate_mult)
+
+
+func get_effective_damage_reduction() -> float:
+	if data == null:
+		return 0.0
+	var dr: float = maxf(0.0, data.damage_reduction)
+	if data.unit_type_id == &"goliath_frame":
+		var econ: EconomyManager = _get_economy_manager()
+		if econ != null:
+			dr += econ.get_goliath_extra_damage_reduction(team)
+	return clampf(dr, 0.0, 0.75)
+
+
+func _sync_nav_max_speed() -> void:
+	if nav_agent != null and data != null:
+		nav_agent.max_speed = maxf(1.0, get_effective_move_speed())
+
+
+func _get_economy_manager() -> EconomyManager:
+	if not is_inside_tree():
+		return null
+	return get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+
+
+func _draw() -> void:
+	var r: float = (data.collision_radius + 6.0) if data != null else 22.0
+	if _adrenal_timer > 0.0:
+		draw_arc(Vector2.ZERO, r, 0.0, TAU, 24, Color(0.28, 1.0, 0.72, 0.88), 2.4, true)
+		draw_circle(Vector2.ZERO, r * 0.75, Color(0.24, 0.98, 0.78, 0.14))
+	if _slow_timer > 0.0:
+		draw_arc(Vector2.ZERO, r + 3.0, 0.0, TAU, 24, Color(0.68, 0.42, 1.0, 0.9), 2.4, true)
+		draw_circle(Vector2.ZERO, r * 0.82, Color(0.56, 0.34, 1.0, 0.16))
 
 
 func _die() -> void:
@@ -449,13 +560,14 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_last_delta = delta
-	if current_target != null and (combat_component == null or not combat_component.is_valid_target(self, current_target)):
+	if current_target != null and (not is_instance_valid(current_target) or combat_component == null or not combat_component.is_valid_target(self, current_target)):
 		current_target = null
 
 	if combat_component != null:
 		combat_component.tick_cooldown(delta)
 	if ability_component != null:
 		ability_component.tick_cooldowns(delta)
+	_tick_status_effects(delta)
 
 	if _hit_flash_timer > 0.0:
 		_hit_flash_timer = maxf(0.0, _hit_flash_timer - delta)
@@ -502,26 +614,54 @@ func _on_nav_velocity_computed(safe_velocity: Vector2) -> void:
 	_apply_direct_motion(safe_velocity, _last_delta)
 
 
+func _tick_status_effects(delta: float) -> void:
+	var changed: bool = false
+	if _adrenal_timer > 0.0:
+		_adrenal_timer = maxf(0.0, _adrenal_timer - delta)
+		if _adrenal_timer <= 0.0:
+			_adrenal_speed_bonus = 0.0
+			_adrenal_attack_speed_bonus = 0.0
+			changed = true
+	if _slow_timer > 0.0:
+		_slow_timer = maxf(0.0, _slow_timer - delta)
+		if _slow_timer <= 0.0:
+			_slow_move_penalty = 0.0
+			_slow_attack_penalty = 0.0
+			changed = true
+	if changed:
+		_sync_nav_max_speed()
+		queue_redraw()
+		status_changed.emit(self)
+
+
 func _process_idle(delta: float) -> void:
 	if not _can_attack() or combat_component == null:
+		return
+
+	if current_target != null and not is_instance_valid(current_target):
+		current_target = null
+
+	# When Aggro AI is toggled OFF, idle/guard units do not passively acquire or chase targets.
+	if not MatchManager.is_aggro_ai_enabled(get_tree()):
+		current_target = null
 		return
 
 	# Active Enemy AI (GUARD): scan aggro_range, pursue into attack_range, and return fire.
 	if team == Team.ENEMY and _can_move():
 		var leash: float = maxf(data.aggro_range, data.attack_range) * 1.35
-		if not combat_component.is_valid_target_in_range(self, current_target, leash):
+		if current_target == null or not combat_component.is_valid_target_in_range(self, current_target, leash):
 			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
-		if current_target != null:
-			if combat_component.distance_to_target_edge(self, current_target) <= data.attack_range:
+		if current_target != null and is_instance_valid(current_target):
+			if combat_component.is_within_attack_envelope(self, current_target):
 				_face_point(current_target.global_position, delta)
 				combat_component.try_fire_at(self, current_target)
-			else:
+			elif not combat_component.is_target_inside_min_range(self, current_target):
 				_request_nav_toward_point(current_target.global_position, 8.0)
 		return
 
-	if not combat_component.is_valid_target_in_range(self, current_target, data.attack_range):
+	if current_target == null or not combat_component.is_within_attack_envelope(self, current_target):
 		current_target = combat_component.find_nearest_enemy(self, data.attack_range)
-	if current_target != null:
+	if current_target != null and is_instance_valid(current_target):
 		_face_point(current_target.global_position, delta)
 		combat_component.try_fire_at(self, current_target)
 
@@ -547,21 +687,27 @@ func _process_moving(delta: float) -> void:
 
 
 func _process_attack_moving(delta: float) -> void:
+	if current_target != null and not is_instance_valid(current_target):
+		current_target = null
+
 	if _can_attack() and combat_component != null:
 		var leash_range: float = maxf(data.aggro_range, data.attack_range) * 1.25
-		if not combat_component.is_valid_target_in_range(self, current_target, leash_range):
+		if current_target != null and not combat_component.is_valid_target_in_range(self, current_target, leash_range):
 			current_target = null
 		if current_target == null:
 			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
 
-	if current_target != null and combat_component != null:
+	if current_target != null and is_instance_valid(current_target) and combat_component != null:
 		_reset_progress_tracker()
-		if combat_component.distance_to_target_edge(self, current_target) <= data.attack_range:
+		if combat_component.is_within_attack_envelope(self, current_target):
 			_face_point(current_target.global_position, delta)
 			combat_component.try_fire_at(self, current_target)
 			return
-		_request_nav_toward_point(current_target.global_position, 8.0)
-		return
+		if combat_component.is_target_inside_min_range(self, current_target):
+			current_target = null
+		else:
+			_request_nav_toward_point(current_target.global_position, 8.0)
+			return
 
 	if nav_agent == null:
 		command_state = CommandState.IDLE
@@ -579,15 +725,20 @@ func _process_attack_moving(delta: float) -> void:
 
 
 func _process_attacking_target(delta: float) -> void:
-	if combat_component == null or not combat_component.is_valid_target(self, current_target):
+	if current_target == null or not is_instance_valid(current_target) or combat_component == null or not combat_component.is_valid_target(self, current_target):
 		current_target = null
 		command_state = CommandState.IDLE
 		velocity = Vector2.ZERO
 		return
 
-	if combat_component.distance_to_target_edge(self, current_target) <= data.attack_range:
+	if combat_component.is_within_attack_envelope(self, current_target):
 		_face_point(current_target.global_position, delta)
 		combat_component.try_fire_at(self, current_target)
+		return
+
+	if combat_component.is_target_inside_min_range(self, current_target):
+		_face_point(current_target.global_position, delta)
+		velocity = Vector2.ZERO
 		return
 
 	if _can_move():
@@ -598,9 +749,11 @@ func _process_hold_position(delta: float) -> void:
 	velocity = Vector2.ZERO
 	if not _can_attack() or combat_component == null:
 		return
-	if not combat_component.is_valid_target_in_range(self, current_target, data.attack_range):
+	if current_target != null and not is_instance_valid(current_target):
+		current_target = null
+	if current_target == null or not combat_component.is_within_attack_envelope(self, current_target):
 		current_target = combat_component.find_nearest_enemy(self, data.attack_range)
-	if current_target != null:
+	if current_target != null and is_instance_valid(current_target):
 		_face_point(current_target.global_position, delta)
 		combat_component.try_fire_at(self, current_target)
 
@@ -716,17 +869,30 @@ func _compute_nav_desired_velocity() -> void:
 		return
 	var dir: Vector2 = _steer_around_static_units(to_next.normalized())
 	_wants_nav_movement = true
-	_desired_move_velocity = dir * data.move_speed
+	_desired_move_velocity = dir * get_effective_move_speed()
+
+
+func _should_ignore_unit_collision(other: Unit) -> bool:
+	if other == null or data == null or other.data == null:
+		return false
+	if other.team != team:
+		return false
+	var self_strider: bool = data.ignore_friendly_unit_collision
+	var other_strider: bool = other.data.ignore_friendly_unit_collision
+	# Colossus Striders walk cleanly over non-strider friendly units, and allies walk cleanly underneath.
+	return self_strider != other_strider
 
 
 func _steer_around_static_units(move_dir: Vector2) -> Vector2:
 	var steer: Vector2 = move_dir
 	var my_r: float = data.collision_radius if data != null else 16.0
 	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not (node is Unit) or node == self:
+		if not is_instance_valid(node) or not (node is Unit) or node == self:
 			continue
 		var other: Unit = node
-		if not is_instance_valid(other) or other.is_dead or other.is_staffed or other._can_move():
+		if other.is_dead or other.is_staffed or other.is_queued_for_deletion() or other._can_move():
+			continue
+		if _should_ignore_unit_collision(other):
 			continue
 		var to_other: Vector2 = other.global_position - global_position
 		var dist: float = to_other.length()
@@ -746,10 +912,11 @@ func _steer_around_static_units(move_dir: Vector2) -> Vector2:
 
 func _apply_direct_motion(target_velocity: Vector2, delta: float) -> void:
 	var accel: float = data.acceleration if data.acceleration > 0.0 else 1800.0
+	var eff_speed: float = get_effective_move_speed()
 	if _wants_nav_movement:
 		var combined: Vector2 = target_velocity + _compute_overlap_separation(1.0)
-		if combined.length() > data.move_speed:
-			combined = combined.normalized() * data.move_speed
+		if combined.length() > eff_speed:
+			combined = combined.normalized() * eff_speed
 		velocity = velocity.move_toward(combined, accel * delta)
 		if velocity.length_squared() > 4.0:
 			_face_angle(velocity.angle(), delta)
@@ -786,12 +953,14 @@ func _apply_stationary_separation(delta: float) -> void:
 func _compute_overlap_separation(extra_margin: float) -> Vector2:
 	var push: Vector2 = Vector2.ZERO
 	var my_r: float = data.collision_radius if data != null else 16.0
-	var max_push: float = data.move_speed * 0.85 if data != null else 220.0
+	var max_push: float = get_effective_move_speed() * 0.85 if data != null else 220.0
 	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not (node is Unit) or node == self:
+		if not is_instance_valid(node) or not (node is Unit) or node == self:
 			continue
 		var other: Unit = node
-		if not is_instance_valid(other) or other.is_dead or other.is_staffed:
+		if other.is_dead or other.is_staffed or other.is_queued_for_deletion():
+			continue
+		if _should_ignore_unit_collision(other):
 			continue
 		var other_r: float = other.data.collision_radius if other.data != null else 16.0
 		var min_dist: float = my_r + other_r + extra_margin
@@ -936,9 +1105,30 @@ func get_inspection_data() -> Dictionary:
 	var subtitle: String = "HOSTILE UNIT" if is_enemy else "FRIENDLY UNIT"
 
 	if not is_enemy and data != null:
-		if data.unit_type_id == &"scout_unit":
+		if data.unit_type_id == &"scout_unit" or data.unit_type_id == &"stinger":
 			accent = Color(0.98, 0.78, 0.24, 1.0)
-			subtitle = "RECON UNIT"
+			subtitle = "FAST FLANKER / RECON"
+		elif data.unit_type_id == &"clone_trooper":
+			accent = Color(0.24, 0.94, 0.82, 1.0)
+			subtitle = "VAT-BORN INFANTRY"
+		elif data.unit_type_id == &"symbiote":
+			accent = Color(0.32, 1.0, 0.66, 1.0)
+			subtitle = "BIO-SUPPORT DRONE"
+		elif data.unit_type_id == &"lance_rig":
+			accent = Color(0.98, 0.68, 0.28, 1.0)
+			subtitle = "ANTI-ARMOR MECH"
+		elif data.unit_type_id == &"signal_jammer":
+			accent = Color(0.76, 0.56, 1.0, 1.0)
+			subtitle = "DISRUPTION WALKER"
+		elif data.unit_type_id == &"goliath_frame":
+			accent = Color(0.36, 0.92, 1.0, 1.0)
+			subtitle = "HEAVY JUGGERNAUT"
+		elif data.unit_type_id == &"arc_lancer":
+			accent = Color(0.46, 0.98, 1.0, 1.0)
+			subtitle = "COLOSSUS STRIDER"
+		elif data.unit_type_id == &"chrysalis_mortar":
+			accent = Color(0.46, 1.0, 0.54, 1.0)
+			subtitle = "BIO-ORDNANCE ARTILLERY"
 		elif data.unit_type_id == &"silica_harvester":
 			accent = Color(0.96, 0.68, 0.22, 1.0)
 			subtitle = "AUTOMATED HARVESTER"
@@ -965,19 +1155,44 @@ func get_inspection_data() -> Dictionary:
 		primary_max = float(maxi(1, data.carry_capacity))
 		stats.append({"label": "Cargo", "value": "%d / %d %s" % [carried, data.carry_capacity, res_label]})
 		stats.append({"label": "Harvest", "value": "%.1fs Cycle" % data.gather_duration})
-		stats.append({"label": "Speed", "value": "%d px/s" % int(round(data.move_speed))})
+		stats.append({"label": "Speed", "value": "%d px/s" % int(round(get_effective_move_speed()))})
 		stats.append({"label": "State", "value": _get_command_state_label()})
 	elif data != null and data.can_staff_compute:
 		stats.append({"label": "Role", "value": "Compute Staff"})
 		stats.append({"label": "Output", "value": "+5 Compute / 3.0s"})
-		stats.append({"label": "Speed", "value": "%d px/s" % int(round(data.move_speed))})
+		stats.append({"label": "Speed", "value": "%d px/s" % int(round(get_effective_move_speed()))})
 		stats.append({"label": "Bandwidth", "value": "%d BW" % data.bandwidth_cost})
 	elif data != null:
-		stats.append({"label": "Damage", "value": "%d" % int(round(data.attack_damage))})
-		stats.append({"label": "Range", "value": "%d px" % int(round(data.attack_range))})
-		stats.append({"label": "Speed", "value": "%d px/s" % int(round(data.move_speed))})
-		if data.attack_damage > 0.0 and data.attack_cooldown > 0.0:
-			stats.append({"label": "Fire Rate", "value": "%.1f /s" % (1.0 / data.attack_cooldown)})
+		var dmg_str: String = "%d" % int(round(data.attack_damage))
+		if data.bonus_vs_armored > 0.0:
+			dmg_str += " (+%d Armor)" % int(round(data.bonus_vs_armored))
+		elif data.aoe_attack_radius > 0.0:
+			dmg_str += " AoE"
+		elif data.line_pierce_width > 0.0:
+			dmg_str += " Pierce"
+		stats.append({"label": "Damage", "value": dmg_str})
+
+		var range_str: String = "%d px" % int(round(data.attack_range))
+		if data.min_attack_range > 0.0:
+			range_str = "%d–%d px" % [int(round(data.min_attack_range)), int(round(data.attack_range))]
+		stats.append({"label": "Range", "value": range_str})
+
+		var spd_str: String = "%d px/s" % int(round(get_effective_move_speed()))
+		if _adrenal_timer > 0.0:
+			spd_str += " [SURGE]"
+		elif _slow_timer > 0.0:
+			spd_str += " [SLOW]"
+		stats.append({"label": "Speed", "value": spd_str})
+
+		var dr: float = get_effective_damage_reduction()
+		if data.heal_aura_rate > 0.0:
+			stats.append({"label": "Aura", "value": "+%.0f HP/s (%dpx)" % [data.heal_aura_rate, int(round(data.heal_aura_radius))]})
+		elif data.ignore_friendly_unit_collision:
+			stats.append({"label": "Passive", "value": "Colossus Stride"})
+		elif dr > 0.001:
+			stats.append({"label": "Armor", "value": "-%d%% Damage" % int(round(dr * 100.0))})
+		elif data.attack_damage > 0.0 and data.attack_cooldown > 0.0:
+			stats.append({"label": "Fire Rate", "value": "%.1f /s" % (1.0 / get_effective_attack_cooldown())})
 		else:
 			stats.append({"label": "Status", "value": "Stationary Target"})
 

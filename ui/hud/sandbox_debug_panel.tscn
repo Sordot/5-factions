@@ -16,7 +16,7 @@ script = ExtResource("1_panel_script")
 
 [node name="MarginContainer" type="MarginContainer" parent="."]
 layout_mode = 0
-offset_right = 640.0
+offset_right = 760.0
 offset_bottom = 172.0
 mouse_filter = 2
 theme_override_constants/margin_left = 12
@@ -52,21 +52,21 @@ unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+1 Unit (F1)"
+text = "+1 Clone (F1)"
 
 [node name="BtnUnit5" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+5 Units (F2)"
+text = "+5 Clones (F2)"
 
 [node name="BtnScout1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+1 Scout (F5)"
+text = "+1 Stinger (F5)"
 
 [node name="BtnWorker1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
 unique_name_in_owner = true
@@ -74,6 +74,20 @@ layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+1 Worker (F6)"
+
+[node name="BtnToggleAggroAI" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Aggro AI: ON (F10)"
+
+[node name="BtnToggleZone" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Zone: ON"
 
 [node name="ButtonRowEcon" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
 layout_mode = 2
@@ -98,7 +112,7 @@ unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "+200B/+100S"
+text = "+300B/200S/100C"
 
 [node name="BtnTriggerZone" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
 unique_name_in_owner = true
@@ -113,6 +127,13 @@ layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Edge Pan: ON (F12)"
+
+[node name="BtnToggleFullscreen" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Fullscreen: OFF (F11)"
 
 [node name="ButtonRow2" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
 layout_mode = 2
@@ -151,10 +172,10 @@ unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "Reset (F10)"
+text = "Reset (Ctrl+F10)"
 
 [node name="ControlsLabel" type="Label" parent="MarginContainer/PanelContainer/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.56, 0.72, 0.8, 0.85)
 theme_override_font_sizes/font_size = 10
-text = "LMB: Select/Inspect | Q/W/E/R: Ability/Build | RMB: Command/Rally | Tab: Subgroup | A/S/H | 1-9"
+text = "LMB: Select/Inspect | Q/W/E/R/T/Y/F: Ability/Build | RMB: Command/Rally | Tab: Subgroup | A/S/H | 1-9"
