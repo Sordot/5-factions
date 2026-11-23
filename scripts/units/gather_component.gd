@@ -112,7 +112,8 @@ func _tick_moving_to_node(owner_unit: Unit) -> void:
 				return
 		cancel()
 		owner_unit.stop_component_navigation()
-		owner_unit.command_state = Unit.CommandState.IDLE
+		if not owner_unit.advance_command_queue():
+			owner_unit.command_state = Unit.CommandState.IDLE
 		return
 
 	last_node_position = target_node.global_position
@@ -223,6 +224,12 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 		carried_amount = 0
 		carried_type = &""
 		cargo_changed.emit(&"", 0)
+
+		if owner_unit.has_queued_commands():
+			cancel()
+			owner_unit.stop_component_navigation()
+			owner_unit.advance_command_queue()
+			return
 
 		if _ensure_valid_target_node(owner_unit):
 			_set_state(GatherState.GATHER_MOVING_TO_NODE)

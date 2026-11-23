@@ -42,6 +42,8 @@ var _wave_timer: float = 0.0
 var _wave_number: int = 0
 var _vat_production_counter: int = 0
 var _dispatched_wave_units: Dictionary = {}
+var _unit_last_pos: Dictionary = {}
+var _unit_stall_ticks: Dictionary = {}
 
 
 func _ready() -> void:
@@ -88,8 +90,9 @@ func _run_decision_tick() -> void:
 	if core == null:
 		return
 
-	# 1. Assign idle workers to harvest Biomass, staff idle engineers, and resume unfinished sites.
+	# 1. Assign idle workers & harvesters to gather, staff idle engineers, and resume unfinished sites.
 	_assign_idle_workers(core)
+	_assign_idle_harvesters()
 	_assign_idle_engineers()
 	_resume_unfinished_buildings()
 
@@ -98,13 +101,16 @@ func _run_decision_tick() -> void:
 		# Pause offensive AI pushes and aggressive target-seeking while Aggro AI is toggled OFF.
 		return
 
-	# 2. Check for incoming threats against AI structures or workers.
+	# 2. Recover any combat wave units that stalled behind obstacles.
+	_recover_stalled_combat_units()
+
+	# 3. Check for incoming threats against AI structures or workers.
 	var under_attack: bool = _handle_base_defense()
 
-	# 3. Economy, infrastructure, and GENESIS_V2 production loop using real EconomyManager resources.
+	# 4. Economy, infrastructure, and GENESIS_V2 production loop using real EconomyManager resources.
 	_manage_economy_and_production(econ, core)
 
-	# 4. Coordinate attack waves when a combat squad is ready.
+	# 5. Coordinate attack waves when a combat squad is ready.
 	if not under_attack:
 		_manage_attack_waves(core)
 
@@ -127,6 +133,63 @@ func _assign_idle_workers(core: Building) -> void:
 		var best_node: ResourceNode = _pick_least_crowded_resource(unit.global_position, biomass_nodes)
 		if best_node != null:
 			unit.command_gather(best_node)
+
+
+func _assign_idle_harvesters() -> void:
+	for unit: Unit in _get_team_units(ai_team):
+		if unit.get_unit_type_id() != &"silica_harvester":
+			continue
+		if unit.command_state != Unit.CommandState.IDLE:
+			continue
+		if unit.is_carrying_cargo():
+			if unit.command_return_cargo():
+				continue
+		var vein: ResourceNode = _find_nearest_resource(unit.global_position, &"silica")
+		if vein != null:
+			unit.command_gather(vein)
+
+
+func _recover_stalled_combat_units() -> void:
+	var live_ids: Dictionary = {}
+	for u: Unit in _get_team_units(ai_team):
+		if not _is_combat_unit(u):
+			continue
+		var uid: int = u.get_instance_id()
+		live_ids[uid] = true
+		var is_traveling: bool = (
+			u.command_state == Unit.CommandState.MOVING
+			or (u.command_state == Unit.CommandState.ATTACK_MOVING and (u.current_target == null or not is_instance_valid(u.current_target)))
+		)
+		if not is_traveling:
+			_unit_last_pos[uid] = u.global_position
+			_unit_stall_ticks[uid] = 0
+			continue
+		if _unit_last_pos.has(uid):
+			var prev_pos: Vector2 = _unit_last_pos[uid]
+			if u.global_position.distance_to(prev_pos) < 18.0:
+				var ticks: int = int(_unit_stall_ticks.get(uid, 0)) + 1
+				_unit_stall_ticks[uid] = ticks
+				if ticks >= 3:
+					_unit_stall_ticks[uid] = 0
+					var final_dest: Vector2 = _select_wave_target(_wave_number)
+					var to_dest: Vector2 = final_dest - u.global_position
+					var dir: Vector2 = to_dest.normalized() if to_dest.length_squared() > 4.0 else Vector2.LEFT
+					var side_sign: float = 1.0 if ((uid + _wave_number) % 2) == 0 else -1.0
+					var detour: Vector2 = u.global_position + Vector2(-dir.y, dir.x) * (150.0 * side_sign) + dir * 75.0
+					detour = Vector2(
+						clampf(detour.x, arena_bounds.position.x + 80.0, arena_bounds.end.x - 80.0),
+						clampf(detour.y, arena_bounds.position.y + 80.0, arena_bounds.end.y - 80.0)
+					)
+					u.command_move(detour)
+					u.command_attack_move(final_dest, true)
+			else:
+				_unit_stall_ticks[uid] = 0
+		_unit_last_pos[uid] = u.global_position
+
+	for k: Variant in _unit_last_pos.keys():
+		if not live_ids.has(k):
+			_unit_last_pos.erase(k)
+			_unit_stall_ticks.erase(k)
 
 
 func _assign_idle_engineers() -> void:
@@ -395,10 +458,26 @@ func _manage_attack_waves(core: Building) -> void:
 	if router != null:
 		destinations = router.assign_group_destinations(staging_units, target_pos)
 
+	# Alternate direct objective pushes with northern/southern flanking routes using Shift-queued legs.
+	var use_flank: bool = (_wave_number >= 2 and (_wave_number % 2) == 0)
+	var flank_wp: Vector2 = Vector2.ZERO
+	if use_flank:
+		var north_lane: bool = ((_wave_number / 2) % 2) == 1
+		flank_wp = Vector2(-220.0, -560.0) if north_lane else Vector2(220.0, 560.0)
+
+	var flank_slots: Array[Vector2] = []
+	if use_flank and router != null:
+		flank_slots = router.assign_group_destinations(staging_units, flank_wp)
+
 	for i: int in range(staging_units.size()):
 		var trooper: Unit = staging_units[i]
 		var dest: Vector2 = destinations[i] if i < destinations.size() else target_pos
-		trooper.command_attack_move(dest)
+		if use_flank:
+			var leg1: Vector2 = flank_slots[i] if i < flank_slots.size() else flank_wp
+			trooper.command_attack_move(leg1, false)
+			trooper.command_attack_move(dest, true)
+		else:
+			trooper.command_attack_move(dest, false)
 		_dispatched_wave_units[trooper.get_instance_id()] = true
 
 

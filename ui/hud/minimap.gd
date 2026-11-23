@@ -114,11 +114,12 @@ func _issue_order_at_minimap_point(local_pos: Vector2) -> void:
 		return
 	var world_pos: Vector2 = _minimap_to_world(local_pos)
 	var is_attack_move: bool = Input.is_action_pressed("cmd_attack_move") or Input.is_key_pressed(KEY_A)
+	var shift_queued: bool = Input.is_key_pressed(KEY_SHIFT)
 	if is_attack_move:
-		_selection_controller.issue_attack_move_at(world_pos)
+		_selection_controller.issue_attack_move_at(world_pos, shift_queued)
 		_ping_color = Color(1.0, 0.36, 0.28, 1.0)
 	else:
-		_selection_controller.issue_right_click_at(world_pos)
+		_selection_controller.issue_right_click_at(world_pos, shift_queued)
 		_ping_color = Color(0.24, 0.96, 0.88, 1.0)
 	_ping_pos = _world_to_minimap(world_pos)
 	_ping_timer = 0.45

@@ -9,7 +9,7 @@ const VENT_SNAP_RADIUS: float = 64.0
 @export var buildable_bounds: Rect2 = Rect2(-640.0, -360.0, 1280.0, 720.0)
 
 
-func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspected_entity: Node) -> void:
+func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspected_entity: Node, shift_queued: bool = false) -> void:
 	# 1. Rally point assignment when inspecting a friendly rally-capable building.
 	if selected_units.is_empty():
 		if inspected_entity is Building and is_instance_valid(inspected_entity):
@@ -21,64 +21,29 @@ func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspect
 	# 2. Attack hostile unit or hostile building.
 	var clicked_enemy_unit: Unit = find_unit_at_point(world_pos, Unit.Team.ENEMY)
 	if clicked_enemy_unit != null:
-		for unit: Unit in selected_units:
-			unit.command_attack_target(clicked_enemy_unit)
-		spawn_move_marker(clicked_enemy_unit.global_position, MoveMarker.MarkerStyle.ATTACK)
+		issue_attack_target_order(selected_units, clicked_enemy_unit, shift_queued)
 		return
 
 	var clicked_enemy_building: Building = find_building_at_point(world_pos, Unit.Team.ENEMY)
 	if clicked_enemy_building != null:
-		for unit: Unit in selected_units:
-			unit.command_attack_target(clicked_enemy_building)
-		spawn_move_marker(clicked_enemy_building.global_position, MoveMarker.MarkerStyle.ATTACK)
+		issue_attack_target_order(selected_units, clicked_enemy_building, shift_queued)
 		return
 
 	# 3. Resource node gathering.
 	var clicked_resource: ResourceNode = find_resource_node_at_point(world_pos)
 	if clicked_resource != null and not clicked_resource.is_vent and _has_any_gatherer_for(selected_units, clicked_resource.resource_type):
-		var non_gatherers: Array[Unit] = []
-		for unit: Unit in selected_units:
-			if unit.can_gather_resource(clicked_resource.resource_type):
-				unit.command_gather(clicked_resource)
-			else:
-				non_gatherers.append(unit)
-		if not non_gatherers.is_empty():
-			var escort_targets: Array[Vector2] = assign_group_destinations(non_gatherers, clicked_resource.global_position)
-			for i: int in range(non_gatherers.size()):
-				non_gatherers[i].command_move(escort_targets[i])
-		spawn_move_marker(clicked_resource.global_position, MoveMarker.MarkerStyle.GATHER)
+		issue_gather_order(selected_units, clicked_resource, shift_queued)
 		return
 
-	# 4. Friendly building interaction (construct, staff ComputeNode, return cargo).
+	# 4. Friendly building interaction (construct, staff Wetware Mainframe, return cargo, or waypoint visit).
 	var clicked_building: Building = find_building_at_point(world_pos, Unit.Team.PLAYER)
 	if clicked_building != null:
 		if not clicked_building.is_constructed:
-			var builders: Array[Unit] = []
-			for unit: Unit in selected_units:
-				if unit.can_construct():
-					builders.append(unit)
-			if not builders.is_empty():
-				for worker: Unit in builders:
-					worker.command_construct_building(clicked_building)
-				spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.INTERACT)
+			if issue_build_order(selected_units, clicked_building, shift_queued):
 				return
 
 		if clicked_building.is_constructed and clicked_building.max_staff_slots > 0:
-			var engineers: Array[Unit] = []
-			var others: Array[Unit] = []
-			for unit: Unit in selected_units:
-				if unit.can_staff_compute() and clicked_building.can_accept_staff(unit):
-					engineers.append(unit)
-				else:
-					others.append(unit)
-			if not engineers.is_empty():
-				for eng: Unit in engineers:
-					eng.command_staff_building(clicked_building)
-				if not others.is_empty():
-					var move_targets_eng: Array[Vector2] = assign_group_destinations(others, world_pos)
-					for i: int in range(others.size()):
-						others[i].command_move(move_targets_eng[i])
-				spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.INTERACT)
+			if issue_staff_order(selected_units, clicked_building, shift_queued, world_pos):
 				return
 
 		if clicked_building.is_constructed and clicked_building.is_resource_dropoff:
@@ -91,19 +56,113 @@ func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspect
 					other_units.append(unit)
 			if not returning_workers.is_empty():
 				for worker: Unit in returning_workers:
-					worker.command_return_cargo(clicked_building)
+					worker.command_return_cargo(clicked_building, shift_queued)
 				if not other_units.is_empty():
-					var move_targets: Array[Vector2] = assign_group_destinations(other_units, world_pos)
+					var approach_targets: Array[Vector2] = _assign_building_perimeter_destinations(other_units, clicked_building)
 					for i: int in range(other_units.size()):
-						other_units[i].command_move(move_targets[i])
+						other_units[i].command_move(approach_targets[i], shift_queued)
 				spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.INTERACT)
 				return
 
+		# Multi-building worker/unit waypoint stop: move cleanly to the building's perimeter so queues advance smoothly.
+		var perimeter_targets: Array[Vector2] = _assign_building_perimeter_destinations(selected_units, clicked_building)
+		for i: int in range(selected_units.size()):
+			selected_units[i].command_move(perimeter_targets[i], shift_queued)
+		spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.INTERACT)
+		return
+
 	# 5. Ground Move with concentric ring formation offsets.
+	issue_move_order(selected_units, world_pos, shift_queued)
+
+
+func issue_move_order(selected_units: Array[Unit], world_pos: Vector2, shift_queued: bool = false) -> void:
+	if selected_units.is_empty():
+		return
 	var targets: Array[Vector2] = assign_group_destinations(selected_units, world_pos)
 	for i: int in range(selected_units.size()):
-		selected_units[i].command_move(targets[i])
+		selected_units[i].command_move(targets[i], shift_queued)
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.MOVE)
+
+
+func issue_attack_target_order(selected_units: Array[Unit], target: Node2D, shift_queued: bool = false) -> void:
+	if selected_units.is_empty() or target == null or not is_instance_valid(target):
+		return
+	for unit: Unit in selected_units:
+		unit.command_attack_target(target, shift_queued)
+	spawn_move_marker(target.global_position, MoveMarker.MarkerStyle.ATTACK)
+
+
+func issue_gather_order(selected_units: Array[Unit], resource_node: ResourceNode, shift_queued: bool = false) -> void:
+	if selected_units.is_empty() or resource_node == null or not is_instance_valid(resource_node):
+		return
+	var non_gatherers: Array[Unit] = []
+	for unit: Unit in selected_units:
+		if unit.can_gather_resource(resource_node.resource_type):
+			unit.command_gather(resource_node, shift_queued)
+		else:
+			non_gatherers.append(unit)
+	if not non_gatherers.is_empty():
+		var escort_targets: Array[Vector2] = assign_group_destinations(non_gatherers, resource_node.global_position)
+		for i: int in range(non_gatherers.size()):
+			non_gatherers[i].command_move(escort_targets[i], shift_queued)
+	spawn_move_marker(resource_node.global_position, MoveMarker.MarkerStyle.GATHER)
+
+
+func issue_build_order(selected_units: Array[Unit], building: Building, shift_queued: bool = false) -> bool:
+	if selected_units.is_empty() or building == null or not is_instance_valid(building):
+		return false
+	var builders: Array[Unit] = []
+	for unit: Unit in selected_units:
+		if unit.can_construct():
+			builders.append(unit)
+	if builders.is_empty():
+		return false
+	for worker: Unit in builders:
+		worker.command_construct_building(building, shift_queued)
+	spawn_move_marker(building.global_position, MoveMarker.MarkerStyle.INTERACT)
+	return true
+
+
+func issue_staff_order(selected_units: Array[Unit], building: Building, shift_queued: bool = false, fallback_pos: Vector2 = Vector2.ZERO) -> bool:
+	if selected_units.is_empty() or building == null or not is_instance_valid(building):
+		return false
+	var engineers: Array[Unit] = []
+	var others: Array[Unit] = []
+	for unit: Unit in selected_units:
+		if unit.can_staff_compute() and building.can_accept_staff(unit):
+			engineers.append(unit)
+		else:
+			others.append(unit)
+	if engineers.is_empty():
+		return false
+	for eng: Unit in engineers:
+		eng.command_staff_building(building, shift_queued)
+	if not others.is_empty():
+		var move_targets: Array[Vector2] = _assign_building_perimeter_destinations(others, building) if fallback_pos == Vector2.ZERO else assign_group_destinations(others, fallback_pos)
+		for i: int in range(others.size()):
+			others[i].command_move(move_targets[i], shift_queued)
+	spawn_move_marker(building.global_position, MoveMarker.MarkerStyle.INTERACT)
+	return true
+
+
+func _assign_building_perimeter_destinations(units: Array[Unit], building: Building) -> Array[Vector2]:
+	var out: Array[Vector2] = []
+	if units.is_empty() or building == null or not is_instance_valid(building):
+		return out
+	var map_rid: RID = _get_navigation_map(units[0])
+	var has_map: bool = map_rid.is_valid() and NavigationServer2D.map_get_iteration_id(map_rid) > 0
+	for i: int in range(units.size()):
+		var u: Unit = units[i]
+		var unit_r: float = u.data.collision_radius if u.data != null else DEFAULT_UNIT_RADIUS
+		var from_b: Vector2 = u.global_position - building.global_position
+		var base_dir: Vector2 = from_b.normalized() if from_b.length_squared() > 4.0 else Vector2.RIGHT
+		var spread: float = (float(i) - float(units.size() - 1) * 0.5) * 0.35
+		var stand_dist: float = building.footprint_radius + unit_r + 14.0
+		var pt: Vector2 = building.global_position + base_dir.rotated(spread) * stand_dist
+		if has_map:
+			pt = NavigationServer2D.map_get_closest_point(map_rid, pt)
+		out.append(pt)
+	return out
 
 
 func _handle_building_rally_right_click(building: Building, world_pos: Vector2) -> void:
@@ -123,26 +182,30 @@ func _handle_building_rally_right_click(building: Building, world_pos: Vector2) 
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.MOVE)
 
 
-func issue_attack_move(world_pos: Vector2, selected_units: Array[Unit]) -> void:
+func issue_attack_move(world_pos: Vector2, selected_units: Array[Unit], shift_queued: bool = false) -> void:
+	issue_attack_move_order(selected_units, world_pos, shift_queued)
+
+
+func issue_attack_move_order(selected_units: Array[Unit], world_pos: Vector2, shift_queued: bool = false) -> void:
 	if selected_units.is_empty():
 		return
 	var clicked_enemy: Unit = find_unit_at_point(world_pos, Unit.Team.ENEMY)
 	if clicked_enemy != null:
 		for unit: Unit in selected_units:
-			unit.command_attack_target(clicked_enemy)
+			unit.command_attack_target(clicked_enemy, shift_queued)
 		spawn_move_marker(clicked_enemy.global_position, MoveMarker.MarkerStyle.ATTACK)
 		return
 
 	var clicked_enemy_building: Building = find_building_at_point(world_pos, Unit.Team.ENEMY)
 	if clicked_enemy_building != null:
 		for unit: Unit in selected_units:
-			unit.command_attack_target(clicked_enemy_building)
+			unit.command_attack_target(clicked_enemy_building, shift_queued)
 		spawn_move_marker(clicked_enemy_building.global_position, MoveMarker.MarkerStyle.ATTACK)
 		return
 
 	var targets: Array[Vector2] = assign_group_destinations(selected_units, world_pos)
 	for i: int in range(selected_units.size()):
-		selected_units[i].command_attack_move(targets[i])
+		selected_units[i].command_attack_move(targets[i], shift_queued)
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.ATTACK)
 
 
@@ -242,7 +305,7 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 	return result
 
 
-func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_units: Array[Unit]) -> bool:
+func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_units: Array[Unit], shift_queued: bool = false) -> bool:
 	var building_data: BuildingData = ability.building_to_build
 	var building_scene: PackedScene = building_data.resolve_scene() if building_data != null else null
 	if building_data == null or building_scene == null:
@@ -279,7 +342,7 @@ func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_
 	new_building.begin_construction(building_data, Unit.Team.PLAYER, eval["vent"] as ResourceNode)
 	_nudge_units_out_of_building(new_building)
 
-	builder.command_construct_building(new_building)
+	builder.command_construct_building(new_building, shift_queued)
 	spawn_move_marker(new_building.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 

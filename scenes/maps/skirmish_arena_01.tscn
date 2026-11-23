@@ -1,4 +1,4 @@
-[gd_scene load_steps=31 format=3]
+[gd_scene load_steps=32 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
 [ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
@@ -29,6 +29,7 @@
 [ext_resource type="PackedScene" path="res://ui/hud/minimap.tscn" id="28_minimap"]
 [ext_resource type="PackedScene" path="res://ui/hud/match_end_overlay.tscn" id="29_match_end_overlay"]
 [ext_resource type="Script" path="res://ui/overlays/rally_point_overlay.gd" id="30_rally_overlay"]
+[ext_resource type="Script" path="res://ui/overlays/command_queue_overlay.gd" id="31_cmd_queue_overlay"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_skirmish"]
 vertices = PackedVector2Array(-1300, -950, 1300, -950, 1300, 950, -1300, 950)
@@ -278,6 +279,10 @@ script = ExtResource("17_build_ghost")
 [node name="RallyPointOverlay" type="Node2D" parent="SelectionController"]
 z_index = 85
 script = ExtResource("30_rally_overlay")
+
+[node name="CommandQueueOverlay" type="Node2D" parent="SelectionController"]
+z_index = 84
+script = ExtResource("31_cmd_queue_overlay")
 
 [node name="SandboxSpawner" type="Node2D" parent="."]
 script = ExtResource("6_spawner")

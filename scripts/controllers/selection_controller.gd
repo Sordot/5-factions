@@ -3,6 +3,7 @@ extends Node2D
 
 const COMMAND_ROUTER_SCRIPT: GDScript = preload("res://scripts/controllers/command_router.gd")
 const RALLY_POINT_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/rally_point_overlay.gd")
+const COMMAND_QUEUE_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/command_queue_overlay.gd")
 const DOUBLE_TAP_WINDOW_MS: int = 350
 
 signal selection_updated(selected_count: int)
@@ -11,6 +12,8 @@ signal building_selection_changed(building: Building)
 signal inspection_changed(entity: Node)
 signal control_groups_changed(summary: Dictionary)
 signal ability_targeting_changed(active_ability: AbilityData)
+signal idle_workers_changed(idle_workers: Array[Unit])
+signal idle_workers_updated(count: int)
 
 @export var drag_threshold: float = 8.0
 @export var camera_path: NodePath
@@ -20,6 +23,7 @@ signal ability_targeting_changed(active_ability: AbilityData)
 @onready var ability_reticle: AbilityTargetingReticle = get_node_or_null("AbilityTargetingReticle") as AbilityTargetingReticle
 @onready var build_ghost_preview: BuildGhostPreview = get_node_or_null("BuildGhostPreview") as BuildGhostPreview
 @onready var rally_point_overlay: Node2D = get_node_or_null("RallyPointOverlay") as Node2D
+@onready var command_queue_overlay: Node2D = get_node_or_null("CommandQueueOverlay") as Node2D
 
 var command_router: CommandRouter = null
 var selected_units: Array[Unit] = []
@@ -30,6 +34,7 @@ var active_subgroup_index: int = 0
 var inspected_enemy: Unit = null
 var control_groups: Dictionary = {}
 var active_targeting_ability: AbilityData = null
+var idle_worker_count: int = 0
 
 var _is_dragging: bool = false
 var _drag_start_world: Vector2 = Vector2.ZERO
@@ -41,9 +46,13 @@ var _last_click_time_ms: int = 0
 var _click_was_double_click: bool = false
 var _click_ctrl_pressed: bool = false
 var _tracked_death_units: Array[Unit] = []
+var _idle_cycle_index: int = -1
+var _idle_refresh_timer: float = 0.0
+var _last_idle_ids: PackedInt64Array = PackedInt64Array()
 
 
 func _ready() -> void:
+	add_to_group("selection_controller")
 	command_router = get_node_or_null("CommandRouter") as CommandRouter
 	if command_router == null:
 		command_router = COMMAND_ROUTER_SCRIPT.new()
@@ -58,8 +67,22 @@ func _ready() -> void:
 	if rally_point_overlay != null and rally_point_overlay.has_method("bind_selection_controller"):
 		rally_point_overlay.call("bind_selection_controller", self)
 
+	if command_queue_overlay == null:
+		command_queue_overlay = COMMAND_QUEUE_OVERLAY_SCRIPT.new() as Node2D
+		command_queue_overlay.name = "CommandQueueOverlay"
+		add_child(command_queue_overlay)
+	if command_queue_overlay != null and command_queue_overlay.has_method("bind_selection_controller"):
+		command_queue_overlay.call("bind_selection_controller", self)
 
-func _process(_delta: float) -> void:
+	call_deferred("_refresh_idle_workers", true)
+
+
+func _process(delta: float) -> void:
+	_idle_refresh_timer += delta
+	if _idle_refresh_timer >= 0.15:
+		_idle_refresh_timer = 0.0
+		_refresh_idle_workers(false)
+
 	# Drop inspection if an inspected hostile entity disappears into Fog of War.
 	if inspected_entity != null and is_instance_valid(inspected_entity):
 		if inspected_entity is Unit:
@@ -117,6 +140,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 
+	if event.is_action_pressed("cmd_select_idle_worker"):
+		var allow_idle_hotkey: bool = true
+		if event is InputEventKey:
+			var idle_k: InputEventKey = event
+			if idle_k.ctrl_pressed or idle_k.alt_pressed or idle_k.echo:
+				allow_idle_hotkey = false
+		if allow_idle_hotkey:
+			if select_next_idle_worker(true) != null:
+				get_viewport().set_input_as_handled()
+			return
+
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_q", "Q"):
 		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_w", "W"):
@@ -149,12 +183,14 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 
 	if event.is_action_pressed("cmd_attack_move"):
+		var shift_amove: bool = Input.is_key_pressed(KEY_SHIFT)
 		if event is InputEventKey:
 			var a_key: InputEventKey = event
-			if a_key.ctrl_pressed or a_key.shift_pressed or a_key.alt_pressed or a_key.echo:
+			if a_key.ctrl_pressed or a_key.alt_pressed or a_key.echo:
 				return
+			shift_amove = a_key.shift_pressed or shift_amove
 		cancel_ability_targeting()
-		issue_attack_move_at(get_global_mouse_position())
+		issue_attack_move_at(get_global_mouse_position(), shift_amove)
 		get_viewport().set_input_as_handled()
 		return
 
@@ -175,7 +211,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
 			if mouse_event.pressed:
 				if active_targeting_ability != null:
-					confirm_ability_target_at(get_global_mouse_position())
+					confirm_ability_target_at(get_global_mouse_position(), mouse_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT))
 					get_viewport().set_input_as_handled()
 					return
 				_is_dragging = true
@@ -190,7 +226,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				cancel_ability_targeting()
 				get_viewport().set_input_as_handled()
 				return
-			issue_right_click_at(get_global_mouse_position())
+			var shift_order: bool = mouse_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT)
+			issue_right_click_at(get_global_mouse_position(), shift_order)
 	elif event is InputEventMouseMotion and _is_dragging:
 		var motion_event: InputEventMouseMotion = event
 		if motion_event.position.distance_to(_drag_start_screen) >= drag_threshold:
@@ -302,14 +339,16 @@ func request_ability_slot(ability: AbilityData) -> bool:
 	return true
 
 
-func confirm_ability_target_at(world_pos: Vector2) -> bool:
+func confirm_ability_target_at(world_pos: Vector2, shift_queued: bool = false) -> bool:
 	if active_targeting_ability == null or command_router == null:
 		return false
 	var ability: AbilityData = active_targeting_ability
 	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
-		var placed: bool = command_router.confirm_build_placement(ability, world_pos, get_active_subgroup_units())
-		if placed:
+		var placed: bool = command_router.confirm_build_placement(ability, world_pos, get_active_subgroup_units(), shift_queued)
+		if placed and not shift_queued:
 			cancel_ability_targeting()
+		if placed:
+			_refresh_idle_workers(true)
 		return placed
 
 	var subgroup_units: Array[Unit] = get_active_subgroup_units()
@@ -341,16 +380,79 @@ func cancel_ability_targeting() -> void:
 	ability_targeting_changed.emit(null)
 
 
-func issue_right_click_at(world_point: Vector2) -> void:
+func issue_right_click_at(world_point: Vector2, shift_queued: bool = false) -> void:
 	_prune_invalid_units()
 	if command_router != null:
-		command_router.handle_right_click(world_point, selected_units, inspected_entity)
+		command_router.handle_right_click(world_point, selected_units, inspected_entity, shift_queued)
+	_refresh_idle_workers(false)
 
 
-func issue_attack_move_at(world_point: Vector2) -> void:
+func issue_attack_move_at(world_point: Vector2, shift_queued: bool = false) -> void:
 	_prune_invalid_units()
 	if command_router != null:
-		command_router.issue_attack_move(world_point, selected_units)
+		command_router.issue_attack_move(world_point, selected_units, shift_queued)
+	_refresh_idle_workers(false)
+
+
+func get_idle_workers() -> Array[Unit]:
+	var idle_list: Array[Unit] = []
+	if not is_inside_tree():
+		return idle_list
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node) or not (node is Unit):
+			continue
+		var unit: Unit = node
+		if unit.is_idle_worker():
+			idle_list.append(unit)
+	idle_list.sort_custom(func(a: Unit, b: Unit) -> bool:
+		return a.get_instance_id() < b.get_instance_id()
+	)
+	return idle_list
+
+
+func select_next_idle_worker(focus_camera: bool = true) -> Unit:
+	var idle_list: Array[Unit] = get_idle_workers()
+	if idle_list.is_empty():
+		_idle_cycle_index = -1
+		_refresh_idle_workers(false)
+		return null
+
+	var next_idx: int = (_idle_cycle_index + 1) % idle_list.size()
+	if selected_units.size() == 1 and is_instance_valid(selected_units[0]):
+		var cur_idx: int = idle_list.find(selected_units[0])
+		if cur_idx >= 0:
+			next_idx = (cur_idx + 1) % idle_list.size()
+
+	_idle_cycle_index = next_idx
+	var chosen: Unit = idle_list[next_idx]
+	cancel_ability_targeting()
+	_set_inspected_entity(null)
+	_set_selected_units([chosen])
+
+	if focus_camera:
+		var cam: RTSCamera = _get_rts_camera()
+		if cam != null:
+			var vp_size: Vector2 = get_viewport_rect().size / cam.zoom
+			var inner_rect: Rect2 = Rect2(cam.global_position - vp_size * 0.5, vp_size).grow(-64.0)
+			if idle_list.size() == 1 or not inner_rect.has_point(chosen.global_position):
+				cam.center_on(chosen.global_position)
+
+	return chosen
+
+
+func _refresh_idle_workers(force_emit: bool = false) -> void:
+	var idle_list: Array[Unit] = get_idle_workers()
+	var ids: PackedInt64Array = PackedInt64Array()
+	ids.resize(idle_list.size())
+	for i: int in range(idle_list.size()):
+		ids[i] = idle_list[i].get_instance_id()
+
+	if not force_emit and ids == _last_idle_ids and idle_worker_count == idle_list.size():
+		return
+	_last_idle_ids = ids
+	idle_worker_count = idle_list.size()
+	idle_workers_changed.emit(idle_list)
+	idle_workers_updated.emit(idle_worker_count)
 
 
 func issue_stop_command() -> void:

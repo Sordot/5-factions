@@ -1,4 +1,4 @@
-[gd_scene load_steps=24 format=3]
+[gd_scene load_steps=25 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
 [ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
@@ -22,6 +22,7 @@
 [ext_resource type="Script" path="res://scripts/systems/encroaching_zone.gd" id="20_enc_zone"]
 [ext_resource type="Script" path="res://scripts/systems/match_manager.gd" id="21_match_manager"]
 [ext_resource type="Script" path="res://ui/overlays/rally_point_overlay.gd" id="22_rally_overlay"]
+[ext_resource type="Script" path="res://ui/overlays/command_queue_overlay.gd" id="23_cmd_queue_overlay"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_arena"]
 vertices = PackedVector2Array(-640, -360, 640, -360, 640, 360, -640, 360)
@@ -133,6 +134,10 @@ script = ExtResource("17_build_ghost")
 [node name="RallyPointOverlay" type="Node2D" parent="SelectionController"]
 z_index = 85
 script = ExtResource("22_rally_overlay")
+
+[node name="CommandQueueOverlay" type="Node2D" parent="SelectionController"]
+z_index = 84
+script = ExtResource("23_cmd_queue_overlay")
 
 [node name="SandboxSpawner" type="Node2D" parent="."]
 script = ExtResource("6_spawner")

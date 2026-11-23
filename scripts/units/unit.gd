@@ -35,6 +35,7 @@ signal ability_cooldown_updated(ability_id: StringName, remaining: float, durati
 signal ability_executed(ability_id: StringName, target_pos: Vector2)
 signal cargo_changed(unit: Unit, resource_type: StringName, amount: int)
 signal staffed_state_changed(unit: Unit, staffed: bool)
+signal command_queue_changed(unit: Unit)
 
 @export var team: Team = Team.PLAYER
 @export var data: UnitData
@@ -60,6 +61,8 @@ var command_state: CommandState = CommandState.IDLE
 var current_target: Node2D = null
 var ability_component: AbilityComponent = null
 var combat_component: CombatComponent = null
+var command_queue: Array[Dictionary] = []
+var active_command: Dictionary = {}
 
 var _construction_target: Building = null
 var _move_destination: Vector2 = Vector2.ZERO
@@ -242,7 +245,148 @@ func get_carried_type() -> StringName:
 	return gather_component.carried_type if gather_component != null else &""
 
 
-func command_gather(resource_node: ResourceNode) -> bool:
+func is_idle_worker() -> bool:
+	if is_dead or is_staffed or is_queued_for_deletion() or not is_inside_tree() or data == null:
+		return false
+	if team != Team.PLAYER or current_hp <= 0.0:
+		return false
+	var uid: StringName = data.unit_type_id
+	var is_worker_role: bool = (
+		data.can_gather
+		or data.can_staff_compute
+		or uid == &"worker"
+		or uid == &"silica_harvester"
+		or uid == &"engineer"
+	)
+	if not is_worker_role:
+		return false
+	if command_state != CommandState.IDLE or not command_queue.is_empty():
+		return false
+	if _construction_target != null:
+		return false
+	if gather_component != null and gather_component.is_active():
+		return false
+	if staff_component != null and staff_component.is_active():
+		return false
+	if ability_component != null and ability_component.has_pending_cast():
+		return false
+	return true
+
+
+func has_queued_commands() -> bool:
+	return not command_queue.is_empty()
+
+
+func clear_command_queue() -> void:
+	var had_items: bool = not command_queue.is_empty() or not active_command.is_empty()
+	command_queue.clear()
+	active_command.clear()
+	if had_items:
+		command_queue_changed.emit(self)
+
+
+func issue_command(cmd: Dictionary, append_to_queue: bool = false) -> bool:
+	if is_dead or is_staffed or cmd.is_empty():
+		return false
+	if append_to_queue:
+		var is_idle_now: bool = (
+			command_state == CommandState.IDLE
+			and active_command.is_empty()
+			and command_queue.is_empty()
+		)
+		if not is_idle_now:
+			command_queue.append(cmd.duplicate())
+			command_queue_changed.emit(self)
+			status_changed.emit(self)
+			return true
+	else:
+		clear_command_queue()
+	return _execute_command(cmd)
+
+
+func advance_command_queue() -> bool:
+	return _advance_command_queue()
+
+
+func _advance_command_queue() -> bool:
+	active_command.clear()
+	while not command_queue.is_empty():
+		var next_cmd: Dictionary = command_queue.pop_front()
+		command_queue_changed.emit(self)
+		if _execute_command(next_cmd):
+			return true
+	command_state = CommandState.IDLE
+	velocity = Vector2.ZERO
+	command_queue_changed.emit(self)
+	status_changed.emit(self)
+	return false
+
+
+func _execute_command(cmd: Dictionary) -> bool:
+	var cmd_type: StringName = cmd.get("type", &"")
+	var ok: bool = false
+	match cmd_type:
+		&"move":
+			ok = _start_move(cmd.get("pos", global_position) as Vector2)
+		&"attack_move":
+			ok = _start_attack_move(cmd.get("pos", global_position) as Vector2)
+		&"attack_target":
+			var atk_t: Variant = cmd.get("target", null)
+			if atk_t != null and is_instance_valid(atk_t) and atk_t is Node2D:
+				ok = _start_attack_target(atk_t as Node2D)
+		&"gather":
+			var rn: Variant = cmd.get("target", null)
+			if rn != null and is_instance_valid(rn) and rn is ResourceNode:
+				ok = _start_gather(rn as ResourceNode)
+		&"return_cargo":
+			var drop_b: Variant = cmd.get("target", null)
+			var drop_building: Building = drop_b as Building if (drop_b != null and is_instance_valid(drop_b) and drop_b is Building) else null
+			ok = _start_return_cargo(drop_building)
+		&"build":
+			var build_t: Variant = cmd.get("target", null)
+			if build_t != null and is_instance_valid(build_t) and build_t is Building:
+				ok = _start_construct_building(build_t as Building)
+		&"staff":
+			var staff_t: Variant = cmd.get("target", null)
+			if staff_t != null and is_instance_valid(staff_t) and staff_t is Building:
+				ok = _start_staff_building(staff_t as Building)
+	if ok:
+		active_command = cmd.duplicate()
+		command_queue_changed.emit(self)
+	return ok
+
+
+func get_active_command_destination() -> Variant:
+	match command_state:
+		CommandState.MOVING:
+			return _move_destination
+		CommandState.ATTACK_MOVING:
+			return _attack_move_destination
+		CommandState.ATTACKING_TARGET:
+			if current_target != null and is_instance_valid(current_target):
+				return current_target.global_position
+		CommandState.CONSTRUCTING:
+			if _construction_target != null and is_instance_valid(_construction_target):
+				return _construction_target.global_position
+		CommandState.GATHERING:
+			if gather_component != null:
+				if gather_component.state == GatherComponent.GatherState.GATHER_RETURNING_TO_BASE and is_instance_valid(gather_component.dropoff_building):
+					return gather_component.dropoff_building.global_position
+				if is_instance_valid(gather_component.target_node):
+					return gather_component.target_node.global_position
+		CommandState.STAFFING_BUILDING:
+			if staff_component != null and is_instance_valid(staff_component.target_building):
+				return staff_component.target_building.global_position
+	return null
+
+
+func command_gather(resource_node: ResourceNode, append_to_queue: bool = false) -> bool:
+	if resource_node == null or not is_instance_valid(resource_node):
+		return false
+	return issue_command({"type": &"gather", "target": resource_node, "pos": resource_node.global_position}, append_to_queue)
+
+
+func _start_gather(resource_node: ResourceNode) -> bool:
 	if is_dead or is_staffed or not can_gather() or not _can_move() or resource_node == null:
 		return false
 	_cancel_active_tasks(true)
@@ -256,7 +400,12 @@ func command_gather(resource_node: ResourceNode) -> bool:
 	return true
 
 
-func command_return_cargo(building: Building = null) -> bool:
+func command_return_cargo(building: Building = null, append_to_queue: bool = false) -> bool:
+	var dest: Vector2 = building.global_position if (building != null and is_instance_valid(building)) else global_position
+	return issue_command({"type": &"return_cargo", "target": building, "pos": dest}, append_to_queue)
+
+
+func _start_return_cargo(building: Building = null) -> bool:
 	if is_dead or is_staffed or not can_gather() or not _can_move() or not is_carrying_cargo():
 		return false
 	_cancel_active_tasks(true)
@@ -270,7 +419,13 @@ func command_return_cargo(building: Building = null) -> bool:
 	return true
 
 
-func command_construct_building(building: Building) -> bool:
+func command_construct_building(building: Building, append_to_queue: bool = false) -> bool:
+	if building == null or not is_instance_valid(building):
+		return false
+	return issue_command({"type": &"build", "target": building, "pos": building.global_position}, append_to_queue)
+
+
+func _start_construct_building(building: Building) -> bool:
 	if is_dead or is_staffed or not can_construct() or not _can_move():
 		return false
 	if building == null or not is_instance_valid(building) or building.is_destroyed or building.is_constructed or building.team != team:
@@ -285,7 +440,13 @@ func command_construct_building(building: Building) -> bool:
 	return true
 
 
-func command_staff_building(building: Building) -> bool:
+func command_staff_building(building: Building, append_to_queue: bool = false) -> bool:
+	if building == null or not is_instance_valid(building):
+		return false
+	return issue_command({"type": &"staff", "target": building, "pos": building.global_position}, append_to_queue)
+
+
+func _start_staff_building(building: Building) -> bool:
 	if is_dead or is_staffed or not can_staff_compute() or not _can_move():
 		return false
 	if building == null or not is_instance_valid(building) or not building.can_accept_staff(self):
@@ -305,6 +466,7 @@ func enter_staffed_building(_building: Building) -> void:
 	if is_staffed:
 		return
 	is_staffed = true
+	clear_command_queue()
 	_cancel_active_tasks(false)
 	command_state = CommandState.IDLE
 	current_target = null
@@ -370,32 +532,50 @@ func heal(amount: float) -> void:
 	status_changed.emit(self)
 
 
-func command_move(target_pos: Vector2) -> void:
+func command_move(target_pos: Vector2, append_to_queue: bool = false) -> void:
+	issue_command({"type": &"move", "pos": target_pos}, append_to_queue)
+
+
+func _start_move(target_pos: Vector2) -> bool:
 	if is_dead or is_staffed or not _can_move():
-		return
+		return false
 	_cancel_active_tasks(false)
 	command_state = CommandState.MOVING
 	current_target = null
 	_move_destination = target_pos
 	_reset_progress_tracker()
 	_set_nav_target(target_pos)
+	status_changed.emit(self)
+	return true
 
 
-func command_attack_target(target: Node2D) -> void:
+func command_attack_target(target: Node2D, append_to_queue: bool = false) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+	issue_command({"type": &"attack_target", "target": target, "pos": target.global_position}, append_to_queue)
+
+
+func _start_attack_target(target: Node2D) -> bool:
 	if is_dead or is_staffed or not _can_attack():
-		return
+		return false
 	if combat_component == null or not combat_component.is_valid_target(self, target):
-		return
+		return false
 	_cancel_active_tasks(false)
 	command_state = CommandState.ATTACKING_TARGET
 	current_target = target
 	_reset_progress_tracker()
 	_last_nav_target = Vector2.INF
+	status_changed.emit(self)
+	return true
 
 
-func command_attack_move(target_pos: Vector2) -> void:
+func command_attack_move(target_pos: Vector2, append_to_queue: bool = false) -> void:
+	issue_command({"type": &"attack_move", "pos": target_pos}, append_to_queue)
+
+
+func _start_attack_move(target_pos: Vector2) -> bool:
 	if is_dead or is_staffed or not _can_move():
-		return
+		return false
 	_cancel_active_tasks(false)
 	command_state = CommandState.ATTACK_MOVING
 	_attack_move_destination = target_pos
@@ -403,11 +583,14 @@ func command_attack_move(target_pos: Vector2) -> void:
 	current_target = null
 	_reset_progress_tracker()
 	_set_nav_target(target_pos)
+	status_changed.emit(self)
+	return true
 
 
 func command_stop() -> void:
 	if is_dead or is_staffed:
 		return
+	clear_command_queue()
 	_cancel_active_tasks(false)
 	command_state = CommandState.IDLE
 	current_target = null
@@ -416,11 +599,13 @@ func command_stop() -> void:
 	_reset_progress_tracker()
 	velocity = Vector2.ZERO
 	_clear_nav_target()
+	status_changed.emit(self)
 
 
 func command_hold_position() -> void:
 	if is_dead or is_staffed:
 		return
+	clear_command_queue()
 	_cancel_active_tasks(false)
 	command_state = CommandState.HOLD_POSITION
 	current_target = null
@@ -429,6 +614,7 @@ func command_hold_position() -> void:
 	_reset_progress_tracker()
 	velocity = Vector2.ZERO
 	_clear_nav_target()
+	status_changed.emit(self)
 
 
 func take_damage(amount: float, attacker: Unit = null) -> void:
@@ -544,6 +730,7 @@ func _die() -> void:
 	if is_dead:
 		return
 	is_dead = true
+	clear_command_queue()
 	_cancel_active_tasks(false)
 	command_state = CommandState.IDLE
 	current_target = null
@@ -668,13 +855,15 @@ func _process_idle(delta: float) -> void:
 
 func _process_moving(delta: float) -> void:
 	if nav_agent == null:
-		command_state = CommandState.IDLE
+		_advance_command_queue()
 		return
 	if not _is_nav_map_ready():
 		return
 	if _should_settle_at_destination(_move_destination, delta):
-		command_state = CommandState.IDLE
 		_reset_progress_tracker()
+		if _advance_command_queue():
+			return
+		command_state = CommandState.IDLE
 		velocity = Vector2.ZERO
 		if data != null and data.auto_gather_on_spawn and can_gather():
 			if is_carrying_cargo():
@@ -710,15 +899,17 @@ func _process_attack_moving(delta: float) -> void:
 			return
 
 	if nav_agent == null:
-		command_state = CommandState.IDLE
+		_advance_command_queue()
 		return
 	if _last_nav_target == Vector2.INF or _last_nav_target.distance_squared_to(_attack_move_destination) > 1.0:
 		_set_nav_target(_attack_move_destination)
 	if not _is_nav_map_ready():
 		return
 	if _should_settle_at_destination(_attack_move_destination, delta):
-		command_state = CommandState.IDLE
 		_reset_progress_tracker()
+		if _advance_command_queue():
+			return
+		command_state = CommandState.IDLE
 		velocity = Vector2.ZERO
 		return
 	_compute_nav_desired_velocity()
@@ -727,6 +918,8 @@ func _process_attack_moving(delta: float) -> void:
 func _process_attacking_target(delta: float) -> void:
 	if current_target == null or not is_instance_valid(current_target) or combat_component == null or not combat_component.is_valid_target(self, current_target):
 		current_target = null
+		if _advance_command_queue():
+			return
 		command_state = CommandState.IDLE
 		velocity = Vector2.ZERO
 		return
@@ -760,11 +953,13 @@ func _process_hold_position(delta: float) -> void:
 
 func _process_casting_ability(delta: float) -> void:
 	if ability_component == null or not ability_component.has_pending_cast():
-		command_state = CommandState.IDLE
+		if not _advance_command_queue():
+			command_state = CommandState.IDLE
 		return
 	if ability_component.try_complete_pending_cast(self):
-		command_state = CommandState.IDLE
 		velocity = Vector2.ZERO
+		if not _advance_command_queue():
+			command_state = CommandState.IDLE
 		return
 	var dest: Vector2 = ability_component.get_pending_destination()
 	_face_point(dest, delta)
@@ -773,7 +968,8 @@ func _process_casting_ability(delta: float) -> void:
 
 func _process_gathering(delta: float) -> void:
 	if gather_component == null or not gather_component.is_active():
-		command_state = CommandState.IDLE
+		if not _advance_command_queue():
+			command_state = CommandState.IDLE
 		return
 	gather_component.tick(self, delta)
 
@@ -781,10 +977,11 @@ func _process_gathering(delta: float) -> void:
 func _process_constructing(delta: float) -> void:
 	if _construction_target == null or not is_instance_valid(_construction_target) or _construction_target.is_destroyed or _construction_target.is_constructed:
 		_construction_target = null
-		command_state = CommandState.IDLE
 		stop_component_navigation()
 		if gather_bar_root != null:
 			gather_bar_root.visible = false
+		if not _advance_command_queue():
+			command_state = CommandState.IDLE
 		return
 
 	var unit_r: float = data.collision_radius if data != null else 13.0
@@ -799,7 +996,8 @@ func _process_constructing(delta: float) -> void:
 			gather_bar_fill.size.x = GATHER_BAR_WIDTH * clampf(_construction_target.construction_progress, 0.0, 1.0)
 		if completed:
 			_construction_target = null
-			command_state = CommandState.IDLE
+			if not _advance_command_queue():
+				command_state = CommandState.IDLE
 		return
 
 	var offset: Vector2 = global_position - _construction_target.global_position
@@ -982,7 +1180,8 @@ func _reset_progress_tracker() -> void:
 
 func _should_settle_at_destination(goal_pos: Vector2, delta: float) -> bool:
 	var dist_to_goal: float = global_position.distance_to(goal_pos)
-	if dist_to_goal <= nav_agent.target_desired_distance or nav_agent.is_navigation_finished():
+	var arrive_dist: float = nav_agent.target_desired_distance + (14.0 if not command_queue.is_empty() else 0.0)
+	if dist_to_goal <= arrive_dist or nav_agent.is_navigation_finished():
 		return true
 	if dist_to_goal < _best_dist_to_goal - 4.0:
 		_best_dist_to_goal = dist_to_goal
@@ -1005,10 +1204,11 @@ func _check_post_slide_settling() -> void:
 		if collider is Unit:
 			var other: Unit = collider
 			if other.team == team and other.command_state == CommandState.IDLE:
-				command_state = CommandState.IDLE
 				_wants_nav_movement = false
 				_reset_progress_tracker()
-				velocity = Vector2.ZERO
+				if not _advance_command_queue():
+					command_state = CommandState.IDLE
+					velocity = Vector2.ZERO
 				return
 
 

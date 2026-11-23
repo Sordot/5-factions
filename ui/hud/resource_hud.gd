@@ -8,6 +8,7 @@ extends CanvasLayer
 @onready var silica_value_label: Label = %SilicaValueLabel
 @onready var compute_value_label: Label = %ComputeValueLabel
 @onready var bandwidth_value_label: Label = %BandwidthValueLabel
+@onready var btn_idle_workers: Button = %BtnIdleWorkers
 @onready var aggro_paused_badge: Label = %AggroPausedBadge
 @onready var uplink_bonus_label: Label = %UplinkBonusLabel
 @onready var zone_status_label: Label = %ZoneStatusLabel
@@ -15,17 +16,52 @@ extends CanvasLayer
 var _economy_manager: EconomyManager = null
 var _encroaching_zone: EncroachingZone = null
 var _match_manager: MatchManager = null
+var _selection_controller: SelectionController = null
 
 
 func _ready() -> void:
 	var res_panel: Control = get_node_or_null("RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel") as Control
 	if res_panel != null:
 		res_panel.add_to_group("blocks_edge_pan")
+	if btn_idle_workers != null:
+		btn_idle_workers.add_to_group("blocks_edge_pan")
+		btn_idle_workers.pressed.connect(_on_idle_workers_pressed)
 	_connect_economy_manager()
 	_connect_encroaching_zone()
 	_connect_match_manager()
+	call_deferred("_connect_selection_controller")
 	_refresh_from_economy()
 	_refresh_aggro_badge()
+	_on_idle_workers_updated(0)
+
+
+func _connect_selection_controller() -> void:
+	if not is_inside_tree():
+		return
+	_selection_controller = get_tree().get_first_node_in_group("selection_controller") as SelectionController
+	if _selection_controller == null:
+		return
+	if not _selection_controller.idle_workers_updated.is_connected(_on_idle_workers_updated):
+		_selection_controller.idle_workers_updated.connect(_on_idle_workers_updated)
+	_on_idle_workers_updated(_selection_controller.idle_worker_count)
+
+
+func _on_idle_workers_pressed() -> void:
+	if _selection_controller == null:
+		_connect_selection_controller()
+	if _selection_controller != null:
+		_selection_controller.select_next_idle_worker(true)
+
+
+func _on_idle_workers_updated(count: int) -> void:
+	if btn_idle_workers == null:
+		return
+	btn_idle_workers.text = "Idle Workers: %d [F1]" % count
+	btn_idle_workers.disabled = count <= 0
+	if count > 0:
+		btn_idle_workers.modulate = Color(1.0, 0.84, 0.28, 1.0)
+	else:
+		btn_idle_workers.modulate = Color(0.56, 0.64, 0.72, 0.72)
 
 
 func _connect_match_manager() -> void:

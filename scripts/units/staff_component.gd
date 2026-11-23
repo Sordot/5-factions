@@ -39,7 +39,8 @@ func tick(owner_unit: Unit, _delta: float) -> void:
 	if target_building == null or not is_instance_valid(target_building) or not target_building.can_accept_staff(owner_unit):
 		cancel()
 		owner_unit.stop_component_navigation()
-		owner_unit.command_state = Unit.CommandState.IDLE
+		if not owner_unit.advance_command_queue():
+			owner_unit.command_state = Unit.CommandState.IDLE
 		return
 
 	var unit_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 13.0
