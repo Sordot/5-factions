@@ -220,7 +220,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				_click_was_double_click = mouse_event.double_click
 				_click_ctrl_pressed = mouse_event.ctrl_pressed or Input.is_key_pressed(KEY_CTRL)
 			elif _is_dragging:
-				_finish_left_selection(mouse_event.position, mouse_event.shift_pressed, _click_was_double_click, _click_ctrl_pressed or mouse_event.ctrl_pressed)
+				_finish_left_selection(
+					mouse_event.position,
+					mouse_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT),
+					_click_was_double_click,
+					_click_ctrl_pressed or mouse_event.ctrl_pressed
+				)
 		elif mouse_event.button_index == MOUSE_BUTTON_RIGHT and mouse_event.pressed:
 			if active_targeting_ability != null:
 				cancel_ability_targeting()
@@ -280,17 +285,17 @@ func get_active_subgroup_units() -> Array[Unit]:
 	return active["units"]
 
 
-func request_ability_by_hotkey(hotkey: String) -> bool:
+func request_ability_by_hotkey(hotkey: String, shift_queued: bool = false) -> bool:
 	var active: Dictionary = get_active_subgroup()
 	if active.is_empty():
 		return false
 	var ability: AbilityData = SubgroupHelper.find_ability_by_hotkey(active, hotkey)
 	if ability == null:
 		return false
-	return request_ability_slot(ability)
+	return request_ability_slot(ability, shift_queued)
 
 
-func request_ability_slot(ability: AbilityData) -> bool:
+func request_ability_slot(ability: AbilityData, shift_queued: bool = false) -> bool:
 	if ability == null or command_router == null:
 		return false
 	_prune_invalid_units()
@@ -319,17 +324,7 @@ func request_ability_slot(ability: AbilityData) -> bool:
 
 	if ability.target_type == AbilityData.TargetType.INSTANT:
 		cancel_ability_targeting()
-		if ability.cast_on_all_ready:
-			var cast_any: bool = false
-			for u: Unit in subgroup_units:
-				if is_instance_valid(u) and not u.is_dead and u.is_ability_ready(ability):
-					if u.command_cast_ability(ability, u.global_position, u):
-						cast_any = true
-			return cast_any
-		var caster: Unit = SubgroupHelper.find_closest_ready_caster(subgroup_units, ability, get_global_mouse_position())
-		if caster != null:
-			return caster.command_cast_ability(ability, caster.global_position, caster)
-		return false
+		return command_router.issue_ability_order(subgroup_units, ability, get_global_mouse_position(), null, shift_queued)
 
 	active_targeting_ability = ability
 	Input.set_default_cursor_shape(Input.CURSOR_CROSS)
@@ -345,10 +340,14 @@ func confirm_ability_target_at(world_pos: Vector2, shift_queued: bool = false) -
 	var ability: AbilityData = active_targeting_ability
 	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
 		var placed: bool = command_router.confirm_build_placement(ability, world_pos, get_active_subgroup_units(), shift_queued)
-		if placed and not shift_queued:
-			cancel_ability_targeting()
 		if placed:
 			_refresh_idle_workers(true)
+			var keep_placing: bool = false
+			if shift_queued and ability.building_to_build != null:
+				var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+				keep_placing = (econ == null or econ.can_afford(Unit.Team.PLAYER, ability.building_to_build.get_cost_dict()))
+			if not keep_placing:
+				cancel_ability_targeting()
 		return placed
 
 	var subgroup_units: Array[Unit] = get_active_subgroup_units()
@@ -356,15 +355,8 @@ func confirm_ability_target_at(world_pos: Vector2, shift_queued: bool = false) -
 	if ability.target_type == AbilityData.TargetType.UNIT_TARGET and target_enemy == null:
 		return false
 
-	var caster: Unit = SubgroupHelper.find_closest_ready_caster(subgroup_units, ability, world_pos)
+	var accepted: bool = command_router.issue_ability_order(subgroup_units, ability, world_pos, target_enemy, shift_queued)
 	cancel_ability_targeting()
-	if caster == null:
-		return false
-
-	var cast_point: Vector2 = target_enemy.global_position if target_enemy != null else world_pos
-	var accepted: bool = caster.command_cast_ability(ability, cast_point, target_enemy)
-	if accepted:
-		command_router.spawn_move_marker(cast_point, MoveMarker.MarkerStyle.ATTACK)
 	return accepted
 
 
@@ -722,7 +714,9 @@ func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
 		if world_rect.has_point(unit.global_position):
 			hits.append(unit)
 
-	if shift_pressed and not selected_units.is_empty():
+	if shift_pressed:
+		if hits.is_empty():
+			return
 		var combined: Array[Unit] = selected_units.duplicate()
 		for u: Unit in hits:
 			if not combined.has(u):
@@ -873,11 +867,13 @@ func _on_inspected_entity_removed(_entity: Variant = null) -> void:
 func _try_handle_ability_hotkey_event(event: InputEvent, action_name: StringName, hotkey_label: String) -> bool:
 	if not event.is_action_pressed(action_name):
 		return false
+	var shift_queued: bool = Input.is_key_pressed(KEY_SHIFT)
 	if event is InputEventKey:
 		var key_ev: InputEventKey = event
-		if key_ev.ctrl_pressed or key_ev.shift_pressed or key_ev.alt_pressed or key_ev.echo:
+		if key_ev.ctrl_pressed or key_ev.alt_pressed or key_ev.echo:
 			return false
-	if request_ability_by_hotkey(hotkey_label):
+		shift_queued = key_ev.shift_pressed or shift_queued
+	if request_ability_by_hotkey(hotkey_label, shift_queued):
 		get_viewport().set_input_as_handled()
 		return true
 	return false

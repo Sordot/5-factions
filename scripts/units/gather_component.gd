@@ -145,7 +145,8 @@ func _tick_gathering(owner_unit: Unit, delta: float) -> void:
 				owner_unit.command_state = Unit.CommandState.IDLE
 		else:
 			cancel()
-			owner_unit.command_state = Unit.CommandState.IDLE
+			if not owner_unit.advance_command_queue():
+				owner_unit.command_state = Unit.CommandState.IDLE
 		return
 
 	# Keep worker stationary and oriented toward the Biomass node while harvesting.
@@ -245,7 +246,8 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 func _get_approach_point(owner_unit: Unit, target_center: Vector2, target_radius: float) -> Vector2:
 	var offset: Vector2 = owner_unit.global_position - target_center
 	var dir: Vector2 = offset.normalized() if offset.length_squared() > 0.01 else Vector2.RIGHT
-	return target_center + dir * (target_radius * 0.75)
+	var unit_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 13.0
+	return target_center + dir * (target_radius + unit_r + 8.0)
 
 
 func _ensure_valid_target_node(owner_unit: Unit) -> bool:

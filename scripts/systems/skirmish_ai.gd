@@ -125,7 +125,7 @@ func _assign_idle_workers(core: Building) -> void:
 	for unit: Unit in _get_team_units(ai_team):
 		if unit.get_unit_type_id() != &"worker":
 			continue
-		if unit.command_state != Unit.CommandState.IDLE:
+		if unit.command_state != Unit.CommandState.IDLE or not unit.command_queue.is_empty():
 			continue
 		if unit.is_carrying_cargo():
 			if unit.command_return_cargo(core):
@@ -139,7 +139,7 @@ func _assign_idle_harvesters() -> void:
 	for unit: Unit in _get_team_units(ai_team):
 		if unit.get_unit_type_id() != &"silica_harvester":
 			continue
-		if unit.command_state != Unit.CommandState.IDLE:
+		if unit.command_state != Unit.CommandState.IDLE or not unit.command_queue.is_empty():
 			continue
 		if unit.is_carrying_cargo():
 			if unit.command_return_cargo():
@@ -200,7 +200,7 @@ func _assign_idle_engineers() -> void:
 	if open_mainframes.is_empty():
 		return
 	for unit: Unit in _get_team_units(ai_team):
-		if not unit.can_staff_compute() or unit.command_state != Unit.CommandState.IDLE:
+		if not unit.can_staff_compute() or unit.command_state != Unit.CommandState.IDLE or not unit.command_queue.is_empty():
 			continue
 		for mf: Building in open_mainframes:
 			if mf.can_accept_staff(unit):

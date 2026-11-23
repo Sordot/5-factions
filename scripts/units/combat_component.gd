@@ -16,6 +16,16 @@ func can_attack(owner_unit: Unit) -> bool:
 	return owner_unit != null and owner_unit.data != null and owner_unit.data.attack_damage > 0.0 and owner_unit.data.attack_range > 0.0
 
 
+func should_pursue_targets(owner_unit: Unit) -> bool:
+	if owner_unit == null or not is_instance_valid(owner_unit):
+		return false
+	if owner_unit.stance == Unit.Stance.HOLD_POSITION:
+		return false
+	if owner_unit.data != null and (owner_unit.data.can_gather or owner_unit.data.can_staff_compute):
+		return false
+	return true
+
+
 func is_valid_target(owner_unit: Unit, candidate: Variant) -> bool:
 	if owner_unit == null or not is_instance_valid(owner_unit) or candidate == null or not is_instance_valid(candidate):
 		return false

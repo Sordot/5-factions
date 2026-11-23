@@ -1,171 +1,102 @@
-# Milestone 1.4 Plan: Idle Worker Detection, Shift-Click Command Queues & Selection/AI Pass
+# Milestone 1.4b Plan: Shift Build/Ability Queuing, Shift Selection, Unit Stances & Queue/AI/Pathing Hardening
 
 **Target Directory:** `docs/agy_plans/12_idle_worker_command_queues_and_ai_pass.md`
 **Primary Scene:** `res://scenes/maps/skirmish_arena_01.tscn` (and `res://scenes/test/milestone_0_test.tscn`)
-**Reference Docs:** `docs/project_reference_doc_gdd.md`, `docs/technical_glossary_and_specs.md`, `docs/agy_plans/aggro_ai_toggle_polish_bundle_plan.md`
+**Reference Docs:** `docs/agy_plans/idle_workers_command_queues_ai_pass_plan.md`, `docs/agy_plans/faction_01_genesis_v2_the_vat_born_plan.md`, `docs/technical_glossary_and_specs.md`
 
-## 1. Objective & Scope
+## 1. Current Baseline (Already Implemented in Repo)
 
-Perform a targeted gameplay-feel and systems pass across **selection logic**, **multi-step command queuing (`Shift + Right-Click`)**, and **Skirmish AI decision-making**, so players can:
+Your latest push (`idle_workers_command_queues_ai_pass_plan.md`) has already landed the core foundation for idle workers, `Shift + Right-Click` command queuing, and the initial AI pass:
 
-1. **Detect & Select Idle Workers Effortlessly:** Spot idle workers (`Worker` / `Harvester` / `Engineer`) via a live HUD indicator/button and cycle or select them with a single click or hotkey (`F1` / `Tab` or dedicated HUD badge) to immediately assign tasks.
+* **Idle Worker Detection & HUD (`unit.gd`, `selection_controller.gd`, `resource_hud.gd`):** `is_idle_worker()` tracking, `F1` / HUD button cycling, and camera focus are implemented.
+* **Core `Shift + Right-Click` Command Queue (`unit.gd`, `command_router.gd`, `ui/overlays/command_queue_overlay.gd`):** `command_queue` storage, sequential execution of right-click move/attack/gather/build-assist orders, and the `CommandQueueOverlay` path visualizer are already in place.
+* **Initial Skirmish AI Worker/Pathing Pass (`scripts/systems/skirmish_ai.gd`):** Worker idle recovery and obstacle navigation updates have been integrated.
 
-2. **Queue Sequential Commands with `Shift + Right-Click`:** Chain movement waypoints, attack/A-move orders, resource gathering, building construction/staffing, or multi-building waypoints onto any pilotable `Team.PLAYER` unit—enabling customized flanking routes for combat squads and multi-stop routines for workers.
+## 2. Objective & Remaining Scope (Delta Only)
 
-3. **Refine Selection & Skirmish AI Polish:** Clean up selection/command edge cases in `selection_controller.gd` and `command_router.gd`, and make `skirmish_ai.gd` smarter about worker allocation, flanking/objective waves, and not getting stuck on idle or blocked states.
+Build directly on top of the existing `command_queue`, `CommandQueueOverlay`, and `SelectionController` infrastructure to add the remaining control modifiers, tactical stance mechanics, and fluid worker pathing/avoidance—without duplicating or overwriting existing `Shift + Right-Click` or `F1` idle-worker systems:
 
-### In Scope
+1. **`Shift + Left-Click` Multi-Building Construction Queuing (`selection_controller.gd`, `command_router.gd`, `build_ghost_preview.gd`, `unit.gd`):**
+   * When placing a building via `BuildGhostPreview` while holding `Shift`, deduct resources, place the building scaffold, **append** the `BUILD` task to the selected worker's existing `command_queue` (instead of clearing/interrupting its current job), and **keep `BuildGhostPreview` active** so the player can immediately chain-place additional structures (e.g., multiple **Synapse Pylons** or a **Cloning Vat** + **Silica Condenser**) until `Esc` or `Right-Click` exits placement mode—or until resources run out.
 
-1. **Idle Worker Detection & Selection (`selection_controller.gd`, `unit.gd`, `resource_hud.gd` / `selection_hud.gd`):**
+2. **`Shift` Ability Queuing (`command_router.gd`, `selection_controller.gd`, `ability_component.gd`, `unit.gd`):**
+   * When confirming a targeted ability (e.g., **Spore Barrage**, **Seismic Slam**, **Static Pulse**) or triggering an instant ability (e.g., **Adrenal Surge**) while holding `Shift`:
+     * If the unit is busy or already has queued waypoints, **append** a `CAST_ABILITY` step to `command_queue` so the ability executes sequentially at the end of its flanking/movement route.
+     * Render a distinct violet/magenta waypoint marker in `CommandQueueOverlay` for queued `CAST_ABILITY` steps.
 
-   * Define an explicit `is_idle_worker() -> bool` check on `Unit` (true for `Team.PLAYER` worker units that are alive, not mid-ability/channeling, have no queued commands, and are not actively gathering, constructing, staffing, or moving toward a task).
+3. **`Shift + Left-Click` Selection Add / Remove (`selection_controller.gd`):**
+   * **`Shift + Left-Click` on a `Team.PLAYER` Unit:** If the unit is not currently in `selected_units`, add it to the selection; if it is already in `selected_units`, **remove** it from the selection (allowing quick single-worker peel-offs from a group).
+   * **`Shift + Drag-Box`:** Appends all boxed `Team.PLAYER` units to `selected_units` without duplicating existing entries (and without wiping selection if the drag box catches empty ground while `Shift` is held).
 
-   * Track live `idle_worker_count: int` and emit `idle_workers_changed(idle_workers: Array[Unit])` from `SelectionController` (or a lightweight world/selection helper).
+4. **Unit Combat Stances — `Aggressive` vs. `Hold Position` (`unit.gd`, `combat_component.gd`, `command_router.gd`, `selection_hud.gd`):**
+   * Add `enum Stance { AGGRESSIVE, HOLD_POSITION }` (`var stance: Stance = Stance.AGGRESSIVE`) on `Unit` with `set_stance(new_stance: Stance)`.
+   * **`AGGRESSIVE` (Default):** Units acquire targets in `aggro_range` and pursue enemies within leash range (when global `Aggro AI` is enabled).
+   * **`HOLD_POSITION` (Hotkey `H` or Command Card button):**
+     * Immediately halts current movement and clears movement orders.
+     * Unit will **not** move or chase enemies that enter `aggro_range` (preventing queued flankers like **Stingers** or **Chrysalis Mortars** from breaking formation early), while still firing at enemies that step directly inside its weapon `attack_range`.
+     * Issuing an explicit `A`-Move or `AGGRESSIVE` command restores `Stance.AGGRESSIVE`.
 
-   * Add an **Idle Worker Badge / Button** (e.g., `Idle Workers: 2 [Space / F1]`—keep `Tab` for subgroup cycling so there is no hotkey collision!) in the HUD that:
+5. **Fluid Worker Pathfinding & Collision/Obstacle Avoidance (`unit.gd`, `gather_component.gd`, `building.gd`, `arena_nav_region.gd`):**
+   * **Eliminate Corner Snagging on Terrain & Placed Buildings:**
+     * When new buildings or construction scaffolds are placed at runtime (`building.gd`), ensure they dynamically carve into the `NavigationRegion2D` polygon (or register with `arena_nav_region.gd` to trigger a clean rebake) with sufficient `agent_radius` margin so `NavigationAgent2D` plots paths *around* structures rather than straight through their `StaticBody2D` colliders.
+     * Tune `NavigationAgent2D` `path_desired_distance` and `target_desired_distance` on workers (`Worker`, `Harvester`, `Engineer`) and enable RVO `avoidance_enabled = true` (or soft steering separation impulses) so workers smoothly slide past each other on busy **BiomassNode ↔ Nexus Vat** and **SilicaVein ↔ Silica Condenser** mineral lines instead of deadlocking head-on.
+   * **Anti-Stuck Slide & Detour Recovery (`unit.gd` / `gather_component.gd`):**
+     * Track short-window displacement progress while a unit is in a moving/gathering/building state; if a worker's actual movement speed drops below a threshold (`< 15%` of `move_speed` for `> 0.6s`) while blocked by another unit or collider corner, apply a tangential perpendicular steering nudge and force a `NavigationAgent2D` path refresh so it glides around the obstruction instead of vibrating in place.
+     * During active `GATHER` / `RETURN_CARGO` trips (`gather_component.gd`), temporarily soften or ignore collision between friendly harvesting workers (or use dedicated RVO avoidance layers) so two workers crossing paths at a `BiomassNode` or `Nexus Vat` never block each other.
 
-     * Shows the count of idle workers and highlights when `> 0`.
-
-     * **Left-Clicking** selects the next idle worker (cycling cleanly through all idle workers across repeated clicks) and optionally pans/focuses the camera onto it if off-screen.
-
-2. **`Shift + Right-Click` Command Queuing for All Pilotable Units (`unit.gd`, `command_router.gd`, `selection_controller.gd`):**
-
-   * Maintain an ordered `command_queue: Array[Dictionary]` on `Unit` alongside `active_command: Dictionary`.
-
-   * **Non-Shift Right-Click (`shift_pressed == false`):** Clears `command_queue` and immediately executes the new order (`MOVE`, `ATTACK_MOVE`, `ATTACK_TARGET`, `GATHER`, `BUILD`, `STAFF`).
-
-   * **Shift + Right-Click (`shift_pressed == true`):**
-
-     * If the unit is currently idle (`active_command.is_empty()` and in `IDLE`), starts executing the new order immediately.
-
-     * If the unit is already busy executing an order, **appends** the new order to `command_queue` without interrupting its current action.
-
-     * When the active order completes (e.g., reaches move destination, finishes building/gathering task, or target dies/is reached), automatically pops and starts the next entry in `command_queue`.
-
-   * **Supported Queued Actions:**
-
-     * **Military / Combat Units:** Queued `MOVE` and `ATTACK_MOVE` waypoints to trace custom flanking routes around terrain obstacles or toward the **Data Hyper-Uplink** / enemy base, plus queued `ATTACK_TARGET` orders.
-
-     * **Workers (`Worker` / `Harvester` / `Engineer`):** Queued `MOVE` orders between placed buildings (e.g., walking from `Nexus Vat` → `Silica Condenser` → `Wetware Mainframe`), queued `GATHER` orders on resource nodes, or queued `BUILD` / `STAFF` actions.
-
-   * **Waypoint Path Preview (`ui/overlays/command_queue_overlay.gd`):** When `Team.PLAYER` units are selected and have a non-empty `command_queue`, draw connected lines and numbered/indexed waypoint markers from the unit's current position through each queued destination so flanking paths and multi-building routes are visually unmistakable.
-
-3. **Selection & Skirmish AI Pass (`selection_controller.gd`, `command_router.gd`, `skirmish_ai.gd`):**
-
-   * **Selection Polish:** Ensure `Shift + Left-Click` cleanly toggles/adds units, `Right-Click` on empty ground or non-actionable targets doesn't accidentally wipe an active `Shift`-queued path unexpectedly, and inspecting a building or resource node remains crisp and predictable.
-
-   * **Skirmish AI Improvements (`skirmish_ai.gd`):**
-
-     * Keep AI workers utilized (re-assigning idle AI workers to nearby `BiomassNode`s or `SilicaVein`s instead of leaving them idle).
-
-     * Improve wave coordination & flanking/objective behavior so AI squads don't stall behind obstacles or get stuck on unreachable targets, while still respecting the `Aggro AI` toggle (`F10` / `SandboxDebugPanel`).
+6. **Queue & AI Edge-Case Hardening (`unit.gd`, `command_queue_overlay.gd`, `skirmish_ai.gd`):**
+   * Ensure `is_idle_worker()` returns `false` whenever a worker has pending `BUILD` or `MOVE` items in `command_queue`.
+   * Guard all queued target references (`target_node` inside `command_queue` dictionaries) with `is_instance_valid()` so if a queued enemy unit, resource node, or construction scaffold is destroyed before the unit reaches that step, the unit cleanly skips that entry and advances to the next queued command.
 
 ### Out of Scope
 
-* New factions, buildings, or unit types beyond `GENESIS_V2`.
+* Re-implementing `F1` idle-worker detection/cycling, `Shift + Right-Click` ground/gather queuing, or `CommandQueueOverlay` from scratch (extend the existing implementations).
+* New factions, units, or upgrades beyond `GENESIS_V2`.
+* `Shift + 1..9` control group appending or AI Fog-of-War scouting changes.
 
-* Complex formation-offset math or multi-player/AI full micro-kiting trees.
+## 3. File & Architecture Delta Plan
 
-* Save/load match state.
+### Existing Files to Extend (No New Files Required)
 
-## 2. File & Architecture Plan
+* **`scripts/units/unit.gd`**
+  * Add `enum Stance { AGGRESSIVE, HOLD_POSITION }`, `var stance: Stance = Stance.AGGRESSIVE`, and `set_stance(new_stance: Stance) -> void`.
+  * Extend `command_queue` step execution to handle `"BUILD"` (moving to the placed scaffold and initiating construction) and `"CAST_ABILITY"` (triggering `AbilityComponent` at the queued target point/entity, then calling `_advance_command_queue()`).
+  * Validate `is_instance_valid(cmd.get("target"))` when popping queued steps so destroyed targets are safely skipped.
+  * Add anti-stuck displacement monitoring and tangential steering/repath recovery (`_apply_anti_stuck_steering(delta)`) plus RVO `avoidance_enabled` velocity blending so units/workers route smoothly around terrain corners, buildings, and crossing allies.
 
-### New Files to Create
+* **`scripts/units/gather_component.gd`**
+  * Enable smooth passing between friendly workers during `GATHER` / `RETURN_CARGO` cycles (soft separation / avoidance priority rather than hard `CharacterBody2D` head-on collision deadlocks) and ensure interaction/drop-off arrival radii account for building collision margins so workers don't try to walk inside a `Nexus Vat` or `Silica Condenser` hitbox.
 
-* `ui/overlays/command_queue_overlay.gd`
+* **`scripts/buildings/building.gd` & `scripts/world/arena_nav_region.gd`**
+  * Ensure newly placed buildings/scaffolds trigger a `NavigationRegion2D` geometry update (and remove their footprint on destruction) with proper navigation agent margin so workers immediately path around newly constructed structures.
 
-  * Lightweight world-space `Node2D` rendering polyline segments and small destination rings for selected units' `command_queue` waypoints (color-coded by queued action: cyan for move, amber/red for attack/A-move, emerald for gather/build/staff).
+* **`scripts/units/combat_component.gd`**
+  * In idle/auto-acquire target checks, respect `unit.stance == Unit.Stance.HOLD_POSITION`: allow stationary attacks against targets already inside `attack_range`, but suppress pursuit/chase movement toward targets only inside `aggro_range`.
 
-### Existing Files to Extend
+* **`scripts/controllers/selection_controller.gd`**
+  * Update single-click and drag-box selection handlers to check `Input.is_key_pressed(KEY_SHIFT)`:
+    * Toggle membership (add if absent, remove if present) when `Shift + Left-Clicking` a friendly unit.
+    * Merge newly drag-boxed friendly units into `selected_units` without clearing existing members when `Shift` is held.
+  * In building placement confirmation, check `shift_held`: if `true`, pass `append_to_queue = true` to `CommandRouter` and keep `BuildGhostPreview` active (exiting automatically only if the player can no longer afford another building of that type).
+  * In ability target confirmation, forward `shift_held` to `CommandRouter`.
 
-* `scripts/units/unit.gd`
+* **`scripts/controllers/command_router.gd`**
+  * Update build placement routing and ability execution routing to accept `append_to_queue: bool = false`, appending `"BUILD"` or `"CAST_ABILITY"` commands onto selected units when `true`.
+  * Wire hotkey `H` (`KEY_H`) to toggle/apply `Unit.Stance.HOLD_POSITION` on selected `Team.PLAYER` units.
 
-  * Add `var command_queue: Array[Dictionary] = []` and helper methods:
+* **`ui/overlays/command_queue_overlay.gd`**
+  * Add color/icon differentiation for `"BUILD"` (emerald square/ring) and `"CAST_ABILITY"` (violet reticle ring) waypoints alongside existing move/attack waypoints.
 
-    * `issue_command(cmd: Dictionary, append_to_queue: bool = false) -> void`
-
-    * `clear_command_queue() -> void`
-
-    * `_advance_command_queue() -> void` (invoked automatically when the active movement/task/attack step finishes)
-
-    * `is_idle_worker() -> bool`
-
-* `scripts/units/gather_component.gd` & `scripts/units/combat_component.gd`
-
-  * Emit or notify `Unit` when a `MOVE` arrival, `ATTACK_TARGET` completion, or one-shot task completes so `_advance_command_queue()` pops the next queued command cleanly (while continuous loops like `GATHER` keep looping unless a new command is queued after them).
-
-* `scripts/controllers/command_router.gd`
-
-  * Accept `shift_queued: bool = false` on right-click and command dispatch methods (`issue_move_order`, `issue_attack_move_order`, `issue_attack_target_order`, `issue_gather_order`, `issue_build_order`, `issue_staff_order`), forwarding `append_to_queue = shift_queued` to each unit in `selected_units`.
-
-* `scripts/controllers/selection_controller.gd`
-
-  * Detect `shift_pressed` (`event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT` → `event.shift_pressed` or `Input.is_key_pressed(KEY_SHIFT)`) and pass it to `CommandRouter`.
-
-  * Add `select_next_idle_worker(focus_camera: bool = true) -> void` and emit `idle_workers_updated(count: int)` whenever units spawn, die, change state, or start/finish tasks.
-
-  * Bind a dedicated idle-worker shortcut (e.g., `KEY_F1` or `KEY_PERIOD` / HUD button—leaving `KEY_TAB` untouched for subgroup cycling).
-
-* `ui/hud/resource_hud.gd` & `ui/hud/resource_hud.tscn` (or `selection_hud.gd` / `.tscn`)
-
-  * Add a compact **Idle Worker button** (`Idle: N`) that lights up when `N > 0` and triggers `SelectionController.select_next_idle_worker()`.
-
-* `scripts/systems/skirmish_ai.gd`
-
-  * Audit worker assignment, idle-worker recovery, and attack-wave pathing/target selection so AI forces actively harvest, expand, and push toward the **Data Hyper-Uplink** or player base without stalling.
-
-## 3. Detailed Behavior Specifications
-
-### A. Idle Worker Definition & Cycling
-
-1. A unit qualifies as an **Idle Worker** when:
-
-   * `team == Team.PLAYER` and `is_inside_tree()` and `hp > 0`
-
-   * Its `UnitData` is a worker/economy role (e.g., `can_gather` or `can_staff_compute` or `unit_type_id` in `[&"worker", &"silica_harvester", &"engineer"]`)
-
-   * `command_queue.is_empty()` and it is currently in `IDLE` state with no active gather, construction, staff, or move target.
-
-2. Clicking the **Idle Worker** HUD button (or pressing `F1`):
-
-   * Collects all current idle workers sorted deterministically (e.g., by `get_instance_id()`).
-
-   * Cycles to the next idle worker in the list (`_idle_cycle_index = (_idle_cycle_index + 1) % idle_workers.size()`), selects that worker (`selected_units = [worker]`, clears `inspected_entity`), and gently pans `RTSCamera` toward it if outside the current view.
-
-### B. `Shift + Right-Click` Command Queuing Rules
-
-1. **Flanking Route Example (Military Units):**
-
-   * Player selects a squad of `Clone Trooper`s / `Stinger`s.
-
-   * Player `Right-Clicks` near a northern or southern flank lane (starts moving immediately).
-
-   * Player holds `Shift` and `Right-Clicks` a second point behind enemy cover, then `Shift + Right-Clicks` onto an enemy target or `A`-moves into the flank.
-
-   * `CommandQueueOverlay` draws the connected multi-leg path; each unit follows waypoint 1, then waypoint 2, then engages at the final point.
-
-2. **Multi-Building / Task Chain Example (Workers):**
-
-   * Player selects a `Worker` (or `Engineer`).
-
-   * Player `Right-Clicks` a `Silica Condenser` (moves there), holds `Shift` and `Right-Clicks` a `Wetware Mainframe` (queues next stop), and optionally `Shift + Right-Clicks` a `BiomassNode` or `ComputeNode` (queues task after arrival).
-
-   * The worker visits each building in order and executes the final task upon reaching it.
-
-3. **Clearing vs. Appending:**
-
-   * A plain `Right-Click` (without `Shift`) calls `clear_command_queue()` before starting the new order so accidental single right-clicks never leave hidden leftover waypoints.
+* **`ui/hud/selection_hud.gd`**
+  * Highlight the **`[H] Hold Position`** Command Card button whenever the inspected/selected unit group is in `Stance.HOLD_POSITION`.
 
 ## 4. Verification Checklist for `agy`
 
-Before concluding this milestone, verify in `skirmish_arena_01.tscn`:
+Before concluding this pass, verify in `skirmish_arena_01.tscn`:
 
-* \[ \] **Idle Worker Detection & Cycling:** When workers finish a task and become idle, the HUD **Idle Worker** button displays the accurate count and lights up; clicking it (or pressing `F1`) selects and cycles through idle workers cleanly.
-
-* \[ \] **Military Flanking via `Shift + Right-Click`:** Selecting combat units, right-clicking a flank waypoint, and `Shift + Right-Click`ing 1–2 additional waypoints renders the queued path preview and moves the units sequentially along the custom flank route.
-
-* \[ \] **Worker Multi-Building Queue via `Shift + Right-Click`:** Selecting a worker and using `Shift + Right-Click` across two placed buildings (and/or a resource node) moves the worker sequentially between them without dropping earlier queued stops.
-
-* \[ \] **Plain Right-Click Reset:** Issuing a normal `Right-Click` (without `Shift`) clears any previously queued waypoints and immediately redirects the unit(s).
-
-* \[ \] **Selection & Skirmish AI Pass:** Selection/inspection transitions work smoothly with no stray orders, and `skirmish_ai.gd` keeps its workers harvesting and sends cohesive waves without getting stuck on obstacles.
+* [ ] **`Shift + Left-Click` Multi-Building Queue:** Select a `Worker`, choose **Synapse Pylon** (or **Cloning Vat**), hold `Shift`, and `Left-Click` 2–3 valid locations; verify the build ghost stays active after each placement, all waypoints appear in `CommandQueueOverlay`, and the worker constructs them sequentially without being counted as an idle worker mid-chain.
+* [ ] **`Shift` Ability Queuing:** Select a **Clone Trooper** or **Chrysalis Mortar**, issue a move waypoint, hold `Shift` and queue **Adrenal Surge** or **Spore Barrage**; verify the ability triggers sequentially after reaching the waypoint.
+* [ ] **`Shift + Left-Click` Selection Toggle:** Drag-select a group of workers or infantry, `Shift + Left-Click` one selected unit to remove it from the group, and `Shift + Left-Click` an unselected unit to add it back.
+* [ ] **Hold Position Stance (`H`):** Press `H` on combat units; verify they stop moving, ignore enemies outside `attack_range`, still shoot enemies that enter `attack_range`, and highlight the `Hold Position` button in `SelectionHUD`.
+* [ ] **Fluid Worker Pathing & Obstacle Avoidance:** Send 4–6 `Worker`s / `Harvester`s across terrain pillars, newly placed buildings, and each other on busy resource lines; verify they path cleanly around structures and slide past crossing workers without getting stuck or vibrating on corners.
+* [ ] **Queued Target Destruction Safety:** Queue a unit to attack/build/gather a target that gets destroyed beforehand; verify the unit cleanly skips the invalidated step and advances to the next queued command with zero errors.

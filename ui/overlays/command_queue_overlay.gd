@@ -65,20 +65,43 @@ func _draw() -> void:
 
 		var step_idx: int = 1
 		for cmd: Dictionary in unit.command_queue:
-			var target_world: Variant = _resolve_cmd_pos(cmd)
+			var cmd_type: StringName = cmd.get("type", &"move")
+			var target_world: Variant = _resolve_cmd_pos(cmd, to_global(prev_pt))
 			if not (target_world is Vector2):
 				continue
 			var next_pt: Vector2 = to_local(target_world as Vector2)
 			var col: Color = _color_for_command(cmd)
 
-			# Glow underlay + crisp segment
-			draw_line(prev_pt, next_pt, Color(col.r, col.g, col.b, 0.22), 4.5, true)
-			draw_line(prev_pt, next_pt, col, 2.0, true)
+			# Glow underlay + crisp segment (skip zero-length segment for anchored instant casts)
+			if prev_pt.distance_squared_to(next_pt) > 4.0:
+				draw_line(prev_pt, next_pt, Color(col.r, col.g, col.b, 0.22), 4.5, true)
+				draw_line(prev_pt, next_pt, col, 2.0, true)
 
-			# Waypoint marker ring + step index
-			var ring_r: float = 8.0 + 1.2 * sin(_pulse_time * 4.0 + float(step_idx))
-			draw_circle(next_pt, ring_r * 0.72, Color(0.05, 0.09, 0.14, 0.82))
-			draw_arc(next_pt, ring_r, 0.0, TAU, 20, col, 1.8, true)
+			var pulse: float = 1.2 * sin(_pulse_time * 4.0 + float(step_idx))
+			var ring_r: float = 8.0 + pulse
+
+			if cmd_type == &"cast_ability":
+				# Distinct violet/magenta ability reticle + cardinal crosshair ticks
+				var ret_r: float = ring_r + 2.5
+				draw_circle(next_pt, ret_r * 0.72, Color(0.08, 0.03, 0.14, 0.86))
+				draw_arc(next_pt, ret_r, 0.0, TAU, 24, col, 2.0, true)
+				var tick_in: float = ret_r - 2.0
+				var tick_out: float = ret_r + 5.0
+				draw_line(next_pt + Vector2(tick_in, 0.0), next_pt + Vector2(tick_out, 0.0), col, 1.8, true)
+				draw_line(next_pt - Vector2(tick_in, 0.0), next_pt - Vector2(tick_out, 0.0), col, 1.8, true)
+				draw_line(next_pt + Vector2(0.0, tick_in), next_pt + Vector2(0.0, tick_out), col, 1.8, true)
+				draw_line(next_pt - Vector2(0.0, tick_in), next_pt - Vector2(0.0, tick_out), col, 1.8, true)
+			elif cmd_type == &"build":
+				# Distinct emerald square + inner ring for queued construction
+				var sq_half: float = ring_r + 1.5
+				var sq_rect: Rect2 = Rect2(next_pt - Vector2(sq_half, sq_half), Vector2(sq_half * 2.0, sq_half * 2.0))
+				draw_rect(sq_rect, Color(0.04, 0.12, 0.09, 0.84), true)
+				draw_rect(sq_rect, col, false, 2.0)
+				draw_arc(next_pt, ring_r * 0.62, 0.0, TAU, 16, Color(col.r, col.g, col.b, 0.65), 1.2, true)
+			else:
+				# Standard waypoint marker ring
+				draw_circle(next_pt, ring_r * 0.72, Color(0.05, 0.09, 0.14, 0.82))
+				draw_arc(next_pt, ring_r, 0.0, TAU, 20, col, 1.8, true)
 
 			var label: String = str(step_idx)
 			var t_sz: Vector2 = font.get_string_size(label, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
@@ -88,9 +111,36 @@ func _draw() -> void:
 			step_idx += 1
 
 
-func _resolve_cmd_pos(cmd: Dictionary) -> Variant:
+func _resolve_cmd_pos(cmd: Dictionary, anchor_world: Vector2) -> Variant:
+	var cmd_type: StringName = cmd.get("type", &"move")
+	if cmd_type == &"cast_ability":
+		var ab: AbilityData = cmd.get("ability", null) as AbilityData
+		if ab != null and ab.target_type == AbilityData.TargetType.INSTANT:
+			return anchor_world
+		if ab != null and ab.target_type == AbilityData.TargetType.UNIT_TARGET:
+			var ab_t: Variant = cmd.get("target", null)
+			if ab_t == null or not is_instance_valid(ab_t) or not (ab_t is Unit):
+				return null
+			var u_t: Unit = ab_t
+			if u_t.is_dead or u_t.is_queued_for_deletion():
+				return null
+			return u_t.global_position
+
 	var target: Variant = cmd.get("target", null)
-	if target != null and is_instance_valid(target) and target is Node2D:
+	if cmd_type == &"attack_target" or cmd_type == &"build" or cmd_type == &"gather" or cmd_type == &"staff":
+		if target == null or not is_instance_valid(target) or not (target is Node2D):
+			return null
+		if (target as Node).is_queued_for_deletion():
+			return null
+		if target is Unit and (target as Unit).is_dead:
+			return null
+		if target is Building and ((target as Building).is_destroyed or (cmd_type == &"build" and (target as Building).is_constructed)):
+			return null
+		if target is ResourceNode and (target as ResourceNode).is_depleted():
+			return null
+		return (target as Node2D).global_position
+
+	if target != null and is_instance_valid(target) and target is Node2D and not (target as Node).is_queued_for_deletion():
 		return (target as Node2D).global_position
 	if cmd.has("pos"):
 		return cmd["pos"]
@@ -104,7 +154,11 @@ func _color_for_command(cmd: Dictionary) -> Color:
 			return Color(1.0, 0.38, 0.28, 0.92)
 		&"gather":
 			return Color(0.26, 1.0, 0.58, 0.92)
-		&"build", &"staff", &"return_cargo":
+		&"build":
+			return Color(0.20, 0.98, 0.68, 0.96)
+		&"cast_ability":
+			return Color(0.88, 0.36, 1.0, 0.96)
+		&"staff", &"return_cargo":
 			return Color(1.0, 0.80, 0.28, 0.92)
 		_:
 			return Color(0.24, 0.94, 1.0, 0.90)

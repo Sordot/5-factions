@@ -1,20 +1,66 @@
 class_name ArenaNavRegion
 extends NavigationRegion2D
 
+const NAV_BAKE_GROUP: StringName = &"nav_bake_obstacles"
+
 @export var arena_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 @export var agent_radius: float = 24.0
 @export var obstacle_group_name: StringName = &"terrain_obstacles"
 
+var _rebake_queued: bool = false
+
 
 func _ready() -> void:
-	call_deferred("rebake_navmesh")
+	add_to_group("arena_nav_region")
+	request_rebake()
+
+
+func request_rebake() -> void:
+	if _rebake_queued:
+		return
+	_rebake_queued = true
+	call_deferred("_perform_deferred_rebake")
+
+
+func _perform_deferred_rebake() -> void:
+	_rebake_queued = false
+	if not is_inside_tree():
+		return
+	rebake_navmesh()
 
 
 func rebake_navmesh() -> void:
+	if not is_inside_tree():
+		return
+
+	# Synchronize nav bake group with all static terrain obstacles and living buildings/scaffolds.
+	for old_node: Node in get_tree().get_nodes_in_group(NAV_BAKE_GROUP):
+		if not is_instance_valid(old_node):
+			continue
+		if old_node is Building:
+			var b_old: Building = old_node
+			if b_old.is_destroyed or b_old.is_queued_for_deletion():
+				b_old.remove_from_group(NAV_BAKE_GROUP)
+
+	for node: Node in get_tree().get_nodes_in_group(obstacle_group_name):
+		if is_instance_valid(node) and not node.is_queued_for_deletion():
+			if not node.is_in_group(NAV_BAKE_GROUP):
+				node.add_to_group(NAV_BAKE_GROUP)
+
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node) or not (node is Building):
+			continue
+		var b: Building = node
+		if b.is_destroyed or b.is_queued_for_deletion():
+			if b.is_in_group(NAV_BAKE_GROUP):
+				b.remove_from_group(NAV_BAKE_GROUP)
+		elif not b.is_in_group(NAV_BAKE_GROUP):
+			b.add_to_group(NAV_BAKE_GROUP)
+
 	var nav_poly: NavigationPolygon = NavigationPolygon.new()
 	nav_poly.parsed_geometry_type = NavigationPolygon.PARSED_GEOMETRY_STATIC_COLLIDERS
 	nav_poly.source_geometry_mode = NavigationPolygon.SOURCE_GEOMETRY_GROUPS_EXPLICIT
-	nav_poly.source_geometry_group_name = obstacle_group_name
+	nav_poly.source_geometry_group_name = NAV_BAKE_GROUP
 	nav_poly.parsed_collision_mask = 1
 	nav_poly.agent_radius = agent_radius
 

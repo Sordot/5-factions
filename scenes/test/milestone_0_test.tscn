@@ -1,4 +1,4 @@
-[gd_scene load_steps=25 format=3]
+[gd_scene load_steps=26 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
 [ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
@@ -23,6 +23,7 @@
 [ext_resource type="Script" path="res://scripts/systems/match_manager.gd" id="21_match_manager"]
 [ext_resource type="Script" path="res://ui/overlays/rally_point_overlay.gd" id="22_rally_overlay"]
 [ext_resource type="Script" path="res://ui/overlays/command_queue_overlay.gd" id="23_cmd_queue_overlay"]
+[ext_resource type="Script" path="res://scripts/world/arena_nav_region.gd" id="24_arena_nav"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_arena"]
 vertices = PackedVector2Array(-640, -360, 640, -360, 640, 360, -640, 360)
@@ -46,6 +47,9 @@ script = ExtResource("1_rts_camera")
 
 [node name="NavigationRegion2D" type="NavigationRegion2D" parent="."]
 navigation_polygon = SubResource("NavigationPolygon_arena")
+script = ExtResource("24_arena_nav")
+arena_bounds = Rect2(-640, -360, 1280, 720)
+agent_radius = 20.0
 
 [node name="FloorVisual" type="Polygon2D" parent="NavigationRegion2D"]
 color = Color(0.11, 0.14, 0.18, 1)

@@ -254,6 +254,7 @@ func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Diction
 
 	_rebuild_ability_buttons(active_group)
 	_refresh_all_ability_states()
+	_refresh_stance_button()
 
 
 func _on_inspection_changed(entity: Node) -> void:
@@ -726,6 +727,35 @@ func _on_unit_status_changed(_unit: Unit) -> void:
 	_refresh_selected_units_display()
 
 
+func _on_unit_stance_changed(_unit: Unit, _new_stance: Unit.Stance) -> void:
+	_refresh_stance_button()
+
+
+func _refresh_stance_button() -> void:
+	if btn_cmd_hold == null or _selection_controller == null:
+		return
+	var living_count: int = 0
+	var hold_count: int = 0
+	for item: Variant in _selection_controller.selected_units:
+		if not is_instance_valid(item) or not (item is Unit):
+			continue
+		var u: Unit = item
+		if u.is_dead or u.is_staffed:
+			continue
+		living_count += 1
+		if u.stance == Unit.Stance.HOLD_POSITION:
+			hold_count += 1
+	if living_count > 0 and hold_count == living_count:
+		btn_cmd_hold.text = "Hold: ON (H)"
+		btn_cmd_hold.modulate = Color(1.0, 0.84, 0.32, 1.0)
+	elif hold_count > 0:
+		btn_cmd_hold.text = "Hold* (H)"
+		btn_cmd_hold.modulate = Color(1.0, 0.90, 0.56, 1.0)
+	else:
+		btn_cmd_hold.text = "Hold (H)"
+		btn_cmd_hold.modulate = Color.WHITE
+
+
 func _refresh_selected_units_display() -> void:
 	if _selection_controller == null:
 		return
@@ -739,6 +769,7 @@ func _refresh_selected_units_display() -> void:
 	else:
 		_refresh_squad_left_column(active_group)
 		_rebuild_unit_badges(_active_subgroup_units)
+	_refresh_stance_button()
 
 
 func _connect_unit_signals(units: Array[Unit]) -> void:
@@ -754,6 +785,8 @@ func _connect_unit_signals(units: Array[Unit]) -> void:
 			unit.cargo_changed.connect(_on_unit_cargo_changed)
 		if not unit.status_changed.is_connected(_on_unit_status_changed):
 			unit.status_changed.connect(_on_unit_status_changed)
+		if not unit.stance_changed.is_connected(_on_unit_stance_changed):
+			unit.stance_changed.connect(_on_unit_stance_changed)
 		_connected_units.append(unit)
 
 
@@ -769,6 +802,8 @@ func _disconnect_unit_signals() -> void:
 				unit.cargo_changed.disconnect(_on_unit_cargo_changed)
 			if unit.status_changed.is_connected(_on_unit_status_changed):
 				unit.status_changed.disconnect(_on_unit_status_changed)
+			if unit.stance_changed.is_connected(_on_unit_stance_changed):
+				unit.stance_changed.disconnect(_on_unit_stance_changed)
 	_connected_units.clear()
 
 
@@ -857,7 +892,7 @@ func _rebuild_ability_buttons(active_group: Dictionary) -> void:
 		var captured_ability: AbilityData = ability
 		btn.pressed.connect(func() -> void:
 			if _selection_controller != null:
-				_selection_controller.request_ability_slot(captured_ability)
+				_selection_controller.request_ability_slot(captured_ability, Input.is_key_pressed(KEY_SHIFT))
 		)
 		var meta_line: String = _build_ability_tooltip_meta(ability)
 		_attach_tooltip(btn, ability.display_name, ability.hotkey_label, meta_line, ability.description)

@@ -62,13 +62,16 @@ func _draw() -> void:
 
 	# Tooltip pill above footprint
 	if not _status_text.is_empty():
+		var display_text: String = _status_text
+		if _is_valid and Input.is_key_pressed(KEY_SHIFT):
+			display_text += "  [SHIFT: CHAIN]"
 		var font: Font = ThemeDB.fallback_font
 		var font_size: int = 12
-		var text_size: Vector2 = font.get_string_size(_status_text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
+		var text_size: Vector2 = font.get_string_size(display_text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
 		var pill_w: float = text_size.x + 16.0
 		var pill_h: float = text_size.y + 8.0
 		var pill_pos: Vector2 = Vector2(center.x - pill_w * 0.5, rect.position.y - pill_h - 8.0)
 		draw_rect(Rect2(pill_pos, Vector2(pill_w, pill_h)), Color(0.04, 0.07, 0.11, 0.9), true)
 		draw_rect(Rect2(pill_pos, Vector2(pill_w, pill_h)), line_col, false, 1.2)
 		var text_pos: Vector2 = Vector2(pill_pos.x + 8.0, pill_pos.y + pill_h - 6.0)
-		draw_string(font, text_pos, _status_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, line_col)
+		draw_string(font, text_pos, display_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, line_col)

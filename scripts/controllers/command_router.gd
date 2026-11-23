@@ -215,8 +215,57 @@ func issue_stop(selected_units: Array[Unit]) -> void:
 
 
 func issue_hold(selected_units: Array[Unit]) -> void:
+	var living: Array[Unit] = []
+	var all_holding: bool = true
 	for unit: Unit in selected_units:
-		unit.command_hold_position()
+		if not is_instance_valid(unit) or unit.is_dead or unit.is_staffed:
+			continue
+		living.append(unit)
+		if unit.stance != Unit.Stance.HOLD_POSITION:
+			all_holding = false
+	if living.is_empty():
+		return
+	var target_stance: Unit.Stance = Unit.Stance.AGGRESSIVE if all_holding else Unit.Stance.HOLD_POSITION
+	for unit: Unit in living:
+		unit.set_stance(target_stance)
+
+
+func issue_ability_order(
+	subgroup_units: Array[Unit],
+	ability: AbilityData,
+	target_pos: Vector2,
+	target_enemy: Unit = null,
+	append_to_queue: bool = false
+) -> bool:
+	if subgroup_units.is_empty() or ability == null:
+		return false
+
+	if ability.target_type == AbilityData.TargetType.INSTANT:
+		if ability.cast_on_all_ready:
+			var cast_any: bool = false
+			for u: Unit in subgroup_units:
+				if is_instance_valid(u) and not u.is_dead and not u.is_staffed and u.is_ability_ready(ability):
+					if u.command_cast_ability(ability, u.global_position, u, append_to_queue):
+						cast_any = true
+			return cast_any
+		var instant_caster: Unit = SubgroupHelper.find_closest_ready_caster(subgroup_units, ability, target_pos)
+		if instant_caster != null:
+			return instant_caster.command_cast_ability(ability, instant_caster.global_position, instant_caster, append_to_queue)
+		return false
+
+	if ability.target_type == AbilityData.TargetType.UNIT_TARGET:
+		if target_enemy == null or not is_instance_valid(target_enemy) or target_enemy.is_dead:
+			return false
+
+	var caster: Unit = SubgroupHelper.find_closest_ready_caster(subgroup_units, ability, target_pos)
+	if caster == null:
+		return false
+
+	var cast_point: Vector2 = target_enemy.global_position if (target_enemy != null and is_instance_valid(target_enemy)) else target_pos
+	var accepted: bool = caster.command_cast_ability(ability, cast_point, target_enemy, append_to_queue)
+	if accepted:
+		spawn_move_marker(cast_point, MoveMarker.MarkerStyle.ATTACK)
+	return accepted
 
 
 func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2, target_team: Unit.Team = Unit.Team.PLAYER) -> Dictionary:

@@ -18,6 +18,15 @@ enum CommandState {
 	STAFFING_BUILDING,
 }
 
+enum Stance {
+	AGGRESSIVE,
+	HOLD_POSITION,
+}
+
+const CMD_EXEC_FAILED: int = 0
+const CMD_EXEC_ACTIVE: int = 1
+const CMD_EXEC_IMMEDIATE_DONE: int = 2
+
 const ABILITY_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/ability_component.gd")
 const COMBAT_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/combat_component.gd")
 const HEAL_AURA_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/heal_aura_component.gd")
@@ -36,10 +45,12 @@ signal ability_executed(ability_id: StringName, target_pos: Vector2)
 signal cargo_changed(unit: Unit, resource_type: StringName, amount: int)
 signal staffed_state_changed(unit: Unit, staffed: bool)
 signal command_queue_changed(unit: Unit)
+signal stance_changed(unit: Unit, new_stance: Stance)
 
 @export var team: Team = Team.PLAYER
 @export var data: UnitData
 @export var always_show_health_bar: bool = false
+@export var stance: Stance = Stance.AGGRESSIVE
 
 @onready var collision_shape: CollisionShape2D = get_node_or_null("CollisionShape2D") as CollisionShape2D
 @onready var nav_agent: NavigationAgent2D = get_node_or_null("NavigationAgent2D") as NavigationAgent2D
@@ -74,6 +85,12 @@ var _desired_move_velocity: Vector2 = Vector2.ZERO
 var _last_delta: float = 1.0 / 60.0
 var _no_progress_timer: float = 0.0
 var _best_dist_to_goal: float = INF
+var _stuck_sample_pos: Vector2 = Vector2.ZERO
+var _stuck_sample_timer: float = 0.0
+var _stuck_accum_time: float = 0.0
+var _stuck_nudge_timer: float = 0.0
+var _stuck_nudge_dir: Vector2 = Vector2.ZERO
+var _stuck_side_sign: float = 1.0
 var _adrenal_timer: float = 0.0
 var _adrenal_speed_bonus: float = 0.0
 var _adrenal_attack_speed_bonus: float = 0.0
@@ -142,6 +159,8 @@ func _ready() -> void:
 		gather_bar_root.visible = false
 
 	_register_with_economy()
+	_stuck_sample_pos = global_position
+	_stuck_side_sign = 1.0 if (get_instance_id() % 2) == 0 else -1.0
 	if data != null and data.auto_gather_on_spawn and can_gather():
 		call_deferred("_try_start_auto_gather")
 
@@ -189,23 +208,50 @@ func get_ability_remaining_cooldown(ability_id: StringName) -> float:
 	return ability_component.get_remaining_cooldown(ability_id) if ability_component != null else 0.0
 
 
-func command_cast_ability(ability: AbilityData, target_pos: Vector2, target_unit: Unit = null) -> bool:
+func command_cast_ability(ability: AbilityData, target_pos: Vector2, target_unit: Unit = null, append_to_queue: bool = false) -> bool:
 	if is_dead or is_staffed or ability_component == null or ability == null:
 		return false
+	var cmd: Dictionary = {
+		"type": &"cast_ability",
+		"ability": ability,
+		"pos": target_pos,
+		"target": target_unit,
+	}
+	if append_to_queue:
+		return issue_command(cmd, true)
+	# Instant self-cast abilities trigger immediately without interrupting active movement or queues.
+	if ability.target_type == AbilityData.TargetType.INSTANT:
+		return ability_component.request_cast(self, ability, global_position, self)
+	return issue_command(cmd, false)
+
+
+func _start_cast_ability(ability: AbilityData, target_pos: Vector2, target_unit: Unit = null) -> int:
+	if is_dead or is_staffed or ability_component == null or ability == null:
+		return CMD_EXEC_FAILED
+	if ability.target_type == AbilityData.TargetType.INSTANT:
+		if ability_component.request_cast(self, ability, global_position, self):
+			return CMD_EXEC_IMMEDIATE_DONE
+		return CMD_EXEC_FAILED
+	if ability.target_type == AbilityData.TargetType.UNIT_TARGET:
+		if target_unit == null or not is_instance_valid(target_unit) or target_unit.is_dead or target_unit.is_queued_for_deletion():
+			return CMD_EXEC_FAILED
+	if not ability_component.is_ability_ready(ability):
+		return CMD_EXEC_FAILED
+	_cancel_active_tasks(false)
 	var accepted: bool = ability_component.request_cast(self, ability, target_pos, target_unit)
 	if not accepted:
-		return false
-	if gather_component != null:
-		gather_component.cancel()
+		return CMD_EXEC_FAILED
 	if ability_component.has_pending_cast():
 		if not _can_move():
 			ability_component.cancel_pending_cast()
-			return false
+			return CMD_EXEC_FAILED
 		command_state = CommandState.CASTING_ABILITY
 		current_target = null
 		_reset_progress_tracker()
 		_last_nav_target = Vector2.INF
-	return true
+		status_changed.emit(self)
+		return CMD_EXEC_ACTIVE
+	return CMD_EXEC_IMMEDIATE_DONE
 
 
 func can_gather() -> bool:
@@ -260,7 +306,7 @@ func is_idle_worker() -> bool:
 	)
 	if not is_worker_role:
 		return false
-	if command_state != CommandState.IDLE or not command_queue.is_empty():
+	if command_state != CommandState.IDLE or not command_queue.is_empty() or not active_command.is_empty():
 		return false
 	if _construction_target != null:
 		return false
@@ -290,7 +336,7 @@ func issue_command(cmd: Dictionary, append_to_queue: bool = false) -> bool:
 		return false
 	if append_to_queue:
 		var is_idle_now: bool = (
-			command_state == CommandState.IDLE
+			(command_state == CommandState.IDLE or command_state == CommandState.HOLD_POSITION)
 			and active_command.is_empty()
 			and command_queue.is_empty()
 		)
@@ -301,7 +347,7 @@ func issue_command(cmd: Dictionary, append_to_queue: bool = false) -> bool:
 			return true
 	else:
 		clear_command_queue()
-	return _execute_command(cmd)
+	return _execute_command(cmd) != CMD_EXEC_FAILED
 
 
 func advance_command_queue() -> bool:
@@ -313,47 +359,55 @@ func _advance_command_queue() -> bool:
 	while not command_queue.is_empty():
 		var next_cmd: Dictionary = command_queue.pop_front()
 		command_queue_changed.emit(self)
-		if _execute_command(next_cmd):
+		var result: int = _execute_command(next_cmd)
+		if result == CMD_EXEC_ACTIVE:
 			return true
-	command_state = CommandState.IDLE
+		if result == CMD_EXEC_IMMEDIATE_DONE:
+			continue
+	command_state = CommandState.HOLD_POSITION if stance == Stance.HOLD_POSITION else CommandState.IDLE
 	velocity = Vector2.ZERO
 	command_queue_changed.emit(self)
 	status_changed.emit(self)
 	return false
 
 
-func _execute_command(cmd: Dictionary) -> bool:
+func _execute_command(cmd: Dictionary) -> int:
 	var cmd_type: StringName = cmd.get("type", &"")
-	var ok: bool = false
+	var result: int = CMD_EXEC_FAILED
 	match cmd_type:
 		&"move":
-			ok = _start_move(cmd.get("pos", global_position) as Vector2)
+			result = CMD_EXEC_ACTIVE if _start_move(cmd.get("pos", global_position) as Vector2) else CMD_EXEC_FAILED
 		&"attack_move":
-			ok = _start_attack_move(cmd.get("pos", global_position) as Vector2)
+			result = CMD_EXEC_ACTIVE if _start_attack_move(cmd.get("pos", global_position) as Vector2) else CMD_EXEC_FAILED
 		&"attack_target":
 			var atk_t: Variant = cmd.get("target", null)
-			if atk_t != null and is_instance_valid(atk_t) and atk_t is Node2D:
-				ok = _start_attack_target(atk_t as Node2D)
+			if atk_t != null and is_instance_valid(atk_t) and atk_t is Node2D and not (atk_t as Node).is_queued_for_deletion():
+				result = CMD_EXEC_ACTIVE if _start_attack_target(atk_t as Node2D) else CMD_EXEC_FAILED
 		&"gather":
 			var rn: Variant = cmd.get("target", null)
-			if rn != null and is_instance_valid(rn) and rn is ResourceNode:
-				ok = _start_gather(rn as ResourceNode)
+			if rn != null and is_instance_valid(rn) and rn is ResourceNode and not (rn as Node).is_queued_for_deletion() and not (rn as ResourceNode).is_depleted():
+				result = CMD_EXEC_ACTIVE if _start_gather(rn as ResourceNode) else CMD_EXEC_FAILED
 		&"return_cargo":
 			var drop_b: Variant = cmd.get("target", null)
-			var drop_building: Building = drop_b as Building if (drop_b != null and is_instance_valid(drop_b) and drop_b is Building) else null
-			ok = _start_return_cargo(drop_building)
+			var drop_building: Building = drop_b as Building if (drop_b != null and is_instance_valid(drop_b) and drop_b is Building and not (drop_b as Building).is_destroyed) else null
+			result = CMD_EXEC_ACTIVE if _start_return_cargo(drop_building) else CMD_EXEC_FAILED
 		&"build":
 			var build_t: Variant = cmd.get("target", null)
-			if build_t != null and is_instance_valid(build_t) and build_t is Building:
-				ok = _start_construct_building(build_t as Building)
+			if build_t != null and is_instance_valid(build_t) and build_t is Building and not (build_t as Node).is_queued_for_deletion():
+				result = CMD_EXEC_ACTIVE if _start_construct_building(build_t as Building) else CMD_EXEC_FAILED
 		&"staff":
 			var staff_t: Variant = cmd.get("target", null)
-			if staff_t != null and is_instance_valid(staff_t) and staff_t is Building:
-				ok = _start_staff_building(staff_t as Building)
-	if ok:
+			if staff_t != null and is_instance_valid(staff_t) and staff_t is Building and not (staff_t as Node).is_queued_for_deletion():
+				result = CMD_EXEC_ACTIVE if _start_staff_building(staff_t as Building) else CMD_EXEC_FAILED
+		&"cast_ability":
+			var ab: AbilityData = cmd.get("ability", null) as AbilityData
+			var raw_t: Variant = cmd.get("target", null)
+			var t_unit: Unit = raw_t as Unit if (raw_t != null and is_instance_valid(raw_t) and raw_t is Unit) else null
+			result = _start_cast_ability(ab, cmd.get("pos", global_position) as Vector2, t_unit)
+	if result == CMD_EXEC_ACTIVE:
 		active_command = cmd.duplicate()
 		command_queue_changed.emit(self)
-	return ok
+	return result
 
 
 func get_active_command_destination() -> Variant:
@@ -365,6 +419,9 @@ func get_active_command_destination() -> Variant:
 		CommandState.ATTACKING_TARGET:
 			if current_target != null and is_instance_valid(current_target):
 				return current_target.global_position
+		CommandState.CASTING_ABILITY:
+			if ability_component != null and ability_component.has_pending_cast():
+				return ability_component.get_pending_destination()
 		CommandState.CONSTRUCTING:
 			if _construction_target != null and is_instance_valid(_construction_target):
 				return _construction_target.global_position
@@ -560,6 +617,9 @@ func _start_attack_target(target: Node2D) -> bool:
 		return false
 	if combat_component == null or not combat_component.is_valid_target(self, target):
 		return false
+	if stance != Stance.AGGRESSIVE:
+		stance = Stance.AGGRESSIVE
+		stance_changed.emit(self, stance)
 	_cancel_active_tasks(false)
 	command_state = CommandState.ATTACKING_TARGET
 	current_target = target
@@ -576,6 +636,9 @@ func command_attack_move(target_pos: Vector2, append_to_queue: bool = false) -> 
 func _start_attack_move(target_pos: Vector2) -> bool:
 	if is_dead or is_staffed or not _can_move():
 		return false
+	if stance != Stance.AGGRESSIVE:
+		stance = Stance.AGGRESSIVE
+		stance_changed.emit(self, stance)
 	_cancel_active_tasks(false)
 	command_state = CommandState.ATTACK_MOVING
 	_attack_move_destination = target_pos
@@ -587,12 +650,35 @@ func _start_attack_move(target_pos: Vector2) -> bool:
 	return true
 
 
+func set_stance(new_stance: Stance) -> void:
+	if is_dead or is_staffed:
+		return
+	var changed: bool = (stance != new_stance)
+	stance = new_stance
+	if stance == Stance.HOLD_POSITION:
+		clear_command_queue()
+		_cancel_active_tasks(false)
+		command_state = CommandState.HOLD_POSITION
+		current_target = null
+		_wants_nav_movement = false
+		_desired_move_velocity = Vector2.ZERO
+		_reset_progress_tracker()
+		velocity = Vector2.ZERO
+		_clear_nav_target()
+	elif command_state == CommandState.HOLD_POSITION:
+		command_state = CommandState.IDLE
+		current_target = null
+	if changed:
+		stance_changed.emit(self, stance)
+	status_changed.emit(self)
+
+
 func command_stop() -> void:
 	if is_dead or is_staffed:
 		return
 	clear_command_queue()
 	_cancel_active_tasks(false)
-	command_state = CommandState.IDLE
+	command_state = CommandState.HOLD_POSITION if stance == Stance.HOLD_POSITION else CommandState.IDLE
 	current_target = null
 	_wants_nav_movement = false
 	_desired_move_velocity = Vector2.ZERO
@@ -603,18 +689,7 @@ func command_stop() -> void:
 
 
 func command_hold_position() -> void:
-	if is_dead or is_staffed:
-		return
-	clear_command_queue()
-	_cancel_active_tasks(false)
-	command_state = CommandState.HOLD_POSITION
-	current_target = null
-	_wants_nav_movement = false
-	_desired_move_velocity = Vector2.ZERO
-	_reset_progress_tracker()
-	velocity = Vector2.ZERO
-	_clear_nav_target()
-	status_changed.emit(self)
+	set_stance(Stance.HOLD_POSITION)
 
 
 func take_damage(amount: float, attacker: Unit = null) -> void:
@@ -632,9 +707,9 @@ func take_damage(amount: float, attacker: Unit = null) -> void:
 	health_changed.emit(self, current_hp, data.max_hp)
 	status_changed.emit(self)
 
-	# Idle enemy combatants retaliate against attackers even if attacked from beyond aggro range (when Aggro AI is ON).
-	if team == Team.ENEMY and MatchManager.is_aggro_ai_enabled(get_tree()) and command_state == CommandState.IDLE and (current_target == null or not is_instance_valid(current_target)) and attacker != null and is_instance_valid(attacker) and _can_attack():
-		if combat_component != null and combat_component.is_valid_target(self, attacker):
+	# Idle aggressive combatants retaliate against attackers even if attacked from beyond aggro range (when Aggro AI is ON).
+	if MatchManager.is_aggro_ai_enabled(get_tree()) and command_state == CommandState.IDLE and (current_target == null or not is_instance_valid(current_target)) and attacker != null and is_instance_valid(attacker) and _can_attack():
+		if combat_component != null and combat_component.should_pursue_targets(self) and combat_component.is_valid_target(self, attacker):
 			current_target = attacker
 
 	if current_hp <= 0.0:
@@ -787,6 +862,9 @@ func _physics_process(delta: float) -> void:
 		CommandState.STAFFING_BUILDING:
 			_process_staffing_building(delta)
 
+	_update_worker_collision_passing()
+	_apply_anti_stuck_steering(delta)
+
 	if _can_move() and nav_agent != null and nav_agent.avoidance_enabled:
 		nav_agent.set_velocity(_desired_move_velocity)
 		if not _wants_nav_movement:
@@ -822,6 +900,9 @@ func _tick_status_effects(delta: float) -> void:
 
 
 func _process_idle(delta: float) -> void:
+	if stance == Stance.HOLD_POSITION:
+		_process_hold_position(delta)
+		return
 	if not _can_attack() or combat_component == null:
 		return
 
@@ -833,8 +914,8 @@ func _process_idle(delta: float) -> void:
 		current_target = null
 		return
 
-	# Active Enemy AI (GUARD): scan aggro_range, pursue into attack_range, and return fire.
-	if team == Team.ENEMY and _can_move():
+	# Aggressive combat units acquire enemies inside aggro_range and pursue within leash range.
+	if combat_component.should_pursue_targets(self) and _can_move():
 		var leash: float = maxf(data.aggro_range, data.attack_range) * 1.35
 		if current_target == null or not combat_component.is_valid_target_in_range(self, current_target, leash):
 			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
@@ -863,8 +944,6 @@ func _process_moving(delta: float) -> void:
 		_reset_progress_tracker()
 		if _advance_command_queue():
 			return
-		command_state = CommandState.IDLE
-		velocity = Vector2.ZERO
 		if data != null and data.auto_gather_on_spawn and can_gather():
 			if is_carrying_cargo():
 				if not command_return_cargo():
@@ -907,10 +986,7 @@ func _process_attack_moving(delta: float) -> void:
 		return
 	if _should_settle_at_destination(_attack_move_destination, delta):
 		_reset_progress_tracker()
-		if _advance_command_queue():
-			return
-		command_state = CommandState.IDLE
-		velocity = Vector2.ZERO
+		_advance_command_queue()
 		return
 	_compute_nav_desired_velocity()
 
@@ -918,10 +994,7 @@ func _process_attack_moving(delta: float) -> void:
 func _process_attacking_target(delta: float) -> void:
 	if current_target == null or not is_instance_valid(current_target) or combat_component == null or not combat_component.is_valid_target(self, current_target):
 		current_target = null
-		if _advance_command_queue():
-			return
-		command_state = CommandState.IDLE
-		velocity = Vector2.ZERO
+		_advance_command_queue()
 		return
 
 	if combat_component.is_within_attack_envelope(self, current_target):
@@ -953,13 +1026,11 @@ func _process_hold_position(delta: float) -> void:
 
 func _process_casting_ability(delta: float) -> void:
 	if ability_component == null or not ability_component.has_pending_cast():
-		if not _advance_command_queue():
-			command_state = CommandState.IDLE
+		_advance_command_queue()
 		return
 	if ability_component.try_complete_pending_cast(self):
 		velocity = Vector2.ZERO
-		if not _advance_command_queue():
-			command_state = CommandState.IDLE
+		_advance_command_queue()
 		return
 	var dest: Vector2 = ability_component.get_pending_destination()
 	_face_point(dest, delta)
@@ -968,8 +1039,7 @@ func _process_casting_ability(delta: float) -> void:
 
 func _process_gathering(delta: float) -> void:
 	if gather_component == null or not gather_component.is_active():
-		if not _advance_command_queue():
-			command_state = CommandState.IDLE
+		_advance_command_queue()
 		return
 	gather_component.tick(self, delta)
 
@@ -980,8 +1050,7 @@ func _process_constructing(delta: float) -> void:
 		stop_component_navigation()
 		if gather_bar_root != null:
 			gather_bar_root.visible = false
-		if not _advance_command_queue():
-			command_state = CommandState.IDLE
+		_advance_command_queue()
 		return
 
 	var unit_r: float = data.collision_radius if data != null else 13.0
@@ -996,19 +1065,18 @@ func _process_constructing(delta: float) -> void:
 			gather_bar_fill.size.x = GATHER_BAR_WIDTH * clampf(_construction_target.construction_progress, 0.0, 1.0)
 		if completed:
 			_construction_target = null
-			if not _advance_command_queue():
-				command_state = CommandState.IDLE
+			_advance_command_queue()
 		return
 
 	var offset: Vector2 = global_position - _construction_target.global_position
 	var dir: Vector2 = offset.normalized() if offset.length_squared() > 0.01 else Vector2.RIGHT
-	var approach: Vector2 = _construction_target.global_position + dir * (_construction_target.footprint_radius * 0.75)
+	var approach: Vector2 = _construction_target.global_position + dir * (_construction_target.footprint_radius + unit_r + 8.0)
 	request_component_navigation(approach, 12.0)
 
 
 func _process_staffing_building(delta: float) -> void:
 	if staff_component == null or not staff_component.is_active():
-		command_state = CommandState.IDLE
+		_advance_command_queue()
 		return
 	staff_component.tick(self, delta)
 
@@ -1148,10 +1216,57 @@ func _apply_stationary_separation(delta: float) -> void:
 		velocity = Vector2.ZERO
 
 
+func _update_worker_collision_passing() -> void:
+	if data == null or not data.can_gather or data.ignore_friendly_unit_collision:
+		return
+	# During active gathering/construction trips, collide only with World (Layer 1) so crossing friendly
+	# workers smoothly slide past each other via RVO + soft separation instead of deadlocking head-on.
+	var want_mask: int = 1 if (command_state == CommandState.GATHERING or command_state == CommandState.CONSTRUCTING) else 3
+	if collision_mask != want_mask:
+		collision_mask = want_mask
+
+
+func _apply_anti_stuck_steering(delta: float) -> void:
+	if not _wants_nav_movement or _desired_move_velocity.length_squared() <= 4.0:
+		_stuck_sample_pos = global_position
+		_stuck_sample_timer = 0.0
+		_stuck_accum_time = 0.0
+		_stuck_nudge_timer = 0.0
+		return
+
+	_stuck_sample_timer += delta
+	if _stuck_sample_timer >= 0.25:
+		var moved_dist: float = global_position.distance_to(_stuck_sample_pos)
+		var actual_speed: float = moved_dist / maxf(0.05, _stuck_sample_timer)
+		var eff_speed: float = maxf(1.0, get_effective_move_speed())
+		if actual_speed < eff_speed * 0.15:
+			_stuck_accum_time += _stuck_sample_timer
+			if _stuck_accum_time >= 0.6:
+				var forward: Vector2 = _desired_move_velocity.normalized()
+				_stuck_nudge_dir = Vector2(-forward.y, forward.x) * _stuck_side_sign
+				_stuck_side_sign = -_stuck_side_sign
+				_stuck_nudge_timer = 0.35
+				_stuck_accum_time = 0.0
+				# Force a fresh NavigationAgent2D path evaluation around the obstruction.
+				_last_nav_target = Vector2.INF
+		else:
+			_stuck_accum_time = 0.0
+		_stuck_sample_pos = global_position
+		_stuck_sample_timer = 0.0
+
+	if _stuck_nudge_timer > 0.0:
+		_stuck_nudge_timer = maxf(0.0, _stuck_nudge_timer - delta)
+		var base_dir: Vector2 = _desired_move_velocity.normalized()
+		var blended: Vector2 = (base_dir * 0.45 + _stuck_nudge_dir * 0.85)
+		if blended.length_squared() > 0.001:
+			_desired_move_velocity = blended.normalized() * get_effective_move_speed()
+
+
 func _compute_overlap_separation(extra_margin: float) -> Vector2:
 	var push: Vector2 = Vector2.ZERO
 	var my_r: float = data.collision_radius if data != null else 16.0
 	var max_push: float = get_effective_move_speed() * 0.85 if data != null else 220.0
+	var self_is_worker: bool = data != null and data.can_gather
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node) or not (node is Unit) or node == self:
 			continue
@@ -1169,13 +1284,21 @@ func _compute_overlap_separation(extra_margin: float) -> Vector2:
 		var dist: float = sqrt(dist_sq)
 		var dir: Vector2 = Vector2.RIGHT.rotated(fmod(float(get_instance_id() % 360) * 1.618, TAU)) if dist < 0.01 else (diff / dist)
 		var overlap_ratio: float = clampf((min_dist - dist) / maxf(1.0, min_dist), 0.15, 1.0)
-		push += dir * max_push * overlap_ratio
+		var push_scale: float = 1.0
+		if self_is_worker and other.team == team and other.data != null and other.data.can_gather:
+			if command_state == CommandState.GATHERING or other.command_state == CommandState.GATHERING:
+				push_scale = 0.35
+		push += dir * max_push * overlap_ratio * push_scale
 	return push.normalized() * max_push if push.length() > max_push else push
 
 
 func _reset_progress_tracker() -> void:
 	_no_progress_timer = 0.0
 	_best_dist_to_goal = INF
+	_stuck_sample_pos = global_position
+	_stuck_sample_timer = 0.0
+	_stuck_accum_time = 0.0
+	_stuck_nudge_timer = 0.0
 
 
 func _should_settle_at_destination(goal_pos: Vector2, delta: float) -> bool:
@@ -1206,9 +1329,7 @@ func _check_post_slide_settling() -> void:
 			if other.team == team and other.command_state == CommandState.IDLE:
 				_wants_nav_movement = false
 				_reset_progress_tracker()
-				if not _advance_command_queue():
-					command_state = CommandState.IDLE
-					velocity = Vector2.ZERO
+				_advance_command_queue()
 				return
 
 

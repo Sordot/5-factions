@@ -107,14 +107,19 @@ func _ready() -> void:
 		var econ_ready: EconomyManager = _get_economy_manager()
 		if econ_ready != null:
 			econ_ready.notify_building_tech_changed(team)
+	add_to_group("nav_bake_obstacles")
+	_request_navmesh_rebake()
 
 
 func _exit_tree() -> void:
+	if is_in_group("nav_bake_obstacles"):
+		remove_from_group("nav_bake_obstacles")
 	if production_component != null:
 		production_component.cancel_all_and_refund(self)
 	if claimed_vent != null and is_instance_valid(claimed_vent):
 		claimed_vent.release_building(self)
 	_unregister_from_economy()
+	_request_navmesh_rebake()
 
 
 func _process(delta: float) -> void:
@@ -212,6 +217,8 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 	_update_construction_visuals()
 	_update_health_bar()
 	_update_staff_slot_visuals()
+	add_to_group("nav_bake_obstacles")
+	_request_navmesh_rebake()
 
 	if build_time <= 0.0:
 		_complete_construction()
@@ -644,6 +651,8 @@ func _destroy() -> void:
 	if is_destroyed:
 		return
 	is_destroyed = true
+	if is_in_group("nav_bake_obstacles"):
+		remove_from_group("nav_bake_obstacles")
 	if production_component != null:
 		production_component.cancel_all_and_refund(self)
 	eject_engineers()
@@ -654,8 +663,17 @@ func _destroy() -> void:
 	var econ_dead: EconomyManager = _get_economy_manager()
 	if econ_dead != null:
 		econ_dead.notify_building_tech_changed(team)
+	_request_navmesh_rebake()
 	destroyed.emit(self)
 	queue_free()
+
+
+func _request_navmesh_rebake() -> void:
+	if not is_inside_tree():
+		return
+	var nav_reg: Node = get_tree().get_first_node_in_group("arena_nav_region")
+	if nav_reg != null and nav_reg.has_method("request_rebake"):
+		nav_reg.call("request_rebake")
 
 
 func _tick_compute_generation(delta: float) -> void:

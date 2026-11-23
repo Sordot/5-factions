@@ -59,5 +59,5 @@ func tick(owner_unit: Unit, _delta: float) -> void:
 
 	var offset: Vector2 = owner_unit.global_position - target_building.global_position
 	var dir: Vector2 = offset.normalized() if offset.length_squared() > 0.01 else Vector2.RIGHT
-	var approach: Vector2 = target_building.global_position + dir * (target_building.footprint_radius * 0.75)
+	var approach: Vector2 = target_building.global_position + dir * (target_building.footprint_radius + unit_r + 8.0)
 	owner_unit.request_component_navigation(approach, 12.0)
