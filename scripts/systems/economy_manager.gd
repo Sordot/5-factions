@@ -334,8 +334,6 @@ func has_constructed_building(team: int, required_building_id: StringName) -> bo
 			continue
 		if b.building_type_id == required_building_id:
 			return true
-		if required_building_id == &"nexus_vat" and b.building_type_id == &"command_core":
-			return true
 	return false
 
 

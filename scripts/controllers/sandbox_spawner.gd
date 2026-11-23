@@ -157,7 +157,7 @@ func reset_sandbox() -> void:
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if node is Building and is_instance_valid(node):
 			var b: Building = node
-			if b.building_type_id != &"nexus_vat" and b.building_type_id != &"command_core":
+			if not b.is_core_hub and b.building_type_id != &"nexus_vat":
 				b.queue_free()
 
 	var container: Node = _get_units_container()

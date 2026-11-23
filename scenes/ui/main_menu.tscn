@@ -68,14 +68,14 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/margin_left = 32
-theme_override_constants/margin_top = 24
-theme_override_constants/margin_right = 32
-theme_override_constants/margin_bottom = 24
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 18
 
 [node name="RootVBox" type="VBoxContainer" parent="RootMargin"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 12
 
 [node name="HeaderPanel" type="PanelContainer" parent="RootMargin/RootVBox"]
 layout_mode = 2
@@ -127,12 +127,12 @@ text = "SFX: ON"
 [node name="BodyHBox" type="HBoxContainer" parent="RootMargin/RootVBox"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/separation = 18
+theme_override_constants/separation = 14
 
 [node name="FactionColumn" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/separation = 12
+theme_override_constants/separation = 10
 
 [node name="FactionSectionHeader" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn"]
 layout_mode = 2
@@ -275,7 +275,7 @@ columns = 2
 
 [node name="LockedSlot2" type="Button" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/LockedGrid"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 76)
+custom_minimum_size = Vector2(0, 62)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -286,7 +286,7 @@ Solar-Optic Precision  •  LOCKED — IN DEVELOPMENT"
 
 [node name="LockedSlot3" type="Button" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/LockedGrid"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 76)
+custom_minimum_size = Vector2(0, 62)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -297,7 +297,7 @@ Heavy Automata Armor  •  LOCKED — IN DEVELOPMENT"
 
 [node name="LockedSlot4" type="Button" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/LockedGrid"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 76)
+custom_minimum_size = Vector2(0, 62)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -308,7 +308,7 @@ Stealth & Algorithmic Subversion  •  LOCKED — IN DEVELOPMENT"
 
 [node name="LockedSlot5" type="Button" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/LockedGrid"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 76)
+custom_minimum_size = Vector2(0, 62)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -325,12 +325,12 @@ theme_override_font_sizes/font_size = 11
 text = "GENESIS_V2 dossier verified. Factions #2–#5 queued for post-vertical-slice milestones."
 
 [node name="ConfigPanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox"]
-custom_minimum_size = Vector2(370, 0)
+custom_minimum_size = Vector2(360, 0)
 layout_mode = 2
 
 [node name="ConfigVBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 9
 
 [node name="ConfigHeader" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
@@ -421,24 +421,24 @@ size_flags_vertical = 3
 
 [node name="BtnLaunch" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 44)
+custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
 focus_mode = 0
 theme_override_colors/font_color = Color(0.96, 1, 1, 1)
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 15
 theme_override_styles/normal = SubResource("StyleBoxFlat_launch_btn")
 text = "LAUNCH SKIRMISH"
 
 [node name="BtnSettings" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 34)
+custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 focus_mode = 0
 text = "SETTINGS & KEYBINDS"
 
 [node name="BtnQuit" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 32)
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 focus_mode = 0
-text = "QUIT"
+text = "EXIT TO DESKTOP"

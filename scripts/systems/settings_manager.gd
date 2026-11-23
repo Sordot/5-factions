@@ -62,7 +62,25 @@ func _ready() -> void:
 	_init_default_keybinds()
 	load_settings()
 	_apply_all_keybinds_to_input_map()
-	apply_display_settings()
+	call_deferred("apply_display_settings")
+
+
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey):
+		return
+	var key_ev: InputEventKey = event
+	if not key_ev.pressed or key_ev.echo:
+		return
+	# Skip global fullscreen toggle while SettingsMenu is actively capturing a keybind.
+	var settings_node: Node = get_tree().get_first_node_in_group("settings_menu")
+	if settings_node != null and is_instance_valid(settings_node) and settings_node.has_method("is_capturing_key"):
+		if bool(settings_node.call("is_capturing_key")):
+			return
+	var is_fs_action: bool = event.is_action_pressed("camera_toggle_fullscreen")
+	var is_alt_enter: bool = key_ev.alt_pressed and (key_ev.keycode == KEY_ENTER or key_ev.keycode == KEY_KP_ENTER)
+	if is_fs_action or is_alt_enter:
+		toggle_fullscreen()
+		get_viewport().set_input_as_handled()
 
 
 func _init_default_keybinds() -> void:
@@ -162,25 +180,41 @@ func set_display_settings(p_window_mode: int, p_resolution: Vector2i) -> void:
 	settings_changed.emit(&"display")
 
 
+func toggle_fullscreen() -> void:
+	var next_mode: int = 1 if window_mode == 0 else 0
+	set_display_settings(next_mode, window_resolution)
+
+
+func is_fullscreen() -> bool:
+	var win: Window = get_window()
+	if win != null:
+		return win.mode == Window.MODE_FULLSCREEN or win.mode == Window.MODE_EXCLUSIVE_FULLSCREEN
+	return window_mode != 0
+
+
 func apply_display_settings() -> void:
 	var win: Window = get_window()
+	if win == null:
+		return
 	if window_mode == 2:
-		if win != null:
-			win.borderless = false
-			win.mode = Window.MODE_EXCLUSIVE_FULLSCREEN
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		win.borderless = false
+		win.mode = Window.MODE_EXCLUSIVE_FULLSCREEN
 	elif window_mode == 1:
-		if win != null:
-			win.borderless = true
-			win.mode = Window.MODE_FULLSCREEN
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		# Godot 4's native borderless fullscreen — leave borderless=false to prevent Win11 DWM overscan/taskbar overlap.
+		win.borderless = false
+		win.mode = Window.MODE_FULLSCREEN
 	else:
-		if win != null:
-			win.borderless = false
-			win.mode = Window.MODE_WINDOWED
-			win.size = window_resolution
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-		DisplayServer.window_set_size(window_resolution)
+		win.mode = Window.MODE_WINDOWED
+		win.borderless = false
+		win.size = window_resolution
+		var screen_idx: int = win.current_screen
+		var usable: Rect2i = DisplayServer.screen_get_usable_rect(screen_idx)
+		if usable.size.x > 0 and usable.size.y > 0:
+			var centered_pos: Vector2i = usable.position + (usable.size - window_resolution) / 2
+			win.position = Vector2i(
+				maxi(usable.position.x, centered_pos.x),
+				maxi(usable.position.y, centered_pos.y)
+			)
 
 
 func is_key_reserved_for_editor(keycode: int) -> bool:

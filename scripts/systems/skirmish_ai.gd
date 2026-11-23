@@ -778,7 +778,7 @@ func _has_worker_building(target_b: Building) -> bool:
 
 func _find_ai_command_core() -> Building:
 	for b: Building in _get_team_buildings(ai_team):
-		if b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core":
+		if b.is_core_hub or b.building_type_id == &"nexus_vat":
 			return b
 	return null
 
@@ -787,7 +787,7 @@ func _find_opposing_command_core() -> Building:
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if node is Building and is_instance_valid(node):
 			var b: Building = node
-			if not b.is_destroyed and b.team != ai_team and (b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core"):
+			if not b.is_destroyed and b.team != ai_team and (b.is_core_hub or b.building_type_id == &"nexus_vat"):
 				return b
 	return null
 

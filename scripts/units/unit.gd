@@ -1555,7 +1555,7 @@ func _apply_team_visuals() -> void:
 	if team != Team.ENEMY:
 		return
 	var type_id: StringName = get_unit_type_id()
-	if type_id == &"enemy_trooper" or type_id == &"target_dummy":
+	if type_id == &"target_dummy":
 		return
 	if _entity_visuals == null and body_visual is Polygon2D:
 		(body_visual as Polygon2D).color = Color(0.84, 0.28, 0.26, 1.0)

@@ -3,7 +3,6 @@ extends StaticBody2D
 
 const PRODUCTION_COMPONENT_SCRIPT: GDScript = preload("res://scripts/buildings/production_component.gd")
 const ENTITY_VISUALS_SCRIPT: GDScript = preload("res://ui/overlays/entity_visuals.gd")
-const ENEMY_TROOPER_DATA_PATH: String = "res://resources/units/enemy_trooper_data.tres"
 const HEALTH_BAR_WIDTH: float = 76.0
 const CONSTRUCT_BAR_WIDTH: float = 68.0
 const DEPOSIT_PULSE_DURATION: float = 0.25
@@ -20,8 +19,8 @@ signal training_changed(building: Building)
 signal rally_changed(building: Building)
 
 @export var team: Unit.Team = Unit.Team.PLAYER
-@export var building_type_id: StringName = &"command_core"
-@export var display_name: String = "Command Core"
+@export var building_type_id: StringName = &"nexus_vat"
+@export var display_name: String = "Nexus Vat"
 @export var max_hp: float = 1500.0
 @export var vision_range: float = 450.0
 @export var footprint_radius: float = 46.0
@@ -75,7 +74,7 @@ var _entity_visuals: EntityVisuals = null
 func _ready() -> void:
 	add_to_group("buildings")
 	add_to_group("selectable_buildings")
-	if building_type_id == &"nexus_vat" or building_type_id == &"command_core":
+	if building_type_id == &"nexus_vat":
 		is_core_hub = true
 	if is_constructed:
 		current_hp = max_hp
@@ -85,8 +84,6 @@ func _ready() -> void:
 		current_hp = maxf(1.0, max_hp * 0.10)
 		construction_progress = 0.0
 		_construction_elapsed = 0.0
-	if team == Unit.Team.ENEMY and building_type_id == &"bio_lab":
-		_apply_enemy_bio_lab_roster()
 	_setup_procedural_visuals()
 	_apply_team_visuals()
 	if core_glow != null:
@@ -190,7 +187,7 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 		accepted_resources = data.accepted_resources.duplicate()
 		max_staff_slots = data.max_staff_slots
 		can_set_rally = data.can_set_rally
-		is_core_hub = data.is_core_hub or building_type_id == &"nexus_vat" or building_type_id == &"command_core"
+		is_core_hub = data.is_core_hub or building_type_id == &"nexus_vat"
 		batch_production_count = maxi(1, data.batch_production_count)
 		base_batch_cost_multiplier = maxf(1.0, data.base_batch_cost_multiplier)
 		var resolved_units: Array[UnitData] = data.resolve_trainable_units()
@@ -200,8 +197,6 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 		if not data.researchable_upgrades.is_empty():
 			researchable_upgrades = data.researchable_upgrades.duplicate()
 
-	if team == Unit.Team.ENEMY and building_type_id == &"bio_lab":
-		_apply_enemy_bio_lab_roster()
 	_apply_team_visuals()
 
 	if production_component == null and (not trainable_unit_data.is_empty() or not researchable_upgrades.is_empty()):
@@ -515,13 +510,13 @@ func take_damage(amount: float) -> void:
 
 func get_inspection_data() -> Dictionary:
 	var accent: Color = Color(0.22, 0.88, 0.94, 1.0)
-	if building_type_id == &"silica_refinery" or building_type_id == &"silica_condenser":
+	if building_type_id == &"silica_condenser":
 		accent = Color(0.98, 0.78, 0.28, 1.0)
-	elif building_type_id == &"compute_node" or building_type_id == &"wetware_mainframe":
+	elif building_type_id == &"wetware_mainframe":
 		accent = Color(0.32, 0.84, 1.0, 1.0)
-	elif building_type_id == &"bandwidth_relay" or building_type_id == &"synapse_pylon":
+	elif building_type_id == &"synapse_pylon":
 		accent = Color(0.76, 0.58, 1.0, 1.0)
-	elif building_type_id == &"bio_lab" or building_type_id == &"cloning_vat":
+	elif building_type_id == &"cloning_vat":
 		accent = Color(0.24, 0.94, 0.72, 1.0)
 	elif building_type_id == &"calibration_foundry":
 		accent = Color(0.96, 0.64, 0.26, 1.0)
@@ -581,7 +576,7 @@ func get_inspection_data() -> Dictionary:
 		stats.append({"label": "Vent Status", "value": "Active Thermal Vent"})
 		stats.append({"label": "Staff Slots", "value": "%d / %d Engineers" % [staffed, max_staff_slots]})
 		stats.append({"label": "Construction", "value": "Operational"})
-	elif building_type_id == &"nexus_vat" or building_type_id == &"command_core":
+	elif is_core_hub or building_type_id == &"nexus_vat":
 		subtitle = "GENESIS_V2 PRIMARY HUB" if team == Unit.Team.PLAYER else "HOSTILE NEXUS VAT"
 		var bw_str: String = "%d / %d" % [econ.get_bandwidth_used(team), econ.get_bandwidth_cap(team)] if econ != null else "--"
 		stats.append({"label": "Drop-Off", "value": "Biomass"})
@@ -610,20 +605,13 @@ func get_inspection_data() -> Dictionary:
 		stats.append({"label": "Prod Speed", "value": "%d%%" % spd_s})
 		stats.append({"label": "Rally", "value": _get_rally_summary()})
 		stats.append({"label": "Role", "value": "Heavy Compute Pivot"})
-	elif building_type_id == &"bio_lab":
-		subtitle = "MILITARY PRODUCTION"
-		var spd: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * 100.0))
-		stats.append({"label": "Roster", "value": "Infantry / Scout"})
-		stats.append({"label": "Prod Speed", "value": "%d%%" % spd})
-		stats.append({"label": "Rally", "value": _get_rally_summary()})
-		stats.append({"label": "Status", "value": "Operational"})
-	elif building_type_id == &"silica_condenser" or building_type_id == &"silica_refinery":
+	elif building_type_id == &"silica_condenser":
 		subtitle = "SILICA REFINING FACILITY"
 		stats.append({"label": "Drop-Off", "value": "Silica"})
 		stats.append({"label": "Harvesters", "value": "%d Active" % _count_friendly_harvesters()})
 		stats.append({"label": "Rally", "value": _get_rally_summary()})
 		stats.append({"label": "Throughput", "value": "25 Silica / Trip"})
-	elif building_type_id == &"synapse_pylon" or building_type_id == &"bandwidth_relay":
+	elif building_type_id == &"synapse_pylon":
 		subtitle = "INFRASTRUCTURE NODE"
 		var bw_net: String = "%d / %d" % [econ.get_bandwidth_used(team), econ.get_bandwidth_cap(team)] if econ != null else "--"
 		stats.append({"label": "Bandwidth", "value": "+%d Capacity" % bandwidth_provided})
@@ -772,13 +760,6 @@ func _update_construction_visuals() -> void:
 	if construct_bar_root != null and construct_bar_fill != null:
 		construct_bar_root.visible = not is_constructed
 		construct_bar_fill.size.x = CONSTRUCT_BAR_WIDTH * clampf(construction_progress, 0.0, 1.0)
-
-
-func _apply_enemy_bio_lab_roster() -> void:
-	var trooper_data: UnitData = load(ENEMY_TROOPER_DATA_PATH) as UnitData
-	if trooper_data != null:
-		trainable_unit_data = [trooper_data]
-		trainable_unit_scenes = []
 
 
 func _apply_team_visuals() -> void:

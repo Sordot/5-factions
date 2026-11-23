@@ -25,10 +25,10 @@ static func build_subgroups(selected_units: Array[Unit]) -> Array[Dictionary]:
 		var group_units: Array[Unit] = buckets[type_id]["units"]
 		group_units.append(unit)
 
-	# Deterministic priority order: clone_trooper / test_unit first, then alphabetical by unit_type_id.
+	# Deterministic priority order: clone_trooper first, then alphabetical by unit_type_id.
 	order.sort_custom(func(a: StringName, b: StringName) -> bool:
-		var a_pri: bool = (a == &"clone_trooper" or a == &"test_unit")
-		var b_pri: bool = (b == &"clone_trooper" or b == &"test_unit")
+		var a_pri: bool = (a == &"clone_trooper")
+		var b_pri: bool = (b == &"clone_trooper")
 		if a_pri and not b_pri:
 			return true
 		if b_pri and not a_pri:

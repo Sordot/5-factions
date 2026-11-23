@@ -435,7 +435,7 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 	var is_training: bool = _owner_building.get_training_queue_size() > 0
 
 	match entity_type_id:
-		&"nexus_vat", &"command_core":
+		&"nexus_vat":
 			# Wide octagonal Y2K server base with docking bays & central pulsing bioluminescent culture core
 			_poly_outlined(hull_poly, shell_hi, outline, 2.4)
 			var inner_oct: PackedVector2Array = _scale_poly(hull_poly, 0.76)
@@ -457,7 +457,7 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 			if is_training:
 				draw_arc(Vector2.ZERO, 25.0, _anim_time * 2.2, _anim_time * 2.2 + PI * 1.1, 20, core_alt, 2.2, true)
 
-		&"synapse_pylon", &"bandwidth_relay":
+		&"synapse_pylon":
 			# Tall diamond/needle spire with orbiting signal ring
 			var py_col: Color = Color(0.76, 0.58, 1.0, 1.0) if team == 0 else core
 			_poly_outlined(hull_poly, shell_hi, py_col, 2.0)
@@ -474,7 +474,7 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 			draw_circle(orb_pt, 3.2, py_col)
 			draw_circle(-orb_pt, 2.4, Color(py_col.r, py_col.g, py_col.b, 0.72))
 
-		&"silica_condenser", &"silica_refinery":
+		&"silica_condenser":
 			# Dual-tank geometric extractor with crystalline prism accents
 			var sil_col: Color = Color(0.98, 0.78, 0.28, 1.0) if team == 0 else core_alt
 			_poly_outlined(hull_poly, shell, sil_col, 2.2)
@@ -490,7 +490,7 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 			])
 			_poly_outlined(prism, Color(1.0, 0.94, 0.68, 0.95) if team == 0 else core, sil_col, 1.5)
 
-		&"wetware_mainframe", &"compute_node":
+		&"wetware_mainframe":
 			# Brutalist server monolith with glowing neural-grid circuit lines & staffing indicator pips
 			var cmp_col: Color = Color(0.28, 0.88, 1.0, 1.0) if team == 0 else core
 			_poly_outlined(hull_poly, shell_hi, cmp_col, 2.2)
@@ -517,7 +517,7 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 				draw_rect(pip_rect, cmp_col if filled else Color(0.14, 0.20, 0.26, 0.95), true)
 				draw_rect(pip_rect, cmp_col, false, 1.2)
 
-		&"cloning_vat", &"bio_lab":
+		&"cloning_vat":
 			# Twin-chambered translucent bio-tank with animated dual-pulse indicators while training
 			var vat_col: Color = Color(0.22, 0.96, 0.76, 1.0) if team == 0 else core
 			_poly_outlined(hull_poly, shell_hi, vat_col, 2.4)
@@ -586,17 +586,17 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 func _get_building_outer_poly(type_id: StringName, radius: float) -> PackedVector2Array:
 	var r: float = maxf(22.0, radius)
 	match type_id:
-		&"synapse_pylon", &"bandwidth_relay":
+		&"synapse_pylon":
 			return PackedVector2Array([
 				Vector2(0, -r), Vector2(r * 0.85, -r * 0.45), Vector2(r * 0.85, r * 0.45),
 				Vector2(0, r), Vector2(-r * 0.85, r * 0.45), Vector2(-r * 0.85, -r * 0.45),
 			])
-		&"silica_condenser", &"silica_refinery":
+		&"silica_condenser":
 			return PackedVector2Array([
 				Vector2(-r * 0.95, -r * 0.70), Vector2(r * 0.55, -r * 0.95), Vector2(r * 0.95, -r * 0.55),
 				Vector2(r * 0.95, r * 0.70), Vector2(-r * 0.55, r * 0.95), Vector2(-r * 0.95, r * 0.55),
 			])
-		&"wetware_mainframe", &"compute_node":
+		&"wetware_mainframe":
 			return PackedVector2Array([
 				Vector2(-r * 0.92, -r * 0.92), Vector2(r * 0.92, -r * 0.92),
 				Vector2(r * 0.92, r * 0.92), Vector2(-r * 0.92, r * 0.92),

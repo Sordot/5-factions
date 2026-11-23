@@ -1,8 +1,8 @@
 class_name UnitData
 extends Resource
 
-@export var unit_type_id: StringName = &"test_unit"
-@export var display_name: String = "Test Unit"
+@export var unit_type_id: StringName = &"clone_trooper"
+@export var display_name: String = "Clone Trooper"
 @export var max_hp: float = 100.0
 @export var move_speed: float = 260.0
 @export var acceleration: float = 1800.0

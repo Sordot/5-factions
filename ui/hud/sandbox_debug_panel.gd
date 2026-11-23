@@ -105,16 +105,10 @@ func _ready() -> void:
 			_camera.toggle_edge_pan()
 	)
 	btn_toggle_fullscreen.pressed.connect(func() -> void:
-		if _camera == null and is_inside_tree():
-			_camera = get_tree().get_first_node_in_group("rts_camera") as RTSCamera
-		if _camera != null:
+		if SettingsManager != null:
+			SettingsManager.toggle_fullscreen()
+		elif _camera != null:
 			_camera.toggle_fullscreen()
-		else:
-			var mode: DisplayServer.WindowMode = DisplayServer.window_get_mode()
-			if mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
-				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-			else:
-				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 		_refresh_fullscreen_button()
 	)
 	btn_dummy_1.pressed.connect(func() -> void:

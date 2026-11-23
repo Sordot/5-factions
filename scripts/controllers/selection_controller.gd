@@ -1136,6 +1136,15 @@ func _prune_invalid_units() -> void:
 				valid.append(unit)
 	if valid.size() != selected_units.size():
 		_set_selected_units(valid, false)
+	if not selected_buildings.is_empty():
+		var valid_b: Array[Building] = []
+		for item_b: Variant in selected_buildings:
+			if is_instance_valid(item_b) and item_b is Building:
+				var b: Building = item_b
+				if not b.is_destroyed and not b.is_queued_for_deletion() and b.team == Unit.Team.PLAYER:
+					valid_b.append(b)
+		if valid_b.size() != selected_buildings.size():
+			_set_selected_buildings(valid_b)
 	if inspected_entity != null:
 		if not is_instance_valid(inspected_entity):
 			_set_inspected_entity(null)

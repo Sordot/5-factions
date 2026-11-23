@@ -47,6 +47,10 @@ func _ready() -> void:
 func _on_settings_changed(category: StringName) -> void:
 	if category == &"camera" or category == &"all":
 		_sync_from_settings()
+	if category == &"display" or category == &"all":
+		_target_position = _clamp_point(_target_position)
+		global_position = _clamp_point(global_position)
+		fullscreen_toggled.emit(is_fullscreen())
 
 
 func _sync_from_settings() -> void:
@@ -78,16 +82,6 @@ func _input(event: InputEvent) -> void:
 		if vp != null and vp.get_visible_rect().grow(EDGE_BOUNDS_TOLERANCE_PX).has_point((event as InputEventMouseMotion).position):
 			_mouse_in_window = true
 		return
-
-	if event is InputEventKey:
-		var key_ev: InputEventKey = event
-		if key_ev.pressed and not key_ev.echo:
-			var is_fs_action: bool = event.is_action_pressed("camera_toggle_fullscreen")
-			var is_alt_enter: bool = key_ev.alt_pressed and (key_ev.keycode == KEY_ENTER or key_ev.keycode == KEY_KP_ENTER)
-			if is_fs_action or is_alt_enter:
-				toggle_fullscreen()
-				get_viewport().set_input_as_handled()
-				return
 
 
 func _process(delta: float) -> void:
@@ -227,7 +221,7 @@ func jump_to_next_base_hub() -> bool:
 		var b: Building = node
 		if b.is_destroyed or b.is_queued_for_deletion() or b.team != Unit.Team.PLAYER:
 			continue
-		if b.is_core_hub or b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core":
+		if b.is_core_hub or b.building_type_id == &"nexus_vat":
 			hubs.append(b)
 	if hubs.is_empty():
 		return false
@@ -269,25 +263,30 @@ func smooth_center_on(world_pos: Vector2) -> void:
 
 
 func is_fullscreen() -> bool:
+	if SettingsManager != null:
+		return SettingsManager.is_fullscreen()
 	var win: Window = get_window()
 	if win != null:
-		if win.mode == Window.MODE_FULLSCREEN or win.mode == Window.MODE_EXCLUSIVE_FULLSCREEN:
-			return true
-	var mode: DisplayServer.WindowMode = DisplayServer.window_get_mode()
-	return mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+		return win.mode == Window.MODE_FULLSCREEN or win.mode == Window.MODE_EXCLUSIVE_FULLSCREEN
+	return false
 
 
 func set_fullscreen(enabled: bool) -> void:
-	var target_win_mode: Window.Mode = Window.MODE_FULLSCREEN if enabled else Window.MODE_WINDOWED
-	var target_ds_mode: DisplayServer.WindowMode = DisplayServer.WINDOW_MODE_FULLSCREEN if enabled else DisplayServer.WINDOW_MODE_WINDOWED
+	if SettingsManager != null:
+		var target_mode: int = 1 if enabled else 0
+		SettingsManager.set_display_settings(target_mode, SettingsManager.window_resolution)
+		return
 	var win: Window = get_window()
 	if win != null:
-		win.mode = target_win_mode
-	DisplayServer.window_set_mode(target_ds_mode)
+		win.borderless = false
+		win.mode = Window.MODE_FULLSCREEN if enabled else Window.MODE_WINDOWED
 	fullscreen_toggled.emit(is_fullscreen())
 
 
 func toggle_fullscreen() -> bool:
+	if SettingsManager != null:
+		SettingsManager.toggle_fullscreen()
+		return SettingsManager.is_fullscreen()
 	set_fullscreen(not is_fullscreen())
 	return is_fullscreen()
 

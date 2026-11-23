@@ -204,11 +204,11 @@ func evaluate_match_state() -> void:
 			continue
 		if b.team == Unit.Team.PLAYER:
 			player_buildings += 1
-			if b.is_core_hub or b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core":
+			if b.is_core_hub or b.building_type_id == &"nexus_vat":
 				player_cores += 1
 		elif b.team == Unit.Team.ENEMY:
 			enemy_buildings += 1
-			if b.is_core_hub or b.building_type_id == &"nexus_vat" or b.building_type_id == &"command_core":
+			if b.is_core_hub or b.building_type_id == &"nexus_vat":
 				enemy_cores += 1
 
 	var enemy_defeated: bool = (enemy_cores == 0) if victory_on_command_core_loss else (enemy_buildings == 0)

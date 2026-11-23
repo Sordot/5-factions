@@ -72,8 +72,20 @@ func _ready() -> void:
 	if capture_banner != null:
 		capture_banner.visible = false
 
+	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_external_settings_changed):
+		SettingsManager.settings_changed.connect(_on_external_settings_changed)
+
 	_sync_all_from_manager()
 	_select_tab(&"controls", false)
+
+
+func is_capturing_key() -> bool:
+	return _capturing_action != &""
+
+
+func _on_external_settings_changed(category: StringName) -> void:
+	if category == &"display" or category == &"audio" or category == &"camera" or category == &"all":
+		_sync_all_from_manager()
 
 
 func _input(event: InputEvent) -> void:

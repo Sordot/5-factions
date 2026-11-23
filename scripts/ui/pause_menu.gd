@@ -73,11 +73,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if is_settings_open():
 		return
-	if event is InputEventKey:
-		var key_ev: InputEventKey = event
-		if key_ev.pressed and not key_ev.echo and key_ev.keycode == KEY_ESCAPE:
-			close_pause()
-			get_viewport().set_input_as_handled()
+	if event.is_action_pressed("cmd_cancel"):
+		close_pause()
+		get_viewport().set_input_as_handled()
 
 
 func _open_settings() -> void:

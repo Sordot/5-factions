@@ -61,6 +61,8 @@ func _ready() -> void:
 
 	if SettingsManager != null and not SettingsManager.keybind_changed.is_connected(_on_keybind_changed):
 		SettingsManager.keybind_changed.connect(_on_keybind_changed)
+	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_display_settings_changed):
+		SettingsManager.settings_changed.connect(_on_display_settings_changed)
 
 	_connect_economy_manager()
 
@@ -159,6 +161,11 @@ func _attach_dynamic_action_tooltip(btn: Button, title: String, action_name: Str
 func _on_keybind_changed(_action_name: StringName) -> void:
 	_refresh_dynamic_command_labels()
 	_refresh_stance_button()
+
+
+func _on_display_settings_changed(category: StringName) -> void:
+	if category == &"display" or category == &"all":
+		call_deferred("_adjust_layout_for_minimap")
 
 
 func _refresh_dynamic_command_labels() -> void:
