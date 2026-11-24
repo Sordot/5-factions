@@ -148,20 +148,22 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 
-	if event.is_action_pressed("ui_cycle_subgroup"):
+	if event.is_action_pressed("ui_cycle_subgroup") and not event.is_echo():
 		if subgroups.size() > 1:
 			cycle_subgroup()
 			get_viewport().set_input_as_handled()
+		elif event is InputEventMouseButton:
+			get_viewport().set_input_as_handled()
 		return
 
-	if event.is_action_pressed("cmd_select_idle_worker"):
+	if event.is_action_pressed("cmd_select_idle_worker") and not event.is_echo():
 		var allow_idle_hotkey: bool = true
 		if event is InputEventKey:
 			var idle_k: InputEventKey = event
-			if idle_k.ctrl_pressed or idle_k.alt_pressed or idle_k.echo:
+			if idle_k.ctrl_pressed or idle_k.alt_pressed:
 				allow_idle_hotkey = false
 		if allow_idle_hotkey:
-			if select_next_idle_worker(true) != null:
+			if select_next_idle_worker(true) != null or event is InputEventMouseButton:
 				get_viewport().set_input_as_handled()
 			return
 
@@ -209,13 +211,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	if event.is_action_pressed("cmd_patrol"):
+	if event.is_action_pressed("cmd_patrol") and not event.is_echo():
 		if event is InputEventKey:
 			var p_key: InputEventKey = event
-			if p_key.ctrl_pressed or p_key.alt_pressed or p_key.echo:
+			if p_key.ctrl_pressed or p_key.alt_pressed:
 				return
 		if not selected_units.is_empty():
 			begin_patrol_targeting()
+			get_viewport().set_input_as_handled()
+		elif event is InputEventMouseButton:
 			get_viewport().set_input_as_handled()
 		return
 

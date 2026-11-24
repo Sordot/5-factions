@@ -52,6 +52,8 @@ func open_pause() -> void:
 		root_control.visible = true
 	if is_inside_tree():
 		get_tree().paused = true
+	if SettingsManager != null:
+		SettingsManager.refresh_mouse_mode()
 
 
 func close_pause() -> void:
@@ -66,6 +68,8 @@ func close_pause() -> void:
 		root_control.visible = false
 	if is_inside_tree():
 		get_tree().paused = false
+	if SettingsManager != null:
+		SettingsManager.call_deferred("refresh_mouse_mode")
 
 
 func _unhandled_input(event: InputEvent) -> void:

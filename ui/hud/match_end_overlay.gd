@@ -28,6 +28,10 @@ func _ready() -> void:
 		btn_sandbox_mode.pressed.connect(_on_sandbox_mode_pressed)
 
 
+func is_summary_visible() -> bool:
+	return root_control != null and root_control.visible
+
+
 func show_summary(stats: Dictionary) -> void:
 	var is_victory: bool = bool(stats.get("is_victory", false))
 	if AudioManager != null:
@@ -55,11 +59,15 @@ func show_summary(stats: Dictionary) -> void:
 
 	if root_control != null:
 		root_control.visible = true
+	if SettingsManager != null:
+		SettingsManager.refresh_mouse_mode()
 
 
 func hide_summary() -> void:
 	if root_control != null:
 		root_control.visible = false
+	if SettingsManager != null:
+		SettingsManager.refresh_mouse_mode()
 
 
 func _on_play_again_pressed() -> void:

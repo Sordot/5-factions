@@ -20,10 +20,6 @@ is_vent = false
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 shape = SubResource("CircleShape2D_silica")
 
-[node name="NavigationObstacle2D" type="NavigationObstacle2D" parent="."]
-radius = 24.0
-avoidance_enabled = true
-
 [node name="HighlightRing" type="Line2D" parent="."]
 visible = false
 points = PackedVector2Array(30, 0, 26, 15, 15, 26, 0, 30, -15, 26, -26, 15, -30, 0, -26, -15, -15, -26, 0, -30, 15, -26, 26, -15)

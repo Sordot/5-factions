@@ -27,6 +27,8 @@ var _settings_instance: SettingsMenu = null
 
 
 func _ready() -> void:
+	if SettingsManager != null:
+		SettingsManager.set_gameplay_cursor_active(false)
 	_selected_map_path = GameConfig.selected_map_path
 	_aggro_ai_enabled = GameConfig.aggro_ai_enabled
 	_resource_preset = GameConfig.resource_preset

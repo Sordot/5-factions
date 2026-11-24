@@ -19,10 +19,6 @@ interaction_radius = 28.0
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 shape = SubResource("CircleShape2D_biomass")
 
-[node name="NavigationObstacle2D" type="NavigationObstacle2D" parent="."]
-radius = 22.0
-avoidance_enabled = true
-
 [node name="HighlightRing" type="Line2D" parent="."]
 visible = false
 points = PackedVector2Array(28, 0, 24.25, 14, 14, 24.25, 0, 28, -14, 24.25, -24.25, 14, -28, 0, -24.25, -14, -14, -24.25, 0, -28, 14, -24.25, 24.25, -14)

@@ -111,10 +111,14 @@ func _ready() -> void:
 		if econ_ready != null:
 			econ_ready.notify_building_tech_changed(team)
 	add_to_group("nav_bake_obstacles")
+	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
+		SettingsManager.settings_changed.connect(_on_settings_changed)
 	_request_navmesh_rebake()
 
 
 func _exit_tree() -> void:
+	if SettingsManager != null and SettingsManager.settings_changed.is_connected(_on_settings_changed):
+		SettingsManager.settings_changed.disconnect(_on_settings_changed)
 	if is_in_group("nav_bake_obstacles"):
 		remove_from_group("nav_bake_obstacles")
 	if production_component != null:
@@ -123,6 +127,12 @@ func _exit_tree() -> void:
 		claimed_vent.release_building(self)
 	_unregister_from_economy()
 	_request_navmesh_rebake()
+
+
+func _on_settings_changed(category: StringName) -> void:
+	if category == &"gameplay" or category == &"all":
+		_update_health_bar()
+		queue_redraw()
 
 
 func _process(delta: float) -> void:
@@ -808,7 +818,13 @@ func _update_health_bar() -> void:
 	var max_val: float = maxf(1.0, max_hp)
 	var ratio: float = clampf(current_hp / max_val, 0.0, 1.0)
 	health_bar_fill.size.x = HEALTH_BAR_WIDTH * ratio
-	health_bar_root.visible = always_show_health_bar or is_selected or not is_constructed or ratio < 0.999
+	var mode: int = SettingsManager.health_bar_mode if SettingsManager != null else 0
+	if mode == 1:
+		health_bar_root.visible = true
+	elif mode == 2:
+		health_bar_root.visible = is_selected
+	else:
+		health_bar_root.visible = always_show_health_bar or is_selected or not is_constructed or ratio < 0.999
 
 
 func _get_economy_manager() -> EconomyManager:

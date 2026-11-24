@@ -44,7 +44,7 @@ func tick(owner_unit: Unit, _delta: float) -> void:
 		return
 
 	var unit_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 13.0
-	var reach: float = target_building.footprint_radius + unit_r + 22.0
+	var reach: float = target_building.footprint_radius + unit_r + 26.0
 	var dist: float = owner_unit.global_position.distance_to(target_building.global_position)
 	if dist <= reach:
 		owner_unit.stop_component_navigation()
@@ -57,8 +57,8 @@ func tick(owner_unit: Unit, _delta: float) -> void:
 		staffing_target_changed.emit(null)
 		return
 
-	var approach: Vector2 = owner_unit.find_clear_approach_point(
-		target_building.global_position,
+	var approach: Vector2 = owner_unit.get_or_compute_approach_point(
+		target_building,
 		target_building.footprint_radius,
 		8.0,
 		target_building,

@@ -96,6 +96,9 @@ var _stuck_nudge_timer: float = 0.0
 var _stuck_nudge_dir: Vector2 = Vector2.ZERO
 var _stuck_side_sign: float = 1.0
 var _stuck_consecutive_nudges: int = 0
+var _cached_approach_point: Vector2 = Vector2.INF
+var _cached_approach_target_pos: Vector2 = Vector2.INF
+var _cached_approach_target_id: int = 0
 var _adrenal_timer: float = 0.0
 var _adrenal_speed_bonus: float = 0.0
 var _adrenal_attack_speed_bonus: float = 0.0
@@ -173,6 +176,8 @@ func _ready() -> void:
 		gather_bar_root.visible = false
 
 	_register_with_economy()
+	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
+		SettingsManager.settings_changed.connect(_on_settings_changed)
 	_stuck_sample_pos = global_position
 	_stuck_side_sign = 1.0 if (get_instance_id() % 2) == 0 else -1.0
 	if data != null and data.auto_gather_on_spawn and can_gather():
@@ -180,7 +185,15 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	if SettingsManager != null and SettingsManager.settings_changed.is_connected(_on_settings_changed):
+		SettingsManager.settings_changed.disconnect(_on_settings_changed)
 	_unregister_from_economy()
+
+
+func _on_settings_changed(category: StringName) -> void:
+	if category == &"gameplay" or category == &"all":
+		_update_health_bar()
+		queue_redraw()
 
 
 func set_selected(selected: bool) -> void:
@@ -590,6 +603,7 @@ func stop_component_navigation() -> void:
 	_desired_move_velocity = Vector2.ZERO
 	velocity = Vector2.ZERO
 	_reset_progress_tracker()
+	clear_cached_approach_point()
 	_clear_nav_target()
 
 
@@ -599,6 +613,58 @@ func reset_progress_tracker() -> void:
 
 func invalidate_nav_path() -> void:
 	_last_nav_target = Vector2.INF
+	clear_cached_approach_point()
+
+
+func get_cached_approach_point() -> Vector2:
+	return _cached_approach_point
+
+
+func clear_cached_approach_point() -> void:
+	_cached_approach_point = Vector2.INF
+	_cached_approach_target_pos = Vector2.INF
+	_cached_approach_target_id = 0
+
+
+func get_or_compute_approach_point(
+	target_node: Node2D,
+	target_radius: float,
+	margin: float = 8.0,
+	ignore_building: Building = null,
+	ignore_resource: ResourceNode = null
+) -> Vector2:
+	if target_node == null or not is_instance_valid(target_node):
+		clear_cached_approach_point()
+		return global_position
+	var unit_r: float = data.collision_radius if data != null else 13.0
+	var bounds: Rect2 = _get_arena_bounds()
+	var safe_bounds: Rect2 = Rect2(
+		bounds.position + Vector2(unit_r + 6.0, unit_r + 6.0),
+		bounds.size - Vector2((unit_r + 6.0) * 2.0, (unit_r + 6.0) * 2.0)
+	)
+	var target_id: int = target_node.get_instance_id()
+	var can_reuse: bool = (
+		_cached_approach_point != Vector2.INF
+		and _cached_approach_target_id == target_id
+		and _cached_approach_target_pos.distance_squared_to(target_node.global_position) <= 16.0
+		and _last_nav_target != Vector2.INF
+		and _is_point_clear_of_obstacles(_cached_approach_point, unit_r + 2.0, safe_bounds, ignore_building, ignore_resource)
+	)
+	if can_reuse:
+		return _cached_approach_point
+
+	var computed: Vector2 = find_clear_approach_point(
+		target_node.global_position,
+		target_radius,
+		margin,
+		ignore_building,
+		ignore_resource,
+		true
+	)
+	_cached_approach_point = computed
+	_cached_approach_target_pos = target_node.global_position
+	_cached_approach_target_id = target_id
+	return computed
 
 
 func find_clear_approach_point(
@@ -606,27 +672,72 @@ func find_clear_approach_point(
 	target_radius: float,
 	margin: float = 8.0,
 	ignore_building: Building = null,
-	ignore_resource: ResourceNode = null
+	ignore_resource: ResourceNode = null,
+	avoid_friendly_workers: bool = true
 ) -> Vector2:
 	var unit_r: float = data.collision_radius if data != null else 13.0
 	var stand_dist: float = target_radius + unit_r + margin
 	var offset: Vector2 = global_position - target_center
 	var base_angle: float = offset.angle() if offset.length_squared() > 0.01 else 0.0
+	# Subtle per-unit deterministic angular bias spreads simultaneous multi-worker clicks cleanly.
+	var slot_bias: float = float((get_instance_id() % 5) - 2) * 0.14 if avoid_friendly_workers else 0.0
 	var bounds: Rect2 = _get_arena_bounds()
 	var safe_bounds: Rect2 = Rect2(
 		bounds.position + Vector2(unit_r + 6.0, unit_r + 6.0),
 		bounds.size - Vector2((unit_r + 6.0) * 2.0, (unit_r + 6.0) * 2.0)
 	)
 
+	var busy_slots: Array[Vector2] = []
+	if avoid_friendly_workers and is_inside_tree():
+		var nearby_r_sq: float = (stand_dist + 84.0) * (stand_dist + 84.0)
+		for node: Node in get_tree().get_nodes_in_group("units"):
+			if not (node is Unit) or not is_instance_valid(node) or node == self:
+				continue
+			var other: Unit = node
+			if other.is_dead or other.is_staffed or other.team != team:
+				continue
+			if other.data == null or not (other.data.can_gather or other.data.can_staff_compute or other.can_construct()):
+				continue
+			var other_working_or_approaching: bool = (
+				other.command_state == CommandState.GATHERING
+				or other.command_state == CommandState.CONSTRUCTING
+				or other.command_state == CommandState.STAFFING_BUILDING
+			)
+			if not other_working_or_approaching:
+				continue
+			if other.global_position.distance_squared_to(target_center) <= nearby_r_sq:
+				busy_slots.append(other.global_position)
+			var other_cached: Vector2 = other.get_cached_approach_point()
+			if other_cached != Vector2.INF and other_cached.distance_squared_to(target_center) <= nearby_r_sq:
+				busy_slots.append(other_cached)
+
+	var slot_clear_dist: float = unit_r * 1.85
+	var slot_clear_sq: float = slot_clear_dist * slot_clear_dist
+	var best_fallback: Vector2 = Vector2.INF
+	var best_fallback_clearance: float = -1.0
+
 	var steps: int = 16
 	var step_angle: float = TAU / float(steps)
 	for i: int in range(steps):
 		var ring_offset: int = 0 if i == 0 else ((i + 1) >> 1)
 		var sign_mult: float = 1.0 if (i % 2) == 1 else -1.0
-		var ang: float = base_angle + float(ring_offset) * step_angle * sign_mult
+		var ang: float = base_angle + slot_bias + float(ring_offset) * step_angle * sign_mult
 		var cand: Vector2 = target_center + Vector2.RIGHT.rotated(ang) * stand_dist
-		if _is_point_clear_of_obstacles(cand, unit_r + 3.0, safe_bounds, ignore_building, ignore_resource):
+		if not _is_point_clear_of_obstacles(cand, unit_r + 3.0, safe_bounds, ignore_building, ignore_resource):
+			continue
+		if busy_slots.is_empty():
 			return cand
+		var min_slot_sq: float = INF
+		for occ: Vector2 in busy_slots:
+			min_slot_sq = minf(min_slot_sq, cand.distance_squared_to(occ))
+		if min_slot_sq >= slot_clear_sq:
+			return cand
+		if min_slot_sq > best_fallback_clearance:
+			best_fallback_clearance = min_slot_sq
+			best_fallback = cand
+
+	if best_fallback != Vector2.INF:
+		return best_fallback
 
 	var fallback: Vector2 = target_center + Vector2.RIGHT.rotated(base_angle) * stand_dist
 	if safe_bounds.has_area():
@@ -998,6 +1109,8 @@ func _physics_process(delta: float) -> void:
 func _on_nav_velocity_computed(safe_velocity: Vector2) -> void:
 	if is_dead or is_staffed or not _wants_nav_movement:
 		return
+	if nav_agent != null and not nav_agent.avoidance_enabled:
+		return
 	_apply_direct_motion(safe_velocity, _last_delta)
 
 
@@ -1176,7 +1289,7 @@ func _process_constructing(delta: float) -> void:
 		return
 
 	var unit_r: float = data.collision_radius if data != null else 13.0
-	var build_reach: float = _construction_target.footprint_radius + unit_r + 24.0
+	var build_reach: float = _construction_target.footprint_radius + unit_r + 28.0
 	var dist: float = global_position.distance_to(_construction_target.global_position)
 	if dist <= build_reach:
 		stop_component_navigation()
@@ -1190,8 +1303,8 @@ func _process_constructing(delta: float) -> void:
 			_advance_command_queue()
 		return
 
-	var approach: Vector2 = find_clear_approach_point(
-		_construction_target.global_position,
+	var approach: Vector2 = get_or_compute_approach_point(
+		_construction_target,
 		_construction_target.footprint_radius,
 		8.0,
 		_construction_target,
@@ -1259,6 +1372,7 @@ func _process_patrolling(delta: float) -> void:
 
 
 func _cancel_active_tasks(keep_gather: bool) -> void:
+	clear_cached_approach_point()
 	if ability_component != null:
 		ability_component.cancel_pending_cast()
 	if not keep_gather and gather_component != null:
@@ -1493,7 +1607,7 @@ func _apply_stationary_separation(delta: float) -> void:
 		return
 	if command_state == CommandState.CONSTRUCTING and _construction_target != null and is_instance_valid(_construction_target):
 		var unit_r: float = data.collision_radius if data != null else 13.0
-		if global_position.distance_to(_construction_target.global_position) <= _construction_target.footprint_radius + unit_r + 24.0:
+		if global_position.distance_to(_construction_target.global_position) <= _construction_target.footprint_radius + unit_r + 28.0:
 			velocity = Vector2.ZERO
 			return
 	var sep_margin: float = 0.0 if command_state == CommandState.HOLD_POSITION else 2.5
@@ -1539,6 +1653,16 @@ func _update_worker_collision_passing() -> void:
 	if collision_mask != want_mask:
 		collision_mask = want_mask
 
+	# Disable RVO avoidance on workers during active task transit (and while stationary working) so
+	# Godot's RVO2 solver never zeros safe_velocity behind teammates or resource nodes. Workers keep
+	# NavigationAgent2D pathfinding + direct motion + soft separation, and re-enable RVO when idle/moving.
+	if nav_agent != null:
+		var want_avoidance: bool = not is_task_transit
+		if nav_agent.avoidance_enabled != want_avoidance:
+			nav_agent.avoidance_enabled = want_avoidance
+			if not want_avoidance:
+				nav_agent.set_velocity(Vector2.ZERO)
+
 
 func _apply_anti_stuck_steering(delta: float) -> void:
 	if not _wants_nav_movement or _desired_move_velocity.length_squared() <= 4.0:
@@ -1568,8 +1692,8 @@ func _apply_anti_stuck_steering(delta: float) -> void:
 				_stuck_nudge_dir = Vector2(-forward.y, forward.x) * _stuck_side_sign
 				_stuck_nudge_timer = 0.65
 				_stuck_accum_time = 0.0
-				# Force a fresh NavigationAgent2D path evaluation around the obstruction.
-				_last_nav_target = Vector2.INF
+				# Force a fresh NavigationAgent2D path & approach slot evaluation around the obstruction.
+				invalidate_nav_path()
 		else:
 			_stuck_accum_time = 0.0
 			if actual_speed >= eff_speed * 0.30:
@@ -1737,7 +1861,13 @@ func _update_health_bar() -> void:
 	var max_val: float = maxf(1.0, data.max_hp)
 	var ratio: float = clampf(current_hp / max_val, 0.0, 1.0)
 	health_bar_fill.size.x = HEALTH_BAR_WIDTH * ratio
-	health_bar_root.visible = always_show_health_bar or is_selected or ratio < 0.999
+	var mode: int = SettingsManager.health_bar_mode if SettingsManager != null else 0
+	if mode == 1:
+		health_bar_root.visible = true
+	elif mode == 2:
+		health_bar_root.visible = is_selected
+	else:
+		health_bar_root.visible = always_show_health_bar or is_selected or ratio < 0.999
 
 
 func _setup_procedural_visuals() -> void:

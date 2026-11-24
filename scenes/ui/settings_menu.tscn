@@ -50,7 +50,7 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="ModalPanel" type="PanelContainer" parent="RootControl/CenterContainer"]
-custom_minimum_size = Vector2(760, 540)
+custom_minimum_size = Vector2(780, 560)
 layout_mode = 2
 
 [node name="VBox" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel"]
@@ -76,7 +76,7 @@ text = "user://settings.cfg"
 
 [node name="TabRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox"]
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 6
 
 [node name="TabBtnControls" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TabRow"]
 unique_name_in_owner = true
@@ -84,7 +84,7 @@ custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 size_flags_horizontal = 3
 focus_mode = 0
-text = "CONTROLS / KEYBINDS"
+text = "CONTROLS"
 
 [node name="TabBtnCamera" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TabRow"]
 unique_name_in_owner = true
@@ -93,6 +93,14 @@ layout_mode = 2
 size_flags_horizontal = 3
 focus_mode = 0
 text = "CAMERA"
+
+[node name="TabBtnGameplay" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TabRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+text = "GAMEPLAY"
 
 [node name="TabBtnAudio" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TabRow"]
 unique_name_in_owner = true
@@ -135,14 +143,16 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.92, 0.56, 1)
 theme_override_font_sizes/font_size = 12
-text = "Press any key... (Esc to cancel)"
+text = "Press any key or Mouse 3/4/5... (Del to unbind • Esc to cancel)"
 horizontal_alignment = 1
+autowrap_mode = 3
 
 [node name="ControlsHint" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelControls"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.58, 0.78, 0.86, 0.9)
 theme_override_font_sizes/font_size = 11
-text = "Click any keybind to rebind. Right-Click issues smart Move/Attack/Gather orders; Shift chains commands. F5–F8 remain Godot-safe."
+text = "Click any shortcut to bind a key or Mouse 3 / Mouse 4 / Mouse 5. Click × (or press Del while capturing) to unbind. LMB/RMB/Wheel & F5–F8 are reserved."
+autowrap_mode = 3
 
 [node name="Scroll" type="ScrollContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelControls"]
 layout_mode = 2
@@ -159,7 +169,7 @@ unique_name_in_owner = true
 visible = false
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/separation = 14
+theme_override_constants/separation = 10
 
 [node name="EdgePanRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera"]
 layout_mode = 2
@@ -176,12 +186,26 @@ focus_mode = 0
 button_pressed = true
 text = "Active"
 
+[node name="ConfineCursorRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/ConfineCursorRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Confine Cursor to Window (Multi-Monitor)"
+
+[node name="ChkConfineCursor" type="CheckButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/ConfineCursorRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Confined"
+
 [node name="EdgeSpeedRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera"]
 layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/EdgeSpeedRow"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(210, 0)
 layout_mode = 2
 text = "Edge-Pan Speed"
 
@@ -207,7 +231,7 @@ layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/EdgeMarginRow"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(210, 0)
 layout_mode = 2
 text = "Edge-Pan Margin"
 
@@ -233,7 +257,7 @@ layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/KbSpeedRow"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(210, 0)
 layout_mode = 2
 text = "Keyboard Pan Speed"
 
@@ -259,7 +283,7 @@ layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/ZoomSpeedRow"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(210, 0)
 layout_mode = 2
 text = "Zoom Step Speed"
 
@@ -280,19 +304,103 @@ layout_mode = 2
 text = "0.12"
 horizontal_alignment = 2
 
-[node name="PanelAudio" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea"]
+[node name="InvertZoomRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/InvertZoomRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Invert Scroll Zoom Direction"
+
+[node name="ChkInvertZoom" type="CheckButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/InvertZoomRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Inverted"
+
+[node name="MidDragSpeedRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/MidDragSpeedRow"]
+custom_minimum_size = Vector2(210, 0)
+layout_mode = 2
+text = "Middle-Mouse Drag Speed"
+
+[node name="SldMidDragSpeed" type="HSlider" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/MidDragSpeedRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.4
+max_value = 2.5
+step = 0.05
+value = 1.0
+
+[node name="ValMidDragSpeed" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelCamera/MidDragSpeedRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(82, 0)
+layout_mode = 2
+text = "1.00x"
+horizontal_alignment = 2
+
+[node name="PanelGameplay" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 14
 
+[node name="HealthBarModeRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/HealthBarModeRow"]
+custom_minimum_size = Vector2(210, 0)
+layout_mode = 2
+text = "Health Bar Display Mode"
+
+[node name="OptHealthBarMode" type="OptionButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/HealthBarModeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(260, 32)
+layout_mode = 2
+focus_mode = 0
+
+[node name="AlertToastsRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/AlertToastsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Show Tactical Alert & Bookmark Toasts"
+
+[node name="ChkAlertToasts" type="CheckButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/AlertToastsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+button_pressed = true
+text = "Enabled"
+
+[node name="GameplayHint" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.56, 0.78, 0.86, 0.88)
+theme_override_font_sizes/font_size = 11
+text = "Health Bar Mode updates active units and structures immediately mid-match while respecting Fog of War for hostile entities."
+autowrap_mode = 3
+
+[node name="PanelAudio" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
 [node name="MasterRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio"]
 layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/MasterRow"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(210, 0)
 layout_mode = 2
 text = "Master Volume"
 
@@ -317,7 +425,7 @@ layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/SfxRow"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(210, 0)
 layout_mode = 2
 text = "SFX / Combat Volume"
 
@@ -342,7 +450,7 @@ layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/UiRow"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(210, 0)
 layout_mode = 2
 text = "UI / Alert Volume"
 
@@ -377,6 +485,21 @@ layout_mode = 2
 focus_mode = 0
 text = "Muted"
 
+[node name="MuteUnfocusedRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/MuteUnfocusedRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Mute Audio When Unfocused"
+
+[node name="ChkMuteUnfocused" type="CheckButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/MuteUnfocusedRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Auto-Mute"
+
 [node name="BtnTestAudio" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(180, 32)
@@ -390,14 +513,14 @@ unique_name_in_owner = true
 visible = false
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/separation = 14
+theme_override_constants/separation = 12
 
 [node name="WindowModeRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay"]
 layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/WindowModeRow"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(210, 0)
 layout_mode = 2
 text = "Window Mode"
 
@@ -412,7 +535,7 @@ layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/ResolutionRow"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(210, 0)
 layout_mode = 2
 text = "Windowed Resolution"
 
@@ -422,11 +545,55 @@ custom_minimum_size = Vector2(260, 32)
 layout_mode = 2
 focus_mode = 0
 
+[node name="VsyncRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/VsyncRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "V-Sync"
+
+[node name="ChkVsync" type="CheckButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/VsyncRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+button_pressed = true
+text = "Enabled"
+
+[node name="FpsCapRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/FpsCapRow"]
+custom_minimum_size = Vector2(210, 0)
+layout_mode = 2
+text = "Frame Rate Cap"
+
+[node name="OptFpsCap" type="OptionButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/FpsCapRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(260, 32)
+layout_mode = 2
+focus_mode = 0
+
+[node name="FpsCounterRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/FpsCounterRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Show Corner FPS Counter"
+
+[node name="ChkFpsCounter" type="CheckButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay/FpsCounterRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Visible"
+
 [node name="DisplayHint" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelDisplay"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.56, 0.78, 0.86, 0.88)
 theme_override_font_sizes/font_size = 11
-text = "Resolution presets apply in Windowed mode. Use F11 (or your rebound Fullscreen key) to toggle fullscreen during a match."
+text = "Resolution presets apply in Windowed mode. Use F11 (or Alt+Enter) to toggle fullscreen anytime."
 autowrap_mode = 3
 
 [node name="SepBottom" type="HSeparator" parent="RootControl/CenterContainer/ModalPanel/VBox"]

@@ -20,6 +20,8 @@ const ALERT_CYCLE_WINDOW_MS: int = 2500
 @export var min_zoom: float = 0.5
 @export var max_zoom: float = 2.0
 @export var zoom_smoothness: float = 14.0
+@export var invert_zoom: bool = false
+@export var middle_drag_speed: float = 1.0
 @export var pan_bounds: Rect2 = Rect2(-960.0, -540.0, 1920.0, 1080.0)
 
 var camera_bookmarks: Dictionary = {}
@@ -62,6 +64,8 @@ func _sync_from_settings() -> void:
 	edge_margin_px = SettingsManager.edge_pan_margin
 	pan_speed = SettingsManager.keyboard_pan_speed
 	zoom_step = SettingsManager.zoom_speed
+	invert_zoom = SettingsManager.invert_zoom
+	middle_drag_speed = SettingsManager.middle_drag_speed
 	if prev_edge != edge_pan_enabled:
 		edge_pan_toggled.emit(edge_pan_enabled)
 
@@ -125,47 +129,58 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("camera_toggle_edge_pan"):
+	if event.is_action_pressed("camera_toggle_edge_pan") and not event.is_echo():
 		toggle_edge_pan()
 		get_viewport().set_input_as_handled()
 		return
 
-	if event is InputEventKey:
-		var key_ev: InputEventKey = event
-		if key_ev.pressed and not key_ev.echo:
-			for slot: int in range(1, 5):
-				var act_name: StringName = StringName("cam_bookmark_%d" % slot)
-				if event.is_action_pressed(act_name):
-					if key_ev.ctrl_pressed or Input.is_key_pressed(KEY_CTRL):
-						save_camera_bookmark(slot)
-					else:
-						recall_camera_bookmark(slot)
-					get_viewport().set_input_as_handled()
-					return
+	if not event.is_echo():
+		var ctrl_down: bool = Input.is_key_pressed(KEY_CTRL)
+		var alt_down: bool = Input.is_key_pressed(KEY_ALT)
+		if event is InputEventKey:
+			var k_mod: InputEventKey = event
+			ctrl_down = ctrl_down or k_mod.ctrl_pressed
+			alt_down = alt_down or k_mod.alt_pressed
 
-			if not key_ev.ctrl_pressed and not key_ev.alt_pressed:
-				if event.is_action_pressed("jump_base_hub"):
-					jump_to_next_base_hub()
-					get_viewport().set_input_as_handled()
-					return
-				if event.is_action_pressed("jump_last_alert"):
-					jump_to_last_alert()
-					get_viewport().set_input_as_handled()
-					return
+		for slot: int in range(1, 5):
+			var act_name: StringName = StringName("cam_bookmark_%d" % slot)
+			if event.is_action_pressed(act_name):
+				if ctrl_down:
+					save_camera_bookmark(slot)
+				else:
+					recall_camera_bookmark(slot)
+				get_viewport().set_input_as_handled()
+				return
+
+		if not ctrl_down and not alt_down:
+			if event.is_action_pressed("jump_base_hub"):
+				jump_to_next_base_hub()
+				get_viewport().set_input_as_handled()
+				return
+			if event.is_action_pressed("jump_last_alert"):
+				jump_to_last_alert()
+				get_viewport().set_input_as_handled()
+				return
 
 	if event is InputEventMouseButton:
 		var mouse_event: InputEventMouseButton = event
 		if mouse_event.button_index == MOUSE_BUTTON_MIDDLE:
-			_is_middle_dragging = mouse_event.pressed
-			if _is_middle_dragging:
-				_target_position = global_position
+			var middle_bound: bool = SettingsManager != null and SettingsManager.is_mouse_button_bound(MOUSE_BUTTON_MIDDLE)
+			if middle_bound:
+				_is_middle_dragging = false
+			else:
+				_is_middle_dragging = mouse_event.pressed
+				if _is_middle_dragging:
+					_target_position = global_position
 		elif mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_target_zoom = clampf(_target_zoom + zoom_step, min_zoom, max_zoom)
+			var delta_up: float = -zoom_step if invert_zoom else zoom_step
+			_target_zoom = clampf(_target_zoom + delta_up, min_zoom, max_zoom)
 		elif mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_target_zoom = clampf(_target_zoom - zoom_step, min_zoom, max_zoom)
+			var delta_dn: float = zoom_step if invert_zoom else -zoom_step
+			_target_zoom = clampf(_target_zoom + delta_dn, min_zoom, max_zoom)
 	elif event is InputEventMouseMotion and _is_middle_dragging:
 		var motion_event: InputEventMouseMotion = event
-		_target_position = _clamp_point(_target_position - motion_event.relative / zoom)
+		_target_position = _clamp_point(_target_position - (motion_event.relative * middle_drag_speed) / zoom)
 		global_position = _target_position
 
 

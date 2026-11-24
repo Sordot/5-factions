@@ -41,6 +41,8 @@ func _ready() -> void:
 	if GameConfig != null and GameConfig.configured_from_menu:
 		aggro_ai_enabled = GameConfig.aggro_ai_enabled
 	_global_aggro_ai_enabled = aggro_ai_enabled
+	if SettingsManager != null:
+		SettingsManager.set_gameplay_cursor_active(true)
 	call_deferred("_ensure_pause_menu")
 	call_deferred("_hook_initial_entities")
 	if not get_tree().node_added.is_connected(_on_tree_node_added):
@@ -110,13 +112,23 @@ func get_recent_alerts() -> Array[Dictionary]:
 
 
 func _input(event: InputEvent) -> void:
+	if event.is_echo():
+		return
+	var ctrl_down: bool = Input.is_key_pressed(KEY_CTRL)
+	var alt_down: bool = Input.is_key_pressed(KEY_ALT)
+	var shift_down: bool = Input.is_key_pressed(KEY_SHIFT)
 	if event is InputEventKey:
 		var key_ev: InputEventKey = event
-		if key_ev.pressed and not key_ev.echo and not key_ev.ctrl_pressed and not key_ev.alt_pressed and not key_ev.shift_pressed:
-			if event.is_action_pressed("debug_toggle_aggro_ai"):
-				toggle_aggro_ai()
-				get_viewport().set_input_as_handled()
-				return
+		if not key_ev.pressed:
+			return
+		ctrl_down = ctrl_down or key_ev.ctrl_pressed
+		alt_down = alt_down or key_ev.alt_pressed
+		shift_down = shift_down or key_ev.shift_pressed
+	if not ctrl_down and not alt_down and not shift_down:
+		if event.is_action_pressed("debug_toggle_aggro_ai"):
+			toggle_aggro_ai()
+			get_viewport().set_input_as_handled()
+			return
 
 
 static func is_aggro_ai_enabled(tree: SceneTree = null) -> bool:
@@ -157,6 +169,8 @@ func _calm_idle_and_ai_units() -> void:
 
 
 func _exit_tree() -> void:
+	if SettingsManager != null:
+		SettingsManager.set_gameplay_cursor_active(false)
 	if get_tree() != null and get_tree().node_added.is_connected(_on_tree_node_added):
 		get_tree().node_added.disconnect(_on_tree_node_added)
 
@@ -185,6 +199,8 @@ func enter_sandbox_mode() -> void:
 	var overlay: Node = _get_end_overlay()
 	if overlay != null and overlay.has_method("hide_summary"):
 		overlay.hide_summary()
+	if SettingsManager != null:
+		SettingsManager.set_gameplay_cursor_active(true)
 
 
 func evaluate_match_state() -> void:

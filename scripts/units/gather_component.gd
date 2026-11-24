@@ -128,7 +128,7 @@ func _tick_moving_to_node(owner_unit: Unit) -> void:
 		return
 
 	owner_unit.request_component_navigation(
-		_get_approach_point(owner_unit, target_node.global_position, target_node.collision_radius, null, target_node),
+		_get_approach_point(owner_unit, target_node, target_node.collision_radius, null, target_node),
 		12.0,
 		4.0
 	)
@@ -256,7 +256,7 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 		return
 
 	owner_unit.request_component_navigation(
-		_get_approach_point(owner_unit, dropoff_building.global_position, dropoff_building.footprint_radius, dropoff_building, null),
+		_get_approach_point(owner_unit, dropoff_building, dropoff_building.footprint_radius, dropoff_building, null),
 		12.0,
 		4.0
 	)
@@ -264,12 +264,12 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 
 func _get_approach_point(
 	owner_unit: Unit,
-	target_center: Vector2,
+	target_entity: Node2D,
 	target_radius: float,
 	ignore_building: Building = null,
 	ignore_resource: ResourceNode = null
 ) -> Vector2:
-	return owner_unit.find_clear_approach_point(target_center, target_radius, 8.0, ignore_building, ignore_resource)
+	return owner_unit.get_or_compute_approach_point(target_entity, target_radius, 8.0, ignore_building, ignore_resource)
 
 
 func _ensure_valid_target_node(owner_unit: Unit) -> bool:
@@ -284,15 +284,15 @@ func _ensure_valid_target_node(owner_unit: Unit) -> bool:
 
 func _get_gather_reach(owner_unit: Unit, node: ResourceNode) -> float:
 	var unit_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 13.0
-	var configured: float = owner_unit.data.gather_range if owner_unit.data != null else 48.0
-	var min_physical: float = node.collision_radius + unit_r + 17.0
+	var configured: float = owner_unit.data.gather_range if owner_unit.data != null else 54.0
+	var min_physical: float = maxf(54.0, node.collision_radius + unit_r + 22.0)
 	return maxf(configured, min_physical)
 
 
 func _get_dropoff_reach(owner_unit: Unit, building: Building) -> float:
 	var unit_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 13.0
 	var configured: float = owner_unit.data.dropoff_range if owner_unit.data != null else 64.0
-	var min_physical: float = building.footprint_radius + unit_r + 18.0
+	var min_physical: float = building.footprint_radius + unit_r + 22.0
 	return maxf(configured, min_physical)
 
 

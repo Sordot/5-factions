@@ -5,11 +5,13 @@ signal closed
 
 @onready var tab_btn_controls: Button = %TabBtnControls
 @onready var tab_btn_camera: Button = %TabBtnCamera
+@onready var tab_btn_gameplay: Button = %TabBtnGameplay
 @onready var tab_btn_audio: Button = %TabBtnAudio
 @onready var tab_btn_display: Button = %TabBtnDisplay
 
 @onready var panel_controls: Control = %PanelControls
 @onready var panel_camera: Control = %PanelCamera
+@onready var panel_gameplay: Control = %PanelGameplay
 @onready var panel_audio: Control = %PanelAudio
 @onready var panel_display: Control = %PanelDisplay
 
@@ -18,6 +20,7 @@ signal closed
 @onready var capture_label: Label = %CaptureLabel
 
 @onready var chk_edge_pan: CheckButton = %ChkEdgePan
+@onready var chk_confine_cursor: CheckButton = %ChkConfineCursor
 @onready var sld_edge_speed: HSlider = %SldEdgeSpeed
 @onready var val_edge_speed: Label = %ValEdgeSpeed
 @onready var sld_edge_margin: HSlider = %SldEdgeMargin
@@ -26,6 +29,12 @@ signal closed
 @onready var val_kb_speed: Label = %ValKbSpeed
 @onready var sld_zoom_speed: HSlider = %SldZoomSpeed
 @onready var val_zoom_speed: Label = %ValZoomSpeed
+@onready var chk_invert_zoom: CheckButton = %ChkInvertZoom
+@onready var sld_mid_drag_speed: HSlider = %SldMidDragSpeed
+@onready var val_mid_drag_speed: Label = %ValMidDragSpeed
+
+@onready var opt_health_bar_mode: OptionButton = %OptHealthBarMode
+@onready var chk_alert_toasts: CheckButton = %ChkAlertToasts
 
 @onready var sld_master_vol: HSlider = %SldMasterVol
 @onready var val_master_vol: Label = %ValMasterVol
@@ -34,10 +43,14 @@ signal closed
 @onready var sld_ui_vol: HSlider = %SldUiVol
 @onready var val_ui_vol: Label = %ValUiVol
 @onready var chk_mute_all: CheckButton = %ChkMuteAll
+@onready var chk_mute_unfocused: CheckButton = %ChkMuteUnfocused
 @onready var btn_test_audio: Button = %BtnTestAudio
 
 @onready var opt_window_mode: OptionButton = %OptWindowMode
 @onready var opt_resolution: OptionButton = %OptResolution
+@onready var chk_vsync: CheckButton = %ChkVsync
+@onready var opt_fps_cap: OptionButton = %OptFpsCap
+@onready var chk_fps_counter: CheckButton = %ChkFpsCounter
 
 @onready var btn_reset_tab: Button = %BtnResetTab
 @onready var btn_reset_all: Button = %BtnResetAll
@@ -48,19 +61,24 @@ var _capturing_action: StringName = &""
 var _capturing_label: String = ""
 var _keybind_buttons: Dictionary = {}
 var _suppress_callbacks: bool = false
+var _notice_timer: float = 0.0
 
 
 func _ready() -> void:
 	layer = 25
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_to_group("settings_menu")
+	if SettingsManager != null:
+		SettingsManager.refresh_mouse_mode()
 
 	tab_btn_controls.pressed.connect(func() -> void: _select_tab(&"controls"))
 	tab_btn_camera.pressed.connect(func() -> void: _select_tab(&"camera"))
+	tab_btn_gameplay.pressed.connect(func() -> void: _select_tab(&"gameplay"))
 	tab_btn_audio.pressed.connect(func() -> void: _select_tab(&"audio"))
 	tab_btn_display.pressed.connect(func() -> void: _select_tab(&"display"))
 
 	_wire_camera_controls()
+	_wire_gameplay_controls()
 	_wire_audio_controls()
 	_wire_display_controls()
 	_build_keybind_rows()
@@ -79,26 +97,46 @@ func _ready() -> void:
 	_select_tab(&"controls", false)
 
 
+func _exit_tree() -> void:
+	if SettingsManager != null:
+		SettingsManager.call_deferred("refresh_mouse_mode")
+
+
+func _process(delta: float) -> void:
+	if _notice_timer > 0.0 and _capturing_action == &"":
+		_notice_timer = maxf(0.0, _notice_timer - delta)
+		if _notice_timer <= 0.0 and capture_banner != null:
+			capture_banner.visible = false
+
+
 func is_capturing_key() -> bool:
 	return _capturing_action != &""
 
 
 func _on_external_settings_changed(category: StringName) -> void:
-	if category == &"display" or category == &"audio" or category == &"camera" or category == &"all":
+	if category == &"display" or category == &"audio" or category == &"camera" or category == &"gameplay" or category == &"all":
 		_sync_all_from_manager()
 
 
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
-	if event is InputEventKey:
-		var key_ev: InputEventKey = event
-		if not key_ev.pressed or key_ev.echo:
-			return
-		if _capturing_action != &"":
+
+	if _capturing_action != &"":
+		if event is InputEventKey:
+			var key_ev: InputEventKey = event
+			if not key_ev.pressed or key_ev.echo:
+				return
 			get_viewport().set_input_as_handled()
 			if key_ev.keycode == KEY_ESCAPE:
 				_cancel_capture()
+				return
+			if key_ev.keycode == KEY_DELETE:
+				var cleared_lbl: String = _capturing_label
+				SettingsManager.clear_action_bind(_capturing_action)
+				AudioManager.play_ui_click()
+				_cancel_capture()
+				_show_controls_notice("Unbound '%s'" % cleared_lbl)
 				return
 			if key_ev.keycode == KEY_CTRL or key_ev.keycode == KEY_SHIFT or key_ev.keycode == KEY_ALT or key_ev.keycode == KEY_META:
 				return
@@ -106,17 +144,41 @@ func _input(event: InputEvent) -> void:
 			if SettingsManager.is_key_reserved_for_editor(chosen):
 				AudioManager.play_error()
 				if capture_label != null:
-					capture_label.text = "F5–F8 are reserved for Godot Editor shortcuts. Press another key for '%s' (Esc to cancel)..." % _capturing_label
+					capture_label.text = "F5–F8 are reserved for Godot Editor shortcuts. Press another key or Mouse 3/4/5 for '%s' (Esc to cancel)..." % _capturing_label
 				return
-			SettingsManager.set_action_key(_capturing_action, chosen)
+			var target_act: StringName = _capturing_action
+			var target_lbl: String = _capturing_label
+			var reassigned: Array[StringName] = SettingsManager.set_action_keybind(target_act, chosen as Key, true)
 			AudioManager.play_ui_click()
 			_cancel_capture()
-			_refresh_keybind_buttons()
+			_show_reassignment_notice(SettingsManager.format_keycode(chosen), target_lbl, reassigned)
 			return
-		if key_ev.keycode == KEY_ESCAPE:
+
+		if event is InputEventMouseButton:
+			var mb: InputEventMouseButton = event
+			if not mb.pressed:
+				return
+			get_viewport().set_input_as_handled()
+			if SettingsManager.is_mouse_button_allowed(int(mb.button_index)):
+				var target_act_m: StringName = _capturing_action
+				var target_lbl_m: String = _capturing_label
+				var reassigned_m: Array[StringName] = SettingsManager.set_action_mouse_bind(target_act_m, mb.button_index, true)
+				AudioManager.play_ui_click()
+				_cancel_capture()
+				_show_reassignment_notice(SettingsManager.format_mouse_button(int(mb.button_index)), target_lbl_m, reassigned_m)
+				return
+			# Explicitly reject LMB, RMB, and Scroll Wheel so core RTS selection/orders can never be overwritten.
+			AudioManager.play_error()
+			if capture_label != null:
+				capture_label.text = "Left/Right Click and Scroll Wheel are reserved. Press a key or Mouse 3/4/5 for '%s' (Esc to cancel)..." % _capturing_label
+			return
+		return
+
+	if event is InputEventKey:
+		var esc_ev: InputEventKey = event
+		if esc_ev.pressed and not esc_ev.echo and esc_ev.keycode == KEY_ESCAPE:
 			get_viewport().set_input_as_handled()
 			_close_menu()
-			return
 
 
 func _select_tab(tab_id: StringName, play_sound: bool = true) -> void:
@@ -126,6 +188,7 @@ func _select_tab(tab_id: StringName, play_sound: bool = true) -> void:
 	_active_tab = tab_id
 	panel_controls.visible = (tab_id == &"controls")
 	panel_camera.visible = (tab_id == &"camera")
+	panel_gameplay.visible = (tab_id == &"gameplay")
 	panel_audio.visible = (tab_id == &"audio")
 	panel_display.visible = (tab_id == &"display")
 
@@ -133,6 +196,7 @@ func _select_tab(tab_id: StringName, play_sound: bool = true) -> void:
 	var idle_col: Color = Color(0.68, 0.76, 0.82, 0.82)
 	tab_btn_controls.modulate = active_col if tab_id == &"controls" else idle_col
 	tab_btn_camera.modulate = active_col if tab_id == &"camera" else idle_col
+	tab_btn_gameplay.modulate = active_col if tab_id == &"gameplay" else idle_col
 	tab_btn_audio.modulate = active_col if tab_id == &"audio" else idle_col
 	tab_btn_display.modulate = active_col if tab_id == &"display" else idle_col
 
@@ -159,7 +223,7 @@ func _build_keybind_rows() -> void:
 		var disp_label: String = String(entry["label"])
 
 		var row: HBoxContainer = HBoxContainer.new()
-		row.add_theme_constant_override("separation", 10)
+		row.add_theme_constant_override("separation", 8)
 
 		var lbl: Label = Label.new()
 		lbl.text = disp_label
@@ -174,7 +238,7 @@ func _build_keybind_rows() -> void:
 		row.add_child(conflict_lbl)
 
 		var bind_btn: Button = Button.new()
-		bind_btn.custom_minimum_size = Vector2(124.0, 28.0)
+		bind_btn.custom_minimum_size = Vector2(132.0, 28.0)
 		bind_btn.focus_mode = Control.FOCUS_NONE
 		bind_btn.add_theme_font_size_override("font_size", 12)
 		var captured_act: StringName = act
@@ -184,42 +248,78 @@ func _build_keybind_rows() -> void:
 		)
 		row.add_child(bind_btn)
 
+		var clear_btn: Button = Button.new()
+		clear_btn.text = "×"
+		clear_btn.tooltip_text = "Unbind shortcut"
+		clear_btn.custom_minimum_size = Vector2(30.0, 28.0)
+		clear_btn.focus_mode = Control.FOCUS_NONE
+		clear_btn.add_theme_font_size_override("font_size", 13)
+		clear_btn.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_cancel_capture()
+			SettingsManager.clear_action_bind(captured_act)
+			_refresh_keybind_buttons()
+			_show_controls_notice("Unbound '%s'" % captured_disp)
+		)
+		row.add_child(clear_btn)
+
 		var reset_btn: Button = Button.new()
 		reset_btn.text = "Default"
-		reset_btn.custom_minimum_size = Vector2(68.0, 28.0)
+		reset_btn.custom_minimum_size = Vector2(64.0, 28.0)
 		reset_btn.focus_mode = Control.FOCUS_NONE
 		reset_btn.add_theme_font_size_override("font_size", 11)
 		reset_btn.pressed.connect(func() -> void:
 			AudioManager.play_ui_click()
-			SettingsManager.reset_action_to_default(captured_act)
+			_cancel_capture()
+			var reassigned_r: Array[StringName] = SettingsManager.reset_action_to_default(captured_act)
 			_refresh_keybind_buttons()
+			_show_reassignment_notice(SettingsManager.get_action_display_label(captured_act), captured_disp, reassigned_r)
 		)
 		row.add_child(reset_btn)
 
 		keybind_list.add_child(row)
 		_keybind_buttons[act] = {
 			"button": bind_btn,
+			"clear": clear_btn,
 			"conflict": conflict_lbl,
 		}
 
 
 func _begin_capture(action_name: StringName, disp_label: String) -> void:
 	AudioManager.play_ui_click()
+	_notice_timer = 0.0
 	_capturing_action = action_name
 	_capturing_label = disp_label
 	if capture_banner != null:
 		capture_banner.visible = true
 	if capture_label != null:
-		capture_label.text = "Press any key to bind '%s'...  (Esc to cancel • F5–F8 reserved)" % disp_label
+		capture_label.text = "Press any key or Mouse 3/4/5 for '%s'...  (Del to unbind • Esc to cancel)" % disp_label
 	_refresh_keybind_buttons()
 
 
 func _cancel_capture() -> void:
 	_capturing_action = &""
 	_capturing_label = ""
-	if capture_banner != null:
+	if capture_banner != null and _notice_timer <= 0.0:
 		capture_banner.visible = false
 	_refresh_keybind_buttons()
+
+
+func _show_controls_notice(message: String) -> void:
+	if capture_banner == null or capture_label == null:
+		return
+	capture_label.text = message
+	capture_banner.visible = true
+	_notice_timer = 3.2
+
+
+func _show_reassignment_notice(bind_text: String, target_label: String, reassigned: Array[StringName]) -> void:
+	if reassigned.is_empty():
+		return
+	var names: PackedStringArray = PackedStringArray()
+	for other_act: StringName in reassigned:
+		names.append(SettingsManager.get_action_label(other_act))
+	_show_controls_notice("Reassigned [%s] from %s to %s" % [bind_text, ", ".join(names), target_label])
 
 
 func _refresh_keybind_buttons() -> void:
@@ -229,30 +329,38 @@ func _refresh_keybind_buttons() -> void:
 			continue
 		var pack: Dictionary = _keybind_buttons[act]
 		var btn: Button = pack["button"] as Button
+		var clear_btn: Button = pack["clear"] as Button
 		var conflict_lbl: Label = pack["conflict"] as Label
-		var code: int = SettingsManager.get_action_keycode(act)
-		var conflicts: Array[StringName] = SettingsManager.find_conflicting_actions(act, code)
+		var binding: String = SettingsManager.get_action_binding(act)
+		var conflicts: Array[StringName] = SettingsManager.find_conflicting_actions(act, binding)
 
 		if _capturing_action == act:
-			btn.text = "[ PRESS KEY... ]"
+			btn.text = "[ PRESS INPUT... ]"
 			btn.modulate = Color(1.0, 0.86, 0.30, 1.0)
 		else:
-			btn.text = "[ %s ]" % SettingsManager.format_keycode(code)
-			if not conflicts.is_empty():
+			btn.text = "[ %s ]" % SettingsManager.format_binding(binding, false)
+			if binding == "none":
+				btn.modulate = Color(0.56, 0.64, 0.72, 0.82)
+			elif not conflicts.is_empty():
 				btn.modulate = Color(1.0, 0.44, 0.32, 1.0)
 			else:
 				btn.modulate = Color(0.72, 0.96, 1.0, 1.0)
 
+		if clear_btn != null:
+			clear_btn.disabled = (binding == "none")
 		if conflict_lbl != null:
 			conflict_lbl.text = "CONFLICT" if not conflicts.is_empty() else ""
 
 
 func _wire_camera_controls() -> void:
 	chk_edge_pan.toggled.connect(func(_on: bool) -> void: _push_camera_settings())
+	chk_confine_cursor.toggled.connect(func(_on: bool) -> void: _push_camera_settings())
 	sld_edge_speed.value_changed.connect(func(_v: float) -> void: _push_camera_settings())
 	sld_edge_margin.value_changed.connect(func(_v: float) -> void: _push_camera_settings())
 	sld_kb_speed.value_changed.connect(func(_v: float) -> void: _push_camera_settings())
 	sld_zoom_speed.value_changed.connect(func(_v: float) -> void: _push_camera_settings())
+	chk_invert_zoom.toggled.connect(func(_on: bool) -> void: _push_camera_settings())
+	sld_mid_drag_speed.value_changed.connect(func(_v: float) -> void: _push_camera_settings())
 
 
 func _push_camera_settings() -> void:
@@ -263,7 +371,10 @@ func _push_camera_settings() -> void:
 		sld_edge_speed.value,
 		sld_edge_margin.value,
 		sld_kb_speed.value,
-		sld_zoom_speed.value
+		sld_zoom_speed.value,
+		chk_confine_cursor.button_pressed,
+		chk_invert_zoom.button_pressed,
+		sld_mid_drag_speed.value
 	)
 	_refresh_camera_labels()
 
@@ -273,6 +384,24 @@ func _refresh_camera_labels() -> void:
 	val_edge_margin.text = "%d px" % int(round(sld_edge_margin.value))
 	val_kb_speed.text = "%d px/s" % int(round(sld_kb_speed.value))
 	val_zoom_speed.text = "%.2f" % sld_zoom_speed.value
+	val_mid_drag_speed.text = "%.2fx" % sld_mid_drag_speed.value
+
+
+func _wire_gameplay_controls() -> void:
+	opt_health_bar_mode.clear()
+	opt_health_bar_mode.add_item("Damaged / Selected (Default)", 0)
+	opt_health_bar_mode.add_item("Always On", 1)
+	opt_health_bar_mode.add_item("Selected Only", 2)
+	opt_health_bar_mode.item_selected.connect(func(_idx: int) -> void: _push_gameplay_settings())
+	chk_alert_toasts.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
+
+
+func _push_gameplay_settings() -> void:
+	if _suppress_callbacks:
+		return
+	var hb_mode: int = clampi(opt_health_bar_mode.selected, 0, 2)
+	SettingsManager.set_gameplay_settings(hb_mode, chk_alert_toasts.button_pressed)
+	AudioManager.play_ui_click()
 
 
 func _wire_audio_controls() -> void:
@@ -280,6 +409,7 @@ func _wire_audio_controls() -> void:
 	sld_sfx_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings())
 	sld_ui_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings())
 	chk_mute_all.toggled.connect(func(_on: bool) -> void: _push_audio_settings())
+	chk_mute_unfocused.toggled.connect(func(_on: bool) -> void: _push_audio_settings())
 	btn_test_audio.pressed.connect(func() -> void:
 		AudioManager.play_sfx(&"build_complete", -2.0, 0.0)
 	)
@@ -292,7 +422,8 @@ func _push_audio_settings() -> void:
 		sld_master_vol.value / 100.0,
 		sld_sfx_vol.value / 100.0,
 		sld_ui_vol.value / 100.0,
-		chk_mute_all.button_pressed
+		chk_mute_all.button_pressed,
+		chk_mute_unfocused.button_pressed
 	)
 	_refresh_audio_labels()
 
@@ -316,6 +447,16 @@ func _wire_display_controls() -> void:
 		opt_resolution.add_item("%d × %d" % [res.x, res.y], i)
 	opt_resolution.item_selected.connect(func(_idx: int) -> void: _push_display_settings())
 
+	chk_vsync.toggled.connect(func(_on: bool) -> void: _push_display_settings())
+
+	opt_fps_cap.clear()
+	for i: int in range(SettingsManager.FPS_CAP_PRESETS.size()):
+		var cap_val: int = int(SettingsManager.FPS_CAP_PRESETS[i])
+		opt_fps_cap.add_item("Unlimited" if cap_val <= 0 else ("%d FPS" % cap_val), i)
+	opt_fps_cap.item_selected.connect(func(_idx: int) -> void: _push_display_settings())
+
+	chk_fps_counter.toggled.connect(func(_on: bool) -> void: _push_display_settings())
+
 
 func _push_display_settings() -> void:
 	if _suppress_callbacks:
@@ -323,7 +464,15 @@ func _push_display_settings() -> void:
 	var mode_idx: int = maxi(0, opt_window_mode.selected)
 	var res_idx: int = clampi(opt_resolution.selected, 0, SettingsManager.RESOLUTION_PRESETS.size() - 1)
 	var chosen_res: Vector2i = SettingsManager.RESOLUTION_PRESETS[res_idx]
-	SettingsManager.set_display_settings(mode_idx, chosen_res)
+	var fps_idx: int = clampi(opt_fps_cap.selected, 0, SettingsManager.FPS_CAP_PRESETS.size() - 1)
+	var chosen_fps: int = int(SettingsManager.FPS_CAP_PRESETS[fps_idx])
+	SettingsManager.set_display_settings(
+		mode_idx,
+		chosen_res,
+		chk_vsync.button_pressed,
+		chosen_fps,
+		chk_fps_counter.button_pressed
+	)
 	opt_resolution.disabled = (mode_idx != 0)
 	AudioManager.play_ui_click()
 
@@ -332,16 +481,23 @@ func _sync_all_from_manager() -> void:
 	_suppress_callbacks = true
 
 	chk_edge_pan.button_pressed = SettingsManager.edge_pan_enabled
+	chk_confine_cursor.button_pressed = SettingsManager.confine_cursor
 	sld_edge_speed.value = SettingsManager.edge_pan_speed
 	sld_edge_margin.value = SettingsManager.edge_pan_margin
 	sld_kb_speed.value = SettingsManager.keyboard_pan_speed
 	sld_zoom_speed.value = SettingsManager.zoom_speed
+	chk_invert_zoom.button_pressed = SettingsManager.invert_zoom
+	sld_mid_drag_speed.value = SettingsManager.middle_drag_speed
 	_refresh_camera_labels()
+
+	opt_health_bar_mode.select(clampi(SettingsManager.health_bar_mode, 0, 2))
+	chk_alert_toasts.button_pressed = SettingsManager.show_alert_toasts
 
 	sld_master_vol.value = SettingsManager.master_volume * 100.0
 	sld_sfx_vol.value = SettingsManager.sfx_volume * 100.0
 	sld_ui_vol.value = SettingsManager.ui_volume * 100.0
 	chk_mute_all.button_pressed = SettingsManager.muted
+	chk_mute_unfocused.button_pressed = SettingsManager.mute_when_unfocused
 	_refresh_audio_labels()
 
 	opt_window_mode.select(clampi(SettingsManager.window_mode, 0, 2))
@@ -353,12 +509,22 @@ func _sync_all_from_manager() -> void:
 	opt_resolution.select(matched_res)
 	opt_resolution.disabled = (SettingsManager.window_mode != 0)
 
+	chk_vsync.button_pressed = SettingsManager.vsync_enabled
+	var matched_fps: int = 0
+	for i: int in range(SettingsManager.FPS_CAP_PRESETS.size()):
+		if int(SettingsManager.FPS_CAP_PRESETS[i]) == SettingsManager.fps_cap:
+			matched_fps = i
+			break
+	opt_fps_cap.select(matched_fps)
+	chk_fps_counter.button_pressed = SettingsManager.show_fps_counter
+
 	_refresh_keybind_buttons()
 	_suppress_callbacks = false
 
 
 func _on_reset_tab_pressed() -> void:
 	AudioManager.play_ui_click()
+	_notice_timer = 0.0
 	_cancel_capture()
 	SettingsManager.reset_category(_active_tab)
 	_sync_all_from_manager()
@@ -366,6 +532,7 @@ func _on_reset_tab_pressed() -> void:
 
 func _on_reset_all_pressed() -> void:
 	AudioManager.play_ui_click()
+	_notice_timer = 0.0
 	_cancel_capture()
 	SettingsManager.reset_all_to_defaults()
 	_sync_all_from_manager()

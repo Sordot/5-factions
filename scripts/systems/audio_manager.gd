@@ -25,6 +25,7 @@ var master_volume_linear: float = 0.72
 var sfx_volume_linear: float = 0.85
 var ui_volume_linear: float = 0.85
 
+var _unfocused_muted: bool = false
 var _streams: Dictionary = {}
 var _players: Array[AudioStreamPlayer] = []
 var _next_player_idx: int = 0
@@ -89,6 +90,17 @@ func _sync_from_settings() -> void:
 		volume_changed.emit(master_volume_linear)
 
 
+func set_unfocused_mute(unfocused_muted: bool) -> void:
+	if _unfocused_muted == unfocused_muted:
+		return
+	_unfocused_muted = unfocused_muted
+	_apply_master_bus_settings()
+
+
+func is_effectively_muted() -> bool:
+	return is_muted or _unfocused_muted
+
+
 func set_muted(muted: bool) -> void:
 	if is_muted == muted:
 		return
@@ -115,7 +127,7 @@ func set_volume(linear: float) -> void:
 
 
 func play_sfx(sfx_id: StringName, volume_db_offset: float = 0.0, pitch_jitter: float = 0.0) -> void:
-	if is_muted or master_volume_linear <= 0.001:
+	if is_effectively_muted() or master_volume_linear <= 0.001:
 		return
 	var channel_linear: float = ui_volume_linear if UI_SFX_IDS.has(sfx_id) else sfx_volume_linear
 	if channel_linear <= 0.001:
@@ -191,7 +203,7 @@ func _apply_master_bus_settings() -> void:
 	var master_idx: int = AudioServer.get_bus_index("Master")
 	if master_idx < 0:
 		return
-	AudioServer.set_bus_mute(master_idx, is_muted)
+	AudioServer.set_bus_mute(master_idx, is_effectively_muted())
 	var db: float = linear_to_db(maxf(0.0001, master_volume_linear))
 	AudioServer.set_bus_volume_db(master_idx, db)
 

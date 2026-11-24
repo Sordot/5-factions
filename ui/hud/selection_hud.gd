@@ -149,7 +149,7 @@ func _attach_dynamic_action_tooltip(btn: Button, title: String, action_name: Str
 	btn.tooltip_text = ""
 	btn.mouse_entered.connect(func() -> void:
 		if command_tooltip != null:
-			var hk: String = SettingsManager.get_action_key_label(action_name) if SettingsManager != null else ""
+			var hk: String = SettingsManager.get_action_display_label(action_name, false) if SettingsManager != null else ""
 			command_tooltip.show_tooltip(title, hk, meta, desc)
 	)
 	btn.mouse_exited.connect(func() -> void:
@@ -158,9 +158,47 @@ func _attach_dynamic_action_tooltip(btn: Button, title: String, action_name: Str
 	)
 
 
+func _get_compact_action_badge(action_name: StringName, fallback: String) -> String:
+	if SettingsManager == null:
+		return fallback
+	return SettingsManager.get_action_display_label(action_name, true)
+
+
+func _get_ability_action_name(hotkey_label: String) -> StringName:
+	match hotkey_label.strip_edges().to_upper():
+		"Q":
+			return &"cmd_ability_q"
+		"W":
+			return &"cmd_ability_w"
+		"E":
+			return &"cmd_ability_e"
+		"R":
+			return &"cmd_ability_r"
+		"T":
+			return &"cmd_ability_t"
+		"Y":
+			return &"cmd_ability_y"
+		"F":
+			return &"cmd_ability_f"
+	return &""
+
+
+func _get_ability_hotkey_display(hotkey_label: String, compact: bool = true) -> String:
+	var act: StringName = _get_ability_action_name(hotkey_label)
+	if act != &"" and SettingsManager != null:
+		return SettingsManager.get_action_display_label(act, compact)
+	return hotkey_label
+
+
 func _on_keybind_changed(_action_name: StringName) -> void:
 	_refresh_dynamic_command_labels()
 	_refresh_stance_button()
+	if not _active_abilities.is_empty():
+		_refresh_all_ability_states()
+	if _inspected_entity is Building and is_instance_valid(_inspected_entity):
+		_refresh_building_action_buttons(_inspected_entity as Building)
+	if _selection_controller != null and _selection_controller.subgroups.size() > 1:
+		_rebuild_subgroup_tabs(_selection_controller.subgroups, _selection_controller.active_subgroup_index)
 
 
 func _on_display_settings_changed(category: StringName) -> void:
@@ -169,16 +207,17 @@ func _on_display_settings_changed(category: StringName) -> void:
 
 
 func _refresh_dynamic_command_labels() -> void:
-	var k_stop: String = SettingsManager.get_action_key_label(&"cmd_stop") if SettingsManager != null else "S"
-	var k_patrol: String = SettingsManager.get_action_key_label(&"cmd_patrol") if SettingsManager != null else "P"
-	var k_amove: String = SettingsManager.get_action_key_label(&"cmd_attack_move") if SettingsManager != null else "A"
+	var k_stop: String = _get_compact_action_badge(&"cmd_stop", "S")
+	var k_patrol: String = _get_compact_action_badge(&"cmd_patrol", "P")
+	var k_amove: String = _get_compact_action_badge(&"cmd_attack_move", "A")
 	if btn_cmd_stop != null:
-		btn_cmd_stop.text = "Stop (%s)" % k_stop
+		btn_cmd_stop.text = ("Stop (%s)" % k_stop) if not k_stop.is_empty() else "Stop"
 	if btn_cmd_patrol != null:
-		btn_cmd_patrol.text = ("Patrol* (%s)" % k_patrol) if _patrol_targeting else ("Patrol (%s)" % k_patrol)
+		var p_prefix: String = "Patrol*" if _patrol_targeting else "Patrol"
+		btn_cmd_patrol.text = ("%s (%s)" % [p_prefix, k_patrol]) if not k_patrol.is_empty() else p_prefix
 		btn_cmd_patrol.modulate = Color(1.0, 0.86, 0.30, 1.0) if _patrol_targeting else Color.WHITE
 	if btn_cmd_amove != null:
-		btn_cmd_amove.text = "Atk-Mv (%s)" % k_amove
+		btn_cmd_amove.text = ("Atk-Mv (%s)" % k_amove) if not k_amove.is_empty() else "Atk-Mv"
 
 
 func _on_patrol_targeting_changed(active: bool) -> void:
@@ -593,10 +632,10 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 			elif is_instance_valid(captured_building):
 				captured_building.eject_engineers()
 		)
-		_attach_tooltip(
+		_attach_dynamic_action_tooltip(
 			eject_btn,
 			"Eject Engineers",
-			"E",
+			&"cmd_ability_e",
 			"Instant Release",
 			"Releases all Engineers currently staffed inside this Wetware Mainframe back onto the battlefield."
 		)
@@ -702,7 +741,8 @@ func _refresh_building_action_buttons(building: Building) -> void:
 		var kind: String = String(entry["kind"])
 		if kind == "eject":
 			var count: int = building.get_assigned_engineer_count()
-			btn.text = "[E] Eject Engineers (%d)" % count
+			var k_eject: String = _get_compact_action_badge(&"cmd_ability_e", "E")
+			btn.text = ("[%s] Eject Engineers (%d)" % [k_eject, count]) if not k_eject.is_empty() else ("Eject Engineers (%d)" % count)
 			btn.disabled = count <= 0
 			btn.modulate = Color(0.55, 0.92, 1.0, 1.0) if count > 0 else Color(0.6, 0.64, 0.7, 0.7)
 		elif kind == "train":
@@ -854,15 +894,16 @@ func _refresh_stance_button() -> void:
 		living_count += 1
 		if u.stance == Unit.Stance.HOLD_POSITION:
 			hold_count += 1
-	var k_hold: String = SettingsManager.get_action_key_label(&"cmd_hold") if SettingsManager != null else "H"
+	var k_hold: String = _get_compact_action_badge(&"cmd_hold", "H")
+	var hold_suffix: String = (" (%s)" % k_hold) if not k_hold.is_empty() else ""
 	if living_count > 0 and hold_count == living_count:
-		btn_cmd_hold.text = "Hold: ON (%s)" % k_hold
+		btn_cmd_hold.text = "Hold: ON%s" % hold_suffix
 		btn_cmd_hold.modulate = Color(1.0, 0.84, 0.32, 1.0)
 	elif hold_count > 0:
-		btn_cmd_hold.text = "Hold* (%s)" % k_hold
+		btn_cmd_hold.text = "Hold*%s" % hold_suffix
 		btn_cmd_hold.modulate = Color(1.0, 0.90, 0.56, 1.0)
 	else:
-		btn_cmd_hold.text = "Hold (%s)" % k_hold
+		btn_cmd_hold.text = "Hold%s" % hold_suffix
 		btn_cmd_hold.modulate = Color.WHITE
 
 
@@ -941,11 +982,13 @@ func _rebuild_subgroup_tabs(subgroups: Array[Dictionary], active_index: int) -> 
 		subgroup_tabs_row.add_child(btn)
 
 	if subgroups.size() > 1:
-		var hint: Label = Label.new()
-		hint.text = " [Tab]"
-		hint.add_theme_font_size_override("font_size", 11)
-		hint.modulate = Color(0.55, 0.9, 0.92, 0.85)
-		subgroup_tabs_row.add_child(hint)
+		var k_tab: String = _get_compact_action_badge(&"ui_cycle_subgroup", "Tab")
+		if not k_tab.is_empty():
+			var hint: Label = Label.new()
+			hint.text = " [%s]" % k_tab
+			hint.add_theme_font_size_override("font_size", 11)
+			hint.modulate = Color(0.55, 0.9, 0.92, 0.85)
+			subgroup_tabs_row.add_child(hint)
 
 
 func _rebuild_unit_badges(units: Array[Unit]) -> void:
@@ -1009,7 +1052,8 @@ func _rebuild_ability_buttons(active_group: Dictionary) -> void:
 		btn.mouse_entered.connect(func() -> void:
 			if command_tooltip != null:
 				var dynamic_meta: String = _build_ability_tooltip_meta(captured_ability)
-				command_tooltip.show_tooltip(captured_ability.display_name, captured_ability.hotkey_label, dynamic_meta, captured_ability.description)
+				var hk_full: String = _get_ability_hotkey_display(captured_ability.hotkey_label, false)
+				command_tooltip.show_tooltip(captured_ability.display_name, hk_full, dynamic_meta, captured_ability.description)
 		)
 		btn.mouse_exited.connect(func() -> void:
 			if command_tooltip != null:
@@ -1063,6 +1107,8 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 	var ability: AbilityData = entry["ability"]
 
 	var is_targeting: bool = (_targeting_ability != null and _targeting_ability.ability_id == ability_id)
+	var hk_compact: String = _get_ability_hotkey_display(ability.hotkey_label, true)
+	var hk_prefix: String = ("[%s] " % hk_compact) if not hk_compact.is_empty() else ""
 
 	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT and ability.building_to_build != null:
 		var b_data: BuildingData = ability.building_to_build
@@ -1079,19 +1125,19 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 
 		if not has_prereq:
 			btn.disabled = false
-			btn.text = "[%s] %s (LOCK)" % [ability.hotkey_label, short_b]
+			btn.text = "%s%s (LOCK)" % [hk_prefix, short_b]
 			btn.modulate = Color(0.64, 0.44, 0.44, 0.68)
 		elif is_targeting:
 			btn.disabled = false
-			btn.text = "[%s] %s*" % [ability.hotkey_label, short_b]
+			btn.text = "%s%s*" % [hk_prefix, short_b]
 			btn.modulate = Color(1.0, 0.85, 0.32, 1.0)
 		elif can_afford:
 			btn.disabled = false
-			btn.text = "[%s] %s (%s)" % [ability.hotkey_label, short_b, cost_text]
+			btn.text = "%s%s (%s)" % [hk_prefix, short_b, cost_text]
 			btn.modulate = Color(0.55, 1.0, 0.95, 1.0)
 		else:
 			btn.disabled = false
-			btn.text = "[%s] %s (%s)" % [ability.hotkey_label, short_b, cost_text]
+			btn.text = "%s%s (%s)" % [hk_prefix, short_b, cost_text]
 			btn.modulate = Color(0.56, 0.6, 0.66, 0.68)
 		return
 
@@ -1113,13 +1159,13 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 	if ready_count > 0:
 		btn.disabled = false
 		if is_targeting:
-			btn.text = "[%s] %s (TARGET)" % [ability.hotkey_label, ability.display_name]
+			btn.text = "%s%s (TARGET)" % [hk_prefix, ability.display_name]
 			btn.modulate = Color(1.0, 0.85, 0.32, 1.0)
 		else:
-			btn.text = "[%s] %s" % [ability.hotkey_label, ability.display_name]
+			btn.text = "%s%s" % [hk_prefix, ability.display_name]
 			btn.modulate = Color(0.55, 1.0, 0.95, 1.0)
 	else:
 		var display_cd: float = 0.0 if min_cd == INF else min_cd
 		btn.disabled = true
-		btn.text = "[%s] %s (%.1fs)" % [ability.hotkey_label, ability.display_name, display_cd]
+		btn.text = "%s%s (%.1fs)" % [hk_prefix, ability.display_name, display_cd]
 		btn.modulate = Color(0.6, 0.64, 0.7, 0.75)

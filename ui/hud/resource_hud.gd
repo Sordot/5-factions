@@ -64,6 +64,8 @@ func _on_keybind_changed(_action_name: StringName) -> void:
 
 
 func _on_hud_toast(message: String) -> void:
+	if SettingsManager != null and not SettingsManager.show_alert_toasts:
+		return
 	_alert_timer = 1.85
 	if resource_alert_label != null:
 		resource_alert_label.text = message.to_upper()
@@ -157,8 +159,8 @@ func _on_idle_workers_pressed() -> void:
 func _on_idle_workers_updated(count: int) -> void:
 	if btn_idle_workers == null:
 		return
-	var hk: String = SettingsManager.get_action_key_label(&"cmd_select_idle_worker") if SettingsManager != null else "`"
-	btn_idle_workers.text = "Idle Workers: %d [%s]" % [count, hk]
+	var hk: String = SettingsManager.get_action_display_label(&"cmd_select_idle_worker", true) if SettingsManager != null else "`"
+	btn_idle_workers.text = ("Idle Workers: %d [%s]" % [count, hk]) if not hk.is_empty() else ("Idle Workers: %d" % count)
 	btn_idle_workers.disabled = count <= 0
 	if count > 0:
 		btn_idle_workers.modulate = Color(1.0, 0.84, 0.28, 1.0)
@@ -178,10 +180,12 @@ func _connect_match_manager() -> void:
 
 
 func _on_tactical_alert_recorded(_world_pos: Vector2, message: String) -> void:
-	var hk: String = SettingsManager.get_action_key_label(&"jump_last_alert") if SettingsManager != null else "Space"
+	if SettingsManager != null and not SettingsManager.show_alert_toasts:
+		return
+	var hk: String = SettingsManager.get_action_display_label(&"jump_last_alert", true) if SettingsManager != null else "SPC"
 	_alert_timer = 2.2
 	if resource_alert_label != null:
-		resource_alert_label.text = "%s  [%s]" % [message.to_upper(), hk]
+		resource_alert_label.text = ("%s  [%s]" % [message.to_upper(), hk]) if not hk.is_empty() else message.to_upper()
 		resource_alert_label.visible = true
 		resource_alert_label.modulate = Color(1.0, 0.82, 0.34, 1.0)
 
