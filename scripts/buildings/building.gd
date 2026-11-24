@@ -3,6 +3,7 @@ extends StaticBody2D
 
 const PRODUCTION_COMPONENT_SCRIPT: GDScript = preload("res://scripts/buildings/production_component.gd")
 const ENTITY_VISUALS_SCRIPT: GDScript = preload("res://ui/overlays/entity_visuals.gd")
+const COMBAT_VFX_SCRIPT: GDScript = preload("res://ui/overlays/combat_vfx.gd")
 const HEALTH_BAR_WIDTH: float = 76.0
 const CONSTRUCT_BAR_WIDTH: float = 68.0
 const DEPOSIT_PULSE_DURATION: float = 0.25
@@ -680,6 +681,16 @@ func _destroy() -> void:
 	if econ_dead != null:
 		econ_dead.notify_building_tech_changed(team)
 	_request_navmesh_rebake()
+	if get_parent() != null and (team == Unit.Team.PLAYER or visible):
+		var burst_col: Color = Color(0.32, 0.96, 0.90, 1.0) if team == Unit.Team.PLAYER else Color(1.0, 0.40, 0.26, 1.0)
+		var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
+		fx.z_index = 54
+		get_parent().add_child(fx)
+		fx.call("setup_death_burst", global_position, maxf(28.0, footprint_radius * 0.95), burst_col, true)
+	if (is_core_hub or building_type_id == &"nexus_vat") and is_inside_tree():
+		var cam: Node = get_tree().get_first_node_in_group("rts_camera")
+		if cam != null and cam.has_method("add_camera_shake"):
+			cam.call("add_camera_shake", 5.0, 0.20, global_position)
 	if AudioManager != null and (team == Unit.Team.PLAYER or visible):
 		AudioManager.play_sfx(&"entity_destroyed", -2.5, 0.06)
 	destroyed.emit(self)

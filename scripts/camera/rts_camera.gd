@@ -33,6 +33,9 @@ var _mouse_in_window: bool = true
 var _base_hub_cycle_index: int = -1
 var _alert_cycle_index: int = -1
 var _last_alert_jump_ms: int = 0
+var _shake_intensity: float = 0.0
+var _shake_timer: float = 0.0
+var _shake_duration: float = 0.15
 
 
 func _ready() -> void:
@@ -126,6 +129,8 @@ func _process(delta: float) -> void:
 	if absf(next_zoom - _target_zoom) < 0.0005:
 		next_zoom = _target_zoom
 	zoom = Vector2(next_zoom, next_zoom)
+
+	_update_camera_shake(dt)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -309,6 +314,45 @@ func toggle_fullscreen() -> bool:
 func center_on(world_pos: Vector2) -> void:
 	_target_position = _clamp_point(world_pos)
 	global_position = _target_position
+
+
+func add_camera_shake(intensity: float, duration: float = 0.15, world_pos: Variant = null) -> void:
+	if SettingsManager != null and not SettingsManager.camera_shake_enabled:
+		return
+	var clamped_intensity: float = clampf(intensity, 0.0, 5.0)
+	if clamped_intensity <= 0.05:
+		return
+	if world_pos is Vector2:
+		var vp: Viewport = get_viewport()
+		if vp != null:
+			var half_view: Vector2 = (vp.get_visible_rect().size / maxf(0.25, zoom.x)) * 0.55 + Vector2(96.0, 96.0)
+			var delta_p: Vector2 = (world_pos as Vector2) - global_position
+			if absf(delta_p.x) > half_view.x or absf(delta_p.y) > half_view.y:
+				return
+	_shake_intensity = maxf(_shake_intensity, clamped_intensity)
+	_shake_duration = maxf(0.08, duration)
+	_shake_timer = maxf(_shake_timer, _shake_duration)
+
+
+func _update_camera_shake(dt: float) -> void:
+	if _shake_timer <= 0.0 or _shake_intensity <= 0.05:
+		if offset != Vector2.ZERO:
+			offset = Vector2.ZERO
+		_shake_intensity = 0.0
+		_shake_timer = 0.0
+		return
+	if SettingsManager != null and not SettingsManager.camera_shake_enabled:
+		offset = Vector2.ZERO
+		_shake_intensity = 0.0
+		_shake_timer = 0.0
+		return
+	_shake_timer = maxf(0.0, _shake_timer - dt)
+	var ratio: float = clampf(_shake_timer / maxf(0.01, _shake_duration), 0.0, 1.0)
+	var amp: float = _shake_intensity * ratio * ratio
+	offset = Vector2(randf_range(-amp, amp), randf_range(-amp, amp))
+	if _shake_timer <= 0.0:
+		offset = Vector2.ZERO
+		_shake_intensity = 0.0
 
 
 func _get_edge_pan_vector() -> Vector2:

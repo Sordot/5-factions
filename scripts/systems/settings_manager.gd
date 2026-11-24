@@ -66,6 +66,7 @@ var middle_drag_speed: float = 1.0
 # Gameplay / HUD preferences
 var health_bar_mode: int = 0 # 0 = Damaged / Selected, 1 = Always On, 2 = Selected Only
 var show_alert_toasts: bool = true
+var camera_shake_enabled: bool = true
 
 # Audio preferences
 var master_volume: float = 0.72
@@ -156,6 +157,7 @@ func load_settings() -> void:
 
 	health_bar_mode = clampi(int(cfg.get_value("gameplay", "health_bar_mode", 0)), 0, 2)
 	show_alert_toasts = bool(cfg.get_value("gameplay", "show_alert_toasts", true))
+	camera_shake_enabled = bool(cfg.get_value("gameplay", "camera_shake_enabled", true))
 
 	master_volume = clampf(float(cfg.get_value("audio", "master_volume", 0.72)), 0.0, 1.0)
 	sfx_volume = clampf(float(cfg.get_value("audio", "sfx_volume", 0.85)), 0.0, 1.0)
@@ -225,6 +227,7 @@ func save_settings() -> void:
 
 	cfg.set_value("gameplay", "health_bar_mode", health_bar_mode)
 	cfg.set_value("gameplay", "show_alert_toasts", show_alert_toasts)
+	cfg.set_value("gameplay", "camera_shake_enabled", camera_shake_enabled)
 
 	cfg.set_value("audio", "master_volume", master_volume)
 	cfg.set_value("audio", "sfx_volume", sfx_volume)
@@ -273,9 +276,15 @@ func set_camera_settings(
 	settings_changed.emit(&"camera")
 
 
-func set_gameplay_settings(p_health_bar_mode: int, p_show_alert_toasts: bool) -> void:
+func set_gameplay_settings(
+	p_health_bar_mode: int,
+	p_show_alert_toasts: bool,
+	p_camera_shake_enabled: Variant = null
+) -> void:
 	health_bar_mode = clampi(p_health_bar_mode, 0, 2)
 	show_alert_toasts = p_show_alert_toasts
+	if p_camera_shake_enabled is bool:
+		camera_shake_enabled = bool(p_camera_shake_enabled)
 	save_settings()
 	settings_changed.emit(&"gameplay")
 
@@ -593,6 +602,7 @@ func reset_category(category: StringName) -> void:
 		&"gameplay":
 			health_bar_mode = 0
 			show_alert_toasts = true
+			camera_shake_enabled = true
 			save_settings()
 			settings_changed.emit(&"gameplay")
 		&"audio":
@@ -634,6 +644,7 @@ func reset_all_to_defaults() -> void:
 	middle_drag_speed = 1.0
 	health_bar_mode = 0
 	show_alert_toasts = true
+	camera_shake_enabled = true
 	master_volume = 0.72
 	sfx_volume = 0.85
 	ui_volume = 0.85

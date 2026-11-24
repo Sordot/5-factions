@@ -40,15 +40,15 @@ var _cooldowns_ms: Dictionary = {
 	&"upgrade_complete": 180,
 	&"unit_ready": 90,
 	&"error_insufficient": 160,
-	&"weapon_rifle": 55,
-	&"weapon_slash": 60,
-	&"weapon_rail": 70,
-	&"weapon_mortar": 90,
+	&"weapon_rifle": 68,
+	&"weapon_slash": 72,
+	&"weapon_rail": 82,
+	&"weapon_mortar": 96,
 	&"ability_adrenal": 80,
 	&"ability_static": 90,
 	&"ability_slam": 100,
 	&"ability_barrage": 100,
-	&"entity_destroyed": 75,
+	&"entity_destroyed": 85,
 	&"match_victory": 500,
 	&"match_defeat": 500,
 }
@@ -164,15 +164,15 @@ func play_error() -> void:
 func play_weapon_for_unit(unit_type_id: StringName) -> void:
 	match unit_type_id:
 		&"stinger", &"symbiote":
-			play_sfx(&"weapon_slash", -6.5, 0.08)
+			play_sfx(&"weapon_slash", -6.5, 0.06)
 		&"lance_rig", &"arc_lancer":
 			play_sfx(&"weapon_rail", -5.0, 0.06)
 		&"chrysalis_mortar":
-			play_sfx(&"weapon_mortar", -3.5, 0.05)
+			play_sfx(&"weapon_mortar", -3.5, 0.06)
 		&"goliath_frame":
-			play_sfx(&"weapon_mortar", -6.0, 0.08)
+			play_sfx(&"weapon_mortar", -6.0, 0.06)
 		_:
-			play_sfx(&"weapon_rifle", -7.5, 0.09)
+			play_sfx(&"weapon_rifle", -7.5, 0.06)
 
 
 func play_ability_sfx(ability_id: StringName) -> void:

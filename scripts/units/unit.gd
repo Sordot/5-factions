@@ -32,6 +32,8 @@ const ABILITY_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/ability_
 const COMBAT_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/combat_component.gd")
 const HEAL_AURA_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/heal_aura_component.gd")
 const ENTITY_VISUALS_SCRIPT: GDScript = preload("res://ui/overlays/entity_visuals.gd")
+const COMBAT_VFX_SCRIPT: GDScript = preload("res://ui/overlays/combat_vfx.gd")
+const AUTO_RETARGET_INTERVAL: float = 0.25
 const HIT_FLASH_DURATION: float = 0.08
 const HEALTH_BAR_WIDTH: float = 36.0
 const GATHER_BAR_WIDTH: float = 32.0
@@ -108,6 +110,8 @@ var _slow_attack_penalty: float = 0.0
 var _entity_visuals: EntityVisuals = null
 var _trail_points: Array[Vector2] = []
 var _trail_sample_timer: float = 0.0
+var _auto_retarget_timer: float = 0.0
+var _vfx_anim_time: float = 0.0
 
 
 func _ready() -> void:
@@ -203,6 +207,7 @@ func set_selected(selected: bool) -> void:
 	if is_node_ready():
 		selection_ring.visible = is_selected
 		_update_health_bar()
+		queue_redraw()
 	selection_changed.emit(self, is_selected)
 
 
@@ -1004,6 +1009,17 @@ func _get_economy_manager() -> EconomyManager:
 
 func _draw() -> void:
 	var type_id: StringName = get_unit_type_id()
+	# Selected unit attack-range & min-range tactical previews (especially readable on Chrysalis Mortar / ranged units)
+	if is_selected and _can_attack() and data != null:
+		var atk_r: float = data.attack_range + data.collision_radius
+		var is_siege: bool = data.min_attack_range > 0.0 or data.aoe_attack_radius > 0.0
+		var range_col: Color = (Color(0.46, 1.0, 0.56, 0.34) if is_siege else Color(0.32, 0.94, 0.96, 0.22)) if team == Team.PLAYER else Color(1.0, 0.38, 0.28, 0.26)
+		_draw_dashed_ring(Vector2.ZERO, atk_r, range_col, 1.5 if is_siege else 1.2, 40 if atk_r > 220.0 else 28)
+		if data.min_attack_range > 0.0:
+			var min_r: float = data.min_attack_range + data.collision_radius
+			draw_circle(Vector2.ZERO, min_r, Color(1.0, 0.28, 0.24, 0.05))
+			_draw_dashed_ring(Vector2.ZERO, min_r, Color(1.0, 0.36, 0.28, 0.44), 1.4, 20)
+
 	# Elevated ground shadow for Arc-Lancer Colossus Stride readability
 	if type_id == &"arc_lancer":
 		draw_circle(Vector2(5.0, 11.0), 17.5, Color(0.02, 0.04, 0.06, 0.42))
@@ -1020,11 +1036,37 @@ func _draw() -> void:
 
 	var r: float = (data.collision_radius + 6.0) if data != null else 22.0
 	if _adrenal_timer > 0.0:
-		draw_arc(Vector2.ZERO, r, 0.0, TAU, 24, Color(0.28, 1.0, 0.72, 0.88), 2.4, true)
-		draw_circle(Vector2.ZERO, r * 0.75, Color(0.24, 0.98, 0.78, 0.14))
+		# Pulsing emerald/gold rim + upward chevron pip
+		var pulse: float = 0.5 + 0.5 * sin(_vfx_anim_time * 10.0)
+		var rim_col: Color = Color(0.28, 1.0, 0.72, 0.88).lerp(Color(1.0, 0.88, 0.34, 0.96), pulse * 0.55)
+		draw_arc(Vector2.ZERO, r + pulse * 1.8, 0.0, TAU, 24, rim_col, 2.4, true)
+		draw_circle(Vector2.ZERO, r * 0.75, Color(0.24, 0.98, 0.78, 0.12 + pulse * 0.08))
+		var chev_y: float = -(r + 6.0 + pulse * 2.5)
+		var chev: PackedVector2Array = PackedVector2Array([
+			Vector2(-4.5, chev_y + 3.0),
+			Vector2(0.0, chev_y - 2.0),
+			Vector2(4.5, chev_y + 3.0),
+		])
+		draw_polyline(chev, Color(0.98, 0.94, 0.42, 0.95), 2.0, true)
 	if _slow_timer > 0.0:
-		draw_arc(Vector2.ZERO, r + 3.0, 0.0, TAU, 24, Color(0.68, 0.42, 1.0, 0.9), 2.4, true)
-		draw_circle(Vector2.ZERO, r * 0.82, Color(0.56, 0.34, 1.0, 0.16))
+		# Flickering violet/cyan static disruption interference arcs
+		var spin: float = _vfx_anim_time * 4.5
+		var flicker: float = 0.65 + 0.35 * sin(_vfx_anim_time * 24.0)
+		draw_circle(Vector2.ZERO, r * 0.82, Color(0.56, 0.34, 1.0, 0.14))
+		for k: int in range(3):
+			var a0: float = spin + float(k) * (TAU / 3.0)
+			var arc_col: Color = Color(0.72, 0.42, 1.0, 0.92 * flicker) if (k % 2 == 0) else Color(0.36, 0.92, 1.0, 0.86 * flicker)
+			draw_arc(Vector2.ZERO, r + 3.0, a0, a0 + 1.15, 10, arc_col, 2.3, true)
+			var crack_dir: Vector2 = Vector2.RIGHT.rotated(a0 + 0.55)
+			draw_line(crack_dir * (r - 1.0), crack_dir * (r + 6.5), arc_col, 1.4, true)
+
+
+func _draw_dashed_ring(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:
+	var step: float = TAU / float(maxi(8, dash_count))
+	for i: int in range(dash_count):
+		var a0: float = float(i) * step
+		var a1: float = a0 + step * 0.54
+		draw_arc(center, radius, a0, a1, 4, col, width, true)
 
 
 func _die() -> void:
@@ -1039,8 +1081,21 @@ func _die() -> void:
 	velocity = Vector2.ZERO
 	set_selected(false)
 	_unregister_from_economy()
+	if get_parent() != null and (team == Team.PLAYER or visible):
+		var uid: StringName = get_unit_type_id()
+		var is_heavy: bool = (uid == &"goliath_frame" or uid == &"arc_lancer" or uid == &"chrysalis_mortar")
+		var burst_r: float = (data.collision_radius * 1.15) if data != null else 18.0
+		var burst_col: Color = Color(0.34, 0.98, 0.88, 1.0) if team == Team.PLAYER else Color(1.0, 0.42, 0.28, 1.0)
+		if uid == &"chrysalis_mortar" and team == Team.PLAYER:
+			burst_col = Color(0.46, 1.0, 0.56, 1.0)
+		elif uid == &"lance_rig" and team == Team.PLAYER:
+			burst_col = Color(1.0, 0.80, 0.34, 1.0)
+		var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
+		fx.z_index = 53
+		get_parent().add_child(fx)
+		fx.call("setup_death_burst", global_position, burst_r, burst_col, is_heavy)
 	if AudioManager != null and (team == Team.PLAYER or visible):
-		AudioManager.play_sfx(&"entity_destroyed", -6.0, 0.10)
+		AudioManager.play_sfx(&"entity_destroyed", -6.0, 0.08)
 	died.emit(self)
 	queue_free()
 
@@ -1116,6 +1171,7 @@ func _on_nav_velocity_computed(safe_velocity: Vector2) -> void:
 
 func _tick_status_effects(delta: float) -> void:
 	var changed: bool = false
+	var any_active: bool = _adrenal_timer > 0.0 or _slow_timer > 0.0
 	if _adrenal_timer > 0.0:
 		_adrenal_timer = maxf(0.0, _adrenal_timer - delta)
 		if _adrenal_timer <= 0.0:
@@ -1128,10 +1184,26 @@ func _tick_status_effects(delta: float) -> void:
 			_slow_move_penalty = 0.0
 			_slow_attack_penalty = 0.0
 			changed = true
+	if any_active:
+		_vfx_anim_time += delta
+		queue_redraw()
 	if changed:
 		_sync_nav_max_speed()
 		queue_redraw()
 		status_changed.emit(self)
+
+
+func _maybe_retarget_higher_threat(delta: float, scan_range: float) -> void:
+	if combat_component == null or current_target == null or not is_instance_valid(current_target):
+		_auto_retarget_timer = 0.0
+		return
+	_auto_retarget_timer -= delta
+	if _auto_retarget_timer > 0.0:
+		return
+	_auto_retarget_timer = AUTO_RETARGET_INTERVAL
+	var better: Node2D = combat_component.find_higher_priority_threat(self, current_target, scan_range)
+	if better != null and is_instance_valid(better) and better != current_target:
+		current_target = better
 
 
 func _process_idle(delta: float) -> void:
@@ -1154,16 +1226,22 @@ func _process_idle(delta: float) -> void:
 		var leash: float = maxf(data.aggro_range, data.attack_range) * 1.35
 		if current_target == null or not combat_component.is_valid_target_in_range(self, current_target, leash):
 			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
+		else:
+			_maybe_retarget_higher_threat(delta, data.attack_range)
 		if current_target != null and is_instance_valid(current_target):
 			if combat_component.is_within_attack_envelope(self, current_target):
 				_face_point(current_target.global_position, delta)
 				combat_component.try_fire_at(self, current_target)
-			elif not combat_component.is_target_inside_min_range(self, current_target):
+			elif combat_component.is_target_inside_min_range(self, current_target):
+				current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
+			else:
 				_request_nav_toward_point(current_target.global_position, 8.0)
 		return
 
 	if current_target == null or not combat_component.is_within_attack_envelope(self, current_target):
 		current_target = combat_component.find_nearest_enemy(self, data.attack_range)
+	else:
+		_maybe_retarget_higher_threat(delta, data.attack_range)
 	if current_target != null and is_instance_valid(current_target):
 		_face_point(current_target.global_position, delta)
 		combat_component.try_fire_at(self, current_target)
@@ -1199,6 +1277,8 @@ func _process_attack_moving(delta: float) -> void:
 			current_target = null
 		if current_target == null:
 			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
+		else:
+			_maybe_retarget_higher_threat(delta, data.attack_range)
 
 	if current_target != null and is_instance_valid(current_target) and combat_component != null:
 		_reset_progress_tracker()
@@ -1254,6 +1334,8 @@ func _process_hold_position(delta: float) -> void:
 		current_target = null
 	if current_target == null or not combat_component.is_within_attack_envelope(self, current_target):
 		current_target = combat_component.find_nearest_enemy(self, data.attack_range)
+	else:
+		_maybe_retarget_higher_threat(delta, data.attack_range)
 	if current_target != null and is_instance_valid(current_target):
 		_face_point(current_target.global_position, delta)
 		combat_component.try_fire_at(self, current_target)
@@ -1337,6 +1419,8 @@ func _process_patrolling(delta: float) -> void:
 			current_target = null
 		if current_target == null:
 			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
+		else:
+			_maybe_retarget_higher_threat(delta, data.attack_range)
 	elif not aggro_on:
 		current_target = null
 
@@ -1951,45 +2035,56 @@ func _on_gather_state_changed(_new_state: GatherComponent.GatherState) -> void:
 	status_changed.emit(self)
 
 
+func get_armor_class_label() -> String:
+	if data == null:
+		return "Light"
+	if data.unit_type_id == &"goliath_frame" or data.unit_type_id == &"arc_lancer":
+		return "Heavy Synthetic"
+	if data.is_armored:
+		return "Armored"
+	return "Light"
+
+
 func get_inspection_data() -> Dictionary:
 	var is_enemy: bool = (team == Team.ENEMY)
 	var accent: Color = Color(1.0, 0.36, 0.26, 1.0) if is_enemy else Color(0.24, 0.92, 0.88, 1.0)
-	var subtitle: String = "HOSTILE UNIT" if is_enemy else "FRIENDLY UNIT"
+	var class_tag: String = get_armor_class_label().to_upper()
+	var subtitle: String = ("HOSTILE %s" % class_tag) if is_enemy else ("FRIENDLY %s" % class_tag)
 
 	if not is_enemy and data != null:
 		if data.unit_type_id == &"scout_unit" or data.unit_type_id == &"stinger":
 			accent = Color(0.98, 0.78, 0.24, 1.0)
-			subtitle = "FAST FLANKER / RECON"
+			subtitle = "LIGHT  •  FAST FLANKER"
 		elif data.unit_type_id == &"clone_trooper":
 			accent = Color(0.24, 0.94, 0.82, 1.0)
-			subtitle = "VAT-BORN INFANTRY"
+			subtitle = "LIGHT  •  VAT-BORN INFANTRY"
 		elif data.unit_type_id == &"symbiote":
 			accent = Color(0.32, 1.0, 0.66, 1.0)
-			subtitle = "BIO-SUPPORT DRONE"
+			subtitle = "LIGHT  •  BIO-SUPPORT DRONE"
 		elif data.unit_type_id == &"lance_rig":
 			accent = Color(0.98, 0.68, 0.28, 1.0)
-			subtitle = "ANTI-ARMOR MECH"
+			subtitle = "LIGHT  •  ANTI-ARMOR MECH"
 		elif data.unit_type_id == &"signal_jammer":
 			accent = Color(0.76, 0.56, 1.0, 1.0)
-			subtitle = "DISRUPTION WALKER"
+			subtitle = "LIGHT  •  DISRUPTION WALKER"
 		elif data.unit_type_id == &"goliath_frame":
 			accent = Color(0.36, 0.92, 1.0, 1.0)
-			subtitle = "HEAVY JUGGERNAUT"
+			subtitle = "HEAVY SYNTHETIC  •  JUGGERNAUT"
 		elif data.unit_type_id == &"arc_lancer":
 			accent = Color(0.46, 0.98, 1.0, 1.0)
-			subtitle = "COLOSSUS STRIDER"
+			subtitle = "HEAVY SYNTHETIC  •  COLOSSUS STRIDER"
 		elif data.unit_type_id == &"chrysalis_mortar":
 			accent = Color(0.46, 1.0, 0.54, 1.0)
-			subtitle = "BIO-ORDNANCE ARTILLERY"
+			subtitle = "ARMORED  •  SIEGE ARTILLERY"
 		elif data.unit_type_id == &"silica_harvester":
 			accent = Color(0.96, 0.68, 0.22, 1.0)
-			subtitle = "AUTOMATED HARVESTER"
+			subtitle = "ARMORED  •  SILICA HARVESTER"
 		elif data.can_staff_compute:
 			accent = Color(0.32, 0.82, 1.0, 1.0)
-			subtitle = "COMPUTE SPECIALIST"
+			subtitle = "LIGHT  •  COMPUTE SPECIALIST"
 		elif data.can_gather:
 			accent = Color(0.28, 0.94, 0.56, 1.0)
-			subtitle = "UTILITY WORKER"
+			subtitle = "LIGHT  •  UTILITY WORKER"
 
 	var max_hp_val: float = data.max_hp if data != null else 100.0
 	var stats: Array[Dictionary] = []
@@ -2017,16 +2112,16 @@ func get_inspection_data() -> Dictionary:
 	elif data != null:
 		var dmg_str: String = "%d" % int(round(data.attack_damage))
 		if data.bonus_vs_armored > 0.0:
-			dmg_str += " (+%d Armor)" % int(round(data.bonus_vs_armored))
+			dmg_str += " (+%d vs Armored)" % int(round(data.bonus_vs_armored))
 		elif data.aoe_attack_radius > 0.0:
-			dmg_str += " AoE"
+			dmg_str += " (AoE %dpx)" % int(round(data.aoe_attack_radius))
 		elif data.line_pierce_width > 0.0:
-			dmg_str += " Pierce"
+			dmg_str += " (Line Pierce)"
 		stats.append({"label": "Damage", "value": dmg_str})
 
 		var range_str: String = "%d px" % int(round(data.attack_range))
 		if data.min_attack_range > 0.0:
-			range_str = "%d–%d px" % [int(round(data.min_attack_range)), int(round(data.attack_range))]
+			range_str = "%d–%d px (Min)" % [int(round(data.min_attack_range)), int(round(data.attack_range))]
 		stats.append({"label": "Range", "value": range_str})
 
 		var spd_str: String = "%d px/s" % int(round(get_effective_move_speed()))
@@ -2040,13 +2135,13 @@ func get_inspection_data() -> Dictionary:
 		if data.heal_aura_rate > 0.0:
 			stats.append({"label": "Aura", "value": "+%.0f HP/s (%dpx)" % [data.heal_aura_rate, int(round(data.heal_aura_radius))]})
 		elif data.ignore_friendly_unit_collision:
-			stats.append({"label": "Passive", "value": "Colossus Stride"})
+			stats.append({"label": "Class", "value": "%s • Stride" % get_armor_class_label()})
 		elif dr > 0.001:
-			stats.append({"label": "Armor", "value": "-%d%% Damage" % int(round(dr * 100.0))})
+			stats.append({"label": "Armor", "value": "%s (-%d%% Dmg)" % [get_armor_class_label(), int(round(dr * 100.0))]})
 		elif data.attack_damage > 0.0 and data.attack_cooldown > 0.0:
-			stats.append({"label": "Fire Rate", "value": "%.1f /s" % (1.0 / get_effective_attack_cooldown())})
+			stats.append({"label": "Class", "value": "%s • %.1f/s" % [get_armor_class_label(), 1.0 / get_effective_attack_cooldown()]})
 		else:
-			stats.append({"label": "Status", "value": "Stationary Target"})
+			stats.append({"label": "Class", "value": get_armor_class_label()})
 
 	return {
 		"title": data.display_name if data != null else name,

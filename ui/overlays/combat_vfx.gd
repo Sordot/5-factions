@@ -1,0 +1,295 @@
+class_name CombatVFX
+extends Node2D
+
+enum VFXMode {
+	MORTAR_SHELL,
+	MELEE_CLEAVE,
+	ARMOR_PIERCE_SPARK,
+	DEATH_BURST,
+	HEAL_TICK,
+}
+
+var _mode: VFXMode = VFXMode.DEATH_BURST
+var _elapsed: float = 0.0
+var _duration: float = 0.30
+var _color: Color = Color(0.32, 0.98, 0.90, 1.0)
+
+# Mortar shell state
+var _from_world: Vector2 = Vector2.ZERO
+var _target_world: Vector2 = Vector2.ZERO
+var _radius: float = 64.0
+var _flight_time: float = 0.48
+var _blast_duration: float = 0.28
+var _arc_height: float = 72.0
+var _impacted: bool = false
+var _on_impact: Callable = Callable()
+
+# Cleave / spark / burst state
+var _dir: Vector2 = Vector2.RIGHT
+var _is_heavy: bool = false
+var _seed: int = 1337
+var _draw_visuals: bool = true
+
+
+func setup_mortar_shell(
+	from_world: Vector2,
+	target_world: Vector2,
+	splash_radius: float,
+	flight_time: float,
+	arc_height: float,
+	vfx_color: Color,
+	on_impact_callback: Callable = Callable()
+) -> void:
+	_mode = VFXMode.MORTAR_SHELL
+	_from_world = from_world
+	_target_world = target_world
+	_radius = maxf(18.0, splash_radius)
+	_flight_time = maxf(0.18, flight_time)
+	_blast_duration = 0.28
+	_duration = _flight_time + _blast_duration
+	_arc_height = maxf(28.0, arc_height)
+	_color = vfx_color
+	_on_impact = on_impact_callback
+	_impacted = false
+	_elapsed = 0.0
+	_refresh_fog_visibility()
+	queue_redraw()
+
+
+func setup_melee_cleave(origin_world: Vector2, target_world: Vector2, vfx_color: Color) -> void:
+	_mode = VFXMode.MELEE_CLEAVE
+	_from_world = origin_world
+	_target_world = target_world
+	var diff: Vector2 = target_world - origin_world
+	_dir = diff.normalized() if diff.length_squared() > 0.01 else Vector2.RIGHT
+	_color = vfx_color
+	_duration = 0.16
+	_elapsed = 0.0
+	_seed = int(Time.get_ticks_usec() & 0x7FFFFFFF)
+	queue_redraw()
+
+
+func setup_armor_pierce_spark(world_pos: Vector2, dir: Vector2, vfx_color: Color) -> void:
+	_mode = VFXMode.ARMOR_PIERCE_SPARK
+	_target_world = world_pos
+	_dir = dir.normalized() if dir.length_squared() > 0.01 else Vector2.RIGHT
+	_color = vfx_color
+	_duration = 0.22
+	_elapsed = 0.0
+	_seed = int(Time.get_ticks_usec() & 0x7FFFFFFF)
+	queue_redraw()
+
+
+func setup_death_burst(world_pos: Vector2, radius: float, primary_color: Color, is_heavy: bool = false) -> void:
+	_mode = VFXMode.DEATH_BURST
+	_target_world = world_pos
+	_radius = maxf(14.0, radius)
+	_color = primary_color
+	_is_heavy = is_heavy
+	_duration = 0.48 if is_heavy else 0.28
+	_elapsed = 0.0
+	_seed = int(Time.get_ticks_usec() & 0x7FFFFFFF)
+	queue_redraw()
+
+
+func setup_heal_tick(world_pos: Vector2, vfx_color: Color = Color(0.32, 1.0, 0.68, 0.95)) -> void:
+	_mode = VFXMode.HEAL_TICK
+	_target_world = world_pos
+	_color = vfx_color
+	_duration = 0.56
+	_elapsed = 0.0
+	queue_redraw()
+
+
+func _process(delta: float) -> void:
+	_elapsed += delta
+	if _mode == VFXMode.MORTAR_SHELL:
+		if not _impacted and _elapsed >= _flight_time:
+			_impacted = true
+			if _on_impact.is_valid():
+				_on_impact.call()
+		_refresh_fog_visibility()
+	if _elapsed >= _duration:
+		if _mode == VFXMode.MORTAR_SHELL and not _impacted:
+			_impacted = true
+			if _on_impact.is_valid():
+				_on_impact.call()
+		queue_free()
+		return
+	queue_redraw()
+
+
+func _refresh_fog_visibility() -> void:
+	if not is_inside_tree():
+		_draw_visuals = true
+		return
+	var fog: Node = get_tree().get_first_node_in_group("fog_of_war")
+	if fog != null and fog.has_method("is_world_pos_visible") and fog.get("fog_enabled"):
+		_draw_visuals = bool(fog.call("is_world_pos_visible", _target_world)) or bool(fog.call("is_world_pos_visible", _from_world))
+	else:
+		_draw_visuals = true
+
+
+func _draw() -> void:
+	if not _draw_visuals:
+		return
+	match _mode:
+		VFXMode.MORTAR_SHELL:
+			_draw_mortar_shell()
+		VFXMode.MELEE_CLEAVE:
+			_draw_melee_cleave()
+		VFXMode.ARMOR_PIERCE_SPARK:
+			_draw_armor_pierce_spark()
+		VFXMode.DEATH_BURST:
+			_draw_death_burst()
+		VFXMode.HEAL_TICK:
+			_draw_heal_tick()
+
+
+func _draw_mortar_shell() -> void:
+	var p0: Vector2 = to_local(_from_world)
+	var p1: Vector2 = to_local(_target_world)
+
+	if not _impacted:
+		var u: float = clampf(_elapsed / _flight_time, 0.0, 1.0)
+		# Ground impact telegraph ring: dashed outer splash boundary + filling inner danger pulse
+		var warn_alpha: float = lerpf(0.42, 0.92, u)
+		var ring_col: Color = Color(_color.r, _color.g, _color.b, warn_alpha)
+		_draw_dashed_circle(p1, _radius, ring_col, 2.0, 20)
+		# Filling inner telegraph pulse that reaches outer splash radius right at impact
+		var fill_r: float = lerpf(_radius * 0.14, _radius, u)
+		draw_circle(p1, fill_r, Color(_color.r, _color.g, _color.b, 0.07 + 0.14 * u))
+		draw_arc(p1, fill_r, 0.0, TAU, 28, Color(_color.r, _color.g, _color.b, 0.30 + 0.45 * u), 1.4, true)
+		# Target center cross pip
+		draw_line(p1 + Vector2(-6.0, 0.0), p1 + Vector2(6.0, 0.0), ring_col, 1.4, true)
+		draw_line(p1 + Vector2(0.0, -6.0), p1 + Vector2(0.0, 6.0), ring_col, 1.4, true)
+
+		# Faint parabolic trajectory arc behind shell
+		var trail_steps: int = 10
+		var trail_start: float = maxf(0.0, u - 0.38)
+		var pts: PackedVector2Array = PackedVector2Array()
+		pts.resize(trail_steps + 1)
+		for i: int in range(trail_steps + 1):
+			var tu: float = lerpf(trail_start, u, float(i) / float(trail_steps))
+			pts[i] = p0.lerp(p1, tu) + Vector2(0.0, -sin(tu * PI) * _arc_height)
+		draw_polyline(pts, Color(_color.r, _color.g, _color.b, 0.58), 2.4, true)
+
+		# Ground shadow beneath arcing shell
+		var ground_pos: Vector2 = p0.lerp(p1, u)
+		draw_circle(ground_pos, 4.5, Color(0.02, 0.05, 0.06, 0.34))
+
+		# Caustic shell orb with bright core
+		var shell_pos: Vector2 = ground_pos + Vector2(0.0, -sin(u * PI) * _arc_height)
+		draw_circle(shell_pos, 6.8, Color(_color.r, _color.g, _color.b, 0.36))
+		draw_circle(shell_pos, 4.2, _color)
+		draw_circle(shell_pos, 2.0, Color(0.95, 1.0, 0.94, 0.95))
+	else:
+		# Impact blast shockwave + caustic splash scatter
+		var bt: float = clampf((_elapsed - _flight_time) / _blast_duration, 0.0, 1.0)
+		var fade: float = 1.0 - bt
+		var blast_r: float = lerpf(_radius * 0.30, _radius * 1.06, sqrt(bt))
+		draw_circle(p1, blast_r, Color(_color.r, _color.g, _color.b, fade * 0.28))
+		draw_arc(p1, blast_r, 0.0, TAU, 36, Color(_color.r, _color.g, _color.b, fade * 0.95), 3.2, true)
+		draw_arc(p1, blast_r * 0.65, 0.0, TAU, 24, Color(0.95, 1.0, 0.92, fade * 0.72), 2.0, true)
+		# Radial splash droplets
+		for i: int in range(8):
+			var ang: float = (TAU * float(i) / 8.0) + 0.35
+			var radial: Vector2 = Vector2.RIGHT.rotated(ang)
+			var inner_p: Vector2 = p1 + radial * (_radius * 0.25 + blast_r * 0.32)
+			var outer_p: Vector2 = p1 + radial * (_radius * 0.35 + blast_r * 0.62)
+			draw_line(inner_p, outer_p, Color(_color.r, _color.g, _color.b, fade * 0.85), 2.0, true)
+
+
+func _draw_melee_cleave() -> void:
+	var t: float = clampf(_elapsed / _duration, 0.0, 1.0)
+	var fade: float = 1.0 - t
+	var center: Vector2 = to_local(_from_world.lerp(_target_world, 0.68))
+	var base_ang: float = _dir.angle()
+	var sweep: float = lerpf(0.75, 1.15, t)
+	var arc_r: float = lerpf(11.0, 22.0, sqrt(t))
+
+	# Outer glowing slash crescent
+	draw_arc(center, arc_r, base_ang - sweep, base_ang + sweep, 14, Color(_color.r, _color.g, _color.b, fade * 0.95), 3.4 * fade + 1.2, true)
+	# White-hot blade edge
+	draw_arc(center, arc_r * 0.82, base_ang - sweep * 0.85, base_ang + sweep * 0.85, 12, Color(1.0, 0.98, 0.88, fade * 0.88), 1.8, true)
+	# Twin acid slash streaks
+	var perp: Vector2 = Vector2(-_dir.y, _dir.x)
+	var tip: Vector2 = to_local(_target_world)
+	for s: float in [-1.0, 1.0]:
+		var sp0: Vector2 = tip - _dir * 6.0 + perp * (s * 7.0)
+		var sp1: Vector2 = tip + _dir * (8.0 + t * 9.0) + perp * (s * (11.0 + t * 6.0))
+		draw_line(sp0, sp1, Color(_color.r, _color.g, _color.b, fade * 0.85), 1.8, true)
+
+
+func _draw_armor_pierce_spark() -> void:
+	var t: float = clampf(_elapsed / _duration, 0.0, 1.0)
+	var fade: float = 1.0 - t
+	var p: Vector2 = to_local(_target_world)
+	var back_dir: Vector2 = -_dir
+	var core_r: float = lerpf(8.5, 2.0, t)
+
+	# Bright anti-armor flash ring + golden starburst
+	draw_circle(p, core_r * 1.4, Color(_color.r, _color.g, _color.b, fade * 0.38))
+	draw_circle(p, core_r * 0.72, Color(1.0, 0.99, 0.90, fade * 0.95))
+	draw_arc(p, lerpf(6.0, 24.0, sqrt(t)), 0.0, TAU, 20, Color(_color.r, _color.g, _color.b, fade * 0.90), 2.2, true)
+
+	# Focused armor-shatter rays fanning backward & radially
+	for i: int in range(6):
+		var spread: float = (float(i) - 2.5) * 0.42
+		var ray_dir: Vector2 = back_dir.rotated(spread)
+		var r0: Vector2 = p + ray_dir * lerpf(3.0, 10.0, t)
+		var r1: Vector2 = p + ray_dir * lerpf(10.0, 26.0, sqrt(t))
+		draw_line(r0, r1, Color(1.0, 0.92, 0.56, fade * 0.95), 2.0, true)
+
+
+func _draw_death_burst() -> void:
+	var t: float = clampf(_elapsed / _duration, 0.0, 1.0)
+	var fade: float = 1.0 - t
+	var p: Vector2 = to_local(_target_world)
+
+	var max_r: float = _radius * (1.85 if _is_heavy else 1.45)
+	var cur_r: float = lerpf(_radius * 0.22, max_r, sqrt(t))
+
+	# Expanding shockwave ring
+	draw_circle(p, cur_r * 0.65, Color(_color.r, _color.g, _color.b, fade * (0.28 if _is_heavy else 0.18)))
+	draw_arc(p, cur_r, 0.0, TAU, 32 if _is_heavy else 20, Color(_color.r, _color.g, _color.b, fade * 0.92), 3.2 if _is_heavy else 2.0, true)
+
+	if _is_heavy:
+		# Secondary delayed inner rupture ring + white flash core
+		var inner_r: float = lerpf(_radius * 0.12, max_r * 0.68, t)
+		draw_arc(p, inner_r, 0.0, TAU, 24, Color(1.0, 0.92, 0.72, fade * 0.82), 2.2, true)
+		if t < 0.35:
+			var flash_fade: float = 1.0 - (t / 0.35)
+			draw_circle(p, _radius * 0.55 * flash_fade, Color(1.0, 0.98, 0.92, flash_fade * 0.85))
+
+	# Flying geometric shards/sparks
+	var shard_count: int = 12 if _is_heavy else 7
+	var angle_offset: float = float(_seed % 360) * 0.017453
+	for i: int in range(shard_count):
+		var ang: float = angle_offset + (TAU * float(i) / float(shard_count)) + float((i * 17) % 7) * 0.06
+		var radial: Vector2 = Vector2.RIGHT.rotated(ang)
+		var speed_scale: float = 0.78 + float((i * 31) % 10) * 0.055
+		var dist: float = lerpf(_radius * 0.18, max_r * 1.15 * speed_scale, sqrt(t))
+		var shard_len: float = (10.0 if _is_heavy else 6.0) * fade
+		var s0: Vector2 = p + radial * dist
+		var s1: Vector2 = p + radial * (dist + shard_len)
+		var shard_col: Color = Color(1.0, 0.92, 0.72, fade * 0.92) if (i % 3 == 0) else Color(_color.r, _color.g, _color.b, fade * 0.88)
+		draw_line(s0, s1, shard_col, 2.4 if _is_heavy else 1.6, true)
+
+
+func _draw_heal_tick() -> void:
+	var t: float = clampf(_elapsed / _duration, 0.0, 1.0)
+	var fade: float = sin(t * PI) if t < 0.25 else (1.0 - ((t - 0.25) / 0.75))
+	var p: Vector2 = to_local(_target_world) + Vector2(0.0, -14.0 - t * 20.0)
+	var col: Color = Color(_color.r, _color.g, _color.b, clampf(fade, 0.0, 1.0) * 0.92)
+	var arm: float = 4.2
+	draw_line(p + Vector2(-arm, 0.0), p + Vector2(arm, 0.0), col, 2.0, true)
+	draw_line(p + Vector2(0.0, -arm), p + Vector2(0.0, arm), col, 2.0, true)
+
+
+func _draw_dashed_circle(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:
+	var step: float = TAU / float(maxi(4, dash_count))
+	for i: int in range(dash_count):
+		var a0: float = float(i) * step
+		var a1: float = a0 + step * 0.58
+		draw_arc(center, radius, a0, a1, 4, col, width, true)

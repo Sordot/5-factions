@@ -4,6 +4,7 @@ extends Node2D
 enum EffectStyle {
 	OFFENSIVE_AOE,
 	SELF_PULSE,
+	SEISMIC_SLAM,
 }
 
 @export var duration: float = 0.35
@@ -31,6 +32,16 @@ func setup_self_pulse(center_world: Vector2, radius: float, effect_color: Color 
 	_to_world = center_world
 	_radius = maxf(16.0, radius)
 	_color = effect_color
+	queue_redraw()
+
+
+func setup_seismic_slam(center_world: Vector2, radius: float, effect_color: Color = Color(1.0, 0.72, 0.28, 0.98)) -> void:
+	_style = EffectStyle.SEISMIC_SLAM
+	_from_world = center_world
+	_to_world = center_world
+	_radius = maxf(24.0, radius)
+	_color = effect_color
+	duration = 0.44
 	queue_redraw()
 
 
@@ -62,6 +73,20 @@ func _draw() -> void:
 		ring_col.a = fade * 0.95
 		draw_arc(target_local, current_r, 0.0, TAU, 36, ring_col, 3.0, true)
 		draw_arc(target_local, _radius, 0.0, TAU, 36, Color(_color.r, _color.g, _color.b, fade * 0.45), 1.5, true)
+	elif _style == EffectStyle.SEISMIC_SLAM:
+		# Heavy radial tectonic shockwave + secondary ground-crack ring + dust ticks
+		var outer_r: float = lerpf(_radius * 0.18, _radius * 1.05, sqrt(t))
+		var inner_r: float = lerpf(10.0, _radius * 0.74, t)
+		draw_circle(target_local, outer_r, Color(_color.r, _color.g, _color.b, fade * 0.22))
+		draw_arc(target_local, outer_r, 0.0, TAU, 44, Color(_color.r, _color.g, _color.b, fade * 0.98), 4.2, true)
+		draw_arc(target_local, inner_r, 0.0, TAU, 36, Color(1.0, 0.95, 0.78, fade * 0.85), 2.4, true)
+		draw_arc(target_local, _radius, 0.0, TAU, 44, Color(_color.r, _color.g, _color.b, fade * 0.36), 1.4, true)
+		for i: int in range(12):
+			var ang: float = TAU * float(i) / 12.0
+			var radial: Vector2 = Vector2.RIGHT.rotated(ang)
+			var p_in: Vector2 = target_local + radial * maxf(10.0, inner_r * 0.72)
+			var p_out: Vector2 = target_local + radial * outer_r
+			draw_line(p_in, p_out, Color(1.0, 0.86, 0.54, fade * 0.78), 2.2, true)
 	else:
 		var pulse_r: float = lerpf(8.0, _radius, t)
 		var ring_col: Color = _color

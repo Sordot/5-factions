@@ -100,6 +100,11 @@ func _process(delta: float) -> void:
 				_set_inspected_entity(null)
 
 	if active_targeting_ability == null or command_router == null:
+		if ability_reticle != null:
+			if is_patrol_targeting:
+				ability_reticle.set_command_mode_reticle(&"patrol", get_global_mouse_position())
+			else:
+				ability_reticle.clear_command_mode_reticle()
 		return
 	var cursor_world: Vector2 = get_global_mouse_position()
 	if active_targeting_ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
@@ -478,6 +483,8 @@ func cancel_patrol_targeting() -> void:
 	is_patrol_targeting = false
 	if active_targeting_ability == null:
 		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	if ability_reticle != null:
+		ability_reticle.clear_command_mode_reticle()
 	patrol_targeting_changed.emit(false)
 
 

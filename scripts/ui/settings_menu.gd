@@ -35,6 +35,7 @@ signal closed
 
 @onready var opt_health_bar_mode: OptionButton = %OptHealthBarMode
 @onready var chk_alert_toasts: CheckButton = %ChkAlertToasts
+@onready var chk_camera_shake: CheckButton = %ChkCameraShake
 
 @onready var sld_master_vol: HSlider = %SldMasterVol
 @onready var val_master_vol: Label = %ValMasterVol
@@ -394,13 +395,14 @@ func _wire_gameplay_controls() -> void:
 	opt_health_bar_mode.add_item("Selected Only", 2)
 	opt_health_bar_mode.item_selected.connect(func(_idx: int) -> void: _push_gameplay_settings())
 	chk_alert_toasts.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
+	chk_camera_shake.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 
 
 func _push_gameplay_settings() -> void:
 	if _suppress_callbacks:
 		return
 	var hb_mode: int = clampi(opt_health_bar_mode.selected, 0, 2)
-	SettingsManager.set_gameplay_settings(hb_mode, chk_alert_toasts.button_pressed)
+	SettingsManager.set_gameplay_settings(hb_mode, chk_alert_toasts.button_pressed, chk_camera_shake.button_pressed)
 	AudioManager.play_ui_click()
 
 
@@ -492,6 +494,7 @@ func _sync_all_from_manager() -> void:
 
 	opt_health_bar_mode.select(clampi(SettingsManager.health_bar_mode, 0, 2))
 	chk_alert_toasts.button_pressed = SettingsManager.show_alert_toasts
+	chk_camera_shake.button_pressed = SettingsManager.camera_shake_enabled
 
 	sld_master_vol.value = SettingsManager.master_volume * 100.0
 	sld_sfx_vol.value = SettingsManager.sfx_volume * 100.0

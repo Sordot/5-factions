@@ -540,6 +540,32 @@ func _shorten_unit_name(full_name: String) -> String:
 	return full_name.replace("Worker Drone", "Worker").replace("Systems Engineer", "Engineer").replace("Silica Harvester", "Harvester").replace("Recon Scout", "Scout").replace("Test Unit", "Infantry").replace("Clone Trooper", "Clone").replace("Signal Jammer", "Jammer").replace("Goliath Frame", "Goliath").replace("Chrysalis Mortar", "Mortar").replace("Batch Efficiency", "Batch Eff.").replace("Adrenal Potency", "Adrenal Pot.").replace("Compute Overdrive", "Overdrive")
 
 
+func _build_unit_class_traits_label(u_data: UnitData) -> String:
+	if u_data == null:
+		return ""
+	var tags: PackedStringArray = PackedStringArray()
+	if u_data.unit_type_id == &"goliath_frame" or u_data.unit_type_id == &"arc_lancer":
+		tags.append("Heavy Synthetic")
+	elif u_data.is_armored:
+		tags.append("Armored")
+	else:
+		tags.append("Light")
+
+	if u_data.bonus_vs_armored > 0.0:
+		tags.append("+vs Armored")
+	if u_data.aoe_attack_radius > 0.0:
+		tags.append("AoE Splash")
+	if u_data.line_pierce_width > 0.0:
+		tags.append("Line Pierce")
+	if u_data.min_attack_range > 0.0:
+		tags.append("Min Range")
+	if u_data.heal_aura_rate > 0.0:
+		tags.append("Heal Aura")
+	if u_data.ignore_friendly_unit_collision:
+		tags.append("Colossus Stride")
+	return " • ".join(tags)
+
+
 func _apply_left_column(info: Dictionary) -> void:
 	var accent: Color = info.get("accent_color", Color(0.24, 0.92, 0.88, 1.0))
 	portrait_swatch.color = accent
@@ -683,7 +709,10 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 				return
 			var b_info: Dictionary = captured_b.get_unit_batch_info(captured_u)
 			var b_cnt: int = int(b_info["batch_count"])
+			var traits_line: String = _build_unit_class_traits_label(captured_u)
 			var meta_line: String = "Cost: %s / %d BW  •  %.1fs" % [String(b_info["cost_label"]), int(b_info["bandwidth_cost"]), float(b_info["duration"])]
+			if not traits_line.is_empty():
+				meta_line = "%s  •  %s" % [traits_line, meta_line]
 			var desc: String = "Queues a %s (max 5 in queue). Reserves Bandwidth immediately." % captured_u.display_name
 			if b_cnt > 1:
 				var mult_val: float = float(b_info["cost_multiplier"])

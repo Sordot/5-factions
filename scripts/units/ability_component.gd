@@ -194,7 +194,13 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 	if ab_id == &"static_pulse" or ab_id == &"seismic_slam":
 		var radius: float = maxf(32.0, ability.aoe_radius)
 		var origin: Vector2 = owner_unit.global_position
-		_spawn_self_pulse(owner_unit, radius, ability.effect_color)
+		if ab_id == &"seismic_slam":
+			_spawn_seismic_slam(owner_unit, radius, ability.effect_color)
+			var cam: Node = owner_unit.get_tree().get_first_node_in_group("rts_camera")
+			if cam != null and cam.has_method("add_camera_shake"):
+				cam.call("add_camera_shake", 4.2, 0.16, origin)
+		else:
+			_spawn_self_pulse(owner_unit, radius, ability.effect_color)
 		for node: Node in owner_unit.get_tree().get_nodes_in_group("units"):
 			if not is_instance_valid(node) or not (node is Unit):
 				continue
@@ -235,6 +241,15 @@ func _spawn_self_pulse(owner_unit: Unit, radius: float, effect_color: Color) -> 
 	fx.z_index = 55
 	owner_unit.get_parent().add_child(fx)
 	fx.setup_self_pulse(owner_unit.global_position, radius, effect_color)
+
+
+func _spawn_seismic_slam(owner_unit: Unit, radius: float, effect_color: Color) -> void:
+	if owner_unit.get_parent() == null:
+		return
+	var fx: AbilityEffect = ABILITY_EFFECT_SCRIPT.new()
+	fx.z_index = 55
+	owner_unit.get_parent().add_child(fx)
+	fx.setup_seismic_slam(owner_unit.global_position, radius, effect_color)
 
 
 func _spawn_aoe_effect(owner_unit: Unit, target_pos: Vector2, radius: float, effect_color: Color = Color(0.42, 0.88, 1.0, 0.95)) -> void:
