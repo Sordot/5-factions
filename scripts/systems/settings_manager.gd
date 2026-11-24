@@ -29,6 +29,7 @@ const KEYBIND_DEFS: Array = [
 	{"action": &"cmd_patrol", "label": "Patrol", "default_key": KEY_P, "category": "Unit Commands"},
 	{"action": &"cmd_select_idle_worker", "label": "Select Idle Worker", "default_key": KEY_QUOTELEFT, "category": "Abilities & Selection"},
 	{"action": &"cmd_select_all_army", "label": "Select All Army", "default_key": KEY_F9, "category": "Abilities & Selection"},
+	{"action": &"cmd_toggle_smart_box_select", "label": "Toggle Combat-Only Box Select", "default_key": KEY_B, "category": "Abilities & Selection"},
 	{"action": &"ui_cycle_subgroup", "label": "Cycle Subgroup", "default_key": KEY_TAB, "category": "Abilities & Selection"},
 	{"action": &"cmd_ability_q", "label": "Ability / Build Slot Q", "default_key": KEY_Q, "category": "Abilities & Selection"},
 	{"action": &"cmd_ability_w", "label": "Ability / Build Slot W", "default_key": KEY_W, "category": "Abilities & Selection"},
@@ -73,9 +74,16 @@ enum AttackRangeMode {
 	DONT_SHOW = 2,
 }
 
+enum AttackMoveMode {
+	QUICK_CAST = 0,
+	CLICK_TO_CONFIRM = 1,
+}
+
 # Gameplay / HUD preferences
 var health_bar_mode: int = 0 # 0 = Damaged / Selected, 1 = Always On, 2 = Selected Only
 var attack_range_mode: int = AttackRangeMode.SHOW_WHILE_TARGETING
+var attack_move_mode: int = AttackMoveMode.QUICK_CAST
+var smart_box_select_enabled: bool = false
 var show_alert_toasts: bool = true
 var camera_shake_enabled: bool = true
 
@@ -169,6 +177,8 @@ func load_settings() -> void:
 
 	health_bar_mode = clampi(int(cfg.get_value("gameplay", "health_bar_mode", 0)), 0, 2)
 	attack_range_mode = clampi(int(cfg.get_value("gameplay", "attack_range_mode", AttackRangeMode.SHOW_WHILE_TARGETING)), 0, 2)
+	attack_move_mode = clampi(int(cfg.get_value("gameplay", "attack_move_mode", AttackMoveMode.QUICK_CAST)), 0, 1)
+	smart_box_select_enabled = bool(cfg.get_value("gameplay", "smart_box_select_enabled", false))
 	show_alert_toasts = bool(cfg.get_value("gameplay", "show_alert_toasts", true))
 	camera_shake_enabled = bool(cfg.get_value("gameplay", "camera_shake_enabled", true))
 
@@ -241,6 +251,8 @@ func save_settings() -> void:
 
 	cfg.set_value("gameplay", "health_bar_mode", health_bar_mode)
 	cfg.set_value("gameplay", "attack_range_mode", attack_range_mode)
+	cfg.set_value("gameplay", "attack_move_mode", attack_move_mode)
+	cfg.set_value("gameplay", "smart_box_select_enabled", smart_box_select_enabled)
 	cfg.set_value("gameplay", "show_alert_toasts", show_alert_toasts)
 	cfg.set_value("gameplay", "camera_shake_enabled", camera_shake_enabled)
 
@@ -296,7 +308,9 @@ func set_gameplay_settings(
 	p_health_bar_mode: int,
 	p_show_alert_toasts: bool,
 	p_camera_shake_enabled: Variant = null,
-	p_attack_range_mode: Variant = null
+	p_attack_range_mode: Variant = null,
+	p_attack_move_mode: Variant = null,
+	p_smart_box_select_enabled: Variant = null
 ) -> void:
 	health_bar_mode = clampi(p_health_bar_mode, 0, 2)
 	show_alert_toasts = p_show_alert_toasts
@@ -304,8 +318,19 @@ func set_gameplay_settings(
 		camera_shake_enabled = bool(p_camera_shake_enabled)
 	if p_attack_range_mode is int:
 		attack_range_mode = clampi(int(p_attack_range_mode), 0, 2)
+	if p_attack_move_mode is int:
+		attack_move_mode = clampi(int(p_attack_move_mode), 0, 1)
+	if p_smart_box_select_enabled is bool:
+		smart_box_select_enabled = bool(p_smart_box_select_enabled)
 	save_settings()
 	settings_changed.emit(&"gameplay")
+
+
+func toggle_smart_box_select() -> bool:
+	smart_box_select_enabled = not smart_box_select_enabled
+	save_settings()
+	settings_changed.emit(&"gameplay")
+	return smart_box_select_enabled
 
 
 func set_audio_settings(
@@ -632,6 +657,8 @@ func reset_category(category: StringName) -> void:
 		&"gameplay":
 			health_bar_mode = 0
 			attack_range_mode = AttackRangeMode.SHOW_WHILE_TARGETING
+			attack_move_mode = AttackMoveMode.QUICK_CAST
+			smart_box_select_enabled = false
 			show_alert_toasts = true
 			camera_shake_enabled = true
 			save_settings()
@@ -676,6 +703,8 @@ func reset_all_to_defaults() -> void:
 	middle_drag_speed = 1.0
 	health_bar_mode = 0
 	attack_range_mode = AttackRangeMode.SHOW_WHILE_TARGETING
+	attack_move_mode = AttackMoveMode.QUICK_CAST
+	smart_box_select_enabled = false
 	show_alert_toasts = true
 	camera_shake_enabled = true
 	master_volume = 0.72

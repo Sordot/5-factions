@@ -18,6 +18,7 @@ signal attack_move_targeting_changed(active: bool)
 signal idle_workers_changed(idle_workers: Array[Unit])
 signal idle_workers_updated(count: int)
 signal army_count_updated(count: int)
+signal hud_toast_requested(message: String)
 
 @export var drag_threshold: float = 8.0
 @export var camera_path: NodePath
@@ -90,11 +91,27 @@ func _ready() -> void:
 	if command_queue_overlay != null and command_queue_overlay.has_method("bind_selection_controller"):
 		command_queue_overlay.call("bind_selection_controller", self)
 
+	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
+		SettingsManager.settings_changed.connect(_on_settings_changed)
+
 	call_deferred("_refresh_idle_workers", true)
 
 
 func _exit_tree() -> void:
+	if SettingsManager != null and SettingsManager.settings_changed.is_connected(_on_settings_changed):
+		SettingsManager.settings_changed.disconnect(_on_settings_changed)
 	_clear_custom_cursor()
+
+
+func _on_settings_changed(category: StringName) -> void:
+	if category != &"gameplay" and category != &"all":
+		return
+	if SettingsManager != null and SettingsManager.attack_move_mode == SettingsManager.AttackMoveMode.QUICK_CAST:
+		if is_attack_move_targeting:
+			cancel_attack_move_targeting()
+			_clear_custom_cursor()
+	if _is_dragging and selection_box != null:
+		selection_box.queue_redraw()
 
 
 func _process(delta: float) -> void:
@@ -215,6 +232,17 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 			return
 
+	if event.is_action_pressed("cmd_toggle_smart_box_select") and not event.is_echo():
+		var allow_smart_toggle: bool = true
+		if event is InputEventKey:
+			var smart_k: InputEventKey = event
+			if smart_k.ctrl_pressed or smart_k.alt_pressed:
+				allow_smart_toggle = false
+		if allow_smart_toggle:
+			_toggle_smart_box_select_hotkey()
+			get_viewport().set_input_as_handled()
+			return
+
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_q", "Q"):
 		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_w", "W"):
@@ -248,12 +276,25 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 
 	if event.is_action_pressed("cmd_attack_move") and not event.is_echo():
+		var shift_amove: bool = Input.is_key_pressed(KEY_SHIFT)
 		if event is InputEventKey:
 			var a_key: InputEventKey = event
 			if a_key.ctrl_pressed or a_key.alt_pressed:
 				return
-		if not selected_units.is_empty():
-			begin_attack_move_targeting()
+			shift_amove = shift_amove or a_key.shift_pressed
+		_prune_invalid_units()
+		if _has_selected_combat_capable_unit():
+			var use_click_confirm: bool = (
+				SettingsManager != null
+				and SettingsManager.attack_move_mode == SettingsManager.AttackMoveMode.CLICK_TO_CONFIRM
+			)
+			if use_click_confirm:
+				begin_attack_move_targeting()
+			else:
+				cancel_ability_targeting()
+				cancel_attack_move_targeting()
+				cancel_patrol_targeting()
+				issue_attack_move_at(get_global_mouse_position(), shift_amove)
 			get_viewport().set_input_as_handled()
 		elif event is InputEventMouseButton:
 			get_viewport().set_input_as_handled()
@@ -530,7 +571,7 @@ func cancel_ability_targeting() -> void:
 
 func begin_attack_move_targeting() -> void:
 	_prune_invalid_units()
-	if selected_units.is_empty():
+	if not _has_selected_combat_capable_unit():
 		return
 	cancel_ability_targeting()
 	cancel_patrol_targeting()
@@ -630,9 +671,32 @@ func _redraw_selected_units() -> void:
 		(inspected_entity as Building).queue_redraw()
 
 
+func _toggle_smart_box_select_hotkey() -> void:
+	if SettingsManager == null:
+		return
+	var enabled: bool = SettingsManager.toggle_smart_box_select()
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	var msg: String = "Combat-Only Box Select: ON" if enabled else "Combat-Only Box Select: OFF (All Units)"
+	hud_toast_requested.emit(msg)
+	if _is_dragging and selection_box != null:
+		selection_box.queue_redraw()
+
+
+func _has_selected_combat_capable_unit() -> bool:
+	for u: Unit in selected_units:
+		if not is_instance_valid(u) or u.is_dead or u.is_staffed:
+			continue
+		if (u.data != null and u.data.attack_damage > 0.0) or not _is_utility_unit(u):
+			return true
+	return false
+
+
 func issue_attack_move_at(world_point: Vector2, shift_queued: bool = false) -> void:
 	_prune_invalid_units()
-	_amove_preview_timer = 0.85
+	if not _has_selected_combat_capable_unit():
+		return
+	_amove_preview_timer = 0.35
 	_last_targeting_active = true
 	_redraw_selected_units()
 	if command_router != null:
@@ -1290,6 +1354,7 @@ func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
 	_last_click_building = null
 	_last_click_time_ms = 0
 	_last_click_building_time_ms = 0
+	var all_unit_hits: Array[Unit] = []
 	var combat_hits: Array[Unit] = []
 	var utility_hits: Array[Unit] = []
 	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
@@ -1299,24 +1364,29 @@ func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
 		if not is_instance_valid(unit) or unit.is_dead or unit.is_staffed or unit.team != Unit.Team.PLAYER:
 			continue
 		if world_rect.has_point(unit.global_position):
+			all_unit_hits.append(unit)
 			if _is_utility_unit(unit):
 				utility_hits.append(unit)
 			else:
 				combat_hits.append(unit)
 
-	# Smart box-selection priority: combat units always take precedence over economy/utility units.
-	var hits: Array[Unit] = combat_hits if not combat_hits.is_empty() else utility_hits
+	# Opt-in Combat-Only Box Select: defaults to selecting ALL friendly units inside the box.
+	var smart_box_enabled: bool = SettingsManager != null and SettingsManager.smart_box_select_enabled
+	var hits: Array[Unit] = all_unit_hits
+	if smart_box_enabled:
+		hits = combat_hits if not combat_hits.is_empty() else utility_hits
 
 	if not hits.is_empty():
 		if shift_pressed:
-			var existing_has_combat: bool = false
-			for prev_u: Unit in selected_units:
-				if is_instance_valid(prev_u) and not prev_u.is_dead and not _is_utility_unit(prev_u):
-					existing_has_combat = true
-					break
 			var to_add: Array[Unit] = hits
-			if existing_has_combat and not combat_hits.is_empty():
-				to_add = combat_hits
+			if smart_box_enabled and not combat_hits.is_empty():
+				var existing_has_combat: bool = false
+				for prev_u: Unit in selected_units:
+					if is_instance_valid(prev_u) and not prev_u.is_dead and not _is_utility_unit(prev_u):
+						existing_has_combat = true
+						break
+				if existing_has_combat:
+					to_add = combat_hits
 			var combined: Array[Unit] = selected_units.duplicate()
 			for u: Unit in to_add:
 				if not combined.has(u):

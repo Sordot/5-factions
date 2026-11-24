@@ -35,6 +35,8 @@ signal closed
 
 @onready var opt_health_bar_mode: OptionButton = %OptHealthBarMode
 @onready var opt_attack_range_mode: OptionButton = %OptAttackRangeMode
+@onready var opt_attack_move_mode: OptionButton = %OptAttackMoveMode
+@onready var chk_smart_box_select: CheckButton = %ChkSmartBoxSelect
 @onready var chk_alert_toasts: CheckButton = %ChkAlertToasts
 @onready var chk_camera_shake: CheckButton = %ChkCameraShake
 
@@ -404,6 +406,12 @@ func _wire_gameplay_controls() -> void:
 	opt_attack_range_mode.add_item("Don't Show", 2)
 	opt_attack_range_mode.item_selected.connect(func(_idx: int) -> void: _push_gameplay_settings())
 
+	opt_attack_move_mode.clear()
+	opt_attack_move_mode.add_item("Quick-Cast (Instant at Cursor)", int(SettingsManager.AttackMoveMode.QUICK_CAST))
+	opt_attack_move_mode.add_item("Click-to-Confirm (Target Cursor)", int(SettingsManager.AttackMoveMode.CLICK_TO_CONFIRM))
+	opt_attack_move_mode.item_selected.connect(func(_idx: int) -> void: _push_gameplay_settings())
+
+	chk_smart_box_select.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 	chk_alert_toasts.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 	chk_camera_shake.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 
@@ -413,7 +421,15 @@ func _push_gameplay_settings() -> void:
 		return
 	var hb_mode: int = clampi(opt_health_bar_mode.selected, 0, 2)
 	var ar_mode: int = clampi(opt_attack_range_mode.selected, 0, 2)
-	SettingsManager.set_gameplay_settings(hb_mode, chk_alert_toasts.button_pressed, chk_camera_shake.button_pressed, ar_mode)
+	var am_mode: int = clampi(opt_attack_move_mode.selected, 0, 1)
+	SettingsManager.set_gameplay_settings(
+		hb_mode,
+		chk_alert_toasts.button_pressed,
+		chk_camera_shake.button_pressed,
+		ar_mode,
+		am_mode,
+		chk_smart_box_select.button_pressed
+	)
 	AudioManager.play_ui_click()
 
 
@@ -508,6 +524,8 @@ func _sync_all_from_manager() -> void:
 
 	opt_health_bar_mode.select(clampi(SettingsManager.health_bar_mode, 0, 2))
 	opt_attack_range_mode.select(clampi(SettingsManager.attack_range_mode, 0, 2))
+	opt_attack_move_mode.select(clampi(SettingsManager.attack_move_mode, 0, 1))
+	chk_smart_box_select.button_pressed = SettingsManager.smart_box_select_enabled
 	chk_alert_toasts.button_pressed = SettingsManager.show_alert_toasts
 	chk_camera_shake.button_pressed = SettingsManager.camera_shake_enabled
 

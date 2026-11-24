@@ -349,7 +349,7 @@ unique_name_in_owner = true
 visible = false
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/separation = 14
+theme_override_constants/separation = 10
 
 [node name="HealthBarModeRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
 layout_mode = 2
@@ -362,7 +362,7 @@ text = "Health Bar Display Mode"
 
 [node name="OptHealthBarMode" type="OptionButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/HealthBarModeRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(260, 32)
+custom_minimum_size = Vector2(280, 32)
 layout_mode = 2
 focus_mode = 0
 
@@ -377,9 +377,41 @@ text = "Attack Range Indicator"
 
 [node name="OptAttackRangeMode" type="OptionButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/AttackRangeModeRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(260, 32)
+custom_minimum_size = Vector2(280, 32)
 layout_mode = 2
 focus_mode = 0
+
+[node name="AttackMoveModeRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/AttackMoveModeRow"]
+custom_minimum_size = Vector2(210, 0)
+layout_mode = 2
+text = "Attack-Move Input"
+
+[node name="OptAttackMoveMode" type="OptionButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/AttackMoveModeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(280, 32)
+layout_mode = 2
+focus_mode = 0
+
+[node name="SmartBoxSelectRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/SmartBoxSelectRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "When ON, drag-box selection ignores workers/harvesters/engineers if combat units are inside the box. Can also be toggled in-game via hotkey."
+mouse_filter = 1
+text = "Combat-Only Box Select"
+
+[node name="ChkSmartBoxSelect" type="CheckButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/SmartBoxSelectRow"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "When ON, drag-box selection ignores workers/harvesters/engineers if combat units are inside the box. Can also be toggled in-game via hotkey."
+focus_mode = 0
+text = "Enabled"
 
 [node name="AlertToastsRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
 layout_mode = 2

@@ -350,6 +350,8 @@ func _connect_selection_controller() -> void:
 		_selection_controller.idle_workers_updated.connect(_on_idle_workers_updated)
 	if not _selection_controller.army_count_updated.is_connected(_on_army_count_updated):
 		_selection_controller.army_count_updated.connect(_on_army_count_updated)
+	if _selection_controller.has_signal("hud_toast_requested") and not _selection_controller.hud_toast_requested.is_connected(_on_hud_toast):
+		_selection_controller.hud_toast_requested.connect(_on_hud_toast)
 	_on_idle_workers_updated(_selection_controller.idle_worker_count)
 	_on_army_count_updated(_selection_controller.army_unit_count)
 	_refresh_tech_button_label()

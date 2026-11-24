@@ -148,7 +148,19 @@ func _bind_static_command_tooltips() -> void:
 	_attach_dynamic_action_tooltip(btn_cmd_stop, "Stop", &"cmd_stop", "Immediate", "Cancels current movement, patrol, gathering, construction, or target and flushes command queue.")
 	_attach_dynamic_action_tooltip(btn_cmd_hold, "Hold Position", &"cmd_hold", "Immediate", "Locks unit position while engaging enemies inside attack range.")
 	_attach_dynamic_action_tooltip(btn_cmd_patrol, "Patrol", &"cmd_patrol", "Click Waypoint (Shift Chains Loop)", "Loops units continuously between waypoints while engaging enemies encountered along the path.")
-	_attach_dynamic_action_tooltip(btn_cmd_amove, "Attack-Move", &"cmd_attack_move", "Click Target (Shift Chains)", "Moves toward target point and automatically engages hostile targets along the way.")
+	if btn_cmd_amove != null:
+		btn_cmd_amove.tooltip_text = ""
+		btn_cmd_amove.mouse_entered.connect(func() -> void:
+			if command_tooltip != null:
+				var hk: String = SettingsManager.get_action_display_label(&"cmd_attack_move", false) if SettingsManager != null else "A"
+				var click_confirm: bool = SettingsManager != null and SettingsManager.attack_move_mode == SettingsManager.AttackMoveMode.CLICK_TO_CONFIRM
+				var meta_txt: String = "Click Target (Shift Chains)" if click_confirm else "Quick-Cast at Cursor (Shift Chains)"
+				command_tooltip.show_tooltip("Attack-Move", hk, meta_txt, "Moves toward target point and automatically engages hostile targets along the way.")
+		)
+		btn_cmd_amove.mouse_exited.connect(func() -> void:
+			if command_tooltip != null:
+				command_tooltip.hide_tooltip()
+		)
 
 
 func _attach_dynamic_action_tooltip(btn: Button, title: String, action_name: StringName, meta: String, desc: String) -> void:

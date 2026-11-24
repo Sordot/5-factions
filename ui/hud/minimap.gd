@@ -112,6 +112,36 @@ func _on_fog_updated() -> void:
 		map_viewport.queue_redraw()
 
 
+func _unhandled_input(event: InputEvent) -> void:
+	if map_viewport == null or not is_visible_in_tree() or event.is_echo():
+		return
+	if not event.is_action_pressed("cmd_attack_move"):
+		return
+	if SettingsManager != null and SettingsManager.attack_move_mode != SettingsManager.AttackMoveMode.QUICK_CAST:
+		return
+	if event is InputEventKey:
+		var k: InputEventKey = event
+		if k.ctrl_pressed or k.alt_pressed:
+			return
+	var local_pos: Vector2 = map_viewport.get_local_mouse_position()
+	if not Rect2(Vector2.ZERO, map_viewport.size).has_point(local_pos):
+		return
+	if _selection_controller == null:
+		_resolve_references()
+	if _selection_controller == null or _selection_controller.selected_units.is_empty():
+		return
+	var world_pos: Vector2 = _minimap_to_world(local_pos)
+	var shift_queued: bool = Input.is_key_pressed(KEY_SHIFT)
+	if event is InputEventKey:
+		shift_queued = shift_queued or (event as InputEventKey).shift_pressed
+	_selection_controller.issue_attack_move_at(world_pos, shift_queued)
+	_ping_color = Color(1.0, 0.36, 0.28, 1.0)
+	_ping_pos = _world_to_minimap(world_pos)
+	_ping_timer = 0.45
+	map_viewport.queue_redraw()
+	get_viewport().set_input_as_handled()
+
+
 func _on_map_viewport_gui_input(event: InputEvent) -> void:
 	if map_viewport == null:
 		return
@@ -140,6 +170,15 @@ func _on_map_viewport_gui_input(event: InputEvent) -> void:
 					map_viewport.queue_redraw()
 					map_viewport.accept_event()
 					return
+				if _selection_controller != null and Input.is_action_pressed("cmd_attack_move") and not _selection_controller.selected_units.is_empty():
+					var quick_world: Vector2 = _minimap_to_world(mb.position)
+					_selection_controller.issue_attack_move_at(quick_world, mb.shift_pressed or Input.is_key_pressed(KEY_SHIFT))
+					_ping_color = Color(1.0, 0.36, 0.28, 1.0)
+					_ping_pos = _world_to_minimap(quick_world)
+					_ping_timer = 0.45
+					map_viewport.queue_redraw()
+					map_viewport.accept_event()
+					return
 				_is_left_dragging = true
 				_move_camera_to_minimap_point(mb.position)
 				map_viewport.accept_event()
@@ -147,6 +186,16 @@ func _on_map_viewport_gui_input(event: InputEvent) -> void:
 				_is_left_dragging = false
 				map_viewport.accept_event()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+			if _selection_controller == null:
+				_resolve_references()
+			if _selection_controller != null and _selection_controller.is_attack_move_targeting:
+				_selection_controller.cancel_attack_move_targeting()
+				map_viewport.accept_event()
+				return
+			if _selection_controller != null and _selection_controller.is_patrol_targeting:
+				_selection_controller.cancel_patrol_targeting()
+				map_viewport.accept_event()
+				return
 			_issue_order_at_minimap_point(mb.position)
 			map_viewport.accept_event()
 	elif event is InputEventMouseMotion and _is_left_dragging:
