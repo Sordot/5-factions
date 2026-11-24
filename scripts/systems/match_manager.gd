@@ -2,6 +2,8 @@ class_name MatchManager
 extends Node
 
 const PAUSE_MENU_SCENE: PackedScene = preload("res://scenes/ui/pause_menu.tscn")
+const SKIRMISH_AI_SCRIPT_PATH: String = "res://scripts/systems/skirmish_ai.gd"
+const SPEED_PRESETS: Array = [0.5, 1.0, 1.5, 2.0]
 const ALERT_REGION_RADIUS: float = 300.0
 const ALERT_DAMAGE_THROTTLE_S: float = 4.0
 const MAX_RECENT_ALERTS: int = 3
@@ -10,6 +12,7 @@ signal match_ended(winner_team: int, stats: Dictionary)
 signal aggro_ai_toggled(enabled: bool)
 signal tactical_alert_recorded(world_pos: Vector2, message: String)
 signal tactical_alert_triggered(world_pos: Vector2, alert_type: StringName, message: String)
+signal game_speed_changed(speed_scale: float)
 
 static var _global_aggro_ai_enabled: bool = true
 
@@ -41,20 +44,90 @@ var _tracked_prod: Dictionary = {}
 var _recent_alerts: Array[Dictionary] = []
 var _damage_alert_log: Array[Dictionary] = []
 var _pause_menu: PauseMenu = null
+var current_game_speed: float = 1.0
 
 
 func _ready() -> void:
 	add_to_group("match_manager")
+	Engine.time_scale = 1.0
+	current_game_speed = 1.0
 	if GameConfig != null and GameConfig.configured_from_menu:
 		aggro_ai_enabled = GameConfig.aggro_ai_enabled
+		if TeamManager != null:
+			TeamManager.configure_from_game_config()
 	_global_aggro_ai_enabled = aggro_ai_enabled
 	if SettingsManager != null:
 		SettingsManager.set_gameplay_cursor_active(true)
 	call_deferred("_ensure_pause_menu")
+	call_deferred("_ensure_spectator_ai_commanders")
 	call_deferred("_hook_initial_entities")
 	call_deferred("_hook_economy_manager")
 	if not get_tree().node_added.is_connected(_on_tree_node_added):
 		get_tree().node_added.connect(_on_tree_node_added)
+
+
+func set_game_speed(speed_scale: float) -> void:
+	if is_match_over:
+		Engine.time_scale = 1.0
+		current_game_speed = 1.0
+		game_speed_changed.emit(1.0)
+		return
+	var clamped: float = clampf(speed_scale, 0.5, 2.0)
+	current_game_speed = clamped
+	if not get_tree().paused:
+		Engine.time_scale = current_game_speed
+	game_speed_changed.emit(current_game_speed)
+
+
+func step_game_speed(delta_idx: int) -> void:
+	var best_idx: int = 1
+	var best_diff: float = INF
+	for i: int in range(SPEED_PRESETS.size()):
+		var d: float = absf(float(SPEED_PRESETS[i]) - current_game_speed)
+		if d < best_diff:
+			best_diff = d
+			best_idx = i
+	var next_idx: int = clampi(best_idx + delta_idx, 0, SPEED_PRESETS.size() - 1)
+	set_game_speed(float(SPEED_PRESETS[next_idx]))
+
+
+func reset_game_speed() -> void:
+	current_game_speed = 1.0
+	Engine.time_scale = 1.0
+	game_speed_changed.emit(1.0)
+
+
+func _ensure_spectator_ai_commanders() -> void:
+	if TeamManager == null or not TeamManager.is_spectator_mode() or not is_inside_tree():
+		return
+	var host: Node = get_tree().current_scene
+	if host == null:
+		return
+	var existing_teams: Dictionary = {}
+	var ref_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
+	for node: Node in get_tree().get_nodes_in_group("skirmish_ai"):
+		if is_instance_valid(node):
+			existing_teams[int(node.get("ai_team"))] = true
+			var b: Variant = node.get("arena_bounds")
+			if b is Rect2:
+				ref_bounds = b as Rect2
+	var nav: Node = get_tree().get_first_node_in_group("arena_nav_region")
+	if nav != null and nav.get("arena_bounds") is Rect2:
+		ref_bounds = nav.get("arena_bounds") as Rect2
+
+	var ai_script: GDScript = load(SKIRMISH_AI_SCRIPT_PATH) as GDScript
+	if ai_script == null:
+		return
+	for tid: int in TeamManager.get_active_teams():
+		if TeamManager.get_team_controller_type(tid) != TeamManager.ControllerType.AI:
+			continue
+		if existing_teams.has(tid):
+			continue
+		var ai_node: Node = ai_script.new()
+		ai_node.name = "SkirmishAICommander_Team%d" % tid
+		ai_node.set("ai_team", tid)
+		ai_node.set("arena_bounds", ref_bounds)
+		host.add_child(ai_node)
 
 
 func get_match_elapsed_seconds() -> float:
@@ -181,6 +254,14 @@ func _input(event: InputEvent) -> void:
 			toggle_aggro_ai()
 			get_viewport().set_input_as_handled()
 			return
+		if event.is_action_pressed("game_speed_down"):
+			step_game_speed(-1)
+			get_viewport().set_input_as_handled()
+			return
+		if event.is_action_pressed("game_speed_up"):
+			step_game_speed(1)
+			get_viewport().set_input_as_handled()
+			return
 
 
 static func is_aggro_ai_enabled(tree: SceneTree = null) -> bool:
@@ -221,6 +302,7 @@ func _calm_idle_and_ai_units() -> void:
 
 
 func _exit_tree() -> void:
+	Engine.time_scale = 1.0
 	if SettingsManager != null:
 		SettingsManager.set_gameplay_cursor_active(false)
 	if get_tree() != null and get_tree().node_added.is_connected(_on_tree_node_added):
@@ -259,10 +341,12 @@ func evaluate_match_state() -> void:
 	if is_match_over or sandbox_mode_active or not is_inside_tree():
 		return
 
-	var player_cores: int = 0
-	var player_buildings: int = 0
-	var enemy_cores: int = 0
-	var enemy_buildings: int = 0
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	var team_cores: Dictionary = {}
+	var team_buildings: Dictionary = {}
+	for tid: int in active_teams:
+		team_cores[tid] = 0
+		team_buildings[tid] = 0
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not (node is Building) or not is_instance_valid(node):
@@ -270,42 +354,51 @@ func evaluate_match_state() -> void:
 		var b: Building = node
 		if b.is_destroyed or b.is_queued_for_deletion():
 			continue
-		if b.team == Unit.Team.PLAYER:
-			player_buildings += 1
-			if b.is_core_hub or b.building_type_id == &"nexus_vat":
-				player_cores += 1
-		elif b.team == Unit.Team.ENEMY:
-			enemy_buildings += 1
-			if b.is_core_hub or b.building_type_id == &"nexus_vat":
-				enemy_cores += 1
+		var t: int = int(b.team)
+		team_buildings[t] = int(team_buildings.get(t, 0)) + 1
+		if b.is_core_hub or b.building_type_id == &"nexus_vat":
+			team_cores[t] = int(team_cores.get(t, 0)) + 1
 
-	var enemy_defeated: bool = (enemy_cores == 0) if victory_on_command_core_loss else (enemy_buildings == 0)
-	if enemy_buildings == 0:
-		enemy_defeated = true
+	var surviving_alliances: Dictionary = {}
+	for tid: int in active_teams:
+		var b_cnt: int = int(team_buildings.get(tid, 0))
+		var c_cnt: int = int(team_cores.get(tid, 0))
+		var alive: bool = (c_cnt > 0 and b_cnt > 0) if victory_on_command_core_loss else (b_cnt > 0)
+		if alive:
+			var ally_id: int = TeamManager.get_team_alliance(tid) if TeamManager != null else tid
+			if not surviving_alliances.has(ally_id):
+				surviving_alliances[ally_id] = tid
 
-	var player_defeated: bool = (player_cores == 0) if victory_on_command_core_loss else (player_buildings == 0)
-	if player_buildings == 0:
-		player_defeated = true
-
-	if enemy_defeated:
-		_finish_match(Unit.Team.PLAYER, "Hostile Nexus Vat Neutralized")
-	elif player_defeated:
-		_finish_match(Unit.Team.ENEMY, "Player Nexus Vat Destroyed")
+	if surviving_alliances.size() <= 1:
+		var winner_tid: int = 0
+		if surviving_alliances.size() == 1:
+			var first_key: Variant = surviving_alliances.keys()[0]
+			winner_tid = int(surviving_alliances[first_key])
+		var reason: String = "Hostile Nexus Vat Neutralized" if winner_tid == 0 else "Team 1 Nexus Vat Destroyed"
+		if TeamManager != null and TeamManager.is_spectator_mode():
+			reason = "%s Achieved Total Domination" % TeamManager.get_team_display_name(winner_tid)
+		_finish_match(winner_tid as Unit.Team, reason)
 
 
 func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 	if is_match_over:
 		return
 	is_match_over = true
+	reset_game_speed()
 
-	# Reveal the battlefield and pause active AI/zone pressure behind the summary modal.
+	# Reveal the battlefield and pause ALL active AI commanders behind the summary modal.
 	var fog: FogOfWarSystem = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
 	if fog != null:
 		fog.set_fog_enabled(false)
 
-	var ai: SkirmishAICommander = get_tree().get_first_node_in_group("skirmish_ai") as SkirmishAICommander
-	if ai != null:
-		ai.enabled = false
+	for ai_node: Node in get_tree().get_nodes_in_group("skirmish_ai"):
+		if is_instance_valid(ai_node):
+			ai_node.set("enabled", false)
+
+	var winner_label: String = TeamManager.get_team_display_name(int(winner_team)) if TeamManager != null else ("PLAYER COMMANDER" if winner_team == Unit.Team.PLAYER else "HOSTILE AI")
+	var is_spectator: bool = TeamManager != null and TeamManager.is_spectator_mode()
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	var is_local_win: bool = true if is_spectator else (int(winner_team) == local_team)
 
 	var safe_duration: float = maxf(1.0, match_elapsed)
 	var player_uplink_pct: float = clampf((player_uplink_time / safe_duration) * 100.0, 0.0, 100.0)
@@ -315,8 +408,9 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 	var e_totals: Dictionary = econ.get_all_totals_gathered(Unit.Team.ENEMY) if econ != null else {}
 	var stats: Dictionary = {
 		"winner_team": int(winner_team),
-		"winner_label": "PLAYER COMMANDER" if winner_team == Unit.Team.PLAYER else "HOSTILE AI",
-		"is_victory": winner_team == Unit.Team.PLAYER,
+		"winner_label": winner_label,
+		"is_victory": is_local_win,
+		"is_spectator": is_spectator,
 		"reason": reason,
 		"duration_seconds": match_elapsed,
 		"duration_formatted": _format_duration(match_elapsed),

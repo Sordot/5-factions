@@ -31,6 +31,8 @@ var _update_timer: float = 0.0
 
 func _ready() -> void:
 	add_to_group("fog_of_war")
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		fog_enabled = false
 	_initialize_grid()
 	refresh_visibility()
 	call_deferred("refresh_visibility")
@@ -92,26 +94,35 @@ func refresh_visibility() -> void:
 		if _grid[i] == VisibilityState.VISIBLE:
 			_grid[i] = VisibilityState.EXPLORED
 
-	# Stamp live vision circles for all living Team.PLAYER units.
+	var spectator: bool = TeamManager != null and TeamManager.is_spectator_mode()
+	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+
+	# Stamp live vision circles for all living allied units (or all active teams in Spectator Mode).
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var unit: Unit = node
-		if unit.is_dead or unit.is_staffed or unit.is_queued_for_deletion() or unit.team != Unit.Team.PLAYER:
+		if unit.is_dead or unit.is_staffed or unit.is_queued_for_deletion():
+			continue
+		var grants_vision: bool = spectator or (TeamManager.are_allies(viewer_team, int(unit.team)) if TeamManager != null else (unit.team == Unit.Team.PLAYER))
+		if not grants_vision:
 			continue
 		_reveal_circle(unit.global_position, unit.get_vision_range())
 
-	# Stamp live vision circles for all living Team.PLAYER buildings.
+	# Stamp live vision circles for all living allied buildings (or all active teams in Spectator Mode).
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node) or not (node is Building):
 			continue
 		var building: Building = node
-		if building.is_destroyed or building.is_queued_for_deletion() or building.team != Unit.Team.PLAYER:
+		if building.is_destroyed or building.is_queued_for_deletion():
+			continue
+		var grants_vision_b: bool = spectator or (TeamManager.are_allies(viewer_team, int(building.team)) if TeamManager != null else (building.team == Unit.Team.PLAYER))
+		if not grants_vision_b:
 			continue
 		_reveal_circle(building.global_position, building.get_vision_range())
 
 	_sync_texture_if_dirty()
-	_apply_enemy_visibility(false)
+	_apply_enemy_visibility(spectator)
 	visibility_updated.emit()
 
 
@@ -189,11 +200,16 @@ func _sync_texture_if_dirty() -> void:
 
 
 func _apply_enemy_visibility(force_reveal_all: bool) -> void:
+	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var unit: Unit = node
-		if unit.is_dead or unit.is_staffed or unit.is_queued_for_deletion() or unit.team != Unit.Team.ENEMY:
+		if unit.is_dead or unit.is_staffed or unit.is_queued_for_deletion():
+			continue
+		var is_hostile: bool = TeamManager.are_enemies(viewer_team, int(unit.team)) if (TeamManager != null and viewer_team >= 0) else (unit.team != Unit.Team.PLAYER)
+		if not is_hostile:
+			unit.visible = true
 			continue
 		unit.visible = true if force_reveal_all else is_world_pos_visible(unit.global_position)
 
@@ -201,7 +217,11 @@ func _apply_enemy_visibility(force_reveal_all: bool) -> void:
 		if not is_instance_valid(node) or not (node is Building):
 			continue
 		var building: Building = node
-		if building.is_destroyed or building.is_queued_for_deletion() or building.team != Unit.Team.ENEMY:
+		if building.is_destroyed or building.is_queued_for_deletion():
+			continue
+		var is_hostile_b: bool = TeamManager.are_enemies(viewer_team, int(building.team)) if (TeamManager != null and viewer_team >= 0) else (building.team != Unit.Team.PLAYER)
+		if not is_hostile_b:
+			building.visible = true
 			continue
 		if force_reveal_all:
 			building.visible = true

@@ -16,6 +16,7 @@ signal ability_targeting_changed(active_ability: AbilityData)
 signal patrol_targeting_changed(active: bool)
 signal idle_workers_changed(idle_workers: Array[Unit])
 signal idle_workers_updated(count: int)
+signal army_count_updated(count: int)
 
 @export var drag_threshold: float = 8.0
 @export var camera_path: NodePath
@@ -39,12 +40,14 @@ var control_groups: Dictionary = {}
 var active_targeting_ability: AbilityData = null
 var is_patrol_targeting: bool = false
 var idle_worker_count: int = 0
+var army_unit_count: int = 0
 
 var _is_dragging: bool = false
 var _drag_start_world: Vector2 = Vector2.ZERO
 var _drag_start_screen: Vector2 = Vector2.ZERO
 var _last_recall_group: int = -1
 var _last_recall_time_ms: int = 0
+var _last_army_select_ms: int = 0
 var _last_click_unit: Unit = null
 var _last_click_building: Building = null
 var _last_click_time_ms: int = 0
@@ -97,15 +100,17 @@ func _process(delta: float) -> void:
 		_last_targeting_active = cur_targeting
 		_redraw_selected_units()
 
-	# Drop inspection if an inspected hostile entity disappears into Fog of War.
+	# Drop inspection if an inspected non-local entity disappears into Fog of War.
 	if inspected_entity != null and is_instance_valid(inspected_entity):
 		if inspected_entity is Unit:
 			var iu: Unit = inspected_entity
-			if iu.team == Unit.Team.ENEMY and not iu.visible:
+			var iu_local: bool = TeamManager.is_team_controlled_by_local_human(int(iu.team)) if TeamManager != null else (iu.team == Unit.Team.PLAYER)
+			if not iu_local and not iu.visible:
 				_set_inspected_entity(null)
 		elif inspected_entity is Building:
 			var ib: Building = inspected_entity
-			if ib.team == Unit.Team.ENEMY and not ib.visible:
+			var ib_local: bool = TeamManager.is_team_controlled_by_local_human(int(ib.team)) if TeamManager != null else (ib.team == Unit.Team.PLAYER)
+			if not ib_local and not ib.visible:
 				_set_inspected_entity(null)
 
 	if active_targeting_ability == null or command_router == null:
@@ -157,7 +162,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		var pause_menu: PauseMenu = get_tree().get_first_node_in_group("pause_menu") as PauseMenu
-		if pause_menu != null and not pause_menu.is_settings_open():
+		if pause_menu != null and not pause_menu.is_settings_open() and not pause_menu.is_tech_tree_open():
 			pause_menu.toggle_pause()
 			get_viewport().set_input_as_handled()
 		return
@@ -181,6 +186,17 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 			return
 
+	if event.is_action_pressed("cmd_select_all_army") and not event.is_echo():
+		var allow_army_hotkey: bool = true
+		if event is InputEventKey:
+			var army_k: InputEventKey = event
+			if army_k.ctrl_pressed or army_k.alt_pressed:
+				allow_army_hotkey = false
+		if allow_army_hotkey:
+			if select_all_army(true) > 0 or event is InputEventMouseButton:
+				get_viewport().set_input_as_handled()
+			return
+
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_q", "Q"):
 		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_w", "W"):
@@ -198,7 +214,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if event.is_action_pressed("cmd_ability_e") and selected_units.is_empty() and inspected_entity is Building:
 		var b_node: Building = inspected_entity
-		if is_instance_valid(b_node) and b_node.team == Unit.Team.PLAYER and b_node.max_staff_slots > 0 and b_node.get_assigned_engineer_count() > 0:
+		var b_local: bool = TeamManager.is_team_controlled_by_local_human(int(b_node.team)) if TeamManager != null else (b_node.team == Unit.Team.PLAYER)
+		if is_instance_valid(b_node) and b_local and b_node.max_staff_slots > 0 and b_node.get_assigned_engineer_count() > 0:
 			b_node.eject_engineers()
 			get_viewport().set_input_as_handled()
 			return
@@ -587,12 +604,59 @@ func select_next_idle_worker(focus_camera: bool = true) -> Unit:
 	return chosen
 
 
+func get_army_units() -> Array[Unit]:
+	var army: Array[Unit] = []
+	if not is_inside_tree():
+		return army
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		return army
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node) or not (node is Unit):
+			continue
+		var u: Unit = node
+		if u.is_dead or u.is_staffed or u.is_queued_for_deletion() or int(u.team) != local_team or u.data == null:
+			continue
+		var uid: StringName = u.get_unit_type_id()
+		if u.data.can_gather or u.data.can_staff_compute or uid == &"worker" or uid == &"silica_harvester" or uid == &"engineer":
+			continue
+		if u.data.attack_damage > 0.0 or uid == &"symbiote" or uid == &"signal_jammer":
+			army.append(u)
+	return army
+
+
+func select_all_army(allow_double_tap_center: bool = true) -> int:
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		return 0
+	var army: Array[Unit] = get_army_units()
+	if army.is_empty():
+		return 0
+	cancel_ability_targeting()
+	cancel_patrol_targeting()
+	_set_selected_buildings([])
+	_set_inspected_entity(null)
+	_set_selected_units(army)
+	if allow_double_tap_center:
+		var now_ms: int = Time.get_ticks_msec()
+		if (now_ms - _last_army_select_ms) <= DOUBLE_TAP_WINDOW_MS:
+			_center_camera_on_units(army)
+			_last_army_select_ms = 0
+		else:
+			_last_army_select_ms = now_ms
+	return army.size()
+
+
 func _refresh_idle_workers(force_emit: bool = false) -> void:
 	var idle_list: Array[Unit] = get_idle_workers()
 	var ids: PackedInt64Array = PackedInt64Array()
 	ids.resize(idle_list.size())
 	for i: int in range(idle_list.size()):
 		ids[i] = idle_list[i].get_instance_id()
+
+	var cur_army_count: int = get_army_units().size()
+	if force_emit or cur_army_count != army_unit_count:
+		army_unit_count = cur_army_count
+		army_count_updated.emit(army_unit_count)
 
 	if not force_emit and ids == _last_idle_ids and idle_worker_count == idle_list.size():
 		return
@@ -919,6 +983,28 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 	if command_router == null:
 		return
 
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		_set_selected_units([])
+		_set_selected_buildings([])
+		var any_u: Unit = command_router.find_any_unit_at_point(world_point)
+		if any_u != null:
+			_set_inspected_entity(any_u)
+			return
+		var any_b: Building = command_router.find_any_building_at_point(world_point)
+		if any_b != null:
+			_set_inspected_entity(any_b)
+			return
+		var spec_bar: Node2D = command_router.find_barricade_at_point(world_point)
+		if spec_bar != null:
+			_set_inspected_entity(spec_bar)
+			return
+		var spec_res: ResourceNode = command_router.find_resource_node_at_point(world_point)
+		if spec_res != null:
+			_set_inspected_entity(spec_res)
+			return
+		_set_inspected_entity(null)
+		return
+
 	var clicked_player: Unit = command_router.find_unit_at_point(world_point, Unit.Team.PLAYER)
 	if clicked_player != null:
 		_set_selected_buildings([])
@@ -994,6 +1080,13 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 		_set_inspected_entity(clicked_enemy_building)
 		return
 
+	var clicked_barricade: Node2D = command_router.find_barricade_at_point(world_point)
+	if clicked_barricade != null:
+		_set_selected_units([])
+		_set_selected_buildings([])
+		_set_inspected_entity(clicked_barricade)
+		return
+
 	var clicked_resource: ResourceNode = command_router.find_resource_node_at_point(world_point)
 	if clicked_resource != null:
 		_set_selected_units([])
@@ -1008,6 +1101,8 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 
 
 func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		return
 	_last_click_unit = null
 	_last_click_building = null
 	_last_click_time_ms = 0
@@ -1260,6 +1355,8 @@ func _set_inspected_entity(entity: Node) -> void:
 			next_entity = entity
 		elif entity is ResourceNode and not (entity as ResourceNode).is_depleted():
 			next_entity = entity
+		elif entity.is_in_group("destructible_barricades") and not bool(entity.get("is_destroyed")):
+			next_entity = entity
 
 	if inspected_entity == next_entity:
 		return
@@ -1280,6 +1377,11 @@ func _set_inspected_entity(entity: Node) -> void:
 			if prev_r.depleted.is_connected(_on_inspected_entity_removed):
 				prev_r.depleted.disconnect(_on_inspected_entity_removed)
 			prev_r.set_inspected(false)
+		elif inspected_entity.is_in_group("destructible_barricades"):
+			if inspected_entity.has_signal("destroyed") and inspected_entity.is_connected("destroyed", _on_inspected_entity_removed):
+				inspected_entity.disconnect("destroyed", _on_inspected_entity_removed)
+			if inspected_entity.has_method("set_selected"):
+				inspected_entity.call("set_selected", false)
 
 	var prev_building: Building = selected_building
 	inspected_entity = next_entity
@@ -1302,6 +1404,11 @@ func _set_inspected_entity(entity: Node) -> void:
 			r.set_inspected(true)
 			if not r.depleted.is_connected(_on_inspected_entity_removed):
 				r.depleted.connect(_on_inspected_entity_removed)
+		elif inspected_entity.is_in_group("destructible_barricades"):
+			if inspected_entity.has_method("set_selected"):
+				inspected_entity.call("set_selected", true)
+			if inspected_entity.has_signal("destroyed") and not inspected_entity.is_connected("destroyed", _on_inspected_entity_removed):
+				inspected_entity.connect("destroyed", _on_inspected_entity_removed)
 
 	if prev_building != selected_building:
 		building_selection_changed.emit(selected_building)

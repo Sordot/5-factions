@@ -42,19 +42,20 @@ func _ready() -> void:
 		starting_biomass = int(preset_res.get("biomass", starting_biomass))
 		starting_silica = int(preset_res.get("silica", starting_silica))
 		starting_compute = int(preset_res.get("compute", starting_compute))
-	_init_team_state(Unit.Team.PLAYER, starting_biomass, starting_silica, starting_compute)
-	if enemy_matches_starting_resources:
-		_init_team_state(Unit.Team.ENEMY, starting_biomass, starting_silica, starting_compute)
-	else:
-		_init_team_state(Unit.Team.ENEMY, 0, 0, 0)
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	for tid: int in active_teams:
+		if tid == 0 or enemy_matches_starting_resources:
+			_init_team_state(tid, starting_biomass, starting_silica, starting_compute)
+		else:
+			_init_team_state(tid, 0, 0, 0)
 	call_deferred("_sync_initial_scene_state")
 
 
 func _sync_initial_scene_state() -> void:
-	recalculate_bandwidth(Unit.Team.PLAYER)
-	recalculate_bandwidth(Unit.Team.ENEMY)
-	resources_changed.emit(Unit.Team.PLAYER, get_resources(Unit.Team.PLAYER))
-	resources_changed.emit(Unit.Team.ENEMY, get_resources(Unit.Team.ENEMY))
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	for tid: int in active_teams:
+		recalculate_bandwidth(tid)
+		resources_changed.emit(tid, get_resources(tid))
 
 
 func _process(delta: float) -> void:
@@ -92,21 +93,19 @@ func _ensure_team(team: int) -> void:
 
 func reset_economy() -> void:
 	_elapsed_time = 0.0
-	_init_team_state(Unit.Team.PLAYER, starting_biomass, starting_silica, starting_compute)
-	if enemy_matches_starting_resources:
-		_init_team_state(Unit.Team.ENEMY, starting_biomass, starting_silica, starting_compute)
-	else:
-		_init_team_state(Unit.Team.ENEMY, 0, 0, 0)
-	_bandwidth_reserved[Unit.Team.PLAYER] = 0
-	_bandwidth_reserved[Unit.Team.ENEMY] = 0
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	for tid: int in active_teams:
+		if tid == 0 or enemy_matches_starting_resources:
+			_init_team_state(tid, starting_biomass, starting_silica, starting_compute)
+		else:
+			_init_team_state(tid, 0, 0, 0)
+		_bandwidth_reserved[tid] = 0
 	upgrade_manager.reset()
 	set_uplink_controller(-1, _uplink_bonus_pct)
-	recalculate_bandwidth(Unit.Team.PLAYER)
-	recalculate_bandwidth(Unit.Team.ENEMY)
-	resources_changed.emit(Unit.Team.PLAYER, get_resources(Unit.Team.PLAYER))
-	resources_changed.emit(Unit.Team.ENEMY, get_resources(Unit.Team.ENEMY))
-	tech_changed.emit(Unit.Team.PLAYER)
-	tech_changed.emit(Unit.Team.ENEMY)
+	for tid: int in active_teams:
+		recalculate_bandwidth(tid)
+		resources_changed.emit(tid, get_resources(tid))
+		tech_changed.emit(tid)
 
 
 func add_resource(team: int, resource_type: StringName, amount: int, record_as_income: bool = true) -> void:
@@ -208,7 +207,8 @@ func notify_insufficient(team: int, missing_key: StringName) -> void:
 	if missing_key == &"":
 		return
 	resource_insufficient.emit(team, missing_key)
-	if team == int(Unit.Team.PLAYER) and AudioManager != null:
+	var is_local: bool = TeamManager.is_team_controlled_by_local_human(team) if TeamManager != null else (team == int(Unit.Team.PLAYER))
+	if is_local and AudioManager != null:
 		AudioManager.play_error()
 
 
@@ -307,8 +307,9 @@ func release_bandwidth(team: int, amount: int) -> void:
 func set_uplink_controller(team: int, bonus_pct: float = 0.05) -> void:
 	_uplink_controller = team
 	_uplink_bonus_pct = maxf(0.0, bonus_pct)
-	production_bonus_changed.emit(Unit.Team.PLAYER, get_production_speed_multiplier(Unit.Team.PLAYER))
-	production_bonus_changed.emit(Unit.Team.ENEMY, get_production_speed_multiplier(Unit.Team.ENEMY))
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	for tid: int in active_teams:
+		production_bonus_changed.emit(tid, get_production_speed_multiplier(tid))
 
 
 func get_production_speed_multiplier(team: int) -> float:

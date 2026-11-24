@@ -1,0 +1,444 @@
+[gd_scene load_steps=34 format=3]
+
+[ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
+[ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
+[ext_resource type="Script" path="res://scripts/controllers/selection_controller.gd" id="3_sel_ctrl"]
+[ext_resource type="Script" path="res://ui/overlays/selection_box.gd" id="4_sel_box"]
+[ext_resource type="PackedScene" path="res://scenes/units/stinger.tscn" id="5_stinger"]
+[ext_resource type="Script" path="res://scripts/controllers/sandbox_spawner.gd" id="6_spawner"]
+[ext_resource type="PackedScene" path="res://ui/hud/sandbox_debug_panel.tscn" id="7_debug_panel"]
+[ext_resource type="Script" path="res://ui/overlays/ability_targeting_reticle.gd" id="8_ability_reticle"]
+[ext_resource type="PackedScene" path="res://ui/hud/selection_hud.tscn" id="9_selection_hud"]
+[ext_resource type="Script" path="res://scripts/systems/economy_manager.gd" id="10_econ_mgr"]
+[ext_resource type="PackedScene" path="res://scenes/world/biomass_node.tscn" id="11_biomass_node"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/nexus_vat.tscn" id="12_nexus_vat"]
+[ext_resource type="PackedScene" path="res://scenes/units/worker_unit.tscn" id="13_worker_unit"]
+[ext_resource type="PackedScene" path="res://ui/hud/resource_hud.tscn" id="14_resource_hud"]
+[ext_resource type="PackedScene" path="res://scenes/world/silica_vein.tscn" id="15_silica_vein"]
+[ext_resource type="PackedScene" path="res://scenes/world/compute_vent.tscn" id="16_compute_vent"]
+[ext_resource type="Script" path="res://ui/overlays/build_ghost_preview.gd" id="17_build_ghost"]
+[ext_resource type="Script" path="res://scripts/controllers/command_router.gd" id="18_cmd_router"]
+[ext_resource type="PackedScene" path="res://scenes/world/hyper_uplink.tscn" id="19_hyper_uplink"]
+[ext_resource type="PackedScene" path="res://scenes/world/map_landmark.tscn" id="20_map_landmark"]
+[ext_resource type="Script" path="res://scripts/world/arena_nav_region.gd" id="22_arena_nav"]
+[ext_resource type="Script" path="res://scripts/world/terrain_obstacle.gd" id="23_terrain_obstacle"]
+[ext_resource type="Script" path="res://scripts/systems/fog_of_war.gd" id="24_fog_of_war"]
+[ext_resource type="Script" path="res://ui/overlays/fog_overlay.gd" id="25_fog_overlay"]
+[ext_resource type="Script" path="res://scripts/systems/skirmish_ai.gd" id="26_skirmish_ai"]
+[ext_resource type="Script" path="res://scripts/systems/match_manager.gd" id="27_match_manager"]
+[ext_resource type="PackedScene" path="res://ui/hud/minimap.tscn" id="28_minimap"]
+[ext_resource type="PackedScene" path="res://ui/hud/match_end_overlay.tscn" id="29_match_end_overlay"]
+[ext_resource type="Script" path="res://ui/overlays/rally_point_overlay.gd" id="30_rally_overlay"]
+[ext_resource type="Script" path="res://ui/overlays/command_queue_overlay.gd" id="31_cmd_queue_overlay"]
+[ext_resource type="PackedScene" path="res://ui/hud/production_ticker.tscn" id="32_prod_ticker"]
+[ext_resource type="PackedScene" path="res://scenes/world/destructible_barricade.tscn" id="33_barricade"]
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_causeway"]
+vertices = PackedVector2Array(-1300, -950, 1300, -950, 1300, 950, -1300, 950)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-1300, -950, 1300, -950, 1300, 950, -1300, 950)])
+parsed_geometry_type = 1
+agent_radius = 24.0
+
+[node name="SkirmishArena02" type="Node2D"]
+
+[node name="EconomyManager" type="Node" parent="."]
+script = ExtResource("10_econ_mgr")
+starting_biomass = 200
+starting_silica = 50
+enemy_matches_starting_resources = true
+
+[node name="RTSCamera" type="Camera2D" parent="."]
+position = Vector2(-840, 380)
+script = ExtResource("1_rts_camera")
+pan_bounds = Rect2(-1480, -1100, 2960, 2200)
+
+[node name="NavigationRegion2D" type="NavigationRegion2D" parent="."]
+navigation_polygon = SubResource("NavigationPolygon_causeway")
+script = ExtResource("22_arena_nav")
+arena_bounds = Rect2(-1300, -950, 2600, 1900)
+agent_radius = 24.0
+
+[node name="FloorVisual" type="Polygon2D" parent="NavigationRegion2D"]
+color = Color(0.09, 0.125, 0.165, 1)
+polygon = PackedVector2Array(-1300, -950, 1300, -950, 1300, 950, -1300, 950)
+
+[node name="FloorBorder" type="Line2D" parent="NavigationRegion2D"]
+points = PackedVector2Array(-1300, -950, 1300, -950, 1300, 950, -1300, 950)
+closed = true
+width = 4.0
+default_color = Color(0.28, 0.68, 0.78, 0.8)
+
+[node name="TerrainObstacles" type="Node2D" parent="."]
+
+[node name="CausewayWallNorth" type="StaticBody2D" parent="TerrainObstacles"]
+position = Vector2(0, -340)
+script = ExtResource("23_terrain_obstacle")
+obstacle_size = Vector2(440, 74)
+
+[node name="CausewayWallSouth" type="StaticBody2D" parent="TerrainObstacles"]
+position = Vector2(0, 340)
+script = ExtResource("23_terrain_obstacle")
+obstacle_size = Vector2(440, 74)
+
+[node name="FlankDividerNW" type="StaticBody2D" parent="TerrainObstacles"]
+position = Vector2(-460, -520)
+script = ExtResource("23_terrain_obstacle")
+obstacle_size = Vector2(72, 340)
+
+[node name="FlankDividerSE" type="StaticBody2D" parent="TerrainObstacles"]
+position = Vector2(460, 520)
+script = ExtResource("23_terrain_obstacle")
+obstacle_size = Vector2(72, 340)
+
+[node name="PocketWallWest" type="StaticBody2D" parent="TerrainObstacles"]
+position = Vector2(-1040, -180)
+script = ExtResource("23_terrain_obstacle")
+obstacle_size = Vector2(360, 64)
+
+[node name="PocketWallEast" type="StaticBody2D" parent="TerrainObstacles"]
+position = Vector2(1040, 180)
+script = ExtResource("23_terrain_obstacle")
+obstacle_size = Vector2(360, 64)
+
+[node name="BaseRampGuardWest" type="StaticBody2D" parent="TerrainObstacles"]
+position = Vector2(-500, 180)
+script = ExtResource("23_terrain_obstacle")
+obstacle_size = Vector2(64, 210)
+
+[node name="BaseRampGuardEast" type="StaticBody2D" parent="TerrainObstacles"]
+position = Vector2(500, -180)
+script = ExtResource("23_terrain_obstacle")
+obstacle_size = Vector2(64, 210)
+
+[node name="Barricades" type="Node2D" parent="."]
+
+[node name="BarricadeFlankNorth" parent="Barricades" instance=ExtResource("33_barricade")]
+position = Vector2(-160, -760)
+rotation = 1.5708
+barricade_name = "North Flank Debris Gate"
+max_hp = 650.0
+footprint_size = Vector2(160, 46)
+
+[node name="BarricadeFlankSouth" parent="Barricades" instance=ExtResource("33_barricade")]
+position = Vector2(160, 760)
+rotation = 1.5708
+barricade_name = "South Flank Debris Gate"
+max_hp = 650.0
+footprint_size = Vector2(160, 46)
+
+[node name="BarricadePocketNW" parent="Barricades" instance=ExtResource("33_barricade")]
+position = Vector2(-720, -240)
+barricade_name = "NW Vault Seal"
+max_hp = 650.0
+footprint_size = Vector2(145, 44)
+
+[node name="BarricadePocketSE" parent="Barricades" instance=ExtResource("33_barricade")]
+position = Vector2(720, 240)
+barricade_name = "SE Vault Seal"
+max_hp = 650.0
+footprint_size = Vector2(145, 44)
+
+[node name="Landmarks" type="Node2D" parent="."]
+
+[node name="WestCausewayBase" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(-900, 420)
+landmark_name = "West Causeway Basin"
+visual_style = 3
+accent_color = Color(0.22, 0.96, 0.88, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, 102)
+
+[node name="EastCausewayBase" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(900, -420)
+landmark_name = "East Causeway Basin"
+visual_style = 3
+accent_color = Color(1, 0.36, 0.28, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, -102)
+
+[node name="TwinCausewayPlaza" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(0, 0)
+landmark_name = "Twin Causeway Bridge"
+visual_style = 3
+accent_color = Color(0.38, 0.94, 1, 1)
+has_collision = false
+show_on_minimap = false
+label_offset = Vector2(0, 134)
+
+[node name="BridgePylonNW" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(-240, -180)
+landmark_name = "Causeway Pylon NW"
+visual_style = 2
+accent_color = Color(0.32, 0.94, 0.96, 1)
+has_collision = true
+show_on_minimap = true
+collider_radius = 24.0
+show_region_label = false
+
+[node name="BridgePylonNE" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(240, -180)
+landmark_name = "Causeway Pylon NE"
+visual_style = 2
+accent_color = Color(0.32, 0.94, 0.96, 1)
+has_collision = true
+show_on_minimap = true
+collider_radius = 24.0
+show_region_label = false
+
+[node name="BridgePylonSW" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(-240, 180)
+landmark_name = "Causeway Pylon SW"
+visual_style = 2
+accent_color = Color(0.32, 0.94, 0.96, 1)
+has_collision = true
+show_on_minimap = true
+collider_radius = 24.0
+show_region_label = false
+
+[node name="BridgePylonSE" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(240, 180)
+landmark_name = "Causeway Pylon SE"
+visual_style = 2
+accent_color = Color(0.32, 0.94, 0.96, 1)
+has_collision = true
+show_on_minimap = true
+collider_radius = 24.0
+show_region_label = false
+
+[node name="NorthBypassGate" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(-20, -760)
+landmark_name = "North Bypass"
+visual_style = 1
+accent_color = Color(0.32, 0.94, 0.96, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, 42)
+
+[node name="SouthBypassGate" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(20, 760)
+landmark_name = "South Bypass"
+visual_style = 1
+accent_color = Color(0.98, 0.78, 0.28, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, -42)
+
+[node name="Objectives" type="Node2D" parent="."]
+
+[node name="HyperUplink" parent="Objectives" instance=ExtResource("19_hyper_uplink")]
+position = Vector2(0, 0)
+
+[node name="ResourceNodes" type="Node2D" parent="."]
+
+[node name="PlayerBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-1140, 310)
+
+[node name="PlayerBiomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-1155, 420)
+
+[node name="PlayerBiomass3" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-1115, 540)
+
+[node name="PlayerBiomass4" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-1020, 640)
+
+[node name="PlayerSilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-820, 120)
+
+[node name="PlayerSilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-910, 65)
+
+[node name="PlayerVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(-680, 690)
+
+[node name="EnemyBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(1140, -310)
+
+[node name="EnemyBiomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(1155, -420)
+
+[node name="EnemyBiomass3" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(1115, -540)
+
+[node name="EnemyBiomass4" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(1020, -640)
+
+[node name="EnemySilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(820, -120)
+
+[node name="EnemySilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(910, -65)
+
+[node name="EnemyVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(680, -690)
+
+[node name="VaultNWBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-1060, -640)
+
+[node name="VaultNWBiomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-970, -735)
+
+[node name="VaultNWSilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-830, -760)
+
+[node name="VaultNWSilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-710, -730)
+
+[node name="VaultNWVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(-1040, -440)
+
+[node name="VaultSEBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(1060, 640)
+
+[node name="VaultSEBiomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(970, 735)
+
+[node name="VaultSESilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(830, 760)
+
+[node name="VaultSESilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(710, 730)
+
+[node name="VaultSEVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(1040, 440)
+
+[node name="Buildings" type="Node2D" parent="."]
+
+[node name="PlayerNexusVat" parent="Buildings" instance=ExtResource("12_nexus_vat")]
+position = Vector2(-900, 420)
+team = 0
+
+[node name="EnemyNexusVat" parent="Buildings" instance=ExtResource("12_nexus_vat")]
+position = Vector2(900, -420)
+team = 1
+display_name = "Hostile Nexus Vat"
+
+[node name="Units" type="Node2D" parent="."]
+
+[node name="PlayerWorker1" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(-995, 370)
+
+[node name="PlayerWorker2" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(-995, 465)
+
+[node name="PlayerWorker3" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(-940, 525)
+
+[node name="PlayerCloneTrooper1" parent="Units" instance=ExtResource("2_clone_trooper")]
+position = Vector2(-740, 330)
+
+[node name="PlayerCloneTrooper2" parent="Units" instance=ExtResource("2_clone_trooper")]
+position = Vector2(-740, 410)
+
+[node name="PlayerStinger1" parent="Units" instance=ExtResource("5_stinger")]
+position = Vector2(-680, 270)
+
+[node name="EnemyWorker1" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(995, -370)
+team = 1
+
+[node name="EnemyWorker2" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(995, -465)
+team = 1
+
+[node name="EnemyWorker3" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(940, -525)
+team = 1
+
+[node name="EnemyCloneTrooper1" parent="Units" instance=ExtResource("2_clone_trooper")]
+position = Vector2(740, -330)
+team = 1
+
+[node name="EnemyCloneTrooper2" parent="Units" instance=ExtResource("2_clone_trooper")]
+position = Vector2(740, -410)
+team = 1
+
+[node name="EnemyStinger1" parent="Units" instance=ExtResource("5_stinger")]
+position = Vector2(680, -270)
+team = 1
+
+[node name="FogOfWarSystem" type="Node" parent="."]
+script = ExtResource("24_fog_of_war")
+arena_bounds = Rect2(-1300, -950, 2600, 1900)
+cell_size = 64.0
+update_interval = 0.15
+
+[node name="FogOverlay" type="Node2D" parent="."]
+z_index = 35
+script = ExtResource("25_fog_overlay")
+fog_system_path = NodePath("../FogOfWarSystem")
+
+[node name="SkirmishAICommander" type="Node" parent="."]
+script = ExtResource("26_skirmish_ai")
+arena_bounds = Rect2(-1300, -950, 2600, 1900)
+
+[node name="MatchManager" type="Node" parent="."]
+script = ExtResource("27_match_manager")
+match_end_overlay_path = NodePath("../MatchEndOverlay")
+
+[node name="SelectionController" type="Node2D" parent="."]
+z_index = 90
+script = ExtResource("3_sel_ctrl")
+camera_path = NodePath("../RTSCamera")
+buildable_bounds = Rect2(-1300, -950, 2600, 1900)
+
+[node name="CommandRouter" type="Node" parent="SelectionController"]
+script = ExtResource("18_cmd_router")
+buildable_bounds = Rect2(-1300, -950, 2600, 1900)
+
+[node name="SelectionBox" type="Node2D" parent="SelectionController"]
+z_index = 100
+script = ExtResource("4_sel_box")
+
+[node name="AbilityTargetingReticle" type="Node2D" parent="SelectionController"]
+z_index = 95
+script = ExtResource("8_ability_reticle")
+
+[node name="BuildGhostPreview" type="Node2D" parent="SelectionController"]
+z_index = 96
+script = ExtResource("17_build_ghost")
+
+[node name="RallyPointOverlay" type="Node2D" parent="SelectionController"]
+z_index = 85
+script = ExtResource("30_rally_overlay")
+
+[node name="CommandQueueOverlay" type="Node2D" parent="SelectionController"]
+z_index = 84
+script = ExtResource("31_cmd_queue_overlay")
+
+[node name="SandboxSpawner" type="Node2D" parent="."]
+script = ExtResource("6_spawner")
+arena_safe_bounds = Rect2(-1240, -890, 2480, 1780)
+reload_scene_on_reset = true
+units_container_path = NodePath("../Units")
+selection_controller_path = NodePath("../SelectionController")
+player_spawn_origin = Vector2(-740, 380)
+worker_spawn_origin = Vector2(-970, 440)
+harvester_spawn_origin = Vector2(-820, 180)
+engineer_spawn_origin = Vector2(-680, 560)
+enemy_spawn_origin = Vector2(740, -380)
+
+[node name="ResourceHUD" parent="." instance=ExtResource("14_resource_hud")]
+economy_manager_path = NodePath("../EconomyManager")
+
+[node name="DebugHUD" type="CanvasLayer" parent="."]
+
+[node name="SandboxDebugPanel" parent="DebugHUD" instance=ExtResource("7_debug_panel")]
+spawner_path = NodePath("../../SandboxSpawner")
+selection_controller_path = NodePath("../../SelectionController")
+
+[node name="ProductionTicker" parent="DebugHUD" instance=ExtResource("32_prod_ticker")]
+
+[node name="SelectionHUD" parent="DebugHUD" instance=ExtResource("9_selection_hud")]
+selection_controller_path = NodePath("../../SelectionController")
+
+[node name="TacticalMinimap" parent="DebugHUD" instance=ExtResource("28_minimap")]
+arena_bounds = Rect2(-1300, -950, 2600, 1900)
+camera_path = NodePath("../../RTSCamera")
+selection_controller_path = NodePath("../../SelectionController")
+fog_system_path = NodePath("../../FogOfWarSystem")
+
+[node name="MatchEndOverlay" parent="." instance=ExtResource("29_match_end_overlay")]

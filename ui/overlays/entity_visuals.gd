@@ -60,6 +60,8 @@ func _process(delta: float) -> void:
 
 
 func _get_palette() -> Dictionary:
+	if TeamManager != null:
+		return TeamManager.get_team_palette(team)
 	var is_enemy: bool = (team == int(Unit.Team.ENEMY))
 	if is_enemy:
 		return {

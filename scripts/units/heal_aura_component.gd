@@ -48,7 +48,8 @@ func _apply_heal_tick(owner_unit: Unit) -> void:
 		if not (node is Unit) or node == owner_unit or not is_instance_valid(node):
 			continue
 		var ally: Unit = node
-		if ally.is_dead or ally.is_staffed or ally.team != owner_unit.team or ally.data == null:
+		var is_allied: bool = TeamManager.are_allies(int(owner_unit.team), int(ally.team)) if TeamManager != null else (ally.team == owner_unit.team)
+		if ally.is_dead or ally.is_staffed or not is_allied or ally.data == null:
 			continue
 		if ally.current_hp >= ally.get_max_hp():
 			continue

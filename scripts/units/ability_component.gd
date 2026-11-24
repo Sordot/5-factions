@@ -150,7 +150,8 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var candidate: Unit = node
-		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or candidate.team == owner_unit.team:
+		var is_hostile: bool = TeamManager.are_enemies(int(owner_unit.team), int(candidate.team)) if TeamManager != null else (candidate.team != owner_unit.team)
+		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not is_hostile:
 			continue
 		var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
 		if candidate.global_position.distance_to(target_pos) <= ability.aoe_radius + enemy_r:
@@ -164,7 +165,8 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 			if not is_instance_valid(node) or not (node is Building):
 				continue
 			var b: Building = node
-			if b.is_destroyed or b.is_queued_for_deletion() or b.team == owner_unit.team:
+			var is_hostile_b: bool = TeamManager.are_enemies(int(owner_unit.team), int(b.team)) if TeamManager != null else (b.team != owner_unit.team)
+			if b.is_destroyed or b.is_queued_for_deletion() or not is_hostile_b:
 				continue
 			if b.global_position.distance_to(target_pos) <= ability.aoe_radius + b.footprint_radius:
 				b.take_damage(ability.damage_or_value, owner_unit)
@@ -205,7 +207,8 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 			if not is_instance_valid(node) or not (node is Unit):
 				continue
 			var enemy: Unit = node
-			if enemy.is_dead or enemy.is_staffed or enemy.is_queued_for_deletion() or enemy.team == owner_unit.team:
+			var is_hostile_e: bool = TeamManager.are_enemies(int(owner_unit.team), int(enemy.team)) if TeamManager != null else (enemy.team != owner_unit.team)
+			if enemy.is_dead or enemy.is_staffed or enemy.is_queued_for_deletion() or not is_hostile_e:
 				continue
 			var enemy_r: float = enemy.data.collision_radius if enemy.data != null else 16.0
 			if enemy.global_position.distance_to(origin) <= radius + enemy_r:
@@ -222,7 +225,8 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 				if not is_instance_valid(node) or not (node is Building):
 					continue
 				var b: Building = node
-				if b.is_destroyed or b.is_queued_for_deletion() or b.team == owner_unit.team:
+				var is_hostile_b2: bool = TeamManager.are_enemies(int(owner_unit.team), int(b.team)) if TeamManager != null else (b.team != owner_unit.team)
+				if b.is_destroyed or b.is_queued_for_deletion() or not is_hostile_b2:
 					continue
 				if b.global_position.distance_to(origin) <= radius + b.footprint_radius:
 					b.take_damage(ability.damage_or_value, owner_unit)

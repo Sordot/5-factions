@@ -28,6 +28,7 @@ const KEYBIND_DEFS: Array = [
 	{"action": &"cmd_hold", "label": "Hold Position", "default_key": KEY_H, "category": "Unit Commands"},
 	{"action": &"cmd_patrol", "label": "Patrol", "default_key": KEY_P, "category": "Unit Commands"},
 	{"action": &"cmd_select_idle_worker", "label": "Select Idle Worker", "default_key": KEY_QUOTELEFT, "category": "Abilities & Selection"},
+	{"action": &"cmd_select_all_army", "label": "Select All Army", "default_key": KEY_F9, "category": "Abilities & Selection"},
 	{"action": &"ui_cycle_subgroup", "label": "Cycle Subgroup", "default_key": KEY_TAB, "category": "Abilities & Selection"},
 	{"action": &"cmd_ability_q", "label": "Ability / Build Slot Q", "default_key": KEY_Q, "category": "Abilities & Selection"},
 	{"action": &"cmd_ability_w", "label": "Ability / Build Slot W", "default_key": KEY_W, "category": "Abilities & Selection"},
@@ -48,6 +49,9 @@ const KEYBIND_DEFS: Array = [
 	{"action": &"camera_pan_right", "label": "Camera Pan Right", "default_key": KEY_RIGHT, "category": "Camera & Navigation"},
 	{"action": &"camera_toggle_edge_pan", "label": "Toggle Edge-Pan", "default_key": KEY_F12, "category": "Camera & Navigation"},
 	{"action": &"camera_toggle_fullscreen", "label": "Toggle Fullscreen", "default_key": KEY_F11, "category": "System"},
+	{"action": &"ui_toggle_tech_tree", "label": "Toggle Tech Tree", "default_key": KEY_U, "category": "System"},
+	{"action": &"game_speed_down", "label": "Game Speed Slower", "default_key": KEY_BRACKETLEFT, "category": "System"},
+	{"action": &"game_speed_up", "label": "Game Speed Faster", "default_key": KEY_BRACKETRIGHT, "category": "System"},
 	{"action": &"debug_toggle_aggro_ai", "label": "Toggle Aggro AI (Debug)", "default_key": KEY_F10, "category": "System"},
 ]
 
@@ -358,6 +362,10 @@ func refresh_mouse_mode() -> void:
 			if bool(pause_node.call("is_pause_open")):
 				should_confine = false
 	if should_confine and is_inside_tree():
+		var tech_node: Node = get_tree().get_first_node_in_group("tech_tree_overlay")
+		if tech_node != null and is_instance_valid(tech_node) and not tech_node.is_queued_for_deletion():
+			should_confine = false
+	if should_confine and is_inside_tree():
 		var end_node: Node = get_tree().get_first_node_in_group("match_end_overlay")
 		if end_node != null and is_instance_valid(end_node) and end_node.has_method("is_summary_visible"):
 			if bool(end_node.call("is_summary_visible")):
@@ -574,6 +582,10 @@ func format_keycode(keycode: int, compact: bool = false) -> String:
 			return "TAB" if compact else "Tab"
 		KEY_DELETE:
 			return "DEL" if compact else "Del"
+		KEY_BRACKETLEFT:
+			return "["
+		KEY_BRACKETRIGHT:
+			return "]"
 		KEY_NONE:
 			return "" if compact else "Unbound"
 	return OS.get_keycode_string(keycode as Key)

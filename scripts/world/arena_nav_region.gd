@@ -94,6 +94,15 @@ func rebake_navmesh() -> void:
 		elif not b.is_in_group(NAV_BAKE_GROUP):
 			b.add_to_group(NAV_BAKE_GROUP)
 
+	for node: Node in get_tree().get_nodes_in_group("destructible_barricades"):
+		if not is_instance_valid(node):
+			continue
+		if bool(node.get("is_destroyed")) or node.is_queued_for_deletion():
+			if node.is_in_group(NAV_BAKE_GROUP):
+				node.remove_from_group(NAV_BAKE_GROUP)
+		elif not node.is_in_group(NAV_BAKE_GROUP):
+			node.add_to_group(NAV_BAKE_GROUP)
+
 	var nav_poly: NavigationPolygon = NavigationPolygon.new()
 	nav_poly.parsed_geometry_type = NavigationPolygon.PARSED_GEOMETRY_STATIC_COLLIDERS
 	nav_poly.source_geometry_mode = NavigationPolygon.SOURCE_GEOMETRY_GROUPS_EXPLICIT

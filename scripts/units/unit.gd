@@ -17,6 +17,7 @@ enum CommandState {
 	CONSTRUCTING,
 	STAFFING_BUILDING,
 	PATROLLING,
+	REPAIRING,
 }
 
 enum Stance {
@@ -31,6 +32,7 @@ const CMD_EXEC_IMMEDIATE_DONE: int = 2
 const ABILITY_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/ability_component.gd")
 const COMBAT_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/combat_component.gd")
 const HEAL_AURA_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/heal_aura_component.gd")
+const REPAIR_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/repair_component.gd")
 const ENTITY_VISUALS_SCRIPT: GDScript = preload("res://ui/overlays/entity_visuals.gd")
 const COMBAT_VFX_SCRIPT: GDScript = preload("res://ui/overlays/combat_vfx.gd")
 const AUTO_RETARGET_INTERVAL: float = 0.25
@@ -80,6 +82,7 @@ var command_state: CommandState = CommandState.IDLE
 var current_target: Node2D = null
 var ability_component: AbilityComponent = null
 var combat_component: CombatComponent = null
+var repair_component: Node = null
 var command_queue: Array[Dictionary] = []
 var active_command: Dictionary = {}
 var patrol_waypoints: Array[Vector2] = []
@@ -160,6 +163,13 @@ func _ready() -> void:
 		heal_aura.heal_per_second = data.heal_aura_rate
 		heal_aura.aura_radius = data.heal_aura_radius
 		add_child(heal_aura)
+
+	if data.can_gather or data.can_staff_compute or data.unit_type_id == &"worker" or data.unit_type_id == &"engineer":
+		repair_component = get_node_or_null("RepairComponent")
+		if repair_component == null:
+			repair_component = REPAIR_COMPONENT_SCRIPT.new()
+			repair_component.name = "RepairComponent"
+			add_child(repair_component)
 
 	ability_component = ABILITY_COMPONENT_SCRIPT.new()
 	ability_component.name = "AbilityComponent"
@@ -253,12 +263,13 @@ func register_kill(_victim: Node = null) -> void:
 			break
 	if target_rank > veterancy_rank:
 		veterancy_rank = target_rank
-		if get_parent() != null and (team == Team.PLAYER or visible):
+		var is_local_owned: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Team.PLAYER)
+		if get_parent() != null and (is_local_owned or visible):
 			var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
 			fx.z_index = 56
 			get_parent().add_child(fx)
 			fx.call("setup_rank_up_pulse", global_position, veterancy_rank)
-		if team == Team.PLAYER and AudioManager != null:
+		if is_local_owned and AudioManager != null:
 			AudioManager.play_sfx(&"veterancy_rank_up", -3.0, 0.03)
 		queue_redraw()
 	status_changed.emit(self)
@@ -349,6 +360,34 @@ func can_staff_compute() -> bool:
 	return not is_dead and not is_staffed and data != null and data.can_staff_compute and staff_component != null
 
 
+func can_repair() -> bool:
+	return not is_dead and not is_staffed and repair_component != null and bool(repair_component.call("can_unit_repair", self))
+
+
+func can_repair_target(target: Node2D) -> bool:
+	return can_repair() and bool(repair_component.call("is_eligible_target", self, target))
+
+
+func command_repair(target: Node2D, append_to_queue: bool = false) -> bool:
+	if target == null or not is_instance_valid(target):
+		return false
+	return issue_command({"type": &"repair", "target": target, "pos": target.global_position}, append_to_queue)
+
+
+func _start_repair(target: Node2D) -> bool:
+	if is_dead or is_staffed or not _can_move() or not can_repair_target(target):
+		return false
+	_cancel_active_tasks(false)
+	if not bool(repair_component.call("start_repair", self, target)):
+		return false
+	command_state = CommandState.REPAIRING
+	current_target = null
+	_reset_progress_tracker()
+	_last_nav_target = Vector2.INF
+	status_changed.emit(self)
+	return true
+
+
 func is_carrying_cargo() -> bool:
 	return gather_component != null and gather_component.has_cargo()
 
@@ -383,6 +422,8 @@ func is_idle_worker() -> bool:
 	if gather_component != null and gather_component.is_active():
 		return false
 	if staff_component != null and staff_component.is_active():
+		return false
+	if repair_component != null and bool(repair_component.call("is_active")):
 		return false
 	if ability_component != null and ability_component.has_pending_cast():
 		return false
@@ -476,6 +517,10 @@ func _execute_command(cmd: Dictionary) -> int:
 			result = _start_cast_ability(ab, cmd.get("pos", global_position) as Vector2, t_unit)
 		&"patrol":
 			result = CMD_EXEC_ACTIVE if _start_patrol(cmd.get("pos", global_position) as Vector2) else CMD_EXEC_FAILED
+		&"repair":
+			var rep_t: Variant = cmd.get("target", null)
+			if rep_t != null and is_instance_valid(rep_t) and rep_t is Node2D and not (rep_t as Node).is_queued_for_deletion():
+				result = CMD_EXEC_ACTIVE if _start_repair(rep_t as Node2D) else CMD_EXEC_FAILED
 	if result == CMD_EXEC_ACTIVE:
 		active_command = cmd.duplicate()
 		command_queue_changed.emit(self)
@@ -509,6 +554,11 @@ func get_active_command_destination() -> Variant:
 		CommandState.PATROLLING:
 			if not patrol_waypoints.is_empty():
 				return patrol_waypoints[clampi(patrol_index, 0, patrol_waypoints.size() - 1)]
+		CommandState.REPAIRING:
+			if repair_component != null:
+				var rep_node: Variant = repair_component.get("target_entity")
+				if rep_node is Node2D and is_instance_valid(rep_node):
+					return (rep_node as Node2D).global_position
 	return null
 
 
@@ -965,7 +1015,8 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 	if is_node_ready():
 		body_visual.modulate = Color(1.95, 2.25, 2.35, 1.0)
 	_update_health_bar()
-	if team == Team.PLAYER and is_inside_tree():
+	var is_local_owned: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Team.PLAYER)
+	if is_local_owned and is_inside_tree():
 		var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
 		if mm != null:
 			var unit_label: String = data.display_name if data != null else "Unit"
@@ -981,7 +1032,8 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 	if current_hp <= 0.0:
 		if attacker != null and is_instance_valid(attacker) and attacker is Unit:
 			var killer: Unit = attacker as Unit
-			if not killer.is_dead and killer.team != team:
+			var is_enemy_killer: bool = TeamManager.are_enemies(int(killer.team), int(team)) if TeamManager != null else (killer.team != team)
+			if not killer.is_dead and is_enemy_killer:
 				killer.register_kill(self)
 		_die()
 
@@ -1237,6 +1289,8 @@ func _physics_process(delta: float) -> void:
 			_process_staffing_building(delta)
 		CommandState.PATROLLING:
 			_process_patrolling(delta)
+		CommandState.REPAIRING:
+			_process_repairing(delta)
 
 	_update_worker_collision_passing()
 	_apply_anti_stuck_steering(delta)
@@ -1496,6 +1550,13 @@ func _process_staffing_building(delta: float) -> void:
 	staff_component.tick(self, delta)
 
 
+func _process_repairing(delta: float) -> void:
+	if repair_component == null or not bool(repair_component.call("is_active")):
+		_advance_command_queue()
+		return
+	repair_component.call("tick", self, delta)
+
+
 func _process_patrolling(delta: float) -> void:
 	if patrol_waypoints.size() < 2:
 		patrol_waypoints.clear()
@@ -1560,6 +1621,8 @@ func _cancel_active_tasks(keep_gather: bool) -> void:
 		gather_component.cancel()
 	if staff_component != null:
 		staff_component.cancel()
+	if repair_component != null:
+		repair_component.call("cancel")
 	patrol_waypoints.clear()
 	patrol_index = 0
 	if _construction_target != null:
@@ -1786,6 +1849,9 @@ func _apply_stationary_separation(delta: float) -> void:
 	if command_state == CommandState.GATHERING and gather_component != null and gather_component.is_harvesting_in_place():
 		velocity = Vector2.ZERO
 		return
+	if command_state == CommandState.REPAIRING and repair_component != null and bool(repair_component.get("is_repairing_in_place")):
+		velocity = Vector2.ZERO
+		return
 	if command_state == CommandState.CONSTRUCTING and _construction_target != null and is_instance_valid(_construction_target):
 		var unit_r: float = data.collision_radius if data != null else 13.0
 		if global_position.distance_to(_construction_target.global_position) <= _construction_target.footprint_radius + unit_r + 28.0:
@@ -1818,15 +1884,18 @@ func _update_worker_collision_passing() -> void:
 		command_state == CommandState.GATHERING
 		or command_state == CommandState.CONSTRUCTING
 		or command_state == CommandState.STAFFING_BUILDING
+		or command_state == CommandState.REPAIRING
 		or (command_state == CommandState.MOVING and (
 			active_type == &"gather"
 			or active_type == &"return_cargo"
 			or active_type == &"build"
 			or active_type == &"staff"
+			or active_type == &"repair"
 			or next_type == &"gather"
 			or next_type == &"return_cargo"
 			or next_type == &"build"
 			or next_type == &"staff"
+			or next_type == &"repair"
 		))
 	)
 	var hostile_bit: int = 4 if team == Team.PLAYER else 2
@@ -2093,25 +2162,26 @@ func _apply_team_visuals() -> void:
 	if _entity_visuals != null:
 		_entity_visuals.team = int(team)
 		_entity_visuals.queue_redraw()
-	if team != Team.ENEMY:
+	if int(team) == 0:
 		return
 	var type_id: StringName = get_unit_type_id()
 	if type_id == &"target_dummy":
 		return
+	var tc: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else Color(0.98, 0.34, 0.26, 1.0)
 	if _entity_visuals == null and body_visual is Polygon2D:
-		(body_visual as Polygon2D).color = Color(0.84, 0.28, 0.26, 1.0)
+		(body_visual as Polygon2D).color = tc.darkened(0.14)
 	var core_accent: Polygon2D = body_visual.get_node_or_null("CoreAccent") as Polygon2D if body_visual != null else null
 	if core_accent != null:
-		core_accent.color = Color(1.0, 0.68, 0.24, 1.0)
+		core_accent.color = tc.lightened(0.18)
 	if health_bar_fill != null:
-		health_bar_fill.color = Color(0.98, 0.34, 0.26, 1.0)
+		health_bar_fill.color = tc
 	if selection_ring != null:
 		var ring_fill: Polygon2D = selection_ring.get_node_or_null("Fill") as Polygon2D
 		if ring_fill != null:
-			ring_fill.color = Color(1.0, 0.30, 0.24, 0.16)
+			ring_fill.color = Color(tc.r, tc.g, tc.b, 0.16)
 		var ring_outline: Line2D = selection_ring.get_node_or_null("Outline") as Line2D
 		if ring_outline != null:
-			ring_outline.default_color = Color(1.0, 0.36, 0.26, 0.95)
+			ring_outline.default_color = Color(tc.r, tc.g, tc.b, 0.95)
 
 
 func _on_gather_cargo_changed(resource_type: StringName, amount: int) -> void:
@@ -2251,6 +2321,7 @@ func get_inspection_data() -> Dictionary:
 			else:
 				stats.append({"label": "Kills", "value": "%d" % kill_count})
 
+	var is_local_controlled: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (not is_enemy)
 	return {
 		"title": data.display_name if data != null else name,
 		"subtitle": subtitle,
@@ -2266,8 +2337,8 @@ func get_inspection_data() -> Dictionary:
 		"primary_bar_max": primary_max,
 		"primary_bar_color": accent,
 		"stats": stats,
-		"is_commandable": not is_enemy,
-		"readonly_label": "HOSTILE UNIT  —  READ-ONLY TELEMETRY",
+		"is_commandable": is_local_controlled,
+		"readonly_label": "SPECTATOR TELEMETRY" if (TeamManager != null and TeamManager.is_spectator_mode()) else "HOSTILE UNIT  —  READ-ONLY TELEMETRY",
 	}
 
 
@@ -2301,6 +2372,8 @@ func _get_command_state_label() -> String:
 			return "Entering Node"
 		CommandState.PATROLLING:
 			return "Patrolling"
+		CommandState.REPAIRING:
+			return "Repairing"
 	return "Active"
 
 

@@ -1,9 +1,16 @@
 class_name ResourceHUD
 extends CanvasLayer
 
+const TECH_TREE_SCENE_PATH: String = "res://scenes/ui/tech_tree_overlay.tscn"
+
 @export var economy_manager_path: NodePath
 @export var tracked_team: Unit.Team = Unit.Team.PLAYER
 
+@onready var top_left_spectator_anchor: Control = %TopLeftSpectatorAnchor
+@onready var spectator_panel: PanelContainer = %SpectatorPanel
+@onready var spec_team0_label: Label = %SpecTeam0Label
+@onready var spec_team1_label: Label = %SpecTeam1Label
+@onready var btn_spectator_fog: Button = %BtnSpectatorFog
 @onready var biomass_value_label: Label = %BiomassValueLabel
 @onready var biomass_rate_label: Label = %BiomassRateLabel
 @onready var silica_value_label: Label = %SilicaValueLabel
@@ -14,6 +21,12 @@ extends CanvasLayer
 @onready var match_timer_label: Label = %MatchTimerLabel
 @onready var btn_audio_mute: Button = %BtnAudioMute
 @onready var btn_idle_workers: Button = %BtnIdleWorkers
+@onready var btn_select_army: Button = %BtnSelectArmy
+@onready var btn_tech_tree: Button = %BtnTechTree
+@onready var btn_speed_05: Button = %BtnSpeed05
+@onready var btn_speed_10: Button = %BtnSpeed10
+@onready var btn_speed_15: Button = %BtnSpeed15
+@onready var btn_speed_20: Button = %BtnSpeed20
 @onready var aggro_paused_badge: Label = %AggroPausedBadge
 @onready var uplink_bonus_label: Label = %UplinkBonusLabel
 @onready var resource_alert_label: Label = %ResourceAlertLabel
@@ -21,6 +34,7 @@ extends CanvasLayer
 var _economy_manager: EconomyManager = null
 var _match_manager: MatchManager = null
 var _selection_controller: SelectionController = null
+var _tech_tree_instance: CanvasLayer = null
 var _flash_timers: Dictionary = {}
 var _alert_timer: float = 0.0
 var _hud_poll_timer: float = 0.0
@@ -46,14 +60,129 @@ func _ready() -> void:
 	if btn_idle_workers != null:
 		btn_idle_workers.add_to_group("blocks_edge_pan")
 		btn_idle_workers.pressed.connect(_on_idle_workers_pressed)
+	if btn_select_army != null:
+		btn_select_army.add_to_group("blocks_edge_pan")
+		btn_select_army.pressed.connect(_on_select_army_pressed)
+	if btn_tech_tree != null:
+		btn_tech_tree.add_to_group("blocks_edge_pan")
+		btn_tech_tree.pressed.connect(toggle_tech_tree)
+	if spectator_panel != null:
+		spectator_panel.add_to_group("blocks_edge_pan")
+	if btn_spectator_fog != null:
+		btn_spectator_fog.add_to_group("blocks_edge_pan")
+		btn_spectator_fog.pressed.connect(_on_spectator_fog_pressed)
+
+	_wire_speed_button(btn_speed_05, 0.5)
+	_wire_speed_button(btn_speed_10, 1.0)
+	_wire_speed_button(btn_speed_15, 1.5)
+	_wire_speed_button(btn_speed_20, 2.0)
+
 	_connect_economy_manager()
 	_connect_match_manager()
 	call_deferred("_connect_camera_toasts")
 	call_deferred("_connect_selection_controller")
+	_apply_spectator_layout()
 	_refresh_from_economy()
 	_refresh_aggro_badge()
 	_refresh_audio_button()
+	_refresh_speed_buttons()
 	_on_idle_workers_updated(0)
+	_on_army_count_updated(0)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_echo():
+		return
+	if event.is_action_pressed("ui_toggle_tech_tree"):
+		toggle_tech_tree()
+		get_viewport().set_input_as_handled()
+
+
+func _wire_speed_button(btn: Button, speed_val: float) -> void:
+	if btn == null:
+		return
+	btn.add_to_group("blocks_edge_pan")
+	btn.pressed.connect(func() -> void:
+		if AudioManager != null:
+			AudioManager.play_ui_click()
+		if _match_manager == null:
+			_connect_match_manager()
+		if _match_manager != null and _match_manager.has_method("set_game_speed"):
+			_match_manager.call("set_game_speed", speed_val)
+		_refresh_speed_buttons()
+	)
+
+
+func _refresh_speed_buttons() -> void:
+	var spd: float = float(_match_manager.get("current_game_speed")) if _match_manager != null else Engine.time_scale
+	var pairs: Array = [
+		{"btn": btn_speed_05, "val": 0.5},
+		{"btn": btn_speed_10, "val": 1.0},
+		{"btn": btn_speed_15, "val": 1.5},
+		{"btn": btn_speed_20, "val": 2.0},
+	]
+	for item: Dictionary in pairs:
+		var b: Button = item["btn"] as Button
+		if b == null:
+			continue
+		var active: bool = absf(spd - float(item["val"])) < 0.05
+		b.modulate = Color(0.32, 1.0, 0.90, 1.0) if active else Color(0.68, 0.78, 0.84, 0.78)
+
+
+func toggle_tech_tree() -> void:
+	if _tech_tree_instance != null and is_instance_valid(_tech_tree_instance):
+		if _tech_tree_instance.has_method("close_overlay"):
+			_tech_tree_instance.call("close_overlay")
+		else:
+			_tech_tree_instance.queue_free()
+		_tech_tree_instance = null
+		return
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	var tech_scene: PackedScene = load(TECH_TREE_SCENE_PATH) as PackedScene
+	if tech_scene == null:
+		return
+	_tech_tree_instance = tech_scene.instantiate() as CanvasLayer
+	if _tech_tree_instance != null:
+		if _tech_tree_instance.has_signal("closed"):
+			_tech_tree_instance.connect("closed", func() -> void:
+				_tech_tree_instance = null
+			)
+		get_tree().root.add_child(_tech_tree_instance)
+
+
+func _apply_spectator_layout() -> void:
+	var is_spec: bool = TeamManager != null and TeamManager.is_spectator_mode()
+	var res_panel: Control = get_node_or_null("RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel") as Control
+	if res_panel != null:
+		res_panel.visible = not is_spec
+	if top_left_spectator_anchor != null:
+		top_left_spectator_anchor.visible = is_spec
+	if btn_idle_workers != null:
+		btn_idle_workers.visible = not is_spec
+	if btn_select_army != null:
+		btn_select_army.visible = not is_spec
+	_refresh_spectator_fog_button()
+
+
+func _on_spectator_fog_pressed() -> void:
+	if not is_inside_tree():
+		return
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	var fog: FogOfWarSystem = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	if fog != null:
+		fog.set_fog_enabled(not fog.fog_enabled)
+	_refresh_spectator_fog_button()
+
+
+func _refresh_spectator_fog_button() -> void:
+	if btn_spectator_fog == null or not is_inside_tree():
+		return
+	var fog: FogOfWarSystem = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	var is_on: bool = fog != null and fog.fog_enabled
+	btn_spectator_fog.text = "Fog: ON" if is_on else "Fog: OFF"
+	btn_spectator_fog.modulate = Color(1.0, 0.78, 0.34, 1.0) if is_on else Color(0.32, 1.0, 0.88, 1.0)
 
 
 func _connect_camera_toasts() -> void:
@@ -66,8 +195,18 @@ func _connect_camera_toasts() -> void:
 
 func _on_keybind_changed(_action_name: StringName) -> void:
 	var count: int = _selection_controller.idle_worker_count if _selection_controller != null else 0
+	var army_c: int = _selection_controller.army_unit_count if _selection_controller != null else 0
 	_on_idle_workers_updated(count)
+	_on_army_count_updated(army_c)
+	_refresh_tech_button_label()
 	_refresh_aggro_badge()
+
+
+func _refresh_tech_button_label() -> void:
+	if btn_tech_tree == null:
+		return
+	var hk: String = SettingsManager.get_action_display_label(&"ui_toggle_tech_tree", true) if SettingsManager != null else "U"
+	btn_tech_tree.text = ("Tech [%s]" % hk) if not hk.is_empty() else "Tech"
 
 
 func _on_hud_toast(message: String) -> void:
@@ -134,6 +273,33 @@ func _refresh_income_rates_and_timer() -> void:
 	if compute_rate_label != null:
 		compute_rate_label.text = ("(+%d/m)" % c_rate) if c_rate > 0 else ""
 
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		_refresh_spectator_telemetry()
+		_refresh_spectator_fog_button()
+
+
+func _refresh_spectator_telemetry() -> void:
+	if _economy_manager == null:
+		return
+	if spec_team0_label != null:
+		var r0: Dictionary = _economy_manager.get_resources(0)
+		spec_team0_label.text = "AI-01: %dB %dS %dC | %d/%d BW" % [
+			int(r0.get(EconomyManager.RESOURCE_BIOMASS, 0)),
+			int(r0.get(EconomyManager.RESOURCE_SILICA, 0)),
+			int(r0.get(EconomyManager.RESOURCE_COMPUTE, 0)),
+			_economy_manager.get_bandwidth_used(0),
+			_economy_manager.get_bandwidth_cap(0),
+		]
+	if spec_team1_label != null:
+		var r1: Dictionary = _economy_manager.get_resources(1)
+		spec_team1_label.text = "AI-02: %dB %dS %dC | %d/%d BW" % [
+			int(r1.get(EconomyManager.RESOURCE_BIOMASS, 0)),
+			int(r1.get(EconomyManager.RESOURCE_SILICA, 0)),
+			int(r1.get(EconomyManager.RESOURCE_COMPUTE, 0)),
+			_economy_manager.get_bandwidth_used(1),
+			_economy_manager.get_bandwidth_cap(1),
+		]
+
 
 func _on_audio_mute_changed(_muted: bool) -> void:
 	_refresh_audio_button()
@@ -182,7 +348,27 @@ func _connect_selection_controller() -> void:
 		return
 	if not _selection_controller.idle_workers_updated.is_connected(_on_idle_workers_updated):
 		_selection_controller.idle_workers_updated.connect(_on_idle_workers_updated)
+	if not _selection_controller.army_count_updated.is_connected(_on_army_count_updated):
+		_selection_controller.army_count_updated.connect(_on_army_count_updated)
 	_on_idle_workers_updated(_selection_controller.idle_worker_count)
+	_on_army_count_updated(_selection_controller.army_unit_count)
+	_refresh_tech_button_label()
+
+
+func _on_select_army_pressed() -> void:
+	if _selection_controller == null:
+		_connect_selection_controller()
+	if _selection_controller != null:
+		_selection_controller.select_all_army(true)
+
+
+func _on_army_count_updated(count: int) -> void:
+	if btn_select_army == null:
+		return
+	var hk: String = SettingsManager.get_action_display_label(&"cmd_select_all_army", true) if SettingsManager != null else "F9"
+	btn_select_army.text = ("Army: %d [%s]" % [count, hk]) if not hk.is_empty() else ("Army: %d" % count)
+	btn_select_army.disabled = count <= 0
+	btn_select_army.modulate = Color(0.32, 0.98, 0.92, 1.0) if count > 0 else Color(0.56, 0.64, 0.72, 0.72)
 
 
 func _on_idle_workers_pressed() -> void:
@@ -213,6 +399,12 @@ func _connect_match_manager() -> void:
 			_match_manager.aggro_ai_toggled.connect(_on_aggro_ai_toggled)
 		if not _match_manager.tactical_alert_recorded.is_connected(_on_tactical_alert_recorded):
 			_match_manager.tactical_alert_recorded.connect(_on_tactical_alert_recorded)
+		if _match_manager.has_signal("game_speed_changed") and not _match_manager.is_connected("game_speed_changed", _on_game_speed_changed):
+			_match_manager.connect("game_speed_changed", _on_game_speed_changed)
+
+
+func _on_game_speed_changed(_speed_scale: float) -> void:
+	_refresh_speed_buttons()
 
 
 func _on_tactical_alert_recorded(_world_pos: Vector2, message: String) -> void:

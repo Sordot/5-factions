@@ -8,6 +8,16 @@ const HEALTH_BAR_WIDTH: float = 76.0
 const CONSTRUCT_BAR_WIDTH: float = 68.0
 const DEPOSIT_PULSE_DURATION: float = 0.25
 const HIT_FLASH_DURATION: float = 0.08
+const SALVAGE_DURATION: float = 4.0
+const DEFAULT_BUILDING_COSTS: Dictionary = {
+	&"nexus_vat": {"biomass": 400, "silica": 100, "compute": 0},
+	&"silica_condenser": {"biomass": 75, "silica": 0, "compute": 0},
+	&"wetware_mainframe": {"biomass": 100, "silica": 50, "compute": 0},
+	&"synapse_pylon": {"biomass": 100, "silica": 0, "compute": 0},
+	&"cloning_vat": {"biomass": 150, "silica": 50, "compute": 0},
+	&"calibration_foundry": {"biomass": 125, "silica": 75, "compute": 0},
+	&"synthetics_fabricator": {"biomass": 150, "silica": 100, "compute": 50},
+}
 
 signal selection_changed(building: Building, selected: bool)
 signal health_changed(building: Building, current_hp: float, max_hp: float)
@@ -65,6 +75,9 @@ var _has_rally: bool = false
 var _rally_position: Vector2 = Vector2.ZERO
 var _rally_target: Node2D = null
 var rally_target_unit: Unit = null
+var construction_costs: Dictionary = {}
+var is_salvaging: bool = false
+var salvage_elapsed: float = 0.0
 var _construction_elapsed: float = 0.0
 var _deposit_pulse_timer: float = 0.0
 var _hit_flash_timer: float = 0.0
@@ -78,6 +91,8 @@ func _ready() -> void:
 	add_to_group("selectable_buildings")
 	if building_type_id == &"nexus_vat":
 		is_core_hub = true
+	if construction_costs.is_empty():
+		construction_costs = _get_default_costs_for_type(building_type_id)
 	if is_constructed:
 		current_hp = max_hp
 		construction_progress = 1.0
@@ -158,10 +173,18 @@ func _process(delta: float) -> void:
 	if not is_constructed:
 		return
 
+	if is_salvaging:
+		salvage_elapsed += delta
+		queue_redraw()
+		status_changed.emit(self)
+		if salvage_elapsed >= SALVAGE_DURATION:
+			_complete_salvage()
+			return
+
 	if max_staff_slots > 0 and not assigned_engineers.is_empty():
 		_tick_compute_generation(delta)
 
-	if production_component != null:
+	if production_component != null and not is_salvaging:
 		production_component.tick(self, delta)
 
 	if is_selected and has_rally() and not _has_rally_overlay():
@@ -169,6 +192,16 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
+	if is_salvaging and is_constructed and not is_destroyed:
+		var prog: float = clampf(salvage_elapsed / SALVAGE_DURATION, 0.0, 1.0)
+		var bar_w: float = 72.0
+		var bar_h: float = 6.0
+		var bar_pos: Vector2 = Vector2(-bar_w * 0.5, footprint_radius + 10.0)
+		var pulse: float = 0.72 + 0.28 * sin(salvage_elapsed * 9.0)
+		draw_rect(Rect2(bar_pos - Vector2(1.0, 1.0), Vector2(bar_w + 2.0, bar_h + 2.0)), Color(0.04, 0.06, 0.09, 0.92), true)
+		draw_rect(Rect2(bar_pos, Vector2(bar_w * prog, bar_h)), Color(1.0, 0.70, 0.20, pulse), true)
+		draw_arc(Vector2.ZERO, footprint_radius + 6.0, -PI * 0.5, -PI * 0.5 + TAU * prog, 32, Color(1.0, 0.72, 0.22, pulse), 2.4, true)
+
 	if not is_selected or not has_rally() or _has_rally_overlay():
 		return
 	var target_world: Vector2 = get_rally_world_position()
@@ -192,6 +225,7 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 	if data != null:
 		building_type_id = data.building_id
 		display_name = data.display_name
+		construction_costs = data.get_cost_dict()
 		max_hp = data.max_hp
 		vision_range = data.vision_range
 		build_time = data.build_time
@@ -575,6 +609,132 @@ func pulse_deposit_feedback() -> void:
 	_deposit_pulse_timer = DEPOSIT_PULSE_DURATION
 
 
+func repair(amount: float) -> void:
+	if is_destroyed or not is_constructed or amount <= 0.0:
+		return
+	var next_hp: float = minf(max_hp, current_hp + amount)
+	if is_equal_approx(next_hp, current_hp):
+		return
+	current_hp = next_hp
+	_update_health_bar()
+	health_changed.emit(self, current_hp, max_hp)
+	status_changed.emit(self)
+
+
+func get_refund_dict(ratio: float) -> Dictionary:
+	var src: Dictionary = construction_costs if not construction_costs.is_empty() else _get_default_costs_for_type(building_type_id)
+	var out: Dictionary = {}
+	for key: Variant in src.keys():
+		var amt: int = int(floor(float(int(src[key])) * ratio + 0.5))
+		if amt > 0:
+			out[key] = amt
+	return out
+
+
+func get_refund_label(ratio: float) -> String:
+	var refund: Dictionary = get_refund_dict(ratio)
+	var parts: PackedStringArray = PackedStringArray()
+	var b: int = int(refund.get(EconomyManager.RESOURCE_BIOMASS, 0))
+	var s: int = int(refund.get(EconomyManager.RESOURCE_SILICA, 0))
+	var c: int = int(refund.get(EconomyManager.RESOURCE_COMPUTE, 0))
+	if b > 0:
+		parts.append("%dB" % b)
+	if s > 0:
+		parts.append("%dS" % s)
+	if c > 0:
+		parts.append("%dC" % c)
+	return " / ".join(parts) if not parts.is_empty() else "0"
+
+
+func cancel_construction() -> bool:
+	if is_destroyed or is_constructed:
+		return false
+	var econ: EconomyManager = _get_economy_manager()
+	if econ != null:
+		var refund: Dictionary = get_refund_dict(0.75)
+		for key: Variant in refund.keys():
+			econ.add_resource(int(team), key as StringName, int(refund[key]), false)
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	_destroy()
+	return true
+
+
+func can_salvage() -> bool:
+	if is_destroyed or not is_constructed:
+		return false
+	if is_core_hub or building_type_id == &"nexus_vat":
+		# Prevent salvaging the team's sole remaining Nexus Vat
+		var core_count: int = 0
+		if is_inside_tree():
+			for node: Node in get_tree().get_nodes_in_group("buildings"):
+				if node is Building and is_instance_valid(node):
+					var b: Building = node
+					if not b.is_destroyed and not b.is_queued_for_deletion() and b.team == team and (b.is_core_hub or b.building_type_id == &"nexus_vat"):
+						core_count += 1
+		if core_count <= 1:
+			return false
+	return true
+
+
+func toggle_salvage() -> bool:
+	if is_salvaging:
+		cancel_salvage()
+		return false
+	return start_salvage()
+
+
+func start_salvage() -> bool:
+	if not can_salvage():
+		if AudioManager != null:
+			AudioManager.play_error()
+		return false
+	is_salvaging = true
+	salvage_elapsed = 0.0
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	queue_redraw()
+	status_changed.emit(self)
+	return true
+
+
+func cancel_salvage() -> void:
+	if not is_salvaging:
+		return
+	is_salvaging = false
+	salvage_elapsed = 0.0
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	queue_redraw()
+	status_changed.emit(self)
+
+
+func _complete_salvage() -> void:
+	if is_destroyed:
+		return
+	is_salvaging = false
+	var econ: EconomyManager = _get_economy_manager()
+	if econ != null:
+		var refund: Dictionary = get_refund_dict(0.50)
+		for key: Variant in refund.keys():
+			econ.add_resource(int(team), key as StringName, int(refund[key]), false)
+	_destroy()
+
+
+func _get_default_costs_for_type(type_id: StringName) -> Dictionary:
+	if DEFAULT_BUILDING_COSTS.has(type_id):
+		var raw: Dictionary = DEFAULT_BUILDING_COSTS[type_id]
+		var out: Dictionary = {}
+		if int(raw.get("biomass", 0)) > 0:
+			out[EconomyManager.RESOURCE_BIOMASS] = int(raw["biomass"])
+		if int(raw.get("silica", 0)) > 0:
+			out[EconomyManager.RESOURCE_SILICA] = int(raw["silica"])
+		if int(raw.get("compute", 0)) > 0:
+			out[EconomyManager.RESOURCE_COMPUTE] = int(raw["compute"])
+		return out
+	return {}
+
+
 func take_damage(amount: float, attacker: Node = null) -> void:
 	if is_destroyed or amount <= 0.0:
 		return
@@ -583,7 +743,8 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 	if is_node_ready() and body_visual != null:
 		body_visual.modulate = Color(1.9, 2.2, 2.3, 1.0)
 	_update_health_bar()
-	if team == Unit.Team.PLAYER and is_inside_tree():
+	var is_local_owned: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Unit.Team.PLAYER)
+	if is_local_owned and is_inside_tree():
 		var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
 		if mm != null:
 			mm.push_tactical_alert(global_position, &"under_attack", "%s Under Attack!" % display_name)
@@ -592,7 +753,8 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 	if current_hp <= 0.0:
 		if attacker != null and is_instance_valid(attacker) and attacker is Unit:
 			var killer: Unit = attacker as Unit
-			if not killer.is_dead and killer.team != team:
+			var is_enemy_killer: bool = TeamManager.are_enemies(int(killer.team), int(team)) if TeamManager != null else (killer.team != team)
+			if not killer.is_dead and is_enemy_killer:
 				killer.register_kill(self)
 		_destroy()
 
@@ -617,6 +779,8 @@ func get_inspection_data() -> Dictionary:
 	var affil: StringName = &"player" if team == Unit.Team.PLAYER else &"enemy"
 	var stats: Array[Dictionary] = []
 
+	var is_local_owned: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Unit.Team.PLAYER)
+
 	if not is_constructed:
 		var pct: int = int(round(construction_progress * 100.0))
 		stats.append({"label": "Construction", "value": "%d%% Complete" % pct})
@@ -638,7 +802,7 @@ func get_inspection_data() -> Dictionary:
 			"primary_bar_max": 100.0,
 			"primary_bar_color": Color(0.32, 0.96, 1.0, 1.0),
 			"stats": stats,
-			"is_commandable": false,
+			"is_commandable": is_local_owned,
 			"readonly_label": "CONSTRUCTION IN PROGRESS",
 		}
 
@@ -648,8 +812,8 @@ func get_inspection_data() -> Dictionary:
 	var primary_val: float = 0.0
 	var primary_max: float = 1.0
 	var primary_col: Color = accent
-	var subtitle: String = "FRIENDLY STRUCTURE" if team == Unit.Team.PLAYER else "HOSTILE STRUCTURE"
-	var has_commands: bool = (team == Unit.Team.PLAYER) and (max_staff_slots > 0 or not trainable_unit_data.is_empty() or not researchable_upgrades.is_empty())
+	var subtitle: String = "FRIENDLY STRUCTURE" if is_local_owned else "HOSTILE STRUCTURE"
+	var has_commands: bool = is_local_owned
 
 	if max_staff_slots > 0:
 		subtitle = "COMPUTE FACILITY"
@@ -709,6 +873,14 @@ func get_inspection_data() -> Dictionary:
 		stats.append({"label": "Role", "value": "Population Relay"})
 	else:
 		stats.append({"label": "Status", "value": "Operational"})
+
+	if is_salvaging:
+		var rem_s: float = maxf(0.0, SALVAGE_DURATION - salvage_elapsed)
+		show_primary = true
+		primary_label = "SALVAGING (50%% REFUND) — %.1fs" % rem_s
+		primary_val = salvage_elapsed
+		primary_max = SALVAGE_DURATION
+		primary_col = Color(1.0, 0.72, 0.22, 1.0)
 
 	return {
 		"title": display_name,
@@ -865,33 +1037,38 @@ func _update_construction_visuals() -> void:
 
 
 func _apply_team_visuals() -> void:
-	if team != Unit.Team.ENEMY:
+	if _entity_visuals != null:
+		_entity_visuals.team = int(team)
+		_entity_visuals.queue_redraw()
+	if int(team) == 0:
 		return
+	var tc: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else Color(0.98, 0.34, 0.26, 1.0)
 	if core_glow != null:
-		core_glow.color = Color(1.0, 0.30, 0.24, 1.0)
+		core_glow.color = tc
 		_base_core_color = core_glow.color
 	if body_visual != null:
 		var outer_hull: Polygon2D = body_visual.get_node_or_null("OuterHull") as Polygon2D
 		if outer_hull != null:
-			outer_hull.color = Color(0.24, 0.14, 0.16, 1.0)
+			outer_hull.color = tc.darkened(0.72)
 		var twin_vat: Polygon2D = body_visual.get_node_or_null("TwinVatLeft") as Polygon2D
 		if twin_vat != null:
-			twin_vat.color = Color(0.96, 0.30, 0.24, 0.96)
+			twin_vat.color = Color(tc.r, tc.g, tc.b, 0.96)
 		var hull_border: Line2D = body_visual.get_node_or_null("HullBorder") as Line2D
 		if hull_border != null:
-			hull_border.default_color = Color(1.0, 0.42, 0.34, 0.90)
+			hull_border.default_color = Color(tc.lightened(0.12).r, tc.lightened(0.12).g, tc.lightened(0.12).b, 0.90)
 	if health_bar_fill != null:
-		health_bar_fill.color = Color(0.98, 0.34, 0.26, 1.0)
+		health_bar_fill.color = tc
 	if selection_ring != null:
 		var ring_fill: Polygon2D = selection_ring.get_node_or_null("Fill") as Polygon2D
 		if ring_fill != null:
-			ring_fill.color = Color(1.0, 0.30, 0.24, 0.16)
+			ring_fill.color = Color(tc.r, tc.g, tc.b, 0.16)
 		var ring_outline: Line2D = selection_ring.get_node_or_null("Outline") as Line2D
 		if ring_outline != null:
-			ring_outline.default_color = Color(1.0, 0.36, 0.26, 0.95)
+			ring_outline.default_color = Color(tc.r, tc.g, tc.b, 0.95)
 	var name_tag: Label = get_node_or_null("NameTag") as Label
 	if name_tag != null:
-		name_tag.add_theme_color_override("font_color", Color(1.0, 0.68, 0.64, 0.92))
+		var tag_col: Color = tc.lightened(0.35)
+		name_tag.add_theme_color_override("font_color", Color(tag_col.r, tag_col.g, tag_col.b, 0.92))
 
 
 func _update_staff_slot_visuals() -> void:

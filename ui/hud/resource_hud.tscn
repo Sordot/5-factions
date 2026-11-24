@@ -17,13 +17,62 @@ grow_vertical = 2
 mouse_filter = 2
 theme = ExtResource("2_theme")
 
+[node name="TopLeftSpectatorAnchor" type="MarginContainer" parent="RootControl"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 0
+offset_right = 620.0
+offset_bottom = 64.0
+mouse_filter = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+
+[node name="SpectatorPanel" type="PanelContainer" parent="RootControl/TopLeftSpectatorAnchor"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="SpecHBox" type="HBoxContainer" parent="RootControl/TopLeftSpectatorAnchor/SpectatorPanel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SpecTag" type="Label" parent="RootControl/TopLeftSpectatorAnchor/SpectatorPanel/SpecHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.84, 0.34, 1)
+theme_override_font_sizes/font_size = 11
+text = "SPECTATOR"
+
+[node name="SpecTeam0Label" type="Label" parent="RootControl/TopLeftSpectatorAnchor/SpectatorPanel/SpecHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.24, 0.98, 0.88, 1)
+theme_override_font_sizes/font_size = 11
+text = "AI-01: 200B 50S 0C | 6/10 BW"
+
+[node name="SpecSep" type="VSeparator" parent="RootControl/TopLeftSpectatorAnchor/SpectatorPanel/SpecHBox"]
+layout_mode = 2
+
+[node name="SpecTeam1Label" type="Label" parent="RootControl/TopLeftSpectatorAnchor/SpectatorPanel/SpecHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.44, 0.34, 1)
+theme_override_font_sizes/font_size = 11
+text = "AI-02: 200B 50S 0C | 6/10 BW"
+
+[node name="BtnSpectatorFog" type="Button" parent="RootControl/TopLeftSpectatorAnchor/SpectatorPanel/SpecHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Fog: OFF"
+
 [node name="TopRightAnchor" type="MarginContainer" parent="RootControl"]
 layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -540.0
-offset_bottom = 132.0
+offset_left = -640.0
+offset_bottom = 148.0
 grow_horizontal = 0
 mouse_filter = 2
 theme_override_constants/margin_top = 12
@@ -240,7 +289,65 @@ unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
-text = "Idle Workers: 0 [F1]"
+text = "Idle Workers: 0 [`]"
+
+[node name="BtnSelectArmy" type="Button" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Army: 0 [F9]"
+
+[node name="BtnTechTree" type="Button" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Tech [U]"
+
+[node name="SpeedStrip" type="HBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox"]
+layout_mode = 2
+mouse_filter = 2
+alignment = 2
+theme_override_constants/separation = 4
+
+[node name="SpeedLbl" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/SpeedStrip"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.56, 0.78, 0.86, 0.88)
+theme_override_font_sizes/font_size = 10
+text = "SPEED:"
+
+[node name="BtnSpeed05" type="Button" parent="RootControl/TopRightAnchor/TopRightVBox/SpeedStrip"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 22)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 10
+text = "0.5x"
+
+[node name="BtnSpeed10" type="Button" parent="RootControl/TopRightAnchor/TopRightVBox/SpeedStrip"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(34, 22)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 10
+text = "1x"
+
+[node name="BtnSpeed15" type="Button" parent="RootControl/TopRightAnchor/TopRightVBox/SpeedStrip"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 22)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 10
+text = "1.5x"
+
+[node name="BtnSpeed20" type="Button" parent="RootControl/TopRightAnchor/TopRightVBox/SpeedStrip"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(34, 22)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 10
+text = "2x"
 
 [node name="AggroPausedBadge" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
 unique_name_in_owner = true

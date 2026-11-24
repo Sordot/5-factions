@@ -196,6 +196,20 @@ func _on_map_viewport_draw() -> void:
 		map_viewport.draw_colored_polygon(mini_poly, Color(0.24, 0.32, 0.40, 0.96))
 		map_viewport.draw_polyline(mini_poly + PackedVector2Array([mini_poly[0]]), Color(0.36, 0.62, 0.72, 0.65), 1.0)
 
+	# 2.25. Destructible Barricades (amber/slate hashed blocks).
+	for node: Node in get_tree().get_nodes_in_group("destructible_barricades"):
+		if not is_instance_valid(node) or bool(node.get("is_destroyed")) or not node.has_method("get_world_polygon"):
+			continue
+		var bar_poly: PackedVector2Array = node.call("get_world_polygon")
+		if bar_poly.size() < 3:
+			continue
+		var mini_bar: PackedVector2Array = PackedVector2Array()
+		mini_bar.resize(bar_poly.size())
+		for bi: int in range(bar_poly.size()):
+			mini_bar[bi] = _world_to_minimap(bar_poly[bi])
+		map_viewport.draw_colored_polygon(mini_bar, Color(0.46, 0.36, 0.20, 0.96))
+		map_viewport.draw_polyline(mini_bar + PackedVector2Array([mini_bar[0]]), Color(1.0, 0.78, 0.28, 0.92), 1.3)
+
 	# 2.5. Map landmarks (subtle Technozen geometric pips).
 	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
 		if not (node is MapLandmarkScript) or not is_instance_valid(node):
@@ -273,40 +287,41 @@ func _on_map_viewport_draw() -> void:
 	if _fog_system != null and _fog_system.fog_enabled and _fog_system.fog_texture != null:
 		map_viewport.draw_texture_rect(_fog_system.fog_texture, rect, false)
 
-	# 6. Buildings (Friendly cyan/green; Enemy red if spotted/visible).
+	# 6. Buildings (Team-colored via TeamManager; Enemy hidden until spotted).
+	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not (node is Building) or not is_instance_valid(node):
 			continue
 		var b: Building = node
 		if b.is_destroyed:
 			continue
-		if b.team == Unit.Team.ENEMY and not b.visible:
+		var is_hostile_b: bool = TeamManager.are_enemies(viewer_team, int(b.team)) if (TeamManager != null and viewer_team >= 0) else (b.team == Unit.Team.ENEMY)
+		if is_hostile_b and not b.visible:
 			continue
 		var bp: Vector2 = _world_to_minimap(b.global_position)
 		var sz: float = 6.5 if (b.is_core_hub or b.building_type_id == &"nexus_vat") else 4.6
-		var col: Color = Color(0.22, 0.96, 0.88, 1.0) if b.team == Unit.Team.PLAYER else Color(1.0, 0.32, 0.26, 0.95)
-		if b.team == Unit.Team.ENEMY and _fog_system != null and _fog_system.fog_enabled and not _fog_system.is_world_pos_visible(b.global_position):
-			col = Color(0.82, 0.32, 0.28, 0.65)
+		var col: Color = TeamManager.get_team_color(int(b.team)) if TeamManager != null else (Color(0.22, 0.96, 0.88, 1.0) if b.team == Unit.Team.PLAYER else Color(1.0, 0.32, 0.26, 0.95))
+		if is_hostile_b and _fog_system != null and _fog_system.fog_enabled and not _fog_system.is_world_pos_visible(b.global_position):
+			col.a = 0.62
 		map_viewport.draw_rect(Rect2(bp - Vector2(sz * 0.5, sz * 0.5), Vector2(sz, sz)), col, true)
 
-	# 8. Units (Friendly cyan/green; Visible Enemy red).
+	# 8. Units (Team-colored via TeamManager; Visible Hostiles only).
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not (node is Unit) or not is_instance_valid(node):
 			continue
 		var u: Unit = node
 		if u.is_dead or u.is_staffed:
 			continue
-		if u.team == Unit.Team.ENEMY and not u.visible:
+		var is_hostile_u: bool = TeamManager.are_enemies(viewer_team, int(u.team)) if (TeamManager != null and viewer_team >= 0) else (u.team == Unit.Team.ENEMY)
+		if is_hostile_u and not u.visible:
 			continue
 		var upos: Vector2 = _world_to_minimap(u.global_position)
-		var ucol: Color = Color(1.0, 0.30, 0.24, 1.0)
-		if u.team == Unit.Team.PLAYER:
+		var ucol: Color = TeamManager.get_team_color(int(u.team)) if TeamManager != null else (Color(0.26, 0.96, 1.0, 1.0) if u.team == Unit.Team.PLAYER else Color(1.0, 0.30, 0.24, 1.0))
+		if viewer_team >= 0 and int(u.team) == viewer_team:
 			if u.get_unit_type_id() == &"worker" or u.get_unit_type_id() == &"silica_harvester":
 				ucol = Color(0.32, 0.98, 0.60, 1.0)
 			elif u.get_unit_type_id() == &"stinger":
 				ucol = Color(0.98, 0.86, 0.32, 1.0)
-			else:
-				ucol = Color(0.26, 0.96, 1.0, 1.0)
 		map_viewport.draw_circle(upos, 2.3, ucol)
 
 	# 9. Minimap command ping ripple.

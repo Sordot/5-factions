@@ -10,29 +10,43 @@ const VENT_SNAP_RADIUS: float = 64.0
 
 
 func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspected_entity: Node, shift_queued: bool = false, selected_buildings: Array[Building] = []) -> void:
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		return
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+
 	# 1. Rally point assignment when inspecting/selecting friendly rally-capable building(s).
 	if selected_units.is_empty():
 		var rally_buildings: Array[Building] = []
 		for b: Building in selected_buildings:
-			if is_instance_valid(b) and not b.is_destroyed and b.team == Unit.Team.PLAYER and b.is_constructed and b.can_set_rally:
+			if is_instance_valid(b) and not b.is_destroyed and int(b.team) == local_team and b.is_constructed and b.can_set_rally:
 				rally_buildings.append(b)
 		if rally_buildings.is_empty() and inspected_entity is Building and is_instance_valid(inspected_entity):
 			var building: Building = inspected_entity
-			if building.team == Unit.Team.PLAYER and building.is_constructed and building.can_set_rally:
+			if int(building.team) == local_team and building.is_constructed and building.can_set_rally:
 				rally_buildings.append(building)
 		if not rally_buildings.is_empty():
 			_handle_multi_building_rally_right_click(rally_buildings, world_pos)
 		return
 
-	# 2. Attack hostile unit or hostile building.
-	var clicked_enemy_unit: Unit = find_unit_at_point(world_pos, Unit.Team.ENEMY)
+	# 2. Attack hostile unit, hostile building, or explicit Destructible Barricade.
+	var clicked_enemy_unit: Unit = find_hostile_unit_at_point(world_pos, local_team)
 	if clicked_enemy_unit != null:
 		issue_attack_target_order(selected_units, clicked_enemy_unit, shift_queued)
 		return
 
-	var clicked_enemy_building: Building = find_building_at_point(world_pos, Unit.Team.ENEMY)
+	var clicked_enemy_building: Building = find_hostile_building_at_point(world_pos, local_team)
 	if clicked_enemy_building != null:
 		issue_attack_target_order(selected_units, clicked_enemy_building, shift_queued)
+		return
+
+	var clicked_barricade: Node2D = find_barricade_at_point(world_pos)
+	if clicked_barricade != null:
+		issue_attack_target_order(selected_units, clicked_barricade, shift_queued)
+		return
+
+	# 2.5. Engineer repair on damaged friendly mechanical/synthetic unit.
+	var clicked_friendly_unit: Unit = find_unit_at_point(world_pos, local_team as Unit.Team)
+	if clicked_friendly_unit != null and issue_repair_order(selected_units, clicked_friendly_unit, shift_queued):
 		return
 
 	# 3. Resource node gathering.
@@ -41,8 +55,8 @@ func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspect
 		issue_gather_order(selected_units, clicked_resource, shift_queued)
 		return
 
-	# 4. Friendly building interaction (construct, staff Wetware Mainframe, return cargo, or waypoint visit).
-	var clicked_building: Building = find_building_at_point(world_pos, Unit.Team.PLAYER)
+	# 4. Friendly building interaction (construct, staff Wetware Mainframe, return cargo, repair, or waypoint visit).
+	var clicked_building: Building = find_building_at_point(world_pos, local_team as Unit.Team)
 	if clicked_building != null:
 		if not clicked_building.is_constructed:
 			if issue_build_order(selected_units, clicked_building, shift_queued):
@@ -68,6 +82,10 @@ func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspect
 					for i: int in range(other_units.size()):
 						other_units[i].command_move(approach_targets[i], shift_queued)
 				spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.INTERACT)
+				return
+
+		if clicked_building.is_constructed and clicked_building.current_hp < clicked_building.max_hp - 0.5:
+			if issue_repair_order(selected_units, clicked_building, shift_queued):
 				return
 
 		# Multi-building worker/unit waypoint stop: move cleanly to the building's perimeter so queues advance smoothly.
@@ -134,6 +152,23 @@ func issue_build_order(selected_units: Array[Unit], building: Building, shift_qu
 	if AudioManager != null:
 		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
 	spawn_move_marker(building.global_position, MoveMarker.MarkerStyle.INTERACT)
+	return true
+
+
+func issue_repair_order(selected_units: Array[Unit], target: Node2D, shift_queued: bool = false) -> bool:
+	if selected_units.is_empty() or target == null or not is_instance_valid(target):
+		return false
+	var repairers: Array[Unit] = []
+	for unit: Unit in selected_units:
+		if is_instance_valid(unit) and unit.can_repair_target(target):
+			repairers.append(unit)
+	if repairers.is_empty():
+		return false
+	for rep_unit: Unit in repairers:
+		rep_unit.command_repair(target, shift_queued)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
+	spawn_move_marker(target.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 
 
@@ -258,18 +293,28 @@ func issue_attack_move(world_pos: Vector2, selected_units: Array[Unit], shift_qu
 func issue_attack_move_order(selected_units: Array[Unit], world_pos: Vector2, shift_queued: bool = false) -> void:
 	if selected_units.is_empty():
 		return
-	var clicked_enemy: Unit = find_unit_at_point(world_pos, Unit.Team.ENEMY)
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	var clicked_enemy: Unit = find_hostile_unit_at_point(world_pos, local_team)
 	if clicked_enemy != null:
 		for unit: Unit in selected_units:
 			unit.command_attack_target(clicked_enemy, shift_queued)
 		spawn_move_marker(clicked_enemy.global_position, MoveMarker.MarkerStyle.ATTACK)
 		return
 
-	var clicked_enemy_building: Building = find_building_at_point(world_pos, Unit.Team.ENEMY)
+	var clicked_enemy_building: Building = find_hostile_building_at_point(world_pos, local_team)
 	if clicked_enemy_building != null:
 		for unit: Unit in selected_units:
 			unit.command_attack_target(clicked_enemy_building, shift_queued)
 		spawn_move_marker(clicked_enemy_building.global_position, MoveMarker.MarkerStyle.ATTACK)
+		return
+
+	var clicked_barricade: Node2D = find_barricade_at_point(world_pos)
+	if clicked_barricade != null:
+		for unit: Unit in selected_units:
+			unit.command_attack_target(clicked_barricade, shift_queued)
+		if AudioManager != null:
+			AudioManager.play_sfx(&"order_attack", -3.5, 0.04)
+		spawn_move_marker(clicked_barricade.global_position, MoveMarker.MarkerStyle.ATTACK)
 		return
 
 	var targets: Array[Vector2] = assign_group_destinations(selected_units, world_pos)
@@ -383,6 +428,12 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 		if is_instance_valid(node) and node.has_method("overlaps_circle"):
 			if node.overlaps_circle(place_pos, new_radius + 8.0):
 				result["reason"] = "Blocked by landmark"
+				return result
+
+	for node: Node in get_tree().get_nodes_in_group("destructible_barricades"):
+		if is_instance_valid(node) and node.has_method("overlaps_circle"):
+			if bool(node.call("overlaps_circle", place_pos, new_radius + 8.0)):
+				result["reason"] = "Blocked by barricade"
 				return result
 
 	# Keep central Hyper-Uplink clear of structures.
@@ -515,6 +566,96 @@ func find_nearest_unoccupied_vent(world_point: Vector2, max_radius: float) -> Re
 			best_dist_sq = d_sq
 			best = res_node
 	return best
+
+
+func find_barricade_at_point(world_point: Vector2) -> Node2D:
+	var closest: Node2D = null
+	var closest_dist_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("destructible_barricades"):
+		if not is_instance_valid(node) or not (node is Node2D):
+			continue
+		if bool(node.get("is_destroyed")) or node.is_queued_for_deletion():
+			continue
+		if node.has_method("contains_point") and bool(node.call("contains_point", world_point)):
+			var d_sq: float = (node as Node2D).global_position.distance_squared_to(world_point)
+			if d_sq < closest_dist_sq:
+				closest_dist_sq = d_sq
+				closest = node as Node2D
+	return closest
+
+
+func find_hostile_unit_at_point(world_point: Vector2, viewer_team: int) -> Unit:
+	var closest: Unit = null
+	var closest_dist_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
+		if not (node is Unit):
+			continue
+		var unit: Unit = node
+		if not is_instance_valid(unit) or unit.is_dead or not unit.visible:
+			continue
+		var is_hostile: bool = TeamManager.are_enemies(viewer_team, int(unit.team)) if (TeamManager != null and viewer_team >= 0) else (unit.team != Unit.Team.PLAYER)
+		if not is_hostile:
+			continue
+		if unit.contains_point(world_point):
+			var d_sq: float = unit.global_position.distance_squared_to(world_point)
+			if d_sq < closest_dist_sq:
+				closest_dist_sq = d_sq
+				closest = unit
+	return closest
+
+
+func find_hostile_building_at_point(world_point: Vector2, viewer_team: int) -> Building:
+	var closest: Building = null
+	var closest_dist_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
+		if not (node is Building):
+			continue
+		var b: Building = node
+		if not is_instance_valid(b) or b.is_destroyed or not b.visible:
+			continue
+		var is_hostile: bool = TeamManager.are_enemies(viewer_team, int(b.team)) if (TeamManager != null and viewer_team >= 0) else (b.team != Unit.Team.PLAYER)
+		if not is_hostile:
+			continue
+		if b.contains_point(world_point):
+			var d_sq: float = b.global_position.distance_squared_to(world_point)
+			if d_sq < closest_dist_sq:
+				closest_dist_sq = d_sq
+				closest = b
+	return closest
+
+
+func find_any_unit_at_point(world_point: Vector2) -> Unit:
+	var closest: Unit = null
+	var closest_dist_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
+		if not (node is Unit):
+			continue
+		var u: Unit = node
+		if not is_instance_valid(u) or u.is_dead or not u.visible:
+			continue
+		if u.contains_point(world_point):
+			var d_sq: float = u.global_position.distance_squared_to(world_point)
+			if d_sq < closest_dist_sq:
+				closest_dist_sq = d_sq
+				closest = u
+	return closest
+
+
+func find_any_building_at_point(world_point: Vector2) -> Building:
+	var closest: Building = null
+	var closest_dist_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
+		if not (node is Building):
+			continue
+		var b: Building = node
+		if not is_instance_valid(b) or b.is_destroyed or not b.visible:
+			continue
+		if b.contains_point(world_point):
+			var d_sq: float = b.global_position.distance_squared_to(world_point)
+			if d_sq < closest_dist_sq:
+				closest_dist_sq = d_sq
+				closest = b
+	return closest
 
 
 func find_unit_at_point(world_point: Vector2, target_team: Unit.Team) -> Unit:

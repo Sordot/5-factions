@@ -89,15 +89,23 @@ func should_pursue_targets(owner_unit: Unit) -> bool:
 	return true
 
 
+func _are_teams_hostile(team_a: int, team_b: int) -> bool:
+	if TeamManager != null:
+		return TeamManager.are_enemies(team_a, team_b)
+	return team_a != team_b
+
+
 func is_valid_target(owner_unit: Unit, candidate: Variant) -> bool:
 	if owner_unit == null or not is_instance_valid(owner_unit) or candidate == null or not is_instance_valid(candidate):
 		return false
 	if candidate is Unit:
 		var u: Unit = candidate
-		return not u.is_dead and not u.is_staffed and not u.is_queued_for_deletion() and u.team != owner_unit.team
+		return not u.is_dead and not u.is_staffed and not u.is_queued_for_deletion() and _are_teams_hostile(int(owner_unit.team), int(u.team))
 	if candidate is Building:
 		var b: Building = candidate
-		return not b.is_destroyed and not b.is_queued_for_deletion() and b.team != owner_unit.team
+		return not b.is_destroyed and not b.is_queued_for_deletion() and _are_teams_hostile(int(owner_unit.team), int(b.team))
+	if candidate is Node2D and (candidate as Node).is_in_group("destructible_barricades"):
+		return not bool((candidate as Node).get("is_destroyed")) and not (candidate as Node).is_queued_for_deletion()
 	return false
 
 
@@ -142,6 +150,8 @@ func distance_to_target_edge(owner_unit: Unit, target: Variant) -> float:
 		other_r = u.data.collision_radius if u.data != null else 16.0
 	elif target_node is Building:
 		other_r = (target_node as Building).footprint_radius
+	elif target_node.is_in_group("destructible_barricades") and target_node.has_method("get_footprint_radius"):
+		other_r = float(target_node.call("get_footprint_radius"))
 	return maxf(0.0, center_dist - my_r - other_r)
 
 
@@ -214,7 +224,7 @@ func find_nearest_enemy(owner_unit: Unit, max_range: float) -> Node2D:
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var candidate: Unit = node
-		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or candidate.team == owner_unit.team:
+		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not _are_teams_hostile(int(owner_unit.team), int(candidate.team)):
 			continue
 		var dist: float = distance_to_target_edge(owner_unit, candidate)
 		if dist < min_range or dist > max_range:
@@ -228,7 +238,7 @@ func find_nearest_enemy(owner_unit: Unit, max_range: float) -> Node2D:
 		if not is_instance_valid(node) or not (node is Building):
 			continue
 		var b: Building = node
-		if b.is_destroyed or b.is_queued_for_deletion() or b.team == owner_unit.team:
+		if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(int(owner_unit.team), int(b.team)):
 			continue
 		var dist: float = distance_to_target_edge(owner_unit, b)
 		if dist < min_range or dist > max_range:
@@ -390,6 +400,8 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 func _is_armored_target(target: Variant) -> bool:
 	if target is Building:
 		return true
+	if target is Node and (target as Node).is_in_group("destructible_barricades"):
+		return bool((target as Node).get("is_armored"))
 	if target is Unit:
 		var u: Unit = target
 		return u.data != null and u.data.is_armored
@@ -408,6 +420,10 @@ func _apply_damage_to_target(owner_unit: Unit, target: Variant, base_dmg: float,
 		if u.data != null and u.data.is_armored:
 			total_dmg += bonus_vs_armored
 		u.take_damage(total_dmg, owner_unit)
+	elif target is Node and (target as Node).is_in_group("destructible_barricades"):
+		if bool((target as Node).get("is_armored")):
+			total_dmg += bonus_vs_armored
+		(target as Node).call("take_damage", total_dmg, owner_unit)
 
 
 func _apply_aoe_damage(owner_unit: Unit, center: Vector2, radius: float, base_dmg: float, bonus_vs_armored: float) -> void:
@@ -431,7 +447,7 @@ func _apply_aoe_damage_for_team(
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var candidate: Unit = node
-		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or candidate.team == attacker_team:
+		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not _are_teams_hostile(int(attacker_team), int(candidate.team)):
 			continue
 		var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
 		if candidate.global_position.distance_to(center) <= radius + enemy_r:
@@ -442,10 +458,20 @@ func _apply_aoe_damage_for_team(
 		if not is_instance_valid(node) or not (node is Building):
 			continue
 		var b: Building = node
-		if b.is_destroyed or b.is_queued_for_deletion() or b.team == attacker_team:
+		if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(int(attacker_team), int(b.team)):
 			continue
 		if b.global_position.distance_to(center) <= radius + b.footprint_radius:
 			b.take_damage(base_dmg + bonus_vs_armored, attacker)
+
+	for node: Node in tree.get_nodes_in_group("destructible_barricades"):
+		if not is_instance_valid(node) or not (node is Node2D):
+			continue
+		if bool(node.get("is_destroyed")) or node.is_queued_for_deletion():
+			continue
+		var bar_r: float = float(node.call("get_footprint_radius")) if node.has_method("get_footprint_radius") else 40.0
+		if (node as Node2D).global_position.distance_to(center) <= radius + bar_r:
+			var bar_dmg: float = base_dmg + (bonus_vs_armored if bool(node.get("is_armored")) else 0.0)
+			node.call("take_damage", bar_dmg, attacker)
 
 
 func _apply_line_pierce_damage(
@@ -463,7 +489,7 @@ func _apply_line_pierce_damage(
 		if not is_instance_valid(node) or not (node is Unit) or node == primary_target:
 			continue
 		var candidate: Unit = node
-		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or candidate.team == owner_unit.team:
+		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not _are_teams_hostile(int(owner_unit.team), int(candidate.team)):
 			continue
 		var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
 		var closest: Vector2 = Geometry2D.get_closest_point_to_segment(candidate.global_position, seg_start, seg_end)
@@ -474,7 +500,7 @@ func _apply_line_pierce_damage(
 		if not is_instance_valid(node) or not (node is Building) or node == primary_target:
 			continue
 		var b: Building = node
-		if b.is_destroyed or b.is_queued_for_deletion() or b.team == owner_unit.team:
+		if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(int(owner_unit.team), int(b.team)):
 			continue
 		var closest_b: Vector2 = Geometry2D.get_closest_point_to_segment(b.global_position, seg_start, seg_end)
 		if b.global_position.distance_to(closest_b) <= half_width + b.footprint_radius:

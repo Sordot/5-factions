@@ -5,8 +5,17 @@ const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.
 
 @onready var btn_audio_mute: Button = %BtnAudioMute
 @onready var map_option: OptionButton = %MapOption
+@onready var btn_mode_pvai: Button = %BtnModePvAI
+@onready var btn_mode_aivai: Button = %BtnModeAIvAI
+@onready var ai_label: Label = %AILabel
+@onready var ai_row: HBoxContainer = %AIRow
 @onready var btn_ai_standard: Button = %BtnAIStandard
 @onready var btn_ai_passive: Button = %BtnAIPassive
+@onready var team0_ai_grid: GridContainer = %Team0AIGrid
+@onready var opt_team0_diff: OptionButton = %OptTeam0Diff
+@onready var opt_team0_style: OptionButton = %OptTeam0Style
+@onready var diff_label: Label = %DiffLabel
+@onready var style_label: Label = %StyleLabel
 @onready var opt_ai_difficulty: OptionButton = %OptAIDifficulty
 @onready var opt_ai_playstyle: OptionButton = %OptAIPlaystyle
 @onready var btn_res_standard: Button = %BtnResStandard
@@ -22,7 +31,10 @@ const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.
 @onready var locked_slot_5: Button = %LockedSlot5
 
 var _selected_map_path: String = GameConfig.MAP_SKIRMISH_01
+var _match_mode: int = 0
 var _aggro_ai_enabled: bool = true
+var _team0_difficulty: int = 1
+var _team0_playstyle: int = 1
 var _ai_difficulty: int = 1
 var _ai_playstyle: int = 0
 var _resource_preset: StringName = GameConfig.PRESET_STANDARD
@@ -32,10 +44,14 @@ var _inspected_locked_btn: Button = null
 
 
 func _ready() -> void:
+	Engine.time_scale = 1.0
 	if SettingsManager != null:
 		SettingsManager.set_gameplay_cursor_active(false)
 	_selected_map_path = GameConfig.selected_map_path
+	_match_mode = int(GameConfig.match_mode)
 	_aggro_ai_enabled = GameConfig.aggro_ai_enabled
+	_team0_difficulty = int(GameConfig.team0_ai_difficulty)
+	_team0_playstyle = int(GameConfig.team0_ai_playstyle)
 	_ai_difficulty = int(GameConfig.ai_difficulty)
 	_ai_playstyle = int(GameConfig.ai_playstyle)
 	_resource_preset = GameConfig.resource_preset
@@ -43,9 +59,52 @@ func _ready() -> void:
 	if map_option != null:
 		map_option.clear()
 		map_option.add_item("Skirmish Arena 01 (1v1 Symmetric)", 0)
-		map_option.add_item("Sandbox Testbed (Milestone 0)", 1)
-		map_option.select(1 if _selected_map_path == GameConfig.MAP_SANDBOX_TESTBED else 0)
+		map_option.add_item("Twin Causeway (Skirmish Arena 02)", 1)
+		map_option.add_item("Sandbox Testbed (Milestone 0)", 2)
+		var map_idx: int = 0
+		if _selected_map_path == GameConfig.MAP_SKIRMISH_02:
+			map_idx = 1
+		elif _selected_map_path == GameConfig.MAP_SANDBOX_TESTBED:
+			map_idx = 2
+		map_option.select(map_idx)
 		map_option.item_selected.connect(_on_map_selected)
+
+	if btn_mode_pvai != null:
+		btn_mode_pvai.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_match_mode = 0
+			_refresh_ui()
+		)
+	if btn_mode_aivai != null:
+		btn_mode_aivai.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_match_mode = 1
+			_refresh_ui()
+		)
+
+	if opt_team0_diff != null:
+		opt_team0_diff.clear()
+		opt_team0_diff.add_item("Relaxed", int(GameConfig.AIDifficulty.RELAXED))
+		opt_team0_diff.add_item("Standard", int(GameConfig.AIDifficulty.STANDARD))
+		opt_team0_diff.add_item("Brutal", int(GameConfig.AIDifficulty.BRUTAL))
+		opt_team0_diff.select(_team0_difficulty)
+		opt_team0_diff.item_selected.connect(func(idx: int) -> void:
+			AudioManager.play_ui_click()
+			_team0_difficulty = clampi(idx, 0, 2)
+			_refresh_ui()
+		)
+
+	if opt_team0_style != null:
+		opt_team0_style.clear()
+		opt_team0_style.add_item("Balanced", int(GameConfig.AIPlaystyle.BALANCED))
+		opt_team0_style.add_item("Swarm Rush", int(GameConfig.AIPlaystyle.SWARM_RUSH))
+		opt_team0_style.add_item("Synthetics Tech", int(GameConfig.AIPlaystyle.SYNTHETICS_TECH))
+		opt_team0_style.select(_team0_playstyle)
+		opt_team0_style.item_selected.connect(func(idx: int) -> void:
+			AudioManager.play_ui_click()
+			_team0_playstyle = clampi(idx, 0, 2)
+			_refresh_ui()
+		)
 
 	if opt_ai_difficulty != null:
 		opt_ai_difficulty.clear()
@@ -130,7 +189,8 @@ func _ready() -> void:
 		btn_quit.pressed.connect(_on_quit_pressed)
 
 	_wire_hover_audio([
-		btn_audio_mute, map_option, btn_ai_standard, btn_ai_passive,
+		btn_audio_mute, map_option, btn_mode_pvai, btn_mode_aivai,
+		btn_ai_standard, btn_ai_passive, opt_team0_diff, opt_team0_style,
 		opt_ai_difficulty, opt_ai_playstyle, btn_res_standard, btn_res_fast,
 		btn_launch, btn_settings, btn_quit,
 		locked_slot_2, locked_slot_3, locked_slot_4, locked_slot_5,
@@ -235,7 +295,12 @@ func _refresh_locked_card_highlights() -> void:
 
 func _on_map_selected(index: int) -> void:
 	AudioManager.play_ui_click()
-	_selected_map_path = GameConfig.MAP_SANDBOX_TESTBED if index == 1 else GameConfig.MAP_SKIRMISH_01
+	if index == 1:
+		_selected_map_path = GameConfig.MAP_SKIRMISH_02
+	elif index == 2:
+		_selected_map_path = GameConfig.MAP_SANDBOX_TESTBED
+	else:
+		_selected_map_path = GameConfig.MAP_SKIRMISH_01
 	_refresh_ui()
 
 
@@ -267,15 +332,34 @@ func _refresh_audio_button() -> void:
 
 
 func _refresh_ui() -> void:
+	var is_spec: bool = (_match_mode == 1)
+	if btn_mode_pvai != null:
+		btn_mode_pvai.modulate = Color(0.42, 1.0, 0.88, 1.0) if not is_spec else Color(0.66, 0.74, 0.80, 0.78)
+	if btn_mode_aivai != null:
+		btn_mode_aivai.modulate = Color(1.0, 0.82, 0.32, 1.0) if is_spec else Color(0.66, 0.74, 0.80, 0.78)
+
+	if ai_label != null:
+		ai_label.visible = not is_spec
+	if ai_row != null:
+		ai_row.visible = not is_spec
+	if team0_ai_grid != null:
+		team0_ai_grid.visible = is_spec
+	if diff_label != null:
+		diff_label.text = "TEAM 2 AI DIFFICULTY" if is_spec else "AI DIFFICULTY"
+		diff_label.add_theme_color_override("font_color", Color(1.0, 0.48, 0.36, 0.95) if is_spec else Color(0.62, 0.84, 0.92, 0.95))
+	if style_label != null:
+		style_label.text = "TEAM 2 AI PLAYSTYLE" if is_spec else "AI PLAYSTYLE"
+		style_label.add_theme_color_override("font_color", Color(1.0, 0.48, 0.36, 0.95) if is_spec else Color(0.62, 0.84, 0.92, 0.95))
+
 	if btn_ai_standard != null:
 		btn_ai_standard.modulate = Color(0.42, 1.0, 0.88, 1.0) if _aggro_ai_enabled else Color(0.66, 0.74, 0.80, 0.78)
 	if btn_ai_passive != null:
 		btn_ai_passive.modulate = Color(1.0, 0.78, 0.34, 1.0) if not _aggro_ai_enabled else Color(0.66, 0.74, 0.80, 0.78)
 
 	if opt_ai_difficulty != null:
-		opt_ai_difficulty.disabled = not _aggro_ai_enabled
+		opt_ai_difficulty.disabled = (not is_spec and not _aggro_ai_enabled)
 	if opt_ai_playstyle != null:
-		opt_ai_playstyle.disabled = not _aggro_ai_enabled
+		opt_ai_playstyle.disabled = (not is_spec and not _aggro_ai_enabled)
 
 	var is_fast: bool = (_resource_preset == GameConfig.PRESET_FAST_TECH)
 	if btn_res_standard != null:
@@ -283,13 +367,21 @@ func _refresh_ui() -> void:
 	if btn_res_fast != null:
 		btn_res_fast.modulate = Color(0.36, 0.92, 1.0, 1.0) if is_fast else Color(0.66, 0.74, 0.80, 0.78)
 
+	if btn_launch != null:
+		btn_launch.text = "LAUNCH AI SPECTATOR MATCH" if is_spec else "LAUNCH SKIRMISH"
+
 	if summary_label != null:
-		var map_name: String = "Sandbox Testbed" if _selected_map_path == GameConfig.MAP_SANDBOX_TESTBED else "Skirmish Arena 01 (1v1)"
-		var ai_str: String = "Passive / Sandbox (Aggro OFF)"
-		if _aggro_ai_enabled:
-			ai_str = "%s AI  •  %s" % [GameConfig.get_difficulty_label(_ai_difficulty), GameConfig.get_playstyle_label(_ai_playstyle)]
+		var map_name: String = GameConfig.get_map_label(_selected_map_path)
 		var res_str: String = "1000 B / 500 S / 200 C" if is_fast else "200 B / 50 S / 0 C"
-		summary_label.text = "FACTION: GENESIS_V2 (The Vat-Born)\nMAP: %s\nOPPONENT: %s\nRESOURCES: %s" % [map_name, ai_str, res_str]
+		if is_spec:
+			var t0_str: String = "%s (%s)" % [GameConfig.get_playstyle_label(_team0_playstyle), GameConfig.get_difficulty_label(_team0_difficulty)]
+			var t1_str: String = "%s (%s)" % [GameConfig.get_playstyle_label(_ai_playstyle), GameConfig.get_difficulty_label(_ai_difficulty)]
+			summary_label.text = "MODE: AI vs AI SPECTATOR\nMAP: %s\nMATCHUP: %s vs %s\nRESOURCES: %s" % [map_name, t0_str, t1_str, res_str]
+		else:
+			var ai_str: String = "Passive / Sandbox (Aggro OFF)"
+			if _aggro_ai_enabled:
+				ai_str = "%s AI  •  %s" % [GameConfig.get_difficulty_label(_ai_difficulty), GameConfig.get_playstyle_label(_ai_playstyle)]
+			summary_label.text = "FACTION: GENESIS_V2 (The Vat-Born)\nMAP: %s\nOPPONENT: %s\nRESOURCES: %s" % [map_name, ai_str, res_str]
 
 
 func _on_launch_pressed() -> void:
@@ -300,7 +392,10 @@ func _on_launch_pressed() -> void:
 		_resource_preset,
 		&"genesis_v2",
 		_ai_difficulty,
-		_ai_playstyle
+		_ai_playstyle,
+		_match_mode,
+		_team0_difficulty,
+		_team0_playstyle
 	)
 	get_tree().change_scene_to_file(_selected_map_path)
 

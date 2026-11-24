@@ -8,6 +8,7 @@ enum VFXMode {
 	DEATH_BURST,
 	HEAL_TICK,
 	RANK_UP_PULSE,
+	REPAIR_BEAM,
 }
 
 var _mode: VFXMode = VFXMode.DEATH_BURST
@@ -113,6 +114,17 @@ func setup_rank_up_pulse(world_pos: Vector2, rank_level: int = 1) -> void:
 	queue_redraw()
 
 
+func setup_repair_beam(from_world: Vector2, to_world: Vector2, vfx_color: Color = Color(0.24, 0.98, 0.86, 0.95)) -> void:
+	_mode = VFXMode.REPAIR_BEAM
+	_from_world = from_world
+	_target_world = to_world
+	_color = vfx_color
+	_duration = 0.20
+	_elapsed = 0.0
+	_seed = int(Time.get_ticks_usec() & 0x7FFFFFFF)
+	queue_redraw()
+
+
 func _process(delta: float) -> void:
 	_elapsed += delta
 	if _mode == VFXMode.MORTAR_SHELL:
@@ -158,6 +170,8 @@ func _draw() -> void:
 			_draw_heal_tick()
 		VFXMode.RANK_UP_PULSE:
 			_draw_rank_up_pulse()
+		VFXMode.REPAIR_BEAM:
+			_draw_repair_beam()
 
 
 func _draw_mortar_shell() -> void:
@@ -319,6 +333,26 @@ func _draw_rank_up_pulse() -> void:
 			p + Vector2(5.5, cy + 3.2),
 		])
 		draw_polyline(chev, Color(_color.r, _color.g, _color.b, fade * 0.96), 2.0, true)
+
+
+func _draw_repair_beam() -> void:
+	var t: float = clampf(_elapsed / _duration, 0.0, 1.0)
+	var fade: float = 1.0 - t * 0.65
+	var p0: Vector2 = to_local(_from_world)
+	var p1: Vector2 = to_local(_target_world)
+	# Soft outer nanite beam + crisp bright inner conduit
+	draw_line(p0, p1, Color(_color.r, _color.g, _color.b, fade * 0.28), 6.0, true)
+	draw_line(p0, p1, Color(_color.r, _color.g, _color.b, fade * 0.90), 2.2, true)
+	draw_line(p0, p1, Color(0.92, 1.0, 0.98, fade * 0.85), 1.0, true)
+	# Traveling nanite pulse bead
+	var bead: Vector2 = p0.lerp(p1, t)
+	draw_circle(bead, 3.2, Color(0.94, 1.0, 0.98, fade))
+	# Welding sparks at target point
+	draw_circle(p1, lerpf(6.5, 2.5, t), Color(_color.r, _color.g, _color.b, fade * 0.65))
+	var ang0: float = float(_seed % 360) * 0.017453
+	for k: int in range(4):
+		var dir: Vector2 = Vector2.RIGHT.rotated(ang0 + float(k) * 1.57)
+		draw_line(p1 + dir * 2.0, p1 + dir * lerpf(4.0, 12.0, t), Color(0.96, 1.0, 0.88, fade * 0.92), 1.5, true)
 
 
 func _draw_dashed_circle(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:

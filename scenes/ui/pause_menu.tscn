@@ -74,6 +74,13 @@ layout_mode = 2
 focus_mode = 0
 text = "Settings & Keybinds"
 
+[node name="BtnTechTree" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+focus_mode = 0
+text = "Tech Tree  (U)"
+
 [node name="BtnRestart" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 36)

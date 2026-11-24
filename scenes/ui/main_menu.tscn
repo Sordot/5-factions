@@ -99,7 +99,7 @@ text = "5 FACTIONS // SOVEREIGN KERNEL"
 layout_mode = 2
 theme_override_colors/font_color = Color(0.28, 0.94, 0.88, 0.94)
 theme_override_font_sizes/font_size = 12
-text = "TECHNOZEN REAL-TIME STRATEGY  •  MILESTONE 1.9 VERTICAL SLICE  •  BUILD 0.1.9"
+text = "TECHNOZEN REAL-TIME STRATEGY  •  MILESTONE 2.2 ENGINE DEPTH  •  BUILD 0.2.2"
 
 [node name="HeaderRight" type="HBoxContainer" parent="RootMargin/RootVBox/HeaderPanel/HeaderHBox"]
 layout_mode = 2
@@ -355,23 +355,53 @@ text = "BATTLEFIELD MAP"
 
 [node name="MapOption" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 29)
+custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
 focus_mode = 0
 
+[node name="ModeLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
+theme_override_font_sizes/font_size = 11
+text = "MATCH MODE"
+
+[node name="ModeRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnModePvAI" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/ModeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Player vs AI"
+
+[node name="BtnModeAIvAI" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/ModeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "AI vs AI (Spectator)"
+
 [node name="AILabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
 theme_override_font_sizes/font_size = 11
 text = "AI OPPONENT MODE"
 
 [node name="AIRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
 
 [node name="BtnAIStandard" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AIRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 28)
+custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 focus_mode = 0
@@ -380,43 +410,81 @@ text = "Skirmish AI (ON)"
 
 [node name="BtnAIPassive" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AIRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 28)
+custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Passive / Sandbox"
 
+[node name="Team0AIGrid" type="GridContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 3
+columns = 2
+
+[node name="Team0DiffLbl" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/Team0AIGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.28, 0.96, 0.88, 0.95)
+theme_override_font_sizes/font_size = 10
+text = "TEAM 1 AI DIFFICULTY"
+
+[node name="Team0StyleLbl" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/Team0AIGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.28, 0.96, 0.88, 0.95)
+theme_override_font_sizes/font_size = 10
+text = "TEAM 1 AI PLAYSTYLE"
+
+[node name="OptTeam0Diff" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/Team0AIGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+
+[node name="OptTeam0Style" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/Team0AIGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+
 [node name="AITuningGrid" type="GridContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
 theme_override_constants/h_separation = 8
-theme_override_constants/v_separation = 4
+theme_override_constants/v_separation = 3
 columns = 2
 
 [node name="DiffLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AITuningGrid"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "AI DIFFICULTY"
 
 [node name="StyleLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AITuningGrid"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "AI PLAYSTYLE"
 
 [node name="OptAIDifficulty" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AITuningGrid"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 28)
+custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 focus_mode = 0
 
 [node name="OptAIPlaystyle" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AITuningGrid"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 28)
+custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 focus_mode = 0

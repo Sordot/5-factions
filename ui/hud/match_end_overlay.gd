@@ -30,11 +30,13 @@ func is_summary_visible() -> bool:
 
 
 func show_summary(stats: Dictionary) -> void:
+	Engine.time_scale = 1.0
 	var is_victory: bool = bool(stats.get("is_victory", false))
+	var is_spectator: bool = bool(stats.get("is_spectator", false))
 	if AudioManager != null:
 		AudioManager.play_sfx(&"match_victory" if is_victory else &"match_defeat", -2.0, 0.0)
 	if title_label != null:
-		title_label.text = "VICTORY" if is_victory else "DEFEAT"
+		title_label.text = "MATCH COMPLETE" if is_spectator else ("VICTORY" if is_victory else "DEFEAT")
 		title_label.add_theme_color_override(
 			"font_color",
 			Color(0.22, 0.98, 0.90, 1.0) if is_victory else Color(1.0, 0.36, 0.30, 1.0)
@@ -63,11 +65,15 @@ func _populate_scoreboard(stats: Dictionary) -> void:
 	var p: Dictionary = stats.get("player", {}) as Dictionary
 	var e: Dictionary = stats.get("enemy", {}) as Dictionary
 
+	var p_col_title: String = "PLAYER (GENESIS_V2)"
 	var ai_tag: String = "AI (GENESIS_V2)"
-	if GameConfig != null:
+	if bool(stats.get("is_spectator", false)) and GameConfig != null:
+		p_col_title = "AI-01 (%s)" % GameConfig.get_difficulty_label(GameConfig.team0_ai_difficulty)
+		ai_tag = "AI-02 (%s)" % GameConfig.get_difficulty_label(GameConfig.team1_ai_difficulty)
+	elif GameConfig != null:
 		ai_tag = "AI (%s)" % GameConfig.get_difficulty_label()
 
-	_add_header_row("TELEMETRY METRIC", "PLAYER (GENESIS_V2)", ai_tag)
+	_add_header_row("TELEMETRY METRIC", p_col_title, ai_tag)
 
 	_add_stat_row("Biomass Gathered", int(p.get("biomass_gathered", 0)), int(e.get("biomass_gathered", 0)), true)
 	_add_stat_row("Silica Gathered", int(p.get("silica_gathered", 0)), int(e.get("silica_gathered", 0)), true)
@@ -162,6 +168,7 @@ func hide_summary() -> void:
 func _on_play_again_pressed() -> void:
 	if AudioManager != null:
 		AudioManager.play_ui_click()
+	Engine.time_scale = 1.0
 	if is_inside_tree():
 		get_tree().reload_current_scene()
 
@@ -169,6 +176,7 @@ func _on_play_again_pressed() -> void:
 func _on_main_menu_pressed() -> void:
 	if AudioManager != null:
 		AudioManager.play_ui_click()
+	Engine.time_scale = 1.0
 	if is_inside_tree():
 		get_tree().change_scene_to_file(GameConfig.MAIN_MENU_SCENE)
 

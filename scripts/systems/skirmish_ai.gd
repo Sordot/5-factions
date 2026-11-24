@@ -100,8 +100,12 @@ func _ready() -> void:
 func _apply_lobby_ai_profile() -> void:
 	if GameConfig == null:
 		return
-	_ai_difficulty = int(GameConfig.ai_difficulty)
-	_ai_playstyle = int(GameConfig.ai_playstyle)
+	if TeamManager != null and TeamManager.is_active_team(int(ai_team)):
+		_ai_difficulty = TeamManager.get_team_ai_difficulty(int(ai_team))
+		_ai_playstyle = TeamManager.get_team_ai_playstyle(int(ai_team))
+	else:
+		_ai_difficulty = int(GameConfig.ai_difficulty)
+		_ai_playstyle = int(GameConfig.ai_playstyle)
 
 	match _ai_difficulty:
 		int(GameConfig.AIDifficulty.RELAXED):
@@ -311,7 +315,8 @@ func _handle_base_defense() -> bool:
 		if not (node is Unit) or not is_instance_valid(node):
 			continue
 		var hostile: Unit = node
-		if hostile.is_dead or hostile.is_staffed or hostile.team == ai_team:
+		var is_enemy: bool = TeamManager.are_enemies(int(ai_team), int(hostile.team)) if TeamManager != null else (hostile.team != ai_team)
+		if hostile.is_dead or hostile.is_staffed or not is_enemy:
 			continue
 		var is_threatening: bool = false
 		var min_d_sq: float = INF
@@ -695,13 +700,15 @@ func _select_wave_target(wave_idx: int) -> Vector2:
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if node is Building and is_instance_valid(node):
 			var b: Building = node
-			if not b.is_destroyed and b.team != ai_team:
+			var is_enemy_b: bool = TeamManager.are_enemies(int(ai_team), int(b.team)) if TeamManager != null else (b.team != ai_team)
+			if not b.is_destroyed and is_enemy_b:
 				return b.global_position
 
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if node is Unit and is_instance_valid(node):
 			var u: Unit = node
-			if not u.is_dead and not u.is_staffed and u.team != ai_team:
+			var is_enemy_u: bool = TeamManager.are_enemies(int(ai_team), int(u.team)) if TeamManager != null else (u.team != ai_team)
+			if not u.is_dead and not u.is_staffed and is_enemy_u:
 				return u.global_position
 
 	return Vector2.ZERO
@@ -811,6 +818,10 @@ func _is_build_spot_valid(data: BuildingData, world_pos: Vector2) -> bool:
 	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
 		if is_instance_valid(node) and node.has_method("overlaps_circle"):
 			if node.overlaps_circle(world_pos, new_radius + 8.0):
+				return false
+	for node: Node in get_tree().get_nodes_in_group("destructible_barricades"):
+		if is_instance_valid(node) and node.has_method("overlaps_circle"):
+			if node.call("overlaps_circle", world_pos, new_radius + 8.0):
 				return false
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if node is Building and is_instance_valid(node) and not (node as Building).is_destroyed:
@@ -933,7 +944,8 @@ func _find_opposing_command_core() -> Building:
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if node is Building and is_instance_valid(node):
 			var b: Building = node
-			if not b.is_destroyed and b.team != ai_team and (b.is_core_hub or b.building_type_id == &"nexus_vat"):
+			var is_enemy: bool = TeamManager.are_enemies(int(ai_team), int(b.team)) if TeamManager != null else (b.team != ai_team)
+			if not b.is_destroyed and is_enemy and (b.is_core_hub or b.building_type_id == &"nexus_vat"):
 				return b
 	return null
 

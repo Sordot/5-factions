@@ -647,10 +647,34 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 	_clear_ability_row()
 
 	if not building.is_constructed:
-		ability_row.visible = false
+		ability_row.columns = 2
+		var cancel_btn: Button = Button.new()
+		cancel_btn.focus_mode = Control.FOCUS_NONE
+		cancel_btn.custom_minimum_size = Vector2(214.0, 32.0)
+		cancel_btn.add_theme_font_size_override("font_size", 11)
+		cancel_btn.text = "[X] Cancel Build (75% Refund)"
+		cancel_btn.modulate = Color(1.0, 0.52, 0.34, 1.0)
+		var captured_b_cancel: Building = building
+		cancel_btn.pressed.connect(func() -> void:
+			if is_instance_valid(captured_b_cancel):
+				captured_b_cancel.cancel_construction()
+		)
+		_attach_tooltip(
+			cancel_btn,
+			"Cancel %s" % building.display_name,
+			"LMB",
+			"75%% Refund: %s" % building.get_refund_label(0.75),
+			"Immediately cancels this unfinished scaffold, refunds 75% of construction resources, releases workers, and updates pathing."
+		)
+		ability_row.add_child(cancel_btn)
+		_building_action_buttons.append({
+			"kind": "cancel_build",
+			"button": cancel_btn,
+		})
+		ability_row.visible = true
 		return
 
-	var total_actions: int = (1 if building.max_staff_slots > 0 else 0) + building.trainable_unit_data.size() + building.researchable_upgrades.size()
+	var total_actions: int = (1 if building.max_staff_slots > 0 else 0) + building.trainable_unit_data.size() + building.researchable_upgrades.size() + 1
 	var use_compact: bool = total_actions > 4
 	ability_row.columns = 3 if use_compact else 2
 	var btn_min_size: Vector2 = Vector2(146.0, 28.0) if use_compact else Vector2(214.0, 29.0)
@@ -769,6 +793,43 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 			"button": upg_btn,
 		})
 
+	# Salvage / Decommission button for completed friendly structures
+	has_buttons = true
+	var salvage_btn: Button = Button.new()
+	salvage_btn.focus_mode = Control.FOCUS_NONE
+	salvage_btn.custom_minimum_size = btn_min_size
+	salvage_btn.add_theme_font_size_override("font_size", btn_font_size)
+	var captured_b_salv: Building = building
+	salvage_btn.pressed.connect(func() -> void:
+		if is_instance_valid(captured_b_salv):
+			captured_b_salv.toggle_salvage()
+	)
+	salvage_btn.tooltip_text = ""
+	salvage_btn.mouse_entered.connect(func() -> void:
+		if command_tooltip == null or not is_instance_valid(captured_b_salv):
+			return
+		if not captured_b_salv.can_salvage():
+			command_tooltip.show_tooltip("Salvage Unavailable", "", "Protected Core", "Cannot salvage last Nexus Vat.")
+		elif captured_b_salv.is_salvaging:
+			command_tooltip.show_tooltip("Cancel Salvage", "LMB", "Stops Decommission", "Halts the active 4.0s decommission countdown and keeps this structure online.")
+		else:
+			command_tooltip.show_tooltip(
+				"Salvage %s" % captured_b_salv.display_name,
+				"LMB",
+				"4.0s Countdown  •  50%% Refund: %s" % captured_b_salv.get_refund_label(0.50),
+				"Decommissions this structure after 4.0s (click again to cancel), refunding 50% of resources, ejecting Engineers, and freeing Bandwidth."
+			)
+	)
+	salvage_btn.mouse_exited.connect(func() -> void:
+		if command_tooltip != null:
+			command_tooltip.hide_tooltip()
+	)
+	ability_row.add_child(salvage_btn)
+	_building_action_buttons.append({
+		"kind": "salvage",
+		"button": salvage_btn,
+	})
+
 	ability_row.visible = has_buttons
 	_refresh_building_action_buttons(building)
 
@@ -819,6 +880,21 @@ func _refresh_building_action_buttons(building: Building) -> void:
 				btn.text = "%s (%s)" % [short_upg, upg.get_cost_label()]
 				btn.disabled = false
 				btn.modulate = Color(1.0, 0.86, 0.42, 1.0) if can_res else Color(0.62, 0.60, 0.54, 0.68)
+		elif kind == "salvage":
+			var can_s: bool = building.can_salvage()
+			if building.is_salvaging:
+				var rem_s: float = maxf(0.0, Building.SALVAGE_DURATION - building.salvage_elapsed)
+				btn.text = "[X] Cancel Salvage (%.1fs)" % rem_s
+				btn.disabled = false
+				btn.modulate = Color(1.0, 0.78, 0.24, 1.0)
+			elif not can_s:
+				btn.text = "[X] Salvage (Locked)"
+				btn.disabled = true
+				btn.modulate = Color(0.56, 0.58, 0.62, 0.58)
+			else:
+				btn.text = "[X] Salvage (50%)"
+				btn.disabled = false
+				btn.modulate = Color(1.0, 0.58, 0.36, 0.94)
 
 
 func _on_inspected_entity_updated(_arg1: Variant = null, _arg2: Variant = null, _arg3: Variant = null) -> void:
@@ -868,6 +944,13 @@ func _connect_inspected_signals(entity: Node) -> void:
 			u.status_changed.connect(_on_inspected_entity_updated)
 		if not u.died.is_connected(_on_inspected_entity_removed):
 			u.died.connect(_on_inspected_entity_removed)
+	elif entity.is_in_group("destructible_barricades"):
+		if entity.has_signal("health_changed") and not entity.is_connected("health_changed", _on_inspected_entity_updated):
+			entity.connect("health_changed", _on_inspected_entity_updated)
+		if entity.has_signal("status_changed") and not entity.is_connected("status_changed", _on_inspected_entity_updated):
+			entity.connect("status_changed", _on_inspected_entity_updated)
+		if entity.has_signal("destroyed") and not entity.is_connected("destroyed", _on_inspected_entity_removed):
+			entity.connect("destroyed", _on_inspected_entity_removed)
 
 
 func _disconnect_inspected_signals() -> void:
@@ -897,6 +980,13 @@ func _disconnect_inspected_signals() -> void:
 			u.status_changed.disconnect(_on_inspected_entity_updated)
 		if u.died.is_connected(_on_inspected_entity_removed):
 			u.died.disconnect(_on_inspected_entity_removed)
+	elif _inspected_entity.is_in_group("destructible_barricades"):
+		if _inspected_entity.has_signal("health_changed") and _inspected_entity.is_connected("health_changed", _on_inspected_entity_updated):
+			_inspected_entity.disconnect("health_changed", _on_inspected_entity_updated)
+		if _inspected_entity.has_signal("status_changed") and _inspected_entity.is_connected("status_changed", _on_inspected_entity_updated):
+			_inspected_entity.disconnect("status_changed", _on_inspected_entity_updated)
+		if _inspected_entity.has_signal("destroyed") and _inspected_entity.is_connected("destroyed", _on_inspected_entity_removed):
+			_inspected_entity.disconnect("destroyed", _on_inspected_entity_removed)
 
 
 func _on_ability_targeting_changed(active_ability: AbilityData) -> void:
