@@ -1,4 +1,4 @@
-[gd_scene load_steps=26 format=3]
+[gd_scene load_steps=27 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
 [ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
@@ -24,6 +24,7 @@
 [ext_resource type="Script" path="res://ui/overlays/command_queue_overlay.gd" id="23_cmd_queue_overlay"]
 [ext_resource type="Script" path="res://scripts/world/arena_nav_region.gd" id="24_arena_nav"]
 [ext_resource type="PackedScene" path="res://ui/hud/production_ticker.tscn" id="25_prod_ticker"]
+[ext_resource type="Script" path="res://ui/overlays/battle_scars_overlay.gd" id="26_battle_scars"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_arena"]
 vertices = PackedVector2Array(-640, -360, 640, -360, 640, 360, -640, 360)
@@ -60,6 +61,10 @@ points = PackedVector2Array(-640, -360, 640, -360, 640, 360, -640, 360)
 closed = true
 width = 3.0
 default_color = Color(0.24, 0.56, 0.62, 0.7)
+
+[node name="BattleScarsOverlay" type="Node2D" parent="."]
+z_index = -6
+script = ExtResource("26_battle_scars")
 
 [node name="Objectives" type="Node2D" parent="."]
 

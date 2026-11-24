@@ -2,8 +2,10 @@ class_name Unit
 extends CharacterBody2D
 
 enum Team {
-	PLAYER,
-	ENEMY,
+	PLAYER = 0,
+	ENEMY = 1,
+	TEAM_3 = 2,
+	TEAM_4 = 3,
 }
 
 enum CommandState {
@@ -75,6 +77,7 @@ signal stance_changed(unit: Unit, new_stance: Stance)
 @onready var gather_bar_fill: ColorRect = get_node_or_null("GatherBar/Fill") as ColorRect
 
 var is_selected: bool = false
+var is_marquee_highlighted: bool = false
 var is_dead: bool = false
 var is_staffed: bool = false
 var current_hp: float = 100.0
@@ -218,9 +221,26 @@ func set_selected(selected: bool) -> void:
 	is_selected = selected
 	if is_node_ready():
 		selection_ring.visible = is_selected
+		if _entity_visuals != null and is_instance_valid(_entity_visuals):
+			_entity_visuals.queue_redraw()
 		_update_health_bar()
 		queue_redraw()
 	selection_changed.emit(self, is_selected)
+
+
+func set_marquee_highlighted(active: bool) -> void:
+	if is_marquee_highlighted == active:
+		return
+	is_marquee_highlighted = active
+	if _entity_visuals != null and is_instance_valid(_entity_visuals):
+		_entity_visuals.queue_redraw()
+	queue_redraw()
+
+
+func get_selection_radius() -> float:
+	if data != null:
+		return maxf(data.selection_radius, data.collision_radius + 4.0)
+	return 20.0
 
 
 func contains_point(world_point: Vector2) -> bool:
@@ -1180,21 +1200,27 @@ func _die() -> void:
 				get_parent().add_child(core)
 				if core.has_method("configure_payload"):
 					core.call("configure_payload", data.salvage_silica, data.salvage_compute, data.display_name)
-	if get_parent() != null and (team == Team.PLAYER or visible):
-		var uid: StringName = get_unit_type_id()
-		var is_heavy: bool = (uid == &"goliath_frame" or uid == &"arc_lancer" or uid == &"chrysalis_mortar")
-		var burst_r: float = (data.collision_radius * 1.15) if data != null else 18.0
-		var burst_col: Color = Color(0.34, 0.98, 0.88, 1.0) if team == Team.PLAYER else Color(1.0, 0.42, 0.28, 1.0)
-		if uid == &"chrysalis_mortar" and team == Team.PLAYER:
-			burst_col = Color(0.46, 1.0, 0.56, 1.0)
-		elif uid == &"lance_rig" and team == Team.PLAYER:
-			burst_col = Color(1.0, 0.80, 0.34, 1.0)
+	var uid: StringName = get_unit_type_id()
+	var is_heavy: bool = (uid == &"goliath_frame" or uid == &"arc_lancer" or uid == &"chrysalis_mortar")
+	var burst_r: float = (data.collision_radius * 1.15) if data != null else 18.0
+	var burst_col: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else (Color(0.34, 0.98, 0.88, 1.0) if team == Team.PLAYER else Color(1.0, 0.42, 0.28, 1.0))
+	if uid == &"chrysalis_mortar" and team == Team.PLAYER:
+		burst_col = Color(0.46, 1.0, 0.56, 1.0)
+	elif uid == &"lance_rig" and team == Team.PLAYER:
+		burst_col = Color(1.0, 0.80, 0.34, 1.0)
+	if is_heavy and is_inside_tree():
+		var scars: Node = get_tree().get_first_node_in_group("battle_scars")
+		if scars != null and scars.has_method("add_scar"):
+			scars.call("add_scar", &"wreck_splatter", global_position, maxf(24.0, burst_r * 1.15), burst_col)
+	var viewer_t: int = TeamManager.get_local_human_team() if TeamManager != null else int(Team.PLAYER)
+	var is_friendly_view: bool = viewer_t < 0 or (TeamManager.are_allies(viewer_t, int(team)) if TeamManager != null else (team == Team.PLAYER))
+	if get_parent() != null and (is_friendly_view or visible):
 		var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
 		fx.z_index = 53
 		get_parent().add_child(fx)
 		fx.call("setup_death_burst", global_position, burst_r, burst_col, is_heavy)
-	if AudioManager != null and (team == Team.PLAYER or visible):
-		AudioManager.play_sfx(&"entity_destroyed", -6.0, 0.08)
+	if AudioManager != null and (is_friendly_view or visible):
+		AudioManager.play_explosion_sfx(global_position, -6.0, false)
 	died.emit(self)
 	queue_free()
 
@@ -1803,10 +1829,13 @@ func get_armor_class_label() -> String:
 
 
 func get_inspection_data() -> Dictionary:
-	var is_enemy: bool = (team == Team.ENEMY)
-	var accent: Color = Color(1.0, 0.36, 0.26, 1.0) if is_enemy else Color(0.24, 0.92, 0.88, 1.0)
+	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Team.PLAYER)
+	var is_local_owned_unit: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Team.PLAYER)
+	var is_allied_ai: bool = (not is_local_owned_unit) and viewer_team >= 0 and TeamManager != null and TeamManager.are_allies(viewer_team, int(team))
+	var is_enemy: bool = (not is_local_owned_unit) and (not is_allied_ai)
+	var accent: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else (Color(1.0, 0.36, 0.26, 1.0) if is_enemy else Color(0.24, 0.92, 0.88, 1.0))
 	var class_tag: String = get_armor_class_label().to_upper()
-	var subtitle: String = ("HOSTILE %s" % class_tag) if is_enemy else ("FRIENDLY %s" % class_tag)
+	var subtitle: String = ("HOSTILE %s" % class_tag) if is_enemy else (("ALLIED %s" % class_tag) if is_allied_ai else ("FRIENDLY %s" % class_tag))
 
 	if not is_enemy and data != null:
 		if data.unit_type_id == &"scout_unit" or data.unit_type_id == &"stinger":

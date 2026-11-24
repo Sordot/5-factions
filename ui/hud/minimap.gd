@@ -84,6 +84,19 @@ func _on_tactical_alert_triggered(world_pos: Vector2, alert_type: StringName, _m
 		map_viewport.queue_redraw()
 
 
+func flash_ping(world_pos: Vector2, color: Color = Color(0.28, 0.96, 1.0, 1.0), duration: float = 1.8) -> void:
+	_alert_pings.append({
+		"world_pos": world_pos,
+		"color": color,
+		"age": 0.0,
+		"duration": maxf(0.6, duration),
+	})
+	while _alert_pings.size() > 8:
+		_alert_pings.pop_front()
+	if map_viewport != null:
+		map_viewport.queue_redraw()
+
+
 func _process(delta: float) -> void:
 	if _ping_timer > 0.0:
 		_ping_timer = maxf(0.0, _ping_timer - delta)
@@ -110,6 +123,24 @@ func _process(delta: float) -> void:
 func _on_fog_updated() -> void:
 	if map_viewport != null:
 		map_viewport.queue_redraw()
+
+
+func _input(event: InputEvent) -> void:
+	if not _is_left_dragging or map_viewport == null:
+		return
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event
+		if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
+			_is_left_dragging = false
+			return
+	elif event is InputEventMouseMotion:
+		var local_pos: Vector2 = map_viewport.get_local_mouse_position()
+		var clamped_pos: Vector2 = Vector2(
+			clampf(local_pos.x, 0.0, map_viewport.size.x),
+			clampf(local_pos.y, 0.0, map_viewport.size.y)
+		)
+		_move_camera_to_minimap_point(clamped_pos)
+		get_viewport().set_input_as_handled()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -178,6 +209,8 @@ func _on_map_viewport_gui_input(event: InputEvent) -> void:
 					_ping_timer = 0.45
 					map_viewport.queue_redraw()
 					map_viewport.accept_event()
+					return
+				if _selection_controller != null and _selection_controller.active_targeting_ability != null:
 					return
 				_is_left_dragging = true
 				_move_camera_to_minimap_point(mb.position)
@@ -335,10 +368,8 @@ func _on_map_viewport_draw() -> void:
 		if live_vis:
 			if uplink.is_contested:
 				u_col = Color(1.0, 0.80, 0.24, 1.0)
-			elif uplink.controlling_team == int(Unit.Team.PLAYER):
-				u_col = Color(0.18, 0.98, 0.90, 1.0)
-			elif uplink.controlling_team == int(Unit.Team.ENEMY):
-				u_col = Color(1.0, 0.34, 0.28, 1.0)
+			elif uplink.controlling_team >= 0:
+				u_col = TeamManager.get_team_color(uplink.controlling_team) if TeamManager != null else (Color(0.18, 0.98, 0.90, 1.0) if uplink.controlling_team == int(Unit.Team.PLAYER) else Color(1.0, 0.34, 0.28, 1.0))
 		var scale_x: float = rect.size.x / maxf(1.0, arena_bounds.size.x)
 		map_viewport.draw_arc(up, maxf(6.5, uplink.capture_radius * scale_x), 0.0, TAU, 24, Color(u_col.r, u_col.g, u_col.b, 0.55 + pulse * 0.25), 1.2)
 		map_viewport.draw_arc(up, lerpf(4.2, 8.2, pulse), 0.0, TAU, 16, Color(u_col.r, u_col.g, u_col.b, (1.0 - pulse) * 0.72), 1.1)

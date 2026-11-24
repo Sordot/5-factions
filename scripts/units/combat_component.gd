@@ -342,7 +342,7 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 	var pierce_width: float = owner_unit.data.line_pierce_width
 
 	if AudioManager != null and _is_pos_audible(owner_unit, tracer_origin, tracer_end):
-		AudioManager.play_weapon_for_unit(unit_id)
+		AudioManager.play_weapon_for_unit(unit_id, owner_unit.global_position)
 		if AudioManager.has_method("notify_combat_activity"):
 			AudioManager.call("notify_combat_activity", 0.35)
 

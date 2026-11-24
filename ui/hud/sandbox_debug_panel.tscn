@@ -15,224 +15,243 @@ theme = ExtResource("2_theme")
 script = ExtResource("1_panel_script")
 
 [node name="MarginContainer" type="MarginContainer" parent="."]
+unique_name_in_owner = true
 layout_mode = 0
-offset_right = 790.0
-offset_bottom = 208.0
 mouse_filter = 2
 theme_override_constants/margin_left = 12
 theme_override_constants/margin_top = 12
 
 [node name="PanelContainer" type="PanelContainer" parent="MarginContainer"]
+unique_name_in_owner = true
 layout_mode = 2
 
 [node name="VBox" type="VBoxContainer" parent="MarginContainer/PanelContainer"]
 layout_mode = 2
 theme_override_constants/separation = 3
 
-[node name="StatusLabel" type="Label" parent="MarginContainer/PanelContainer/VBox"]
+[node name="HeaderRow" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="StatusLabel" type="Label" parent="MarginContainer/PanelContainer/VBox/HeaderRow"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.86, 0.96, 1, 1)
 theme_override_font_sizes/font_size = 12
 text = "Units: 3 (Selected: 0)  |  Hostiles: 1"
 
-[node name="GroupsLabel" type="Label" parent="MarginContainer/PanelContainer/VBox"]
+[node name="BtnCollapse" type="Button" parent="MarginContainer/PanelContainer/VBox/HeaderRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(28, 22)
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Minimize / Expand Debug HUD"
+theme_override_font_sizes/font_size = 11
+text = "–"
+
+[node name="BodyVBox" type="VBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="GroupsLabel" type="Label" parent="MarginContainer/PanelContainer/VBox/BodyVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.56, 0.78, 0.86, 0.92)
 theme_override_font_sizes/font_size = 11
 text = "Control Groups: None (Ctrl=Set, Shift=Add, Alt=Steal + 1-9)"
 
-[node name="ButtonRow" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
+[node name="ButtonRow" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox/BodyVBox"]
 layout_mode = 2
 theme_override_constants/separation = 5
 
-[node name="BtnUnit1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
+[node name="BtnUnit1" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+1 Clone"
 
-[node name="BtnUnit5" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
+[node name="BtnUnit5" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+5 Clones"
 
-[node name="BtnScout1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
+[node name="BtnScout1" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+1 Stinger"
 
-[node name="BtnWorker1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
+[node name="BtnWorker1" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+1 Worker"
 
-[node name="BtnToggleAggroAI" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
+[node name="BtnToggleAggroAI" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Aggro AI: ON (F10)"
 
-[node name="ButtonRowEcon" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
+[node name="ButtonRowEcon" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox/BodyVBox"]
 layout_mode = 2
 theme_override_constants/separation = 5
 
-[node name="BtnHarvester1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
+[node name="BtnHarvester1" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRowEcon"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+1 Harv"
 
-[node name="BtnEngineer1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
+[node name="BtnEngineer1" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRowEcon"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+1 Eng"
 
-[node name="BtnGrantRes" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
+[node name="BtnGrantRes" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRowEcon"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+300B/200S/100C"
 
-[node name="BtnToggleEdgePan" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
+[node name="BtnToggleEdgePan" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRowEcon"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Edge Pan: ON (F12)"
 
-[node name="BtnToggleFullscreen" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
+[node name="BtnToggleFullscreen" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRowEcon"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Fullscreen: OFF (F11)"
 
-[node name="ButtonRow2" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
+[node name="ButtonRow2" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox/BodyVBox"]
 layout_mode = 2
 theme_override_constants/separation = 5
 
-[node name="BtnDummy1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow2"]
+[node name="BtnDummy1" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRow2"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+1 Dummy"
 
-[node name="BtnDummy3" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow2"]
+[node name="BtnDummy3" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRow2"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+3 Dum"
 
-[node name="BtnEnemy1" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow2"]
+[node name="BtnEnemy1" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRow2"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+1 Trooper (F9)"
 
-[node name="BtnClearDummies" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow2"]
+[node name="BtnClearDummies" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRow2"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Clear Hostiles"
 
-[node name="BtnReset" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow2"]
+[node name="BtnReset" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRow2"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Reset (Ctrl+F10)"
 
-[node name="BtnMainMenu" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow2"]
+[node name="BtnMainMenu" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/ButtonRow2"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Main Menu"
 
-[node name="GenesisRosterRow" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
+[node name="GenesisRosterRow" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox/BodyVBox"]
 layout_mode = 2
 theme_override_constants/separation = 5
 
-[node name="BtnSpawnTeam" type="Button" parent="MarginContainer/PanelContainer/VBox/GenesisRosterRow"]
+[node name="BtnSpawnTeam" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/GenesisRosterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Team: PLAYER"
 
-[node name="UnitCatalogOption" type="OptionButton" parent="MarginContainer/PanelContainer/VBox/GenesisRosterRow"]
+[node name="UnitCatalogOption" type="OptionButton" parent="MarginContainer/PanelContainer/VBox/BodyVBox/GenesisRosterRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(142, 0)
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 
-[node name="BtnSpawnCatalogUnit" type="Button" parent="MarginContainer/PanelContainer/VBox/GenesisRosterRow"]
+[node name="BtnSpawnCatalogUnit" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/GenesisRosterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+Unit"
 
-[node name="BuildingCatalogOption" type="OptionButton" parent="MarginContainer/PanelContainer/VBox/GenesisRosterRow"]
+[node name="BuildingCatalogOption" type="OptionButton" parent="MarginContainer/PanelContainer/VBox/BodyVBox/GenesisRosterRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(150, 0)
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 
-[node name="BtnSpawnCatalogBuilding" type="Button" parent="MarginContainer/PanelContainer/VBox/GenesisRosterRow"]
+[node name="BtnSpawnCatalogBuilding" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/GenesisRosterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+Structure"
 
-[node name="BtnSpawnTurret" type="Button" parent="MarginContainer/PanelContainer/VBox/GenesisRosterRow"]
+[node name="BtnSpawnTurret" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/GenesisRosterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+Sentry Pylon"
 
-[node name="BtnToggleCombatLab" type="Button" parent="MarginContainer/PanelContainer/VBox/GenesisRosterRow"]
+[node name="BtnToggleCombatLab" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/GenesisRosterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Combat Lab ▸"
 
-[node name="CombatLabRow" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
+[node name="CombatLabRow" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox/BodyVBox"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 5
 
-[node name="CombatLabLabel" type="Label" parent="MarginContainer/PanelContainer/VBox/CombatLabRow"]
+[node name="CombatLabLabel" type="Label" parent="MarginContainer/PanelContainer/VBox/BodyVBox/CombatLabRow"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.36, 0.96, 0.9, 0.95)
 theme_override_font_sizes/font_size = 11
 text = "COMBAT LAB:"
 
-[node name="CombatLabPresetOption" type="OptionButton" parent="MarginContainer/PanelContainer/VBox/CombatLabRow"]
+[node name="CombatLabPresetOption" type="OptionButton" parent="MarginContainer/PanelContainer/VBox/BodyVBox/CombatLabRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(310, 0)
 layout_mode = 2
@@ -240,21 +259,21 @@ size_flags_horizontal = 3
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 
-[node name="BtnLabSpawnFight" type="Button" parent="MarginContainer/PanelContainer/VBox/CombatLabRow"]
+[node name="BtnLabSpawnFight" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/CombatLabRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Spawn & Fight"
 
-[node name="BtnLabClear" type="Button" parent="MarginContainer/PanelContainer/VBox/CombatLabRow"]
+[node name="BtnLabClear" type="Button" parent="MarginContainer/PanelContainer/VBox/BodyVBox/CombatLabRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Clear Combatants"
 
-[node name="ControlsLabel" type="Label" parent="MarginContainer/PanelContainer/VBox"]
+[node name="ControlsLabel" type="Label" parent="MarginContainer/PanelContainer/VBox/BodyVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.56, 0.72, 0.8, 0.85)
 theme_override_font_sizes/font_size = 10

@@ -20,7 +20,7 @@ signal idle_workers_updated(count: int)
 signal army_count_updated(count: int)
 signal hud_toast_requested(message: String)
 
-@export var drag_threshold: float = 8.0
+@export var drag_threshold: float = 4.0
 @export var camera_path: NodePath
 @export var buildable_bounds: Rect2 = Rect2(-640.0, -360.0, 1280.0, 720.0)
 
@@ -46,8 +46,10 @@ var idle_worker_count: int = 0
 var army_unit_count: int = 0
 
 var _is_dragging: bool = false
+var _drag_box_active: bool = false
 var _drag_start_world: Vector2 = Vector2.ZERO
 var _drag_start_screen: Vector2 = Vector2.ZERO
+var _marquee_preview_entities: Array[Node] = []
 var _last_recall_group: int = -1
 var _last_recall_time_ms: int = 0
 var _last_army_select_ms: int = 0
@@ -98,6 +100,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	_clear_marquee_preview()
 	if SettingsManager != null and SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.disconnect(_on_settings_changed)
 	_clear_custom_cursor()
@@ -110,8 +113,17 @@ func _on_settings_changed(category: StringName) -> void:
 		if is_attack_move_targeting:
 			cancel_attack_move_targeting()
 			_clear_custom_cursor()
-	if _is_dragging and selection_box != null:
-		selection_box.queue_redraw()
+	if _is_dragging and _drag_box_active:
+		if selection_box != null:
+			selection_box.queue_redraw()
+		var rect: Rect2 = _build_world_rect(_drag_start_world, get_global_mouse_position())
+		_update_marquee_preview(rect)
+		for ent: Node in _marquee_preview_entities:
+			if is_instance_valid(ent) and ent is CanvasItem:
+				(ent as CanvasItem).queue_redraw()
+				var ev: Node = ent.get_node_or_null("BodyVisual/EntityVisuals")
+				if ev is CanvasItem:
+					(ev as CanvasItem).queue_redraw()
 
 
 func _process(delta: float) -> void:
@@ -119,6 +131,9 @@ func _process(delta: float) -> void:
 	if _idle_refresh_timer >= 0.15:
 		_idle_refresh_timer = 0.0
 		_refresh_idle_workers(false)
+
+	if _is_dragging:
+		_update_active_drag_marquee()
 
 	if _amove_preview_timer > 0.0:
 		_amove_preview_timer = maxf(0.0, _amove_preview_timer - delta)
@@ -160,7 +175,7 @@ func _process(delta: float) -> void:
 		if ability_reticle != null:
 			ability_reticle.clear_targeting()
 		if build_ghost_preview != null:
-			var eval: Dictionary = command_router.evaluate_build_placement(active_targeting_ability.building_to_build, cursor_world)
+			var eval: Dictionary = command_router.evaluate_build_placement(active_targeting_ability.building_to_build, cursor_world, _get_local_human_team_enum())
 			build_ghost_preview.set_preview(
 				active_targeting_ability.building_to_build,
 				eval["pos"],
@@ -182,8 +197,37 @@ func _process(delta: float) -> void:
 			cancel_ability_targeting()
 
 
+func _input(event: InputEvent) -> void:
+	if not _is_dragging:
+		return
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event
+		if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
+			var was_box: bool = _drag_box_active
+			_finish_left_selection(
+				mb.position,
+				mb.shift_pressed or Input.is_key_pressed(KEY_SHIFT),
+				_click_was_double_click,
+				_click_ctrl_pressed or mb.ctrl_pressed
+			)
+			if was_box:
+				get_viewport().set_input_as_handled()
+			return
+		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed and _drag_box_active:
+			_cancel_drag_box()
+			get_viewport().set_input_as_handled()
+			return
+	elif event.is_action_pressed("cmd_cancel") and _drag_box_active:
+		_cancel_drag_box()
+		get_viewport().set_input_as_handled()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("cmd_cancel"):
+		if _is_dragging:
+			_cancel_drag_box()
+			get_viewport().set_input_as_handled()
+			return
 		if active_targeting_ability != null:
 			cancel_ability_targeting()
 			get_viewport().set_input_as_handled()
@@ -347,6 +391,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					get_viewport().set_input_as_handled()
 					return
 				_is_dragging = true
+				_drag_box_active = false
 				_drag_start_world = get_global_mouse_position()
 				_drag_start_screen = mouse_event.position
 				_click_was_double_click = mouse_event.double_click
@@ -359,6 +404,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					_click_ctrl_pressed or mouse_event.ctrl_pressed
 				)
 		elif mouse_event.button_index == MOUSE_BUTTON_RIGHT and mouse_event.pressed:
+			if _is_dragging:
+				_cancel_drag_box()
+				get_viewport().set_input_as_handled()
+				return
 			if active_targeting_ability != null:
 				cancel_ability_targeting()
 				get_viewport().set_input_as_handled()
@@ -374,10 +423,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			var shift_order: bool = mouse_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT)
 			issue_right_click_at(get_global_mouse_position(), shift_order)
 	elif event is InputEventMouseMotion and _is_dragging:
-		var motion_event: InputEventMouseMotion = event
-		if motion_event.position.distance_to(_drag_start_screen) >= drag_threshold:
-			var rect: Rect2 = _build_world_rect(_drag_start_world, get_global_mouse_position())
-			selection_box.update_box(rect, true)
+		_update_active_drag_marquee()
 
 
 func clear_selection() -> void:
@@ -445,6 +491,7 @@ func cycle_subgroup() -> void:
 		return
 	cancel_ability_targeting()
 	active_subgroup_index = (active_subgroup_index + 1) % subgroups.size()
+	_play_active_subgroup_bark()
 	selection_changed.emit(selected_units, subgroups, active_subgroup_index)
 
 
@@ -453,7 +500,20 @@ func set_active_subgroup(index: int) -> void:
 		return
 	cancel_ability_targeting()
 	active_subgroup_index = index
+	_play_active_subgroup_bark()
 	selection_changed.emit(selected_units, subgroups, active_subgroup_index)
+
+
+func _play_active_subgroup_bark() -> void:
+	if AudioManager == null or subgroups.is_empty():
+		return
+	var active_units: Array[Unit] = get_active_subgroup_units()
+	if active_units.is_empty():
+		return
+	var lead: Unit = active_units[0]
+	if is_instance_valid(lead) and not lead.is_dead:
+		var cls: StringName = AudioManager.classify_unit_bark_class(lead.get_unit_type_id())
+		AudioManager.play_selection_audio(active_units, cls)
 
 
 func get_active_subgroup() -> Dictionary:
@@ -490,16 +550,17 @@ func request_ability_slot(ability: AbilityData, shift_queued: bool = false) -> b
 	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
 		if ability.building_to_build == null:
 			return false
+		var local_t: Unit.Team = _get_local_human_team_enum()
 		var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 		if ability.building_to_build.required_building_id != &"":
-			if econ == null or not econ.has_constructed_building(Unit.Team.PLAYER, ability.building_to_build.required_building_id):
+			if econ == null or not econ.has_constructed_building(local_t, ability.building_to_build.required_building_id):
 				if AudioManager != null:
 					AudioManager.play_error()
 				return false
-		if econ != null and not econ.can_afford(Unit.Team.PLAYER, ability.building_to_build.get_cost_dict()):
-			var missing: StringName = econ.find_missing_resource(Unit.Team.PLAYER, ability.building_to_build.get_cost_dict(), 0)
+		if econ != null and not econ.can_afford(local_t, ability.building_to_build.get_cost_dict()):
+			var missing: StringName = econ.find_missing_resource(local_t, ability.building_to_build.get_cost_dict(), 0)
 			if missing != &"":
-				econ.notify_insufficient(Unit.Team.PLAYER, missing)
+				econ.notify_insufficient(local_t, missing)
 			return false
 		if command_router.find_closest_builder(subgroup_units, get_global_mouse_position()) == null:
 			return false
@@ -542,13 +603,13 @@ func confirm_ability_target_at(world_pos: Vector2, shift_queued: bool = false) -
 			var keep_placing: bool = false
 			if shift_queued and ability.building_to_build != null:
 				var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
-				keep_placing = (econ == null or econ.can_afford(Unit.Team.PLAYER, ability.building_to_build.get_cost_dict()))
+				keep_placing = (econ == null or econ.can_afford(_get_local_human_team_enum(), ability.building_to_build.get_cost_dict()))
 			if not keep_placing:
 				cancel_ability_targeting()
 		return placed
 
 	var subgroup_units: Array[Unit] = get_active_subgroup_units()
-	var target_enemy: Unit = command_router.find_unit_at_point(world_pos, Unit.Team.ENEMY)
+	var target_enemy: Unit = command_router.find_hostile_unit_at_point(world_pos, int(_get_local_human_team_enum()))
 	if ability.target_type == AbilityData.TargetType.UNIT_TARGET and target_enemy == null:
 		return false
 
@@ -1131,16 +1192,23 @@ func _get_control_group_key(key_event: InputEventKey) -> int:
 	return 0
 
 
+func _get_local_human_team_enum() -> Unit.Team:
+	if TeamManager != null and TeamManager.get_local_human_team() >= 0:
+		return TeamManager.get_local_human_team() as Unit.Team
+	return Unit.Team.PLAYER
+
+
 func _get_pruned_group(group_num: int) -> Array[Unit]:
 	var valid: Array[Unit] = []
 	if not control_groups.has(group_num):
 		return valid
+	var local_t: Unit.Team = _get_local_human_team_enum()
 	var raw: Variant = control_groups[group_num]
 	if raw is Array:
 		for item: Variant in raw:
 			if is_instance_valid(item) and item is Unit:
 				var unit: Unit = item
-				if not unit.is_dead and not unit.is_staffed and unit.team == Unit.Team.PLAYER:
+				if not unit.is_dead and not unit.is_staffed and unit.team == local_t:
 					valid.append(unit)
 	return valid
 
@@ -1149,12 +1217,13 @@ func _get_pruned_building_group(group_num: int) -> Array[Building]:
 	var valid: Array[Building] = []
 	if not control_groups.has(group_num):
 		return valid
+	var local_t: Unit.Team = _get_local_human_team_enum()
 	var raw: Variant = control_groups[group_num]
 	if raw is Array:
 		for item: Variant in raw:
 			if is_instance_valid(item) and item is Building:
 				var b: Building = item
-				if not b.is_destroyed and not b.is_queued_for_deletion() and b.team == Unit.Team.PLAYER:
+				if not b.is_destroyed and not b.is_queued_for_deletion() and b.team == local_t:
 					valid.append(b)
 	return valid
 
@@ -1193,13 +1262,122 @@ func _get_rts_camera() -> RTSCamera:
 	return null
 
 
-func _finish_left_selection(end_screen_pos: Vector2, shift_pressed: bool = false, is_double_click: bool = false, ctrl_pressed: bool = false) -> void:
+func _update_active_drag_marquee() -> void:
+	if not _is_dragging:
+		return
+	var cur_world: Vector2 = get_global_mouse_position()
+	var vp: Viewport = get_viewport()
+	var cur_screen: Vector2 = vp.get_mouse_position() if vp != null else _drag_start_screen
+	if not _drag_box_active:
+		if cur_screen.distance_to(_drag_start_screen) >= drag_threshold or cur_world.distance_to(_drag_start_world) >= drag_threshold:
+			_drag_box_active = true
+	if _drag_box_active:
+		var rect: Rect2 = _build_world_rect(_drag_start_world, cur_world)
+		if selection_box != null:
+			selection_box.update_box(rect, true)
+		_update_marquee_preview(rect)
+
+
+func _cancel_drag_box() -> void:
 	_is_dragging = false
+	_drag_box_active = false
 	_click_was_double_click = false
 	_click_ctrl_pressed = false
-	selection_box.update_box(Rect2(), false)
+	if selection_box != null:
+		selection_box.update_box(Rect2(), false)
+	_clear_marquee_preview()
+
+
+func _circle_intersects_rect(center: Vector2, radius: float, rect: Rect2) -> bool:
+	var clamped: Vector2 = Vector2(
+		clampf(center.x, rect.position.x, rect.end.x),
+		clampf(center.y, rect.position.y, rect.end.y)
+	)
+	return center.distance_squared_to(clamped) <= radius * radius
+
+
+func _collect_box_selection_candidates(world_rect: Rect2) -> Dictionary:
+	var local_t: Unit.Team = _get_local_human_team_enum()
+	var all_unit_hits: Array[Unit] = []
+	var combat_hits: Array[Unit] = []
+	var utility_hits: Array[Unit] = []
+	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
+		if not (node is Unit):
+			continue
+		var unit: Unit = node
+		if not is_instance_valid(unit) or unit.is_dead or unit.is_staffed or unit.team != local_t:
+			continue
+		if _circle_intersects_rect(unit.global_position, unit.get_selection_radius(), world_rect):
+			all_unit_hits.append(unit)
+			if _is_utility_unit(unit):
+				utility_hits.append(unit)
+			else:
+				combat_hits.append(unit)
+
+	var smart_box_enabled: bool = SettingsManager != null and SettingsManager.smart_box_select_enabled
+	var unit_hits: Array[Unit] = all_unit_hits
+	if smart_box_enabled:
+		unit_hits = combat_hits if not combat_hits.is_empty() else utility_hits
+
+	var b_hits: Array[Building] = []
+	if unit_hits.is_empty():
+		for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
+			if not (node is Building) or not is_instance_valid(node):
+				continue
+			var b: Building = node
+			if b.is_destroyed or b.team != local_t:
+				continue
+			if _circle_intersects_rect(b.global_position, b.footprint_radius * 0.75, world_rect):
+				b_hits.append(b)
+
+	return {
+		"units": unit_hits,
+		"combat_units": combat_hits,
+		"buildings": b_hits,
+		"smart_box_enabled": smart_box_enabled,
+	}
+
+
+func _update_marquee_preview(world_rect: Rect2) -> void:
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		_clear_marquee_preview()
+		return
+	var result: Dictionary = _collect_box_selection_candidates(world_rect)
+	var next_entities: Array[Node] = []
+	for u: Unit in (result["units"] as Array[Unit]):
+		next_entities.append(u)
+	if next_entities.is_empty():
+		for b: Building in (result["buildings"] as Array[Building]):
+			next_entities.append(b)
+
+	for prev: Node in _marquee_preview_entities:
+		if is_instance_valid(prev) and not next_entities.has(prev):
+			if prev.has_method("set_marquee_highlighted"):
+				prev.call("set_marquee_highlighted", false)
+	for cur: Node in next_entities:
+		if is_instance_valid(cur) and cur.has_method("set_marquee_highlighted"):
+			cur.call("set_marquee_highlighted", true)
+	_marquee_preview_entities = next_entities
+
+
+func _clear_marquee_preview() -> void:
+	for ent: Node in _marquee_preview_entities:
+		if is_instance_valid(ent) and ent.has_method("set_marquee_highlighted"):
+			ent.call("set_marquee_highlighted", false)
+	_marquee_preview_entities.clear()
+
+
+func _finish_left_selection(end_screen_pos: Vector2, shift_pressed: bool = false, is_double_click: bool = false, ctrl_pressed: bool = false) -> void:
+	var was_box_drag: bool = _drag_box_active
+	_is_dragging = false
+	_drag_box_active = false
+	_click_was_double_click = false
+	_click_ctrl_pressed = false
+	if selection_box != null:
+		selection_box.update_box(Rect2(), false)
+	_clear_marquee_preview()
 	var end_world_pos: Vector2 = get_global_mouse_position()
-	if end_screen_pos.distance_to(_drag_start_screen) < drag_threshold:
+	if not was_box_drag and end_screen_pos.distance_to(_drag_start_screen) < drag_threshold:
 		_select_at_point(end_world_pos, shift_pressed, is_double_click, ctrl_pressed)
 	else:
 		_select_in_rect(_build_world_rect(_drag_start_world, end_world_pos), shift_pressed)
@@ -1235,14 +1413,15 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 		_set_inspected_entity(null)
 		return
 
-	var clicked_player: Unit = command_router.find_unit_at_point(world_point, Unit.Team.PLAYER)
+	var local_t: Unit.Team = _get_local_human_team_enum()
+	var clicked_player: Unit = command_router.find_unit_at_point(world_point, local_t)
 	if clicked_player != null:
 		_set_selected_buildings([])
 		_set_inspected_entity(null)
 		var now_ms: int = Time.get_ticks_msec()
 		var rapid_second_click: bool = (_last_click_unit == clicked_player and (now_ms - _last_click_time_ms) <= DOUBLE_TAP_WINDOW_MS)
 		if is_double_click or ctrl_pressed or (not shift_pressed and rapid_second_click):
-			var same_type: Array[Unit] = _find_visible_units_of_type(clicked_player.get_unit_type_id(), Unit.Team.PLAYER)
+			var same_type: Array[Unit] = _find_visible_units_of_type(clicked_player.get_unit_type_id(), local_t)
 			_last_click_unit = null
 			_last_click_time_ms = 0
 			if shift_pressed and not selected_units.is_empty():
@@ -1271,13 +1450,13 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 	_last_click_unit = null
 	_last_click_time_ms = 0
 
-	var clicked_building: Building = command_router.find_building_at_point(world_point, Unit.Team.PLAYER)
+	var clicked_building: Building = command_router.find_building_at_point(world_point, local_t)
 	if clicked_building != null:
 		var now_b_ms: int = Time.get_ticks_msec()
 		var rapid_second_b: bool = (_last_click_building == clicked_building and (now_b_ms - _last_click_building_time_ms) <= DOUBLE_TAP_WINDOW_MS)
 		_set_selected_units([])
 		if is_double_click or ctrl_pressed or (not shift_pressed and rapid_second_b):
-			var same_b: Array[Building] = _find_visible_buildings_of_type(clicked_building.building_type_id, Unit.Team.PLAYER)
+			var same_b: Array[Building] = _find_visible_buildings_of_type(clicked_building.building_type_id, local_t)
 			_last_click_building = null
 			_last_click_building_time_ms = 0
 			_set_selected_buildings(same_b)
@@ -1354,27 +1533,10 @@ func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
 	_last_click_building = null
 	_last_click_time_ms = 0
 	_last_click_building_time_ms = 0
-	var all_unit_hits: Array[Unit] = []
-	var combat_hits: Array[Unit] = []
-	var utility_hits: Array[Unit] = []
-	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
-		if not (node is Unit):
-			continue
-		var unit: Unit = node
-		if not is_instance_valid(unit) or unit.is_dead or unit.is_staffed or unit.team != Unit.Team.PLAYER:
-			continue
-		if world_rect.has_point(unit.global_position):
-			all_unit_hits.append(unit)
-			if _is_utility_unit(unit):
-				utility_hits.append(unit)
-			else:
-				combat_hits.append(unit)
-
-	# Opt-in Combat-Only Box Select: defaults to selecting ALL friendly units inside the box.
-	var smart_box_enabled: bool = SettingsManager != null and SettingsManager.smart_box_select_enabled
-	var hits: Array[Unit] = all_unit_hits
-	if smart_box_enabled:
-		hits = combat_hits if not combat_hits.is_empty() else utility_hits
+	var candidates: Dictionary = _collect_box_selection_candidates(world_rect)
+	var hits: Array[Unit] = candidates["units"] as Array[Unit]
+	var combat_hits: Array[Unit] = candidates["combat_units"] as Array[Unit]
+	var smart_box_enabled: bool = bool(candidates["smart_box_enabled"])
 
 	if not hits.is_empty():
 		if shift_pressed:
@@ -1401,15 +1563,7 @@ func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
 		return
 
 	# If no player units are inside the box, allow box-selecting friendly buildings for multi-building production.
-	var b_hits: Array[Building] = []
-	for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
-		if not (node is Building) or not is_instance_valid(node):
-			continue
-		var b: Building = node
-		if b.is_destroyed or b.team != Unit.Team.PLAYER:
-			continue
-		if world_rect.has_point(b.global_position):
-			b_hits.append(b)
+	var b_hits: Array[Building] = candidates["buildings"] as Array[Building]
 
 	if not b_hits.is_empty():
 		if shift_pressed:
@@ -1458,10 +1612,11 @@ func _set_selected_buildings(buildings: Array[Building]) -> void:
 			prev.set_selected(false)
 
 	selected_buildings = []
+	var local_t: Unit.Team = _get_local_human_team_enum()
 	for item: Variant in buildings:
 		if is_instance_valid(item) and item is Building:
 			var b: Building = item
-			if not b.is_destroyed and b.team == Unit.Team.PLAYER and not selected_buildings.has(b):
+			if not b.is_destroyed and b.team == local_t and not selected_buildings.has(b):
 				selected_buildings.append(b)
 
 	if selected_buildings.is_empty():
@@ -1474,13 +1629,13 @@ func _set_selected_buildings(buildings: Array[Building]) -> void:
 		if not b.destroyed.is_connected(_on_selected_building_destroyed):
 			b.destroyed.connect(_on_selected_building_destroyed)
 
-	_set_inspected_entity(selected_buildings[0])
+	_set_inspected_entity(selected_buildings[0], false)
 	# Re-ensure every multi-selected building stays visibly selected after _set_inspected_entity.
 	for b: Building in selected_buildings:
 		if is_instance_valid(b):
 			b.set_selected(true)
 	if AudioManager != null:
-		AudioManager.play_sfx(&"unit_select", -5.0, 0.03)
+		AudioManager.play_selection_audio(selected_buildings)
 	buildings_selection_changed.emit(selected_buildings)
 
 
@@ -1497,8 +1652,9 @@ func queue_unit_distributed(unit_data: UnitData) -> bool:
 	if unit_data == null:
 		return false
 	var candidates: Array[Building] = []
+	var local_t: Unit.Team = _get_local_human_team_enum()
 	for b: Building in selected_buildings:
-		if is_instance_valid(b) and not b.is_destroyed and b.is_constructed and b.team == Unit.Team.PLAYER:
+		if is_instance_valid(b) and not b.is_destroyed and b.is_constructed and b.team == local_t:
 			if b.trainable_unit_data.has(unit_data):
 				candidates.append(b)
 	if candidates.is_empty() and selected_building != null and is_instance_valid(selected_building):
@@ -1558,7 +1714,7 @@ func _find_visible_units_of_type(type_id: StringName, target_team: Unit.Team) ->
 	return matches
 
 
-func _set_selected_units(new_selection: Array[Unit], reset_subgroup_index: bool = true) -> void:
+func _set_selected_units(new_selection: Array[Unit], reset_subgroup_index: bool = true, play_audio: bool = true) -> void:
 	for item: Variant in selected_units:
 		if is_instance_valid(item) and item is Unit:
 			var prev_unit: Unit = item
@@ -1567,10 +1723,11 @@ func _set_selected_units(new_selection: Array[Unit], reset_subgroup_index: bool 
 
 	_disconnect_death_trackers()
 	selected_units = []
+	var local_t: Unit.Team = _get_local_human_team_enum()
 	for item: Variant in new_selection:
 		if is_instance_valid(item) and item is Unit:
 			var unit: Unit = item
-			if not unit.is_dead and not unit.is_staffed and unit.team == Unit.Team.PLAYER:
+			if not unit.is_dead and not unit.is_staffed and unit.team == local_t:
 				selected_units.append(unit)
 				unit.set_selected(true)
 				if not unit.died.is_connected(_on_selected_unit_died):
@@ -1589,11 +1746,8 @@ func _set_selected_units(new_selection: Array[Unit], reset_subgroup_index: bool 
 		cancel_ability_targeting()
 		cancel_attack_move_targeting()
 		cancel_patrol_targeting()
-	elif AudioManager != null:
-		AudioManager.play_sfx(&"unit_select", -4.5, 0.04)
-		if not subgroups.is_empty() and AudioManager.has_method("play_unit_bark_for_units"):
-			var primary_units: Array[Unit] = subgroups[active_subgroup_index]["units"]
-			AudioManager.call("play_unit_bark_for_units", primary_units, &"select")
+	elif play_audio and AudioManager != null:
+		AudioManager.play_selection_audio(selected_units)
 
 	selection_updated.emit(selected_units.size())
 	selection_changed.emit(selected_units, subgroups, active_subgroup_index)
@@ -1620,7 +1774,7 @@ func _disconnect_death_trackers() -> void:
 	_tracked_death_units.clear()
 
 
-func _set_inspected_entity(entity: Node) -> void:
+func _set_inspected_entity(entity: Node, emit_audio: bool = true) -> void:
 	var next_entity: Node = null
 	if entity != null and is_instance_valid(entity):
 		if entity is Building and not (entity as Building).is_destroyed:
@@ -1700,6 +1854,9 @@ func _set_inspected_entity(entity: Node) -> void:
 			if inspected_entity.has_signal("expired") and not inspected_entity.is_connected("expired", _on_inspected_entity_removed):
 				inspected_entity.connect("expired", _on_inspected_entity_removed)
 
+	if emit_audio and inspected_entity != null and AudioManager != null:
+		AudioManager.play_selection_audio([inspected_entity])
+
 	if prev_building != selected_building:
 		building_selection_changed.emit(selected_building)
 	inspection_changed.emit(inspected_entity)
@@ -1725,20 +1882,21 @@ func _try_handle_ability_hotkey_event(event: InputEvent, action_name: StringName
 
 
 func _prune_invalid_units() -> void:
+	var local_t: Unit.Team = _get_local_human_team_enum()
 	var valid: Array[Unit] = []
 	for item: Variant in selected_units:
 		if is_instance_valid(item) and item is Unit:
 			var unit: Unit = item
-			if not unit.is_dead and not unit.is_staffed and unit.team == Unit.Team.PLAYER:
+			if not unit.is_dead and not unit.is_staffed and unit.team == local_t:
 				valid.append(unit)
 	if valid.size() != selected_units.size():
-		_set_selected_units(valid, false)
+		_set_selected_units(valid, false, false)
 	if not selected_buildings.is_empty():
 		var valid_b: Array[Building] = []
 		for item_b: Variant in selected_buildings:
 			if is_instance_valid(item_b) and item_b is Building:
 				var b: Building = item_b
-				if not b.is_destroyed and not b.is_queued_for_deletion() and b.team == Unit.Team.PLAYER:
+				if not b.is_destroyed and not b.is_queued_for_deletion() and b.team == local_t:
 					valid_b.append(b)
 		if valid_b.size() != selected_buildings.size():
 			_set_selected_buildings(valid_b)

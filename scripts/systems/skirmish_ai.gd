@@ -783,7 +783,12 @@ func _manage_attack_waves(core: Building) -> void:
 
 func _select_wave_target(wave_idx: int) -> Vector2:
 	var uplink: HyperUplink = get_tree().get_first_node_in_group("hyper_uplinks") as HyperUplink
-	if (wave_idx % 2) == 1 and uplink != null and uplink.controlling_team != int(ai_team):
+	var allied_controls_uplink: bool = (
+		uplink != null
+		and uplink.controlling_team >= 0
+		and (TeamManager.are_allies(int(ai_team), uplink.controlling_team) if TeamManager != null else (uplink.controlling_team == int(ai_team)))
+	)
+	if (wave_idx % 2) == 1 and uplink != null and not allied_controls_uplink:
 		return uplink.global_position
 
 	var player_core: Building = _find_opposing_command_core()
@@ -1034,13 +1039,20 @@ func _find_ai_command_core() -> Building:
 
 
 func _find_opposing_command_core() -> Building:
+	var my_core: Building = _find_ai_command_core()
+	var origin: Vector2 = my_core.global_position if my_core != null else Vector2.ZERO
+	var best: Building = null
+	var best_d_sq: float = INF
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if node is Building and is_instance_valid(node):
 			var b: Building = node
 			var is_enemy: bool = TeamManager.are_enemies(int(ai_team), int(b.team)) if TeamManager != null else (b.team != ai_team)
 			if not b.is_destroyed and is_enemy and (b.is_core_hub or b.building_type_id == &"nexus_vat"):
-				return b
-	return null
+				var d_sq: float = origin.distance_squared_to(b.global_position)
+				if d_sq < best_d_sq:
+					best_d_sq = d_sq
+					best = b
+	return best
 
 
 func _get_team_buildings(target_team: Unit.Team) -> Array[Building]:

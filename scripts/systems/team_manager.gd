@@ -156,46 +156,66 @@ func configure_from_game_config() -> void:
 		_setup_default_1v1()
 		return
 	var faction_id: StringName = GameConfig.selected_faction_id
-	if int(GameConfig.match_mode) == 1:
-		configure_match(&"ai_vs_ai", [
-			{
-				"team_id": 0,
-				"alliance_id": 0,
-				"faction_id": faction_id,
-				"controller_type": ControllerType.AI,
-				"display_name": "AI-01 (%s • %s)" % [GameConfig.get_difficulty_label(GameConfig.team0_ai_difficulty), GameConfig.get_playstyle_label(GameConfig.team0_ai_playstyle)],
-				"ai_difficulty": GameConfig.team0_ai_difficulty,
-				"ai_playstyle": GameConfig.team0_ai_playstyle,
-			},
-			{
-				"team_id": 1,
-				"alliance_id": 1,
-				"faction_id": faction_id,
-				"controller_type": ControllerType.AI,
-				"display_name": "AI-02 (%s • %s)" % [GameConfig.get_difficulty_label(GameConfig.team1_ai_difficulty), GameConfig.get_playstyle_label(GameConfig.team1_ai_playstyle)],
-				"ai_difficulty": GameConfig.team1_ai_difficulty,
-				"ai_playstyle": GameConfig.team1_ai_playstyle,
-			},
-		])
-	else:
-		configure_match(&"player_vs_ai", [
-			{
-				"team_id": 0,
-				"alliance_id": 0,
-				"faction_id": faction_id,
-				"controller_type": ControllerType.HUMAN,
-				"display_name": "PLAYER // %s" % String(faction_id).to_upper(),
-			},
-			{
-				"team_id": 1,
-				"alliance_id": 1,
-				"faction_id": faction_id,
-				"controller_type": ControllerType.AI,
-				"display_name": "AI (%s • %s)" % [GameConfig.get_difficulty_label(GameConfig.team1_ai_difficulty), GameConfig.get_playstyle_label(GameConfig.team1_ai_playstyle)],
-				"ai_difficulty": GameConfig.team1_ai_difficulty,
-				"ai_playstyle": GameConfig.team1_ai_playstyle,
-			},
-		])
+	var active_slots: Array[Dictionary] = GameConfig.get_active_slot_configs()
+	if active_slots.is_empty():
+		_setup_default_1v1()
+		return
+
+	var has_human: bool = false
+	for slot: Dictionary in active_slots:
+		if int(slot.get("controller_type", ControllerType.AI)) == ControllerType.HUMAN:
+			has_human = true
+			break
+
+	var mode: StringName = &"player_vs_ai" if has_human else &"ai_vs_ai"
+	var show_alliance: bool = active_slots.size() > 2
+	var built: Array = []
+	for slot: Dictionary in active_slots:
+		var tid: int = int(slot.get("team_id", 0))
+		var ally_id: int = int(slot.get("alliance_id", tid))
+		var ctrl_type: int = int(slot.get("controller_type", ControllerType.AI))
+		var diff: int = int(slot.get("ai_difficulty", 1))
+		var style: int = int(slot.get("ai_playstyle", 0))
+		var ally_tag: String = " [%s]" % GameConfig.get_alliance_letter(ally_id) if show_alliance else ""
+		var disp: String = ""
+		if ctrl_type == ControllerType.HUMAN:
+			disp = "PLAYER%s // %s" % [ally_tag, String(faction_id).to_upper()]
+		else:
+			disp = "AI-%02d%s (%s • %s)" % [
+				tid + 1,
+				ally_tag,
+				GameConfig.get_difficulty_label(diff),
+				GameConfig.get_playstyle_label(style),
+			]
+		built.append({
+			"team_id": tid,
+			"alliance_id": ally_id,
+			"faction_id": faction_id,
+			"controller_type": ctrl_type,
+			"display_name": disp,
+			"ai_difficulty": diff,
+			"ai_playstyle": style,
+		})
+	configure_match(mode, built)
+
+
+func get_alliance_letter(alliance_id: int) -> String:
+	if GameConfig != null and GameConfig.has_method("get_alliance_letter"):
+		return GameConfig.get_alliance_letter(alliance_id)
+	const LETTERS: Array = ["A", "B", "C", "D"]
+	return String(LETTERS[clampi(alliance_id, 0, LETTERS.size() - 1)])
+
+
+func get_team_short_label(team_id: int, include_alliance: bool = true) -> String:
+	if team_id == TEAM_NEUTRAL:
+		return "NEUTRAL"
+	var base: String = "P%d" % (team_id + 1)
+	if team_configs.has(team_id):
+		var ctrl: int = int((team_configs[team_id] as Dictionary).get("controller_type", ControllerType.AI))
+		base = ("P%d" % (team_id + 1)) if ctrl == ControllerType.HUMAN else ("AI-%d" % (team_id + 1))
+	if include_alliance and get_active_teams().size() > 2:
+		return "%s [%s]" % [base, get_alliance_letter(get_team_alliance(team_id))]
+	return base
 
 
 func get_active_teams() -> Array[int]:

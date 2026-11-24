@@ -8,6 +8,7 @@ const TECH_TREE_SCENE_PATH: String = "res://scenes/ui/tech_tree_overlay.tscn"
 @onready var btn_resume: Button = %BtnResume
 @onready var btn_settings: Button = %BtnSettings
 @onready var btn_tech_tree: Button = %BtnTechTree
+@onready var btn_toggle_debug_hud: Button = %BtnToggleDebugHud
 @onready var btn_restart: Button = %BtnRestart
 @onready var btn_main_menu: Button = %BtnMainMenu
 
@@ -27,10 +28,13 @@ func _ready() -> void:
 		btn_settings.pressed.connect(_open_settings)
 	if btn_tech_tree != null:
 		btn_tech_tree.pressed.connect(_open_tech_tree)
+	if btn_toggle_debug_hud != null:
+		btn_toggle_debug_hud.pressed.connect(_on_toggle_debug_hud_pressed)
 	if btn_restart != null:
 		btn_restart.pressed.connect(_restart_skirmish)
 	if btn_main_menu != null:
 		btn_main_menu.pressed.connect(_quit_to_main_menu)
+	call_deferred("_refresh_debug_hud_button")
 
 
 func is_pause_open() -> bool:
@@ -72,10 +76,38 @@ func open_pause() -> void:
 	Engine.time_scale = 1.0
 	if root_control != null:
 		root_control.visible = true
+	_refresh_debug_hud_button()
 	if is_inside_tree():
 		get_tree().paused = true
 	if SettingsManager != null:
 		SettingsManager.refresh_mouse_mode()
+
+
+func _refresh_debug_hud_button() -> void:
+	if btn_toggle_debug_hud == null or not is_inside_tree():
+		return
+	var panel: Node = get_tree().get_first_node_in_group("sandbox_debug_panel")
+	if panel == null or not is_instance_valid(panel):
+		btn_toggle_debug_hud.visible = false
+		return
+	btn_toggle_debug_hud.visible = true
+	var is_on: bool = bool(panel.call("is_panel_visible")) if panel.has_method("is_panel_visible") else bool(panel.get("visible"))
+	btn_toggle_debug_hud.text = "Sandbox / Debug HUD: ON" if is_on else "Sandbox / Debug HUD: OFF"
+	btn_toggle_debug_hud.modulate = Color(0.38, 1.0, 0.88, 1.0) if is_on else Color(0.84, 0.90, 0.96, 0.92)
+
+
+func _on_toggle_debug_hud_pressed() -> void:
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	if not is_inside_tree():
+		return
+	var panel: Node = get_tree().get_first_node_in_group("sandbox_debug_panel")
+	if panel != null and is_instance_valid(panel):
+		if panel.has_method("toggle_panel_visible"):
+			panel.call("toggle_panel_visible")
+		else:
+			panel.set("visible", not bool(panel.get("visible")))
+	_refresh_debug_hud_button()
 
 
 func close_pause() -> void:

@@ -4,12 +4,43 @@ signal mute_changed(is_muted: bool)
 signal volume_changed(volume_linear: float)
 
 const SAMPLE_RATE: int = 22050
-const POOL_SIZE: int = 16
-const UNIT_BARK_COOLDOWN_MS: int = 600
+const COMBAT_POOL_SIZE: int = 10
+const UI_POOL_SIZE: int = 8
+const BARK_SELECT_DEBOUNCE_MS: int = 120
+const BARK_ORDER_DEBOUNCE_MS: int = 450
+
+const AMB_BASE_CEILING_DB: float = -16.0
+const AMB_COMBAT_CEILING_DB: float = -14.0
+const AMB_UPLINK_CEILING_DB: float = -15.0
+const AMB_DUCK_TARGET_DB: float = -5.0
+const AMB_DUCK_ATTACK_DB_PER_S: float = 25.0 # 0.2s attack to -5 dB
+const AMB_DUCK_RELEASE_DB_PER_S: float = 4.2 # ~1.2s release from -5 dB
+
+const UNIT_CLASS_PRIORITY: Dictionary = {
+	&"heavy": 5,
+	&"counter": 4,
+	&"support": 3,
+	&"swarm": 2,
+	&"worker": 1,
+}
+
+const BUILDING_CLASS_PRIORITY: Dictionary = {
+	&"production": 5,
+	&"hub": 4,
+	&"tech": 3,
+	&"defense": 2,
+	&"utility": 1,
+}
 
 const UI_SFX_IDS: Array = [
 	&"ui_click",
 	&"unit_select",
+	&"inspect_tick",
+	&"bldg_select_production",
+	&"bldg_select_hub",
+	&"bldg_select_tech",
+	&"bldg_select_defense",
+	&"bldg_select_utility",
 	&"order_move",
 	&"order_attack",
 	&"order_gather",
@@ -31,41 +62,49 @@ var is_muted: bool = false
 var master_volume_linear: float = 0.72
 var sfx_volume_linear: float = 0.85
 var ui_volume_linear: float = 0.85
-var ambience_volume_linear: float = 0.55
+var ambience_volume_linear: float = 0.35
 
 var _unfocused_muted: bool = false
 var _streams: Dictionary = {}
-var _players: Array[AudioStreamPlayer] = []
-var _next_player_idx: int = 0
+var _combat_players: Array[AudioStreamPlayer] = []
+var _combat_start_ms: Array[int] = []
+var _ui_players: Array[AudioStreamPlayer] = []
+var _next_ui_idx: int = 0
+var _bark_player: AudioStreamPlayer = null
 var _last_play_ms: Dictionary = {}
-var _last_bark_ms: int = -9999
+var _last_bark_select_ms: int = -9999
+var _last_bark_order_ms: int = -9999
 var _amb_base_player: AudioStreamPlayer = null
 var _amb_combat_player: AudioStreamPlayer = null
 var _amb_uplink_player: AudioStreamPlayer = null
 var _combat_intensity: float = 0.0
 var _combat_target: float = 0.0
-var _combat_hold_timer: float = 0.0
+var _combat_hold_until_ms: int = 0
 var _uplink_tension: float = 0.0
-var _amb_poll_timer: float = 0.0
+var _amb_duck_db: float = 0.0
+var _amb_duck_until_ms: int = 0
+var _last_tick_ms: int = 0
+var _amb_poll_acc_s: float = 0.0
 var _cooldowns_ms: Dictionary = {
 	&"ui_click": 30,
 	&"unit_select": 45,
-	&"order_move": 50,
-	&"order_attack": 50,
-	&"order_gather": 50,
+	&"inspect_tick": 80,
+	&"order_move": 60,
+	&"order_attack": 60,
+	&"order_gather": 60,
 	&"build_complete": 120,
 	&"upgrade_complete": 180,
 	&"unit_ready": 90,
 	&"error_insufficient": 160,
-	&"weapon_rifle": 68,
-	&"weapon_slash": 72,
-	&"weapon_rail": 82,
-	&"weapon_mortar": 96,
-	&"ability_adrenal": 80,
-	&"ability_static": 90,
-	&"ability_slam": 100,
-	&"ability_barrage": 100,
-	&"entity_destroyed": 85,
+	&"weapon_rifle": 75,
+	&"weapon_slash": 80,
+	&"weapon_rail": 90,
+	&"weapon_mortar": 105,
+	&"ability_adrenal": 90,
+	&"ability_static": 100,
+	&"ability_slam": 110,
+	&"ability_barrage": 110,
+	&"entity_destroyed": 95,
 	&"alert_under_attack": 1800,
 	&"alert_uplink": 1400,
 	&"alert_complete": 700,
@@ -79,12 +118,29 @@ var _cooldowns_ms: Dictionary = {
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	for i: int in range(POOL_SIZE):
-		var player: AudioStreamPlayer = AudioStreamPlayer.new()
-		player.name = "SFXPlayer_%d" % i
-		player.bus = &"Master"
-		add_child(player)
-		_players.append(player)
+	_last_tick_ms = Time.get_ticks_msec()
+	_ensure_master_bus_limiter()
+
+	for i: int in range(COMBAT_POOL_SIZE):
+		var cp: AudioStreamPlayer = AudioStreamPlayer.new()
+		cp.name = "CombatSFXPlayer_%d" % i
+		cp.bus = &"Master"
+		add_child(cp)
+		_combat_players.append(cp)
+		_combat_start_ms.append(0)
+
+	for i: int in range(UI_POOL_SIZE):
+		var up: AudioStreamPlayer = AudioStreamPlayer.new()
+		up.name = "UISFXPlayer_%d" % i
+		up.bus = &"Master"
+		add_child(up)
+		_ui_players.append(up)
+
+	_bark_player = AudioStreamPlayer.new()
+	_bark_player.name = "BarkChannelPlayer"
+	_bark_player.bus = &"Master"
+	add_child(_bark_player)
+
 	_generate_procedural_library()
 	_setup_ambience_players()
 	_sync_from_settings()
@@ -93,32 +149,52 @@ func _ready() -> void:
 	_apply_master_bus_settings()
 
 
-func _process(delta: float) -> void:
+func _ensure_master_bus_limiter() -> void:
+	var master_idx: int = AudioServer.get_bus_index("Master")
+	if master_idx < 0:
+		return
+	var fx_count: int = AudioServer.get_bus_effect_count(master_idx)
+	for i: int in range(fx_count):
+		if AudioServer.get_bus_effect(master_idx, i) is AudioEffectLimiter:
+			return
+	var limiter: AudioEffectLimiter = AudioEffectLimiter.new()
+	limiter.ceiling_db = -1.0
+	limiter.threshold_db = -3.0
+	AudioServer.add_bus_effect(master_idx, limiter)
+
+
+func _process(_delta: float) -> void:
 	if _amb_base_player == null:
 		return
-	var unscaled_dt: float = clampf(delta / maxf(0.25, Engine.time_scale), 0.0, 0.1)
+	var now_ms: int = Time.get_ticks_msec()
+	var real_dt: float = clampf(float(now_ms - _last_tick_ms) * 0.001, 0.0, 0.1)
+	_last_tick_ms = now_ms
 
-	if _combat_hold_timer > 0.0:
-		_combat_hold_timer = maxf(0.0, _combat_hold_timer - unscaled_dt)
-	else:
+	if now_ms >= _combat_hold_until_ms:
 		_combat_target = 0.0
 
 	if _combat_intensity < _combat_target:
-		_combat_intensity = minf(_combat_target, _combat_intensity + unscaled_dt / 1.5)
+		_combat_intensity = minf(_combat_target, _combat_intensity + real_dt / 1.5)
 	elif _combat_intensity > _combat_target:
-		_combat_intensity = maxf(_combat_target, _combat_intensity - unscaled_dt / 5.0)
+		_combat_intensity = maxf(_combat_target, _combat_intensity - real_dt / 5.0)
 
-	_amb_poll_timer += unscaled_dt
-	var uplink_target: float = 0.0
-	var in_match: bool = false
 	var is_paused: bool = is_inside_tree() and get_tree().paused
-	if _amb_poll_timer >= 0.35 and is_inside_tree():
-		_amb_poll_timer = 0.0
+	var want_duck: bool = is_paused or (now_ms < _amb_duck_until_ms)
+	var duck_target: float = AMB_DUCK_TARGET_DB if want_duck else 0.0
+	if _amb_duck_db > duck_target:
+		_amb_duck_db = maxf(duck_target, _amb_duck_db - AMB_DUCK_ATTACK_DB_PER_S * real_dt)
+	elif _amb_duck_db < duck_target:
+		_amb_duck_db = minf(duck_target, _amb_duck_db + AMB_DUCK_RELEASE_DB_PER_S * real_dt)
+
+	_amb_poll_acc_s += real_dt
+	var uplink_target: float = 0.0
+	if _amb_poll_acc_s >= 0.35 and is_inside_tree():
+		_amb_poll_acc_s = 0.0
 		var mm: Node = get_tree().get_first_node_in_group("match_manager")
-		in_match = mm != null and is_instance_valid(mm)
+		var in_match: bool = mm != null and is_instance_valid(mm)
 		if not in_match:
 			_combat_target = 0.0
-			_combat_hold_timer = 0.0
+			_combat_hold_until_ms = 0
 		else:
 			for node: Node in get_tree().get_nodes_in_group("hyper_uplinks"):
 				if is_instance_valid(node) and node is HyperUplink:
@@ -134,7 +210,22 @@ func _process(delta: float) -> void:
 
 func notify_combat_activity(weight: float = 0.45) -> void:
 	_combat_target = clampf(maxf(_combat_target, weight), 0.0, 1.0)
-	_combat_hold_timer = maxf(_combat_hold_timer, 2.5)
+	var hold_until: int = Time.get_ticks_msec() + 2500
+	if hold_until > _combat_hold_until_ms:
+		_combat_hold_until_ms = hold_until
+
+
+func trigger_ambience_duck(duration_sec: float = 1.8) -> void:
+	var until_ms: int = Time.get_ticks_msec() + int(round(maxf(0.2, duration_sec) * 1000.0))
+	if until_ms > _amb_duck_until_ms:
+		_amb_duck_until_ms = until_ms
+
+
+func _slider_to_db(linear_val: float) -> float:
+	var v: float = clampf(linear_val, 0.0, 1.0)
+	if v <= 0.005:
+		return -80.0
+	return linear_to_db(pow(v, 1.6))
 
 
 func _setup_ambience_players() -> void:
@@ -163,20 +254,30 @@ func _setup_ambience_players() -> void:
 	_amb_uplink_player.play()
 
 
-func _update_ambience_mix(is_paused: bool) -> void:
-	var muted_now: bool = is_effectively_muted() or master_volume_linear <= 0.001 or ambience_volume_linear <= 0.001
-	var duck: float = 0.40 if is_paused else 1.0
-	var amb_gain: float = 0.0 if muted_now else (ambience_volume_linear * duck)
+func _update_ambience_mix(_is_paused: bool) -> void:
+	var muted_now: bool = is_effectively_muted() or master_volume_linear <= 0.005 or ambience_volume_linear <= 0.005
+	if muted_now:
+		if _amb_base_player != null:
+			_amb_base_player.volume_db = -80.0
+		if _amb_combat_player != null:
+			_amb_combat_player.volume_db = -80.0
+		if _amb_uplink_player != null:
+			_amb_uplink_player.volume_db = -80.0
+		return
 
+	var user_amb_db: float = _slider_to_db(ambience_volume_linear)
 	if _amb_base_player != null:
-		var g_base: float = amb_gain * 0.42
-		_amb_base_player.volume_db = linear_to_db(g_base) if g_base > 0.0005 else -80.0
+		_amb_base_player.volume_db = maxf(-80.0, user_amb_db + AMB_BASE_CEILING_DB + _amb_duck_db)
 	if _amb_combat_player != null:
-		var g_combat: float = amb_gain * _combat_intensity * 0.46
-		_amb_combat_player.volume_db = linear_to_db(g_combat) if g_combat > 0.0005 else -80.0
+		if _combat_intensity <= 0.005:
+			_amb_combat_player.volume_db = -80.0
+		else:
+			_amb_combat_player.volume_db = maxf(-80.0, user_amb_db + AMB_COMBAT_CEILING_DB + linear_to_db(_combat_intensity) + _amb_duck_db)
 	if _amb_uplink_player != null:
-		var g_uplink: float = amb_gain * _uplink_tension * 0.34
-		_amb_uplink_player.volume_db = linear_to_db(g_uplink) if g_uplink > 0.0005 else -80.0
+		if _uplink_tension <= 0.005:
+			_amb_uplink_player.volume_db = -80.0
+		else:
+			_amb_uplink_player.volume_db = maxf(-80.0, user_amb_db + AMB_UPLINK_CEILING_DB + linear_to_db(_uplink_tension) + _amb_duck_db)
 
 
 func _on_settings_changed(category: StringName) -> void:
@@ -238,14 +339,53 @@ func set_volume(linear: float) -> void:
 	volume_changed.emit(master_volume_linear)
 
 
-func play_sfx(sfx_id: StringName, volume_db_offset: float = 0.0, pitch_jitter: float = 0.0) -> void:
-	if is_effectively_muted() or master_volume_linear <= 0.001:
+func _compute_spatial_attenuation(world_pos: Vector2, allow_cull: bool) -> Dictionary:
+	if world_pos == Vector2.INF or not is_inside_tree():
+		return {"culled": false, "db_offset": 0.0}
+	var cam: Camera2D = get_viewport().get_camera_2d()
+	if cam == null:
+		cam = get_tree().get_first_node_in_group("rts_camera") as Camera2D
+	if cam == null or not is_instance_valid(cam):
+		return {"culled": false, "db_offset": 0.0}
+	var vp_size: Vector2 = get_viewport().get_visible_rect().size
+	var zoom_vec: Vector2 = Vector2(maxf(0.1, cam.zoom.x), maxf(0.1, cam.zoom.y))
+	var half_world: Vector2 = (vp_size / zoom_vec) * 0.5
+	var view_radius: float = maxf(240.0, half_world.length())
+	var dist: float = cam.global_position.distance_to(world_pos)
+	var norm: float = dist / view_radius
+	if norm <= 0.85:
+		return {"culled": false, "db_offset": 0.0}
+	if norm > 1.55:
+		if allow_cull:
+			return {"culled": true, "db_offset": -80.0}
+		return {"culled": false, "db_offset": -16.0}
+	var t: float = clampf((norm - 0.85) / 0.70, 0.0, 1.0)
+	return {"culled": false, "db_offset": lerpf(0.0, -16.0, t)}
+
+
+func play_sfx(
+	sfx_id: StringName,
+	volume_db_offset: float = 0.0,
+	pitch_jitter: float = 0.0,
+	world_pos: Vector2 = Vector2.INF,
+	allow_offscreen_cull: bool = true
+) -> void:
+	if is_effectively_muted() or master_volume_linear <= 0.005:
 		return
-	var channel_linear: float = ui_volume_linear if UI_SFX_IDS.has(sfx_id) else sfx_volume_linear
-	if channel_linear <= 0.001:
+	var is_ui_sfx: bool = UI_SFX_IDS.has(sfx_id)
+	var channel_linear: float = ui_volume_linear if is_ui_sfx else sfx_volume_linear
+	if channel_linear <= 0.005:
 		return
 	if not _streams.has(sfx_id):
 		return
+
+	var spatial_db: float = 0.0
+	if world_pos != Vector2.INF:
+		var atten: Dictionary = _compute_spatial_attenuation(world_pos, allow_offscreen_cull)
+		if bool(atten["culled"]):
+			return
+		spatial_db = float(atten["db_offset"])
+
 	var now_ms: int = Time.get_ticks_msec()
 	var min_gap: int = int(_cooldowns_ms.get(sfx_id, 40))
 	var prev_ms: int = int(_last_play_ms.get(sfx_id, -9999))
@@ -253,11 +393,14 @@ func play_sfx(sfx_id: StringName, volume_db_offset: float = 0.0, pitch_jitter: f
 		return
 	_last_play_ms[sfx_id] = now_ms
 
-	var player: AudioStreamPlayer = _acquire_player()
+	if sfx_id == &"match_victory" or sfx_id == &"match_defeat":
+		trigger_ambience_duck(2.4)
+
+	var player: AudioStreamPlayer = _acquire_ui_player() if is_ui_sfx else _acquire_combat_player(now_ms)
 	if player == null:
 		return
 	player.stream = _streams[sfx_id] as AudioStreamWAV
-	player.volume_db = volume_db_offset + linear_to_db(channel_linear)
+	player.volume_db = volume_db_offset + spatial_db + _slider_to_db(channel_linear)
 	if pitch_jitter > 0.0:
 		player.pitch_scale = 1.0 + randf_range(-pitch_jitter, pitch_jitter)
 	else:
@@ -265,17 +408,155 @@ func play_sfx(sfx_id: StringName, volume_db_offset: float = 0.0, pitch_jitter: f
 	player.play()
 
 
+func resolve_selection_audio_class(entities: Array) -> Dictionary:
+	var best_unit_class: StringName = &""
+	var best_unit_prio: int = -1
+	var best_bldg_class: StringName = &""
+	var best_bldg_prio: int = -1
+	var has_inspectable: bool = false
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+
+	for item: Variant in entities:
+		if not is_instance_valid(item):
+			continue
+		if item is Unit:
+			var u: Unit = item as Unit
+			if u.is_dead:
+				continue
+			if local_team >= 0 and int(u.team) == local_team:
+				var u_cls: StringName = classify_unit_bark_class(u.get_unit_type_id())
+				var u_prio: int = int(UNIT_CLASS_PRIORITY.get(u_cls, 1))
+				if u_prio > best_unit_prio:
+					best_unit_prio = u_prio
+					best_unit_class = u_cls
+			else:
+				has_inspectable = true
+		elif item is Building:
+			var b: Building = item as Building
+			if b.is_destroyed:
+				continue
+			if local_team >= 0 and int(b.team) == local_team:
+				var b_cls: StringName = classify_building_audio_class(b)
+				var b_prio: int = int(BUILDING_CLASS_PRIORITY.get(b_cls, 1))
+				if b_prio > best_bldg_prio:
+					best_bldg_prio = b_prio
+					best_bldg_class = b_cls
+			else:
+				has_inspectable = true
+		else:
+			has_inspectable = true
+
+	if best_unit_class != &"":
+		return {"kind": &"unit", "audio_class": best_unit_class}
+	if best_bldg_class != &"":
+		return {"kind": &"building", "audio_class": best_bldg_class}
+	if has_inspectable:
+		return {"kind": &"inspect", "audio_class": &"inspect"}
+	return {"kind": &"", "audio_class": &""}
+
+
+func classify_building_audio_class(building: Building) -> StringName:
+	if building == null:
+		return &"utility"
+	var bid: StringName = building.building_type_id
+	if bid == &"cloning_vat" or bid == &"synthetics_fabricator" or bid == &"calibration_foundry":
+		return &"production"
+	if building.is_core_hub or bid == &"nexus_vat":
+		return &"hub"
+	if bid == &"wetware_mainframe" or building.max_staff_slots > 0:
+		return &"tech"
+	if building.has_turret or bid == &"defense_turret":
+		return &"defense"
+	return &"utility"
+
+
+func _play_on_bark_channel(
+	stream_key: StringName,
+	volume_db_offset: float,
+	pitch_jitter: float,
+	debounce_ms: int,
+	is_order: bool
+) -> void:
+	if is_effectively_muted() or master_volume_linear <= 0.005 or ui_volume_linear <= 0.005:
+		return
+	if _bark_player == null or not _streams.has(stream_key):
+		return
+	var now_ms: int = Time.get_ticks_msec()
+	var prev_ms: int = _last_bark_order_ms if is_order else _last_bark_select_ms
+	if now_ms - prev_ms < debounce_ms:
+		return
+	if is_order:
+		_last_bark_order_ms = now_ms
+	else:
+		_last_bark_select_ms = now_ms
+
+	# Single-voice channel: stop any active bark cleanly so selections/orders never overlap.
+	if _bark_player.playing:
+		_bark_player.stop()
+	_bark_player.stream = _streams[stream_key] as AudioStreamWAV
+	_bark_player.volume_db = volume_db_offset + _slider_to_db(ui_volume_linear)
+	if pitch_jitter > 0.0:
+		_bark_player.pitch_scale = 1.0 + randf_range(-pitch_jitter, pitch_jitter)
+	else:
+		_bark_player.pitch_scale = 1.0
+	_bark_player.play()
+
+
+func play_selection_audio(entities: Array, preferred_unit_class: StringName = &"") -> void:
+	if preferred_unit_class != &"":
+		if TeamManager != null and TeamManager.is_spectator_mode():
+			return
+		var pref_key: StringName = StringName("bark_%s_select" % String(preferred_unit_class))
+		_play_on_bark_channel(pref_key, -4.5, 0.04, BARK_SELECT_DEBOUNCE_MS, false)
+		return
+
+	if entities.is_empty():
+		return
+	var resolved: Dictionary = resolve_selection_audio_class(entities)
+	var kind: StringName = resolved.get("kind", &"") as StringName
+	var cls: StringName = resolved.get("audio_class", &"") as StringName
+	match kind:
+		&"unit":
+			var u_key: StringName = StringName("bark_%s_select" % String(cls))
+			_play_on_bark_channel(u_key, -4.5, 0.04, BARK_SELECT_DEBOUNCE_MS, false)
+		&"building":
+			var b_key: StringName = StringName("bldg_select_%s" % String(cls))
+			_play_on_bark_channel(b_key, -5.0, 0.02, BARK_SELECT_DEBOUNCE_MS, false)
+		&"inspect":
+			_play_on_bark_channel(&"inspect_tick", -10.5, 0.03, BARK_SELECT_DEBOUNCE_MS, false)
+
+
+func play_order_audio(units: Array, fallback_sfx: StringName = &"order_move") -> void:
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		return
+	var best_cls: StringName = &""
+	var best_prio: int = -1
+	for item: Variant in units:
+		if is_instance_valid(item) and item is Unit:
+			var u: Unit = item as Unit
+			if not u.is_dead:
+				var u_cls: StringName = classify_unit_bark_class(u.get_unit_type_id())
+				var u_prio: int = int(UNIT_CLASS_PRIORITY.get(u_cls, 1))
+				if u_prio > best_prio:
+					best_prio = u_prio
+					best_cls = u_cls
+	if best_cls != &"":
+		var key: StringName = StringName("bark_%s_order" % String(best_cls))
+		_play_on_bark_channel(key, -4.5, 0.05, BARK_ORDER_DEBOUNCE_MS, true)
+		return
+	if fallback_sfx != &"":
+		play_sfx(fallback_sfx, -4.5, 0.04)
+
+
 func play_unit_bark_for_units(units: Array, bark_type: StringName) -> void:
 	if units.is_empty():
 		return
 	if TeamManager != null and TeamManager.is_spectator_mode():
 		return
-	for item: Variant in units:
-		if is_instance_valid(item) and item is Unit:
-			var u: Unit = item as Unit
-			if not u.is_dead:
-				play_unit_bark(classify_unit_bark_class(u.get_unit_type_id()), bark_type)
-				return
+	if bark_type == &"order":
+		play_order_audio(units, &"")
+	else:
+		play_selection_audio(units)
 
 
 func classify_unit_bark_class(unit_type_id: StringName) -> StringName:
@@ -295,24 +576,12 @@ func classify_unit_bark_class(unit_type_id: StringName) -> StringName:
 
 
 func play_unit_bark(unit_class: StringName, bark_type: StringName) -> void:
-	if is_effectively_muted() or master_volume_linear <= 0.001 or ui_volume_linear <= 0.001:
-		return
 	if TeamManager != null and TeamManager.is_spectator_mode():
 		return
-	var now_ms: int = Time.get_ticks_msec()
-	if now_ms - _last_bark_ms < UNIT_BARK_COOLDOWN_MS:
-		return
 	var key: StringName = StringName("bark_%s_%s" % [String(unit_class), String(bark_type)])
-	if not _streams.has(key):
-		return
-	_last_bark_ms = now_ms
-	var player: AudioStreamPlayer = _acquire_player()
-	if player == null:
-		return
-	player.stream = _streams[key] as AudioStreamWAV
-	player.volume_db = -4.5 + linear_to_db(ui_volume_linear)
-	player.pitch_scale = 1.0 + randf_range(-0.05, 0.05)
-	player.play()
+	var is_order: bool = (bark_type == &"order")
+	var debounce: int = BARK_ORDER_DEBOUNCE_MS if is_order else BARK_SELECT_DEBOUNCE_MS
+	_play_on_bark_channel(key, -4.5, 0.05, debounce, is_order)
 
 
 func play_ui_click() -> void:
@@ -323,37 +592,61 @@ func play_error() -> void:
 	play_sfx(&"error_insufficient", -2.0, 0.0)
 
 
-func play_weapon_for_unit(unit_type_id: StringName) -> void:
+func play_slider_preview(channel: StringName) -> void:
+	match channel:
+		&"sfx":
+			play_sfx(&"weapon_rifle", -5.5, 0.04)
+		&"master", &"ui":
+			play_sfx(&"ui_click", -2.5, 0.02)
+
+
+func play_weapon_sfx(unit_type_id: StringName, world_pos: Vector2 = Vector2.INF) -> void:
+	play_weapon_for_unit(unit_type_id, world_pos)
+
+
+func play_weapon_for_unit(unit_type_id: StringName, world_pos: Vector2 = Vector2.INF) -> void:
 	match unit_type_id:
 		&"stinger", &"symbiote":
-			play_sfx(&"weapon_slash", -6.5, 0.06)
+			play_sfx(&"weapon_slash", -6.5, 0.06, world_pos, true)
 		&"lance_rig", &"arc_lancer":
-			play_sfx(&"weapon_rail", -5.0, 0.06)
+			play_sfx(&"weapon_rail", -5.0, 0.06, world_pos, true)
 		&"chrysalis_mortar":
-			play_sfx(&"weapon_mortar", -3.5, 0.06)
+			play_sfx(&"weapon_mortar", -3.5, 0.06, world_pos, true)
 		&"goliath_frame":
-			play_sfx(&"weapon_mortar", -6.0, 0.06)
+			play_sfx(&"weapon_mortar", -6.0, 0.06, world_pos, true)
 		_:
-			play_sfx(&"weapon_rifle", -7.5, 0.06)
+			play_sfx(&"weapon_rifle", -7.5, 0.06, world_pos, true)
 
 
-func play_ability_sfx(ability_id: StringName) -> void:
+func play_explosion_sfx(world_pos: Vector2 = Vector2.INF, volume_db_offset: float = -5.0, is_major_global: bool = false) -> void:
+	if is_major_global:
+		play_sfx(&"entity_destroyed", volume_db_offset, 0.05, world_pos, false)
+	else:
+		play_sfx(&"entity_destroyed", volume_db_offset, 0.08, world_pos, true)
+
+
+func play_build_sfx(sfx_id: StringName = &"build_complete", world_pos: Vector2 = Vector2.INF) -> void:
+	play_sfx(sfx_id, -2.5, 0.02, world_pos, false)
+
+
+func play_ability_sfx(ability_id: StringName, world_pos: Vector2 = Vector2.INF) -> void:
 	match ability_id:
 		&"adrenal_surge", &"nanite_surge":
-			play_sfx(&"ability_adrenal", -3.5, 0.04)
+			play_sfx(&"ability_adrenal", -3.5, 0.04, world_pos, true)
 		&"static_pulse":
-			play_sfx(&"ability_static", -3.0, 0.03)
+			play_sfx(&"ability_static", -3.0, 0.03, world_pos, true)
 		&"seismic_slam":
-			play_sfx(&"ability_slam", -2.0, 0.04)
+			play_sfx(&"ability_slam", -2.0, 0.04, world_pos, true)
 		&"spore_barrage", &"overcharge_pulse":
-			play_sfx(&"ability_barrage", -2.5, 0.04)
+			play_sfx(&"ability_barrage", -2.5, 0.04, world_pos, true)
 		_:
-			play_sfx(&"ability_adrenal", -4.0, 0.04)
+			play_sfx(&"ability_adrenal", -4.0, 0.04, world_pos, true)
 
 
 func play_tactical_alert(alert_type: StringName) -> void:
 	if SettingsManager != null and not SettingsManager.show_alert_toasts:
 		return
+	trigger_ambience_duck(1.8)
 	match alert_type:
 		&"under_attack", &"damage":
 			play_sfx(&"alert_under_attack", -3.5, 0.02)
@@ -365,12 +658,30 @@ func play_tactical_alert(alert_type: StringName) -> void:
 			play_sfx(&"alert_complete", -4.5, 0.02)
 
 
-func _acquire_player() -> AudioStreamPlayer:
-	for p: AudioStreamPlayer in _players:
+func _acquire_combat_player(now_ms: int) -> AudioStreamPlayer:
+	for i: int in range(_combat_players.size()):
+		if not _combat_players[i].playing:
+			_combat_start_ms[i] = now_ms
+			return _combat_players[i]
+	# Steal the oldest active combat voice so the pool stays strictly capped at COMBAT_POOL_SIZE.
+	var oldest_idx: int = 0
+	var oldest_ms: int = _combat_start_ms[0]
+	for i: int in range(1, _combat_players.size()):
+		if _combat_start_ms[i] < oldest_ms:
+			oldest_ms = _combat_start_ms[i]
+			oldest_idx = i
+	var stolen: AudioStreamPlayer = _combat_players[oldest_idx]
+	stolen.stop()
+	_combat_start_ms[oldest_idx] = now_ms
+	return stolen
+
+
+func _acquire_ui_player() -> AudioStreamPlayer:
+	for p: AudioStreamPlayer in _ui_players:
 		if not p.playing:
 			return p
-	var fallback: AudioStreamPlayer = _players[_next_player_idx]
-	_next_player_idx = (_next_player_idx + 1) % _players.size()
+	var fallback: AudioStreamPlayer = _ui_players[_next_ui_idx]
+	_next_ui_idx = (_next_ui_idx + 1) % _ui_players.size()
 	fallback.stop()
 	return fallback
 
@@ -379,15 +690,20 @@ func _apply_master_bus_settings() -> void:
 	var master_idx: int = AudioServer.get_bus_index("Master")
 	if master_idx < 0:
 		return
-	AudioServer.set_bus_mute(master_idx, is_effectively_muted())
-	var db: float = linear_to_db(maxf(0.0001, master_volume_linear))
-	AudioServer.set_bus_volume_db(master_idx, db)
+	AudioServer.set_bus_mute(master_idx, is_effectively_muted() or master_volume_linear <= 0.005)
+	AudioServer.set_bus_volume_db(master_idx, _slider_to_db(master_volume_linear))
 
 
 func _generate_procedural_library() -> void:
 	# UI & Command Feedback
 	_streams[&"ui_click"] = _synth_glass_click()
 	_streams[&"unit_select"] = _synth_chime(PackedFloat32Array([740.0, 1110.0]), 0.055, 0.24)
+	_streams[&"inspect_tick"] = _synth_chime(PackedFloat32Array([920.0]), 0.035, 0.18)
+	_streams[&"bldg_select_production"] = _synth_chord_swell(PackedFloat32Array([261.63, 392.0, 523.25]), 0.20, 0.24)
+	_streams[&"bldg_select_hub"] = _synth_chord_swell(PackedFloat32Array([146.83, 220.0, 329.63]), 0.24, 0.28)
+	_streams[&"bldg_select_tech"] = _synth_chime(PackedFloat32Array([587.33, 880.0]), 0.05, 0.20)
+	_streams[&"bldg_select_defense"] = _synth_chirp(420.0, 680.0, 0.12, 0.22)
+	_streams[&"bldg_select_utility"] = _synth_chime(PackedFloat32Array([493.88, 739.99]), 0.045, 0.18)
 	_streams[&"order_move"] = _synth_chirp(520.0, 780.0, 0.085, 0.24)
 	_streams[&"order_attack"] = _synth_double_chirp(660.0, 440.0, 0.095, 0.28)
 	_streams[&"order_gather"] = _synth_chime(PackedFloat32Array([440.0, 660.0]), 0.065, 0.24)

@@ -258,12 +258,19 @@ func tick(owner_building: Building, delta: float) -> void:
 		if upg != null and econ != null:
 			econ.complete_upgrade(owner_building.team, upg.upgrade_id)
 			owner_building.pulse_deposit_feedback()
-			if owner_building.team == Unit.Team.PLAYER:
-				var mm: MatchManager = owner_building.get_tree().get_first_node_in_group("match_manager") as MatchManager
+			var b_tid: int = int(owner_building.team)
+			var is_local_upg: bool = TeamManager.is_team_controlled_by_local_human(b_tid) if TeamManager != null else (b_tid == int(Unit.Team.PLAYER))
+			var viewer_u: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+			var show_upg_feed: bool = viewer_u < 0 or (TeamManager.are_allies(viewer_u, b_tid) if TeamManager != null else is_local_upg)
+			var mm: MatchManager = owner_building.get_tree().get_first_node_in_group("match_manager") as MatchManager
+			if is_local_upg:
 				if mm != null:
 					mm.push_tactical_alert(owner_building.global_position, &"tech_complete", "%s Researched" % upg.display_name)
 				elif AudioManager != null:
 					AudioManager.play_sfx(&"upgrade_complete", -2.0, 0.0)
+			if show_upg_feed and mm != null and mm.has_method("emit_tactical_event"):
+				var tag: String = TeamManager.get_team_short_label(b_tid, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (b_tid + 1))
+				mm.call("emit_tactical_event", &"economy", "%s %s Complete" % [tag, upg.display_name], owner_building.global_position, Color(0.26, 0.98, 0.88, 1.0))
 			upgrade_researched.emit(upg)
 		_emit_queue_changed()
 		return

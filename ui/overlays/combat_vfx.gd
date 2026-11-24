@@ -142,6 +142,11 @@ func _process(delta: float) -> void:
 	if _mode == VFXMode.MORTAR_SHELL:
 		if not _impacted and _elapsed >= _flight_time:
 			_impacted = true
+			if is_inside_tree():
+				var scars: Node = get_tree().get_first_node_in_group("battle_scars")
+				if scars != null and scars.has_method("add_scar"):
+					var scar_kind: StringName = &"scorch_large" if _radius >= 50.0 else &"scorch_small"
+					scars.call("add_scar", scar_kind, _target_world, clampf(_radius * 0.62, 16.0, 56.0), _color)
 			if _on_impact.is_valid():
 				_on_impact.call()
 		_refresh_fog_visibility()

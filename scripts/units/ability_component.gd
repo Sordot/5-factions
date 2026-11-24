@@ -201,7 +201,7 @@ func execute_ability(owner_unit: Unit, ability: AbilityData, target_pos: Vector2
 			_execute_instant(owner_unit, ability)
 
 	if AudioManager != null and (owner_unit.team == Unit.Team.PLAYER or owner_unit.visible):
-		AudioManager.play_ability_sfx(ability.ability_id)
+		AudioManager.play_ability_sfx(ability.ability_id, owner_unit.global_position)
 
 	ability_executed.emit(ability.ability_id, target_pos)
 
@@ -265,6 +265,9 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 			var cam: Node = owner_unit.get_tree().get_first_node_in_group("rts_camera")
 			if cam != null and cam.has_method("add_camera_shake"):
 				cam.call("add_camera_shake", 4.2, 0.16, origin)
+			var scars: Node = owner_unit.get_tree().get_first_node_in_group("battle_scars")
+			if scars != null and scars.has_method("add_scar"):
+				scars.call("add_scar", &"scorch_large", origin, clampf(radius * 0.56, 28.0, 62.0), ability.effect_color)
 		else:
 			_spawn_self_pulse(owner_unit, radius, ability.effect_color)
 		var unit_list2: Array = SpatialGrid.query_units_in_radius(origin, radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")

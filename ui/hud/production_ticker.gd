@@ -62,12 +62,16 @@ func _refresh_ticker() -> void:
 	if not is_inside_tree() or ticker_panel == null:
 		return
 
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	if local_team < 0:
+		ticker_panel.visible = false
+		return
 	var active_entries: Array[Dictionary] = []
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not (node is Building) or not is_instance_valid(node):
 			continue
 		var b: Building = node
-		if b.is_destroyed or b.is_queued_for_deletion() or not b.is_constructed or b.team != Unit.Team.PLAYER:
+		if b.is_destroyed or b.is_queued_for_deletion() or not b.is_constructed or int(b.team) != local_team:
 			continue
 		if b.production_component == null:
 			continue

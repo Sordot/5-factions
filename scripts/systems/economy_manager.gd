@@ -313,7 +313,10 @@ func set_uplink_controller(team: int, bonus_pct: float = 0.05) -> void:
 
 
 func get_production_speed_multiplier(team: int) -> float:
-	var base_mult: float = (1.0 + _uplink_bonus_pct) if _uplink_controller == team else 1.0
+	var has_uplink: bool = false
+	if _uplink_controller >= 0:
+		has_uplink = TeamManager.are_allies(_uplink_controller, team) if TeamManager != null else (_uplink_controller == team)
+	var base_mult: float = (1.0 + _uplink_bonus_pct) if has_uplink else 1.0
 	var fast_mult: float = GameConfig.get_build_speed_multiplier() if (GameConfig != null and GameConfig.has_method("get_build_speed_multiplier")) else 1.0
 	return base_mult * fast_mult
 

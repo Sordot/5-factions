@@ -20,6 +20,7 @@ const ALERT_CYCLE_WINDOW_MS: int = 2500
 @export var min_zoom: float = 0.5
 @export var max_zoom: float = 2.0
 @export var zoom_smoothness: float = 14.0
+@export var zoom_to_cursor: bool = true
 @export var invert_zoom: bool = false
 @export var middle_drag_speed: float = 1.0
 @export var pan_bounds: Rect2 = Rect2(-960.0, -540.0, 1920.0, 1080.0)
@@ -67,6 +68,7 @@ func _sync_from_settings() -> void:
 	edge_margin_px = SettingsManager.edge_pan_margin
 	pan_speed = SettingsManager.keyboard_pan_speed
 	zoom_step = SettingsManager.zoom_speed
+	zoom_to_cursor = SettingsManager.zoom_to_cursor
 	invert_zoom = SettingsManager.invert_zoom
 	middle_drag_speed = SettingsManager.middle_drag_speed
 	if prev_edge != edge_pan_enabled:
@@ -179,14 +181,37 @@ func _unhandled_input(event: InputEvent) -> void:
 					_target_position = global_position
 		elif mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			var delta_up: float = -zoom_step if invert_zoom else zoom_step
-			_target_zoom = clampf(_target_zoom + delta_up, min_zoom, max_zoom)
+			_apply_zoom_delta(delta_up)
 		elif mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var delta_dn: float = zoom_step if invert_zoom else -zoom_step
-			_target_zoom = clampf(_target_zoom + delta_dn, min_zoom, max_zoom)
+			_apply_zoom_delta(delta_dn)
 	elif event is InputEventMouseMotion and _is_middle_dragging:
 		var motion_event: InputEventMouseMotion = event
 		_target_position = _clamp_point(_target_position - (motion_event.relative * middle_drag_speed) / zoom)
 		global_position = _target_position
+
+
+func _apply_zoom_delta(zoom_delta: float) -> void:
+	var old_target_zoom: float = _target_zoom
+	var next_target_zoom: float = clampf(old_target_zoom + zoom_delta, min_zoom, max_zoom)
+	if is_equal_approx(old_target_zoom, next_target_zoom):
+		return
+	_target_zoom = next_target_zoom
+	if not zoom_to_cursor:
+		return
+	var vp: Viewport = get_viewport()
+	if vp == null:
+		return
+	var hovered: Control = vp.gui_get_hovered_control()
+	if hovered != null and hovered.mouse_filter == Control.MOUSE_FILTER_STOP:
+		return
+	var vp_size: Vector2 = vp.get_visible_rect().size
+	if vp_size.x <= 1.0 or vp_size.y <= 1.0:
+		return
+	var mouse_offset: Vector2 = vp.get_mouse_position() - vp_size * 0.5
+	# Shift camera target so the world point under the mouse cursor stays anchored through the zoom step.
+	var world_shift: Vector2 = mouse_offset * ((1.0 / maxf(0.05, old_target_zoom)) - (1.0 / maxf(0.05, next_target_zoom)))
+	_target_position = _clamp_point(_target_position + world_shift)
 
 
 func set_edge_pan_enabled(enabled: bool) -> void:
@@ -235,11 +260,14 @@ func jump_to_next_base_hub() -> bool:
 	if not is_inside_tree():
 		return false
 	var hubs: Array[Building] = []
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	if local_team < 0:
+		local_team = 0
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not (node is Building) or not is_instance_valid(node):
 			continue
 		var b: Building = node
-		if b.is_destroyed or b.is_queued_for_deletion() or b.team != Unit.Team.PLAYER:
+		if b.is_destroyed or b.is_queued_for_deletion() or int(b.team) != local_team:
 			continue
 		if b.is_core_hub or b.building_type_id == &"nexus_vat":
 			hubs.append(b)

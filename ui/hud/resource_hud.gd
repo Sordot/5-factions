@@ -43,6 +43,8 @@ var _bw_pulse_time: float = 0.0
 
 
 func _ready() -> void:
+	if TeamManager != null and TeamManager.get_local_human_team() >= 0:
+		tracked_team = TeamManager.get_local_human_team() as Unit.Team
 	var res_panel: Control = get_node_or_null("RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel") as Control
 	if res_panel != null:
 		res_panel.add_to_group("blocks_edge_pan")

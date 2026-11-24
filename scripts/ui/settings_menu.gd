@@ -30,6 +30,7 @@ signal closed
 @onready var sld_zoom_speed: HSlider = %SldZoomSpeed
 @onready var val_zoom_speed: Label = %ValZoomSpeed
 @onready var chk_invert_zoom: CheckButton = %ChkInvertZoom
+@onready var chk_zoom_to_cursor: CheckButton = %ChkZoomToCursor
 @onready var sld_mid_drag_speed: HSlider = %SldMidDragSpeed
 @onready var val_mid_drag_speed: Label = %ValMidDragSpeed
 
@@ -39,6 +40,7 @@ signal closed
 @onready var chk_smart_box_select: CheckButton = %ChkSmartBoxSelect
 @onready var chk_alert_toasts: CheckButton = %ChkAlertToasts
 @onready var chk_camera_shake: CheckButton = %ChkCameraShake
+@onready var chk_battle_scars: CheckButton = %ChkBattleScars
 
 @onready var sld_master_vol: HSlider = %SldMasterVol
 @onready var val_master_vol: Label = %ValMasterVol
@@ -68,6 +70,8 @@ var _capturing_label: String = ""
 var _keybind_buttons: Dictionary = {}
 var _suppress_callbacks: bool = false
 var _notice_timer: float = 0.0
+var _last_slider_preview_ms: int = -9999
+const SLIDER_PREVIEW_COOLDOWN_MS: int = 220
 
 
 func _ready() -> void:
@@ -366,6 +370,7 @@ func _wire_camera_controls() -> void:
 	sld_kb_speed.value_changed.connect(func(_v: float) -> void: _push_camera_settings())
 	sld_zoom_speed.value_changed.connect(func(_v: float) -> void: _push_camera_settings())
 	chk_invert_zoom.toggled.connect(func(_on: bool) -> void: _push_camera_settings())
+	chk_zoom_to_cursor.toggled.connect(func(_on: bool) -> void: _push_camera_settings())
 	sld_mid_drag_speed.value_changed.connect(func(_v: float) -> void: _push_camera_settings())
 
 
@@ -380,7 +385,8 @@ func _push_camera_settings() -> void:
 		sld_zoom_speed.value,
 		chk_confine_cursor.button_pressed,
 		chk_invert_zoom.button_pressed,
-		sld_mid_drag_speed.value
+		sld_mid_drag_speed.value,
+		chk_zoom_to_cursor.button_pressed
 	)
 	_refresh_camera_labels()
 
@@ -414,6 +420,7 @@ func _wire_gameplay_controls() -> void:
 	chk_smart_box_select.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 	chk_alert_toasts.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 	chk_camera_shake.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
+	chk_battle_scars.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 
 
 func _push_gameplay_settings() -> void:
@@ -428,24 +435,25 @@ func _push_gameplay_settings() -> void:
 		chk_camera_shake.button_pressed,
 		ar_mode,
 		am_mode,
-		chk_smart_box_select.button_pressed
+		chk_smart_box_select.button_pressed,
+		chk_battle_scars.button_pressed
 	)
 	AudioManager.play_ui_click()
 
 
 func _wire_audio_controls() -> void:
-	sld_master_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings())
-	sld_sfx_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings())
-	sld_ui_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings())
-	sld_ambience_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings())
-	chk_mute_all.toggled.connect(func(_on: bool) -> void: _push_audio_settings())
-	chk_mute_unfocused.toggled.connect(func(_on: bool) -> void: _push_audio_settings())
+	sld_master_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings(&"master"))
+	sld_sfx_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings(&"sfx"))
+	sld_ui_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings(&"ui"))
+	sld_ambience_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings(&"ambience"))
+	chk_mute_all.toggled.connect(func(_on: bool) -> void: _push_audio_settings(&""))
+	chk_mute_unfocused.toggled.connect(func(_on: bool) -> void: _push_audio_settings(&""))
 	btn_test_audio.pressed.connect(func() -> void:
 		AudioManager.play_sfx(&"build_complete", -2.0, 0.0)
 	)
 
 
-func _push_audio_settings() -> void:
+func _push_audio_settings(preview_channel: StringName = &"") -> void:
 	if _suppress_callbacks:
 		return
 	SettingsManager.set_audio_settings(
@@ -457,6 +465,12 @@ func _push_audio_settings() -> void:
 		sld_ambience_vol.value / 100.0
 	)
 	_refresh_audio_labels()
+	if preview_channel == &"master" or preview_channel == &"sfx" or preview_channel == &"ui":
+		var now_ms: int = Time.get_ticks_msec()
+		if now_ms - _last_slider_preview_ms >= SLIDER_PREVIEW_COOLDOWN_MS:
+			_last_slider_preview_ms = now_ms
+			if AudioManager != null and AudioManager.has_method("play_slider_preview"):
+				AudioManager.call("play_slider_preview", preview_channel)
 
 
 func _refresh_audio_labels() -> void:
@@ -519,6 +533,7 @@ func _sync_all_from_manager() -> void:
 	sld_kb_speed.value = SettingsManager.keyboard_pan_speed
 	sld_zoom_speed.value = SettingsManager.zoom_speed
 	chk_invert_zoom.button_pressed = SettingsManager.invert_zoom
+	chk_zoom_to_cursor.button_pressed = SettingsManager.zoom_to_cursor
 	sld_mid_drag_speed.value = SettingsManager.middle_drag_speed
 	_refresh_camera_labels()
 
@@ -528,6 +543,7 @@ func _sync_all_from_manager() -> void:
 	chk_smart_box_select.button_pressed = SettingsManager.smart_box_select_enabled
 	chk_alert_toasts.button_pressed = SettingsManager.show_alert_toasts
 	chk_camera_shake.button_pressed = SettingsManager.camera_shake_enabled
+	chk_battle_scars.button_pressed = SettingsManager.battle_scars_enabled
 
 	sld_master_vol.value = SettingsManager.master_volume * 100.0
 	sld_sfx_vol.value = SettingsManager.sfx_volume * 100.0

@@ -5,24 +5,21 @@ const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.
 
 @onready var btn_audio_mute: Button = %BtnAudioMute
 @onready var map_option: OptionButton = %MapOption
-@onready var btn_mode_pvai: Button = %BtnModePvAI
-@onready var btn_mode_aivai: Button = %BtnModeAIvAI
-@onready var ai_label: Label = %AILabel
+@onready var btn_players_2: Button = %BtnPlayers2
+@onready var btn_players_3: Button = %BtnPlayers3
+@onready var btn_players_4: Button = %BtnPlayers4
+@onready var opt_team_preset: OptionButton = %OptTeamPreset
+@onready var spectator_badge: Label = %SpectatorBadge
+@onready var slot_roster_vbox: VBoxContainer = %SlotRosterVBox
 @onready var ai_row: HBoxContainer = %AIRow
 @onready var btn_ai_standard: Button = %BtnAIStandard
 @onready var btn_ai_passive: Button = %BtnAIPassive
-@onready var team0_ai_grid: GridContainer = %Team0AIGrid
-@onready var opt_team0_diff: OptionButton = %OptTeam0Diff
-@onready var opt_team0_style: OptionButton = %OptTeam0Style
-@onready var diff_label: Label = %DiffLabel
-@onready var style_label: Label = %StyleLabel
-@onready var opt_ai_difficulty: OptionButton = %OptAIDifficulty
-@onready var opt_ai_playstyle: OptionButton = %OptAIPlaystyle
 @onready var btn_res_standard: Button = %BtnResStandard
 @onready var btn_res_fast: Button = %BtnResFast
 @onready var chk_mutator_yield: CheckBox = %ChkMutatorYield
 @onready var chk_mutator_no_fog: CheckBox = %ChkMutatorNoFog
 @onready var chk_mutator_fast_build: CheckBox = %ChkMutatorFastBuild
+@onready var validation_label: Label = %ValidationLabel
 @onready var summary_label: Label = %MatchSummaryLabel
 @onready var dossier_notice_label: Label = %DossierNoticeLabel
 @onready var btn_launch: Button = %BtnLaunch
@@ -34,12 +31,12 @@ const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.
 @onready var locked_slot_5: Button = %LockedSlot5
 
 var _selected_map_path: String = GameConfig.MAP_SKIRMISH_01
-var _match_mode: int = 0
+var _player_count: int = 2
+var _team_preset: StringName = GameConfig.TEAM_PRESET_1V1
+var _slot_configs: Array[Dictionary] = []
+var _slot_row_widgets: Array[Dictionary] = []
+var _preset_ids: Array[StringName] = []
 var _aggro_ai_enabled: bool = true
-var _team0_difficulty: int = 1
-var _team0_playstyle: int = 1
-var _ai_difficulty: int = 1
-var _ai_playstyle: int = 0
 var _resource_preset: StringName = GameConfig.PRESET_STANDARD
 var _mutator_high_yield: bool = false
 var _mutator_no_fog: bool = false
@@ -47,89 +44,59 @@ var _mutator_fast_build: bool = false
 var _bg_time: float = 0.0
 var _settings_instance: SettingsMenu = null
 var _inspected_locked_btn: Button = null
+var _suppress_callbacks: bool = false
 
 
 func _ready() -> void:
 	Engine.time_scale = 1.0
 	if SettingsManager != null:
 		SettingsManager.set_gameplay_cursor_active(false)
+
 	_selected_map_path = GameConfig.selected_map_path
-	_match_mode = int(GameConfig.match_mode)
+	_player_count = GameConfig.player_count
+	_team_preset = GameConfig.team_preset
 	_aggro_ai_enabled = GameConfig.aggro_ai_enabled
-	_team0_difficulty = int(GameConfig.team0_ai_difficulty)
-	_team0_playstyle = int(GameConfig.team0_ai_playstyle)
-	_ai_difficulty = int(GameConfig.ai_difficulty)
-	_ai_playstyle = int(GameConfig.ai_playstyle)
 	_resource_preset = GameConfig.resource_preset
 	_mutator_high_yield = GameConfig.mutator_high_yield
 	_mutator_no_fog = GameConfig.mutator_no_fog
 	_mutator_fast_build = GameConfig.mutator_fast_build
 
+	_slot_configs.clear()
+	for i: int in range(4):
+		if i < GameConfig.slot_configs.size():
+			_slot_configs.append((GameConfig.slot_configs[i] as Dictionary).duplicate(true))
+		else:
+			_slot_configs.append({
+				"team_id": i,
+				"alliance_id": i,
+				"controller_type": 0 if i == 0 else 1,
+				"faction_id": GameConfig.selected_faction_id,
+				"ai_difficulty": int(GameConfig.AIDifficulty.STANDARD),
+				"ai_playstyle": int(GameConfig.AIPlaystyle.BALANCED),
+			})
+
 	if map_option != null:
 		map_option.clear()
-		map_option.add_item("Skirmish Arena 01 (1v1 Symmetric)", 0)
-		map_option.add_item("Twin Causeway (Skirmish Arena 02)", 1)
-		map_option.add_item("Sandbox Testbed (Milestone 0)", 2)
-		var map_idx: int = 0
-		if _selected_map_path == GameConfig.MAP_SKIRMISH_02:
-			map_idx = 1
-		elif _selected_map_path == GameConfig.MAP_SANDBOX_TESTBED:
-			map_idx = 2
-		map_option.select(map_idx)
+		var selected_idx: int = 0
+		for i: int in range(GameConfig.MAP_CATALOG.size()):
+			var entry: Dictionary = GameConfig.MAP_CATALOG[i]
+			map_option.add_item(String(entry["label"]), i)
+			if String(entry["path"]) == _selected_map_path:
+				selected_idx = i
+		map_option.select(selected_idx)
 		map_option.item_selected.connect(_on_map_selected)
 
-	if btn_mode_pvai != null:
-		btn_mode_pvai.pressed.connect(func() -> void:
-			AudioManager.play_ui_click()
-			_match_mode = 0
-			_refresh_ui()
-		)
-	if btn_mode_aivai != null:
-		btn_mode_aivai.pressed.connect(func() -> void:
-			AudioManager.play_ui_click()
-			_match_mode = 1
-			_refresh_ui()
-		)
+	if btn_players_2 != null:
+		btn_players_2.pressed.connect(func() -> void: _set_player_count(2))
+	if btn_players_3 != null:
+		btn_players_3.pressed.connect(func() -> void: _set_player_count(3))
+	if btn_players_4 != null:
+		btn_players_4.pressed.connect(func() -> void: _set_player_count(4))
 
-	if opt_team0_diff != null:
-		opt_team0_diff.clear()
-		opt_team0_diff.add_item("Relaxed", int(GameConfig.AIDifficulty.RELAXED))
-		opt_team0_diff.add_item("Standard", int(GameConfig.AIDifficulty.STANDARD))
-		opt_team0_diff.add_item("Brutal", int(GameConfig.AIDifficulty.BRUTAL))
-		opt_team0_diff.select(_team0_difficulty)
-		opt_team0_diff.item_selected.connect(func(idx: int) -> void:
-			AudioManager.play_ui_click()
-			_team0_difficulty = clampi(idx, 0, 2)
-			_refresh_ui()
-		)
+	if opt_team_preset != null:
+		opt_team_preset.item_selected.connect(_on_team_preset_selected)
 
-	if opt_team0_style != null:
-		opt_team0_style.clear()
-		opt_team0_style.add_item("Balanced", int(GameConfig.AIPlaystyle.BALANCED))
-		opt_team0_style.add_item("Swarm Rush", int(GameConfig.AIPlaystyle.SWARM_RUSH))
-		opt_team0_style.add_item("Synthetics Tech", int(GameConfig.AIPlaystyle.SYNTHETICS_TECH))
-		opt_team0_style.select(_team0_playstyle)
-		opt_team0_style.item_selected.connect(func(idx: int) -> void:
-			AudioManager.play_ui_click()
-			_team0_playstyle = clampi(idx, 0, 2)
-			_refresh_ui()
-		)
-
-	if opt_ai_difficulty != null:
-		opt_ai_difficulty.clear()
-		opt_ai_difficulty.add_item("Relaxed", int(GameConfig.AIDifficulty.RELAXED))
-		opt_ai_difficulty.add_item("Standard", int(GameConfig.AIDifficulty.STANDARD))
-		opt_ai_difficulty.add_item("Brutal", int(GameConfig.AIDifficulty.BRUTAL))
-		opt_ai_difficulty.select(int(_ai_difficulty))
-		opt_ai_difficulty.item_selected.connect(_on_ai_difficulty_selected)
-
-	if opt_ai_playstyle != null:
-		opt_ai_playstyle.clear()
-		opt_ai_playstyle.add_item("Balanced", int(GameConfig.AIPlaystyle.BALANCED))
-		opt_ai_playstyle.add_item("Swarm Rush", int(GameConfig.AIPlaystyle.SWARM_RUSH))
-		opt_ai_playstyle.add_item("Synthetics Tech", int(GameConfig.AIPlaystyle.SYNTHETICS_TECH))
-		opt_ai_playstyle.select(int(_ai_playstyle))
-		opt_ai_playstyle.item_selected.connect(_on_ai_playstyle_selected)
+	_build_slot_roster_widgets()
 
 	if btn_ai_standard != null:
 		btn_ai_standard.pressed.connect(func() -> void:
@@ -220,9 +187,8 @@ func _ready() -> void:
 		btn_quit.pressed.connect(_on_quit_pressed)
 
 	_wire_hover_audio([
-		btn_audio_mute, map_option, btn_mode_pvai, btn_mode_aivai,
-		btn_ai_standard, btn_ai_passive, opt_team0_diff, opt_team0_style,
-		opt_ai_difficulty, opt_ai_playstyle, btn_res_standard, btn_res_fast,
+		btn_audio_mute, map_option, btn_players_2, btn_players_3, btn_players_4,
+		opt_team_preset, btn_ai_standard, btn_ai_passive, btn_res_standard, btn_res_fast,
 		chk_mutator_yield, chk_mutator_no_fog, chk_mutator_fast_build,
 		btn_launch, btn_settings, btn_quit,
 		locked_slot_2, locked_slot_3, locked_slot_4, locked_slot_5,
@@ -239,8 +205,218 @@ func _ready() -> void:
 			var u_cnt: int = (u_roster as Array).size() if u_roster is Array else 11
 			dossier_notice_label.text = "%s (%d Structures • %d Units): %s" % [fac_name, b_cnt, u_cnt, fac_tag]
 
+	_clamp_player_count_for_map()
+	_rebuild_preset_options()
 	_refresh_audio_button()
 	_refresh_ui()
+
+
+func _build_slot_roster_widgets() -> void:
+	if slot_roster_vbox == null:
+		return
+	for child: Node in slot_roster_vbox.get_children():
+		child.queue_free()
+	_slot_row_widgets.clear()
+
+	for i: int in range(4):
+		var row: HBoxContainer = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 4)
+
+		var pip: ColorRect = ColorRect.new()
+		pip.custom_minimum_size = Vector2(7.0, 22.0)
+		pip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var pal: Dictionary = TeamManager.DEFAULT_TEAM_PALETTES[i % TeamManager.DEFAULT_TEAM_PALETTES.size()] if TeamManager != null else {"primary": Color(0.24, 0.96, 0.88, 1.0)}
+		pip.color = pal["primary"] as Color
+		row.add_child(pip)
+
+		var slot_lbl: Label = Label.new()
+		slot_lbl.text = "P%d" % (i + 1)
+		slot_lbl.custom_minimum_size = Vector2(22.0, 0.0)
+		slot_lbl.add_theme_font_size_override("font_size", 11)
+		slot_lbl.add_theme_color_override("font_color", pal["primary"] as Color)
+		row.add_child(slot_lbl)
+
+		var ctrl_btn: Button = Button.new()
+		ctrl_btn.custom_minimum_size = Vector2(58.0, 24.0)
+		ctrl_btn.focus_mode = Control.FOCUS_NONE
+		ctrl_btn.add_theme_font_size_override("font_size", 10)
+		ctrl_btn.tooltip_text = "Click to switch between Human and AI (all AI = Spectator Mode)"
+		var captured_i: int = i
+		ctrl_btn.pressed.connect(func() -> void:
+			_on_slot_controller_toggled(captured_i)
+		)
+		row.add_child(ctrl_btn)
+
+		var ally_opt: OptionButton = OptionButton.new()
+		ally_opt.custom_minimum_size = Vector2(56.0, 24.0)
+		ally_opt.focus_mode = Control.FOCUS_NONE
+		ally_opt.add_theme_font_size_override("font_size", 10)
+		ally_opt.add_item("T-A", 0)
+		ally_opt.add_item("T-B", 1)
+		ally_opt.add_item("T-C", 2)
+		ally_opt.add_item("T-D", 3)
+		ally_opt.item_selected.connect(func(idx: int) -> void:
+			_on_slot_alliance_changed(captured_i, idx)
+		)
+		row.add_child(ally_opt)
+
+		var diff_opt: OptionButton = OptionButton.new()
+		diff_opt.custom_minimum_size = Vector2(88.0, 24.0)
+		diff_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		diff_opt.focus_mode = Control.FOCUS_NONE
+		diff_opt.add_theme_font_size_override("font_size", 10)
+		diff_opt.add_item("Relaxed", int(GameConfig.AIDifficulty.RELAXED))
+		diff_opt.add_item("Standard", int(GameConfig.AIDifficulty.STANDARD))
+		diff_opt.add_item("Brutal", int(GameConfig.AIDifficulty.BRUTAL))
+		diff_opt.item_selected.connect(func(idx: int) -> void:
+			_on_slot_difficulty_changed(captured_i, idx)
+		)
+		row.add_child(diff_opt)
+
+		var style_opt: OptionButton = OptionButton.new()
+		style_opt.custom_minimum_size = Vector2(92.0, 24.0)
+		style_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		style_opt.focus_mode = Control.FOCUS_NONE
+		style_opt.add_theme_font_size_override("font_size", 10)
+		style_opt.add_item("Balanced", int(GameConfig.AIPlaystyle.BALANCED))
+		style_opt.add_item("Swarm", int(GameConfig.AIPlaystyle.SWARM_RUSH))
+		style_opt.add_item("Tech", int(GameConfig.AIPlaystyle.SYNTHETICS_TECH))
+		style_opt.item_selected.connect(func(idx: int) -> void:
+			_on_slot_playstyle_changed(captured_i, idx)
+		)
+		row.add_child(style_opt)
+
+		var human_tag: Label = Label.new()
+		human_tag.text = "LOCAL COMMANDER"
+		human_tag.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		human_tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		human_tag.add_theme_font_size_override("font_size", 10)
+		human_tag.add_theme_color_override("font_color", Color(0.42, 0.96, 0.90, 0.90))
+		human_tag.visible = false
+		row.add_child(human_tag)
+
+		slot_roster_vbox.add_child(row)
+		_slot_row_widgets.append({
+			"row": row,
+			"ctrl_btn": ctrl_btn,
+			"ally_opt": ally_opt,
+			"diff_opt": diff_opt,
+			"style_opt": style_opt,
+			"human_tag": human_tag,
+		})
+
+
+func _set_player_count(count: int) -> void:
+	var max_p: int = GameConfig.get_map_max_players(_selected_map_path)
+	var clamped: int = clampi(count, 2, max_p)
+	if clamped == _player_count:
+		return
+	AudioManager.play_ui_click()
+	_player_count = clamped
+	# Choose sensible default preset when switching player count
+	if _player_count == 2:
+		_team_preset = GameConfig.TEAM_PRESET_1V1
+	elif _player_count == 3:
+		_team_preset = GameConfig.TEAM_PRESET_FFA
+	else:
+		_team_preset = GameConfig.TEAM_PRESET_FFA
+	GameConfig.apply_team_preset(_player_count, _team_preset, _slot_configs)
+	_rebuild_preset_options()
+	_refresh_ui()
+
+
+func _clamp_player_count_for_map() -> void:
+	var max_p: int = GameConfig.get_map_max_players(_selected_map_path)
+	if _player_count > max_p:
+		_player_count = max_p
+		_team_preset = GameConfig.TEAM_PRESET_1V1 if _player_count == 2 else GameConfig.TEAM_PRESET_FFA
+		GameConfig.apply_team_preset(_player_count, _team_preset, _slot_configs)
+	# Ensure preset is valid for current player count
+	var valid_list: Array[Dictionary] = GameConfig.get_valid_presets_for_count(_player_count)
+	var found: bool = false
+	for item: Dictionary in valid_list:
+		if item["id"] == _team_preset:
+			found = true
+			break
+	if not found and not valid_list.is_empty():
+		_team_preset = valid_list[0]["id"] as StringName
+		GameConfig.apply_team_preset(_player_count, _team_preset, _slot_configs)
+
+
+func _rebuild_preset_options() -> void:
+	if opt_team_preset == null:
+		return
+	_suppress_callbacks = true
+	opt_team_preset.clear()
+	_preset_ids.clear()
+	var valid_list: Array[Dictionary] = GameConfig.get_valid_presets_for_count(_player_count)
+	var sel_idx: int = 0
+	for i: int in range(valid_list.size()):
+		var item: Dictionary = valid_list[i]
+		var pid: StringName = item["id"] as StringName
+		_preset_ids.append(pid)
+		opt_team_preset.add_item(String(item["label"]), i)
+		if pid == _team_preset:
+			sel_idx = i
+	opt_team_preset.select(sel_idx)
+	_suppress_callbacks = false
+
+
+func _on_team_preset_selected(index: int) -> void:
+	if _suppress_callbacks or index < 0 or index >= _preset_ids.size():
+		return
+	AudioManager.play_ui_click()
+	_team_preset = _preset_ids[index]
+	GameConfig.apply_team_preset(_player_count, _team_preset, _slot_configs)
+	_refresh_ui()
+
+
+func _on_slot_controller_toggled(slot_idx: int) -> void:
+	if slot_idx < 0 or slot_idx >= _slot_configs.size():
+		return
+	AudioManager.play_ui_click()
+	var cur_ctrl: int = int(_slot_configs[slot_idx]["controller_type"])
+	if cur_ctrl == 0:
+		# Switch Human -> AI (Spectator Mode if no Human remains)
+		_slot_configs[slot_idx]["controller_type"] = 1
+	else:
+		# Switch AI -> Human; enforce at most 1 local Human across all slots
+		for i: int in range(_slot_configs.size()):
+			_slot_configs[i]["controller_type"] = 0 if i == slot_idx else 1
+	_refresh_ui()
+
+
+func _on_slot_alliance_changed(slot_idx: int, alliance_idx: int) -> void:
+	if _suppress_callbacks or slot_idx < 0 or slot_idx >= _slot_configs.size():
+		return
+	AudioManager.play_ui_click()
+	_slot_configs[slot_idx]["alliance_id"] = clampi(alliance_idx, 0, 3)
+	_team_preset = GameConfig.TEAM_PRESET_CUSTOM
+	_rebuild_preset_options()
+	_refresh_ui()
+
+
+func _on_slot_difficulty_changed(slot_idx: int, diff_idx: int) -> void:
+	if _suppress_callbacks or slot_idx < 0 or slot_idx >= _slot_configs.size():
+		return
+	AudioManager.play_ui_click()
+	_slot_configs[slot_idx]["ai_difficulty"] = clampi(diff_idx, 0, 2)
+	_refresh_ui()
+
+
+func _on_slot_playstyle_changed(slot_idx: int, style_idx: int) -> void:
+	if _suppress_callbacks or slot_idx < 0 or slot_idx >= _slot_configs.size():
+		return
+	AudioManager.play_ui_click()
+	_slot_configs[slot_idx]["ai_playstyle"] = clampi(style_idx, 0, 2)
+	_refresh_ui()
+
+
+func _has_active_human() -> bool:
+	for i: int in range(mini(_player_count, _slot_configs.size())):
+		if int(_slot_configs[i]["controller_type"]) == 0:
+			return true
+	return false
 
 
 func _wire_hover_audio(controls: Array) -> void:
@@ -338,24 +514,12 @@ func _refresh_locked_card_highlights() -> void:
 
 func _on_map_selected(index: int) -> void:
 	AudioManager.play_ui_click()
-	if index == 1:
-		_selected_map_path = GameConfig.MAP_SKIRMISH_02
-	elif index == 2:
-		_selected_map_path = GameConfig.MAP_SANDBOX_TESTBED
+	if index >= 0 and index < GameConfig.MAP_CATALOG.size():
+		_selected_map_path = String((GameConfig.MAP_CATALOG[index] as Dictionary)["path"])
 	else:
 		_selected_map_path = GameConfig.MAP_SKIRMISH_01
-	_refresh_ui()
-
-
-func _on_ai_difficulty_selected(index: int) -> void:
-	AudioManager.play_ui_click()
-	_ai_difficulty = clampi(index, 0, 2)
-	_refresh_ui()
-
-
-func _on_ai_playstyle_selected(index: int) -> void:
-	AudioManager.play_ui_click()
-	_ai_playstyle = clampi(index, 0, 2)
+	_clamp_player_count_for_map()
+	_rebuild_preset_options()
 	_refresh_ui()
 
 
@@ -375,34 +539,57 @@ func _refresh_audio_button() -> void:
 
 
 func _refresh_ui() -> void:
-	var is_spec: bool = (_match_mode == 1)
-	if btn_mode_pvai != null:
-		btn_mode_pvai.modulate = Color(0.42, 1.0, 0.88, 1.0) if not is_spec else Color(0.66, 0.74, 0.80, 0.78)
-	if btn_mode_aivai != null:
-		btn_mode_aivai.modulate = Color(1.0, 0.82, 0.32, 1.0) if is_spec else Color(0.66, 0.74, 0.80, 0.78)
+	_suppress_callbacks = true
+	var max_p: int = GameConfig.get_map_max_players(_selected_map_path)
+	var is_spec: bool = not _has_active_human()
+	var valid_teams: bool = GameConfig.has_opposing_alliances(_slot_configs, _player_count)
 
-	if ai_label != null:
-		ai_label.visible = not is_spec
+	if btn_players_2 != null:
+		btn_players_2.disabled = false
+		btn_players_2.modulate = Color(0.36, 1.0, 0.88, 1.0) if _player_count == 2 else Color(0.66, 0.74, 0.80, 0.78)
+	if btn_players_3 != null:
+		btn_players_3.disabled = (max_p < 3)
+		btn_players_3.tooltip_text = "Requires a 4-player map (Quad Nexus)" if max_p < 3 else "3-Player Skirmish"
+		btn_players_3.modulate = Color(0.36, 1.0, 0.88, 1.0) if _player_count == 3 else (Color(0.42, 0.48, 0.54, 0.50) if max_p < 3 else Color(0.66, 0.74, 0.80, 0.78))
+	if btn_players_4 != null:
+		btn_players_4.disabled = (max_p < 4)
+		btn_players_4.tooltip_text = "Requires a 4-player map (Quad Nexus)" if max_p < 4 else "4-Player Skirmish"
+		btn_players_4.modulate = Color(0.36, 1.0, 0.88, 1.0) if _player_count == 4 else (Color(0.42, 0.48, 0.54, 0.50) if max_p < 4 else Color(0.66, 0.74, 0.80, 0.78))
+
+	if spectator_badge != null:
+		spectator_badge.visible = is_spec
+
+	for i: int in range(_slot_row_widgets.size()):
+		var w: Dictionary = _slot_row_widgets[i]
+		var row: Control = w["row"] as Control
+		row.visible = (i < _player_count)
+		if i >= _player_count:
+			continue
+		var cfg: Dictionary = _slot_configs[i]
+		var is_human: bool = int(cfg["controller_type"]) == 0
+		var ctrl_btn: Button = w["ctrl_btn"] as Button
+		var ally_opt: OptionButton = w["ally_opt"] as OptionButton
+		var diff_opt: OptionButton = w["diff_opt"] as OptionButton
+		var style_opt: OptionButton = w["style_opt"] as OptionButton
+		var human_tag: Label = w["human_tag"] as Label
+
+		ctrl_btn.text = "Human" if is_human else "AI"
+		ctrl_btn.modulate = Color(0.36, 1.0, 0.88, 1.0) if is_human else Color(0.84, 0.90, 0.96, 0.92)
+		ally_opt.select(clampi(int(cfg["alliance_id"]), 0, 3))
+		diff_opt.select(clampi(int(cfg["ai_difficulty"]), 0, 2))
+		style_opt.select(clampi(int(cfg["ai_playstyle"]), 0, 2))
+		diff_opt.visible = not is_human
+		style_opt.visible = not is_human
+		diff_opt.disabled = (not is_spec and not _aggro_ai_enabled)
+		style_opt.disabled = (not is_spec and not _aggro_ai_enabled)
+		human_tag.visible = is_human
+
 	if ai_row != null:
 		ai_row.visible = not is_spec
-	if team0_ai_grid != null:
-		team0_ai_grid.visible = is_spec
-	if diff_label != null:
-		diff_label.text = "TEAM 2 AI DIFFICULTY" if is_spec else "AI DIFFICULTY"
-		diff_label.add_theme_color_override("font_color", Color(1.0, 0.48, 0.36, 0.95) if is_spec else Color(0.62, 0.84, 0.92, 0.95))
-	if style_label != null:
-		style_label.text = "TEAM 2 AI PLAYSTYLE" if is_spec else "AI PLAYSTYLE"
-		style_label.add_theme_color_override("font_color", Color(1.0, 0.48, 0.36, 0.95) if is_spec else Color(0.62, 0.84, 0.92, 0.95))
-
 	if btn_ai_standard != null:
 		btn_ai_standard.modulate = Color(0.42, 1.0, 0.88, 1.0) if _aggro_ai_enabled else Color(0.66, 0.74, 0.80, 0.78)
 	if btn_ai_passive != null:
 		btn_ai_passive.modulate = Color(1.0, 0.78, 0.34, 1.0) if not _aggro_ai_enabled else Color(0.66, 0.74, 0.80, 0.78)
-
-	if opt_ai_difficulty != null:
-		opt_ai_difficulty.disabled = (not is_spec and not _aggro_ai_enabled)
-	if opt_ai_playstyle != null:
-		opt_ai_playstyle.disabled = (not is_spec and not _aggro_ai_enabled)
 
 	var is_fast: bool = (_resource_preset == GameConfig.PRESET_FAST_TECH)
 	if btn_res_standard != null:
@@ -410,12 +597,21 @@ func _refresh_ui() -> void:
 	if btn_res_fast != null:
 		btn_res_fast.modulate = Color(0.36, 0.92, 1.0, 1.0) if is_fast else Color(0.66, 0.74, 0.80, 0.78)
 
+	if validation_label != null:
+		validation_label.visible = not valid_teams
+
 	if btn_launch != null:
-		btn_launch.text = "LAUNCH AI SPECTATOR MATCH" if is_spec else "LAUNCH SKIRMISH"
+		btn_launch.disabled = not valid_teams
+		if not valid_teams:
+			btn_launch.text = "ASSIGN 2+ OPPOSING TEAMS"
+		elif is_spec:
+			btn_launch.text = "LAUNCH AI SPECTATOR (%dP)" % _player_count
+		else:
+			btn_launch.text = "LAUNCH %s SKIRMISH" % GameConfig.get_preset_display_label(_team_preset).to_upper()
 
 	if summary_label != null:
 		var map_name: String = GameConfig.get_map_label(_selected_map_path)
-		var res_str: String = "1000 B / 500 S / 200 C" if is_fast else "200 B / 50 S / 0 C"
+		var res_str: String = "1000B/500S/200C" if is_fast else "200B/50S"
 		var mut_parts: PackedStringArray = PackedStringArray()
 		if _mutator_high_yield:
 			mut_parts.append("2x Yield")
@@ -423,30 +619,44 @@ func _refresh_ui() -> void:
 			mut_parts.append("No Fog")
 		if _mutator_fast_build:
 			mut_parts.append("Fast Build")
-		var mut_line: String = ("\nMUTATORS: %s" % " • ".join(mut_parts)) if not mut_parts.is_empty() else ""
-		if is_spec:
-			var t0_str: String = "%s (%s)" % [GameConfig.get_playstyle_label(_team0_playstyle), GameConfig.get_difficulty_label(_team0_difficulty)]
-			var t1_str: String = "%s (%s)" % [GameConfig.get_playstyle_label(_ai_playstyle), GameConfig.get_difficulty_label(_ai_difficulty)]
-			summary_label.text = "MODE: AI vs AI SPECTATOR\nMAP: %s\nMATCHUP: %s vs %s\nRESOURCES: %s%s" % [map_name, t0_str, t1_str, res_str, mut_line]
-		else:
-			var ai_str: String = "Passive / Sandbox (Aggro OFF)"
-			if _aggro_ai_enabled:
-				ai_str = "%s AI  •  %s" % [GameConfig.get_difficulty_label(_ai_difficulty), GameConfig.get_playstyle_label(_ai_playstyle)]
-			summary_label.text = "FACTION: GENESIS_V2 (The Vat-Born)\nMAP: %s\nOPPONENT: %s\nRESOURCES: %s%s" % [map_name, ai_str, res_str, mut_line]
+		var mut_suffix: String = ("  •  " + ", ".join(mut_parts)) if not mut_parts.is_empty() else ""
+		var matchup_str: String = _build_alliance_summary_text()
+		var mode_tag: String = "AI SPECTATOR" if is_spec else ("PASSIVE SANDBOX" if not _aggro_ai_enabled else "GENESIS_V2")
+		summary_label.text = "%s  •  %s\nTEAMS: %s\nRES: %s%s" % [mode_tag, map_name, matchup_str, res_str, mut_suffix]
+	_suppress_callbacks = false
+
+
+func _build_alliance_summary_text() -> String:
+	var groups: Dictionary = {}
+	for i: int in range(_player_count):
+		var cfg: Dictionary = _slot_configs[i]
+		var ally: int = int(cfg["alliance_id"])
+		if not groups.has(ally):
+			groups[ally] = PackedStringArray()
+		var tag: String = ("P%d" % (i + 1)) if int(cfg["controller_type"]) == 0 else ("AI%d" % (i + 1))
+		(groups[ally] as PackedStringArray).append(tag)
+	var keys: Array = groups.keys()
+	keys.sort()
+	var sides: PackedStringArray = PackedStringArray()
+	for k: Variant in keys:
+		var members: PackedStringArray = groups[k] as PackedStringArray
+		sides.append("[%s: %s]" % [GameConfig.get_alliance_letter(int(k)), "+".join(members)])
+	return " vs ".join(sides)
 
 
 func _on_launch_pressed() -> void:
+	if not GameConfig.has_opposing_alliances(_slot_configs, _player_count):
+		AudioManager.play_error()
+		return
 	AudioManager.play_sfx(&"build_complete", -3.0, 0.0)
-	GameConfig.set_match_config(
+	GameConfig.set_lobby_config(
 		_selected_map_path,
+		_player_count,
+		_team_preset,
+		_slot_configs,
 		_aggro_ai_enabled,
 		_resource_preset,
 		&"genesis_v2",
-		_ai_difficulty,
-		_ai_playstyle,
-		_match_mode,
-		_team0_difficulty,
-		_team0_playstyle,
 		_mutator_high_yield,
 		_mutator_no_fog,
 		_mutator_fast_build

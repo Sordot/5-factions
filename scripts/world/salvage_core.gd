@@ -136,7 +136,19 @@ func _complete_extraction(extractor: Node) -> void:
 
 	var is_local: bool = TeamManager.is_team_controlled_by_local_human(claim_team) if TeamManager != null else (claim_team == 0)
 	if AudioManager != null and (is_local or visible):
-		AudioManager.play_sfx(&"salvage_claimed", -2.5, 0.04)
+		AudioManager.play_sfx(&"salvage_claimed", -2.5, 0.04, global_position, not is_local)
+
+	if is_inside_tree():
+		var scars: Node = get_tree().get_first_node_in_group("battle_scars")
+		if scars != null and scars.has_method("add_scar"):
+			scars.call("add_scar", &"wreck_splatter", global_position, 20.0, Color(1.0, 0.80, 0.28, 1.0))
+		var viewer_s: int = TeamManager.get_local_human_team() if TeamManager != null else 0
+		var show_feed: bool = viewer_s < 0 or (TeamManager.are_allies(viewer_s, claim_team) if TeamManager != null else (claim_team == 0))
+		if show_feed:
+			var mm: Node = get_tree().get_first_node_in_group("match_manager")
+			if mm != null and mm.has_method("emit_tactical_event"):
+				var tag: String = TeamManager.get_team_short_label(claim_team, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (claim_team + 1))
+				mm.call("emit_tactical_event", &"economy", "%s Salvage Claimed (%s)" % [tag, get_payload_label()], global_position, Color(0.28, 0.98, 0.78, 1.0))
 
 	if SpatialGrid != null:
 		SpatialGrid.unregister_salvage(self)
@@ -150,6 +162,10 @@ func _dissolve() -> void:
 	if is_claimed:
 		return
 	is_claimed = true
+	if is_inside_tree():
+		var scars: Node = get_tree().get_first_node_in_group("battle_scars")
+		if scars != null and scars.has_method("add_scar"):
+			scars.call("add_scar", &"wreck_splatter", global_position, 18.0, Color(0.68, 0.76, 0.82, 1.0))
 	if SpatialGrid != null:
 		SpatialGrid.unregister_salvage(self)
 	if is_in_group("salvage_cores"):

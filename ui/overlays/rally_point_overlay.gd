@@ -27,8 +27,9 @@ func bind_selection_controller(controller: Node) -> void:
 
 func _on_buildings_selection_changed(buildings: Array[Building]) -> void:
 	_disconnect_buildings()
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 	for b: Building in buildings:
-		if is_instance_valid(b) and not b.is_destroyed and b.team == Unit.Team.PLAYER and b.can_set_rally:
+		if is_instance_valid(b) and not b.is_destroyed and local_team >= 0 and int(b.team) == local_team and b.can_set_rally:
 			_selected_buildings.append(b)
 			if not b.rally_changed.is_connected(_on_building_changed):
 				b.rally_changed.connect(_on_building_changed)
@@ -42,9 +43,10 @@ func _on_inspection_changed(entity: Node) -> void:
 	if not _selected_buildings.is_empty() and entity == _selected_buildings[0]:
 		return
 	_disconnect_buildings()
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 	if entity != null and is_instance_valid(entity) and entity is Building:
 		var b: Building = entity
-		if not b.is_destroyed and b.team == Unit.Team.PLAYER and b.can_set_rally:
+		if not b.is_destroyed and local_team >= 0 and int(b.team) == local_team and b.can_set_rally:
 			_inspected_building = b
 			_selected_buildings = [b]
 			if not b.rally_changed.is_connected(_on_building_changed):

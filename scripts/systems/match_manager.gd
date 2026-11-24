@@ -8,11 +8,22 @@ const ALERT_REGION_RADIUS: float = 300.0
 const ALERT_DAMAGE_THROTTLE_S: float = 4.0
 const MAX_RECENT_ALERTS: int = 3
 const TIMELINE_SAMPLE_INTERVAL: float = 5.0
+const HEAVY_UNIT_IDS: Array = [&"goliath_frame", &"arc_lancer", &"chrysalis_mortar"]
+const MAJOR_STRUCTURE_IDS: Array = [
+	&"nexus_vat",
+	&"cloning_vat",
+	&"calibration_foundry",
+	&"synthetics_fabricator",
+	&"wetware_mainframe",
+	&"defense_turret",
+]
+const TIER2_STRUCTURE_IDS: Array = [&"synthetics_fabricator", &"calibration_foundry", &"wetware_mainframe"]
 
 signal match_ended(winner_team: int, stats: Dictionary)
 signal aggro_ai_toggled(enabled: bool)
 signal tactical_alert_recorded(world_pos: Vector2, message: String)
 signal tactical_alert_triggered(world_pos: Vector2, alert_type: StringName, message: String)
+signal tactical_event_logged(category: StringName, message: String, world_pos: Vector2, accent_color: Color)
 signal game_speed_changed(speed_scale: float)
 
 static var _global_aggro_ai_enabled: bool = true
@@ -42,8 +53,12 @@ var _eval_timer: float = 0.0
 var _tracked_buildings: Dictionary = {}
 var _tracked_units: Dictionary = {}
 var _tracked_prod: Dictionary = {}
+var _team_stats: Dictionary = {}
+var _team_last_core_pos: Dictionary = {}
+var _eliminated_teams: Dictionary = {}
 var _recent_alerts: Array[Dictionary] = []
 var _damage_alert_log: Array[Dictionary] = []
+var _event_dedupe_times: Dictionary = {}
 var _pause_menu: PauseMenu = null
 var current_game_speed: float = 1.0
 var timeline_samples: Array[Dictionary] = []
@@ -56,20 +71,212 @@ func _ready() -> void:
 	current_game_speed = 1.0
 	timeline_samples.clear()
 	_timeline_sample_timer = 0.0
+	_eliminated_teams.clear()
+	_team_last_core_pos.clear()
+	_event_dedupe_times.clear()
 	if GameConfig != null and GameConfig.configured_from_menu:
 		aggro_ai_enabled = GameConfig.aggro_ai_enabled
 		if TeamManager != null:
 			TeamManager.configure_from_game_config()
+	_init_team_stats()
 	_global_aggro_ai_enabled = aggro_ai_enabled
 	if SettingsManager != null:
 		SettingsManager.set_gameplay_cursor_active(true)
-	call_deferred("_ensure_pause_menu")
-	call_deferred("_ensure_spectator_ai_commanders")
-	call_deferred("_hook_initial_entities")
-	call_deferred("_hook_economy_manager")
-	call_deferred("_record_timeline_sample")
+	call_deferred("_initialize_match_runtime")
 	if not get_tree().node_added.is_connected(_on_tree_node_added):
 		get_tree().node_added.connect(_on_tree_node_added)
+
+
+func _init_team_stats() -> void:
+	_team_stats.clear()
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	for tid: int in active_teams:
+		_ensure_team_stat_bucket(tid)
+
+
+func _ensure_team_stat_bucket(tid: int) -> Dictionary:
+	if not _team_stats.has(tid):
+		_team_stats[tid] = {
+			"units_trained": 0,
+			"units_lost": 0,
+			"enemies_destroyed": 0,
+			"buildings_built": 0,
+			"buildings_lost": 0,
+			"peak_bandwidth": 0,
+			"uplink_seconds": 0.0,
+		}
+	return _team_stats[tid] as Dictionary
+
+
+func _initialize_match_runtime() -> void:
+	if not is_inside_tree():
+		return
+	_ensure_pause_menu()
+	_prune_inactive_team_spawns()
+	_center_camera_on_local_base()
+	_ensure_ai_commanders()
+	_hook_initial_entities()
+	_hook_economy_manager()
+	_record_timeline_sample()
+	_schedule_starting_worker_dispatch()
+
+
+func _is_sandbox_testbed_scene() -> bool:
+	if sandbox_mode_active:
+		return true
+	if not is_inside_tree():
+		return false
+	var scene_path: String = ""
+	if owner != null and not owner.scene_file_path.is_empty():
+		scene_path = owner.scene_file_path
+	elif get_tree().current_scene != null:
+		scene_path = get_tree().current_scene.scene_file_path
+	return scene_path.ends_with("milestone_0_test.tscn")
+
+
+func _schedule_starting_worker_dispatch() -> void:
+	if _is_sandbox_testbed_scene() or not is_inside_tree():
+		return
+	var timer: SceneTreeTimer = get_tree().create_timer(0.15)
+	timer.timeout.connect(_dispatch_starting_workers_to_biomass, CONNECT_ONE_SHOT)
+
+
+func _dispatch_starting_workers_to_biomass() -> void:
+	if not is_inside_tree() or is_match_over or _is_sandbox_testbed_scene():
+		return
+
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	var all_biomass: Array[ResourceNode] = []
+	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+		if node is ResourceNode and is_instance_valid(node):
+			var rn: ResourceNode = node
+			if not rn.is_depleted() and not rn.is_vent and rn.resource_type == &"biomass":
+				all_biomass.append(rn)
+	if all_biomass.is_empty():
+		return
+
+	for tid: int in active_teams:
+		var hub_pos: Vector2 = Vector2.INF
+		if _team_last_core_pos.has(tid):
+			hub_pos = _team_last_core_pos[tid] as Vector2
+		else:
+			for b_node: Node in get_tree().get_nodes_in_group("buildings"):
+				if b_node is Building and is_instance_valid(b_node):
+					var b: Building = b_node
+					if not b.is_destroyed and int(b.team) == tid and (b.is_core_hub or b.building_type_id == &"nexus_vat"):
+						hub_pos = b.global_position
+						break
+		if hub_pos == Vector2.INF:
+			continue
+
+		var local_nodes: Array[ResourceNode] = []
+		for rn: ResourceNode in all_biomass:
+			if rn.global_position.distance_to(hub_pos) <= 560.0:
+				local_nodes.append(rn)
+		if local_nodes.is_empty():
+			continue
+		local_nodes.sort_custom(func(a: ResourceNode, b: ResourceNode) -> bool:
+			return hub_pos.distance_squared_to(a.global_position) < hub_pos.distance_squared_to(b.global_position)
+		)
+
+		var idle_workers: Array[Unit] = []
+		for u_node: Node in get_tree().get_nodes_in_group("units"):
+			if not (u_node is Unit) or not is_instance_valid(u_node):
+				continue
+			var u: Unit = u_node
+			if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
+				continue
+			if int(u.team) != tid or u.get_unit_type_id() != &"worker":
+				continue
+			if u.command_state != Unit.CommandState.IDLE or not u.command_queue.is_empty():
+				continue
+			idle_workers.append(u)
+		if idle_workers.is_empty():
+			continue
+
+		var assigned_counts: Dictionary = {}
+		for rn: ResourceNode in local_nodes:
+			assigned_counts[rn.get_instance_id()] = 0
+
+		for worker: Unit in idle_workers:
+			var best_node: ResourceNode = null
+			var best_score: float = INF
+			for rn: ResourceNode in local_nodes:
+				var nid: int = rn.get_instance_id()
+				var score: float = float(assigned_counts.get(nid, 0)) * 10000.0 + worker.global_position.distance_to(rn.global_position)
+				if score < best_score:
+					best_score = score
+					best_node = rn
+			if best_node != null:
+				var chosen_id: int = best_node.get_instance_id()
+				assigned_counts[chosen_id] = int(assigned_counts.get(chosen_id, 0)) + 1
+				worker.command_gather(best_node, false)
+
+
+func _prune_inactive_team_spawns() -> void:
+	if sandbox_mode_active or TeamManager == null or not is_inside_tree():
+		return
+	var active_map: Dictionary = {}
+	for tid: int in TeamManager.get_active_teams():
+		active_map[tid] = true
+
+	var pruned_any: bool = false
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not (node is Building) or not is_instance_valid(node):
+			continue
+		var b: Building = node
+		var b_tid: int = int(b.team)
+		if not active_map.has(b_tid):
+			if SpatialGrid != null:
+				SpatialGrid.unregister_building(b)
+			b.is_destroyed = true
+			if b.is_in_group("nav_bake_obstacles"):
+				b.remove_from_group("nav_bake_obstacles")
+			if b.is_in_group("buildings"):
+				b.remove_from_group("buildings")
+			b.queue_free()
+			pruned_any = true
+		elif b.is_core_hub or b.building_type_id == &"nexus_vat":
+			_team_last_core_pos[b_tid] = b.global_position
+
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not (node is Unit) or not is_instance_valid(node):
+			continue
+		var u: Unit = node
+		if u.get_unit_type_id() == &"target_dummy":
+			continue
+		if not active_map.has(int(u.team)):
+			if SpatialGrid != null:
+				SpatialGrid.unregister_unit(u)
+			u.is_dead = true
+			if u.is_in_group("units"):
+				u.remove_from_group("units")
+			u.queue_free()
+			pruned_any = true
+
+	if pruned_any:
+		var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+		if econ != null:
+			for tid: int in TeamManager.get_active_teams():
+				econ.call_deferred("recalculate_bandwidth", tid)
+		var nav_reg: Node = get_tree().get_first_node_in_group("arena_nav_region")
+		if nav_reg != null and nav_reg.has_method("request_rebake"):
+			nav_reg.call("request_rebake")
+		var fog: Node = get_tree().get_first_node_in_group("fog_of_war")
+		if fog != null and fog.has_method("invalidate_building_vision_cache"):
+			fog.call("invalidate_building_vision_cache")
+
+
+func _center_camera_on_local_base() -> void:
+	if sandbox_mode_active or TeamManager == null or not is_inside_tree():
+		return
+	var local_team: int = TeamManager.get_local_human_team()
+	if local_team < 0:
+		return
+	if _team_last_core_pos.has(local_team):
+		var cam: Node = get_tree().get_first_node_in_group("rts_camera")
+		if cam != null and cam.has_method("center_on"):
+			cam.call("center_on", _team_last_core_pos[local_team] as Vector2)
 
 
 func set_game_speed(speed_scale: float) -> void:
@@ -103,23 +310,35 @@ func reset_game_speed() -> void:
 	game_speed_changed.emit(1.0)
 
 
-func _ensure_spectator_ai_commanders() -> void:
-	if TeamManager == null or not TeamManager.is_spectator_mode() or not is_inside_tree():
+func _ensure_ai_commanders() -> void:
+	if sandbox_mode_active or TeamManager == null or not is_inside_tree():
 		return
 	var host: Node = get_tree().current_scene
 	if host == null:
 		return
-	var existing_teams: Dictionary = {}
+
 	var ref_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
-	for node: Node in get_tree().get_nodes_in_group("skirmish_ai"):
-		if is_instance_valid(node):
-			existing_teams[int(node.get("ai_team"))] = true
-			var b: Variant = node.get("arena_bounds")
-			if b is Rect2:
-				ref_bounds = b as Rect2
 	var nav: Node = get_tree().get_first_node_in_group("arena_nav_region")
 	if nav != null and nav.get("arena_bounds") is Rect2:
 		ref_bounds = nav.get("arena_bounds") as Rect2
+
+	var existing_teams: Dictionary = {}
+	for node: Node in get_tree().get_nodes_in_group("skirmish_ai"):
+		if not is_instance_valid(node):
+			continue
+		var tid: int = int(node.get("ai_team"))
+		var b: Variant = node.get("arena_bounds")
+		if b is Rect2 and nav == null:
+			ref_bounds = b as Rect2
+		var should_be_ai: bool = TeamManager.is_active_team(tid) and TeamManager.get_team_controller_type(tid) == TeamManager.ControllerType.AI
+		if not should_be_ai or existing_teams.has(tid):
+			node.set("enabled", false)
+			node.queue_free()
+			continue
+		existing_teams[tid] = node
+		node.set("arena_bounds", ref_bounds)
+		if node.has_method("_apply_lobby_ai_profile"):
+			node.call("_apply_lobby_ai_profile")
 
 	var ai_script: GDScript = load(SKIRMISH_AI_SCRIPT_PATH) as GDScript
 	if ai_script == null:
@@ -131,7 +350,7 @@ func _ensure_spectator_ai_commanders() -> void:
 			continue
 		var ai_node: Node = ai_script.new()
 		ai_node.name = "SkirmishAICommander_Team%d" % tid
-		ai_node.set("ai_team", tid)
+		ai_node.set("ai_team", tid as Unit.Team)
 		ai_node.set("arena_bounds", ref_bounds)
 		host.add_child(ai_node)
 
@@ -152,6 +371,11 @@ func _hook_economy_manager() -> void:
 		return
 	if not econ.bandwidth_changed.is_connected(_on_bandwidth_changed):
 		econ.bandwidth_changed.connect(_on_bandwidth_changed)
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	for tid: int in active_teams:
+		var bw: int = econ.get_bandwidth_used(tid)
+		var bucket: Dictionary = _ensure_team_stat_bucket(tid)
+		bucket["peak_bandwidth"] = maxi(int(bucket["peak_bandwidth"]), bw)
 	player_peak_bandwidth = maxi(player_peak_bandwidth, econ.get_bandwidth_used(Unit.Team.PLAYER))
 	enemy_peak_bandwidth = maxi(enemy_peak_bandwidth, econ.get_bandwidth_used(Unit.Team.ENEMY))
 
@@ -159,6 +383,8 @@ func _hook_economy_manager() -> void:
 func _on_bandwidth_changed(team: int, used: int, _cap: int) -> void:
 	if is_match_over:
 		return
+	var bucket: Dictionary = _ensure_team_stat_bucket(team)
+	bucket["peak_bandwidth"] = maxi(int(bucket["peak_bandwidth"]), used)
 	if team == int(Unit.Team.PLAYER):
 		player_peak_bandwidth = maxi(player_peak_bandwidth, used)
 	elif team == int(Unit.Team.ENEMY):
@@ -178,6 +404,23 @@ func _ensure_pause_menu() -> void:
 	_pause_menu = PAUSE_MENU_SCENE.instantiate() as PauseMenu
 	if _pause_menu != null:
 		host.add_child(_pause_menu)
+
+
+func emit_tactical_event(
+	category: StringName,
+	message: String,
+	world_pos: Vector2,
+	accent_color: Color = Color(0.28, 0.96, 0.92, 1.0),
+	dedupe_key: String = ""
+) -> void:
+	if is_match_over or message.strip_edges().is_empty():
+		return
+	if not dedupe_key.is_empty():
+		var now_s: float = float(Time.get_ticks_msec()) * 0.001
+		if _event_dedupe_times.has(dedupe_key) and (now_s - float(_event_dedupe_times[dedupe_key])) < 2.2:
+			return
+		_event_dedupe_times[dedupe_key] = now_s
+	tactical_event_logged.emit(category, message, world_pos, accent_color)
 
 
 func push_tactical_alert(world_pos: Vector2, alert_type: StringName, message: String = "") -> void:
@@ -303,9 +546,10 @@ func _calm_idle_and_ai_units() -> void:
 		var u: Unit = node
 		if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
 			continue
+		var is_ai_unit: bool = TeamManager.get_team_controller_type(int(u.team)) == TeamManager.ControllerType.AI if TeamManager != null else (u.team == Unit.Team.ENEMY)
 		if u.command_state == Unit.CommandState.IDLE:
 			u.current_target = null
-		elif u.team == Unit.Team.ENEMY and (u.command_state == Unit.CommandState.ATTACK_MOVING or u.command_state == Unit.CommandState.ATTACKING_TARGET):
+		elif is_ai_unit and (u.command_state == Unit.CommandState.ATTACK_MOVING or u.command_state == Unit.CommandState.ATTACKING_TARGET):
 			u.command_stop()
 
 
@@ -323,10 +567,13 @@ func _process(delta: float) -> void:
 
 	match_elapsed += delta
 	var uplink: HyperUplink = get_tree().get_first_node_in_group("hyper_uplinks") as HyperUplink
-	if uplink != null:
-		if uplink.controlling_team == int(Unit.Team.PLAYER):
+	if uplink != null and uplink.controlling_team >= 0:
+		var ctrl_tid: int = uplink.controlling_team
+		var bucket: Dictionary = _ensure_team_stat_bucket(ctrl_tid)
+		bucket["uplink_seconds"] = float(bucket["uplink_seconds"]) + delta
+		if ctrl_tid == int(Unit.Team.PLAYER):
 			player_uplink_time += delta
-		elif uplink.controlling_team == int(Unit.Team.ENEMY):
+		elif ctrl_tid == int(Unit.Team.ENEMY):
 			enemy_uplink_time += delta
 
 	_timeline_sample_timer += delta
@@ -424,6 +671,7 @@ func evaluate_match_state() -> void:
 		team_buildings[t] = int(team_buildings.get(t, 0)) + 1
 		if b.is_core_hub or b.building_type_id == &"nexus_vat":
 			team_cores[t] = int(team_cores.get(t, 0)) + 1
+			_team_last_core_pos[t] = b.global_position
 
 	var surviving_alliances: Dictionary = {}
 	for tid: int in active_teams:
@@ -434,16 +682,37 @@ func evaluate_match_state() -> void:
 			var ally_id: int = TeamManager.get_team_alliance(tid) if TeamManager != null else tid
 			if not surviving_alliances.has(ally_id):
 				surviving_alliances[ally_id] = tid
+		elif not _eliminated_teams.has(tid):
+			_eliminated_teams[tid] = true
+			if active_teams.size() > 2:
+				var elim_pos: Vector2 = _team_last_core_pos.get(tid, Vector2.ZERO) as Vector2
+				var elim_tag: String = TeamManager.get_team_short_label(tid, true) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("Team %d" % (tid + 1))
+				emit_tactical_event(&"objective", "%s Eliminated!" % elim_tag, elim_pos, Color(1.0, 0.82, 0.28, 1.0))
 
 	if surviving_alliances.size() <= 1:
 		var winner_tid: int = 0
 		if surviving_alliances.size() == 1:
 			var first_key: Variant = surviving_alliances.keys()[0]
 			winner_tid = int(surviving_alliances[first_key])
-		var reason: String = "Hostile Nexus Vat Neutralized" if winner_tid == 0 else "Team 1 Nexus Vat Destroyed"
+		var reason: String = "All Opposing Command Cores Neutralized"
+		if active_teams.size() <= 2:
+			reason = "Hostile Nexus Vat Neutralized" if winner_tid == 0 else "Command Core Destroyed"
 		if TeamManager != null and TeamManager.is_spectator_mode():
-			reason = "%s Achieved Total Domination" % TeamManager.get_team_display_name(winner_tid)
+			reason = "%s Achieved Total Domination" % _format_winner_label(winner_tid)
 		_finish_match(winner_tid as Unit.Team, reason)
+
+
+func _format_winner_label(winner_tid: int) -> String:
+	if TeamManager == null:
+		return "PLAYER COMMANDER" if winner_tid == 0 else "HOSTILE AI"
+	var win_ally: int = TeamManager.get_team_alliance(winner_tid)
+	var allies: PackedStringArray = PackedStringArray()
+	for tid: int in TeamManager.get_active_teams():
+		if TeamManager.get_team_alliance(tid) == win_ally:
+			allies.append(TeamManager.get_team_short_label(tid, false))
+	if allies.size() > 1:
+		return "TEAM %s (%s)" % [TeamManager.get_alliance_letter(win_ally), " + ".join(allies)]
+	return TeamManager.get_team_display_name(winner_tid)
 
 
 func _finish_match(winner_team: Unit.Team, reason: String) -> void:
@@ -462,17 +731,47 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 		if is_instance_valid(ai_node):
 			ai_node.set("enabled", false)
 
-	var winner_label: String = TeamManager.get_team_display_name(int(winner_team)) if TeamManager != null else ("PLAYER COMMANDER" if winner_team == Unit.Team.PLAYER else "HOSTILE AI")
+	var winner_label: String = _format_winner_label(int(winner_team))
 	var is_spectator: bool = TeamManager != null and TeamManager.is_spectator_mode()
 	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
-	var is_local_win: bool = true if is_spectator else (int(winner_team) == local_team)
+	var is_local_win: bool = true if is_spectator else (
+		TeamManager.are_allies(local_team, int(winner_team)) if (TeamManager != null and local_team >= 0) else (int(winner_team) == local_team)
+	)
 
 	var safe_duration: float = maxf(1.0, match_elapsed)
+	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	var teams_stats_out: Dictionary = {}
+	for tid: int in active_teams:
+		var bucket: Dictionary = _ensure_team_stat_bucket(tid)
+		var totals: Dictionary = econ.get_all_totals_gathered(tid) if econ != null else {}
+		var up_s: float = float(bucket.get("uplink_seconds", 0.0))
+		var up_pct: float = clampf((up_s / safe_duration) * 100.0, 0.0, 100.0)
+		teams_stats_out[tid] = {
+			"team_id": tid,
+			"alliance_id": TeamManager.get_team_alliance(tid) if TeamManager != null else tid,
+			"short_label": TeamManager.get_team_short_label(tid, true) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (tid + 1)),
+			"display_name": TeamManager.get_team_display_name(tid) if TeamManager != null else ("TEAM %d" % (tid + 1)),
+			"color": TeamManager.get_team_color(tid) if TeamManager != null else Color(0.24, 0.96, 0.88, 1.0),
+			"biomass_gathered": int(totals.get(EconomyManager.RESOURCE_BIOMASS, 0)),
+			"silica_gathered": int(totals.get(EconomyManager.RESOURCE_SILICA, 0)),
+			"compute_gathered": int(totals.get(EconomyManager.RESOURCE_COMPUTE, 0)),
+			"units_trained": int(bucket.get("units_trained", 0)),
+			"units_lost": int(bucket.get("units_lost", 0)),
+			"enemies_destroyed": int(bucket.get("enemies_destroyed", 0)),
+			"buildings_built": int(bucket.get("buildings_built", 0)),
+			"buildings_lost": int(bucket.get("buildings_lost", 0)),
+			"peak_bandwidth": int(bucket.get("peak_bandwidth", 0)),
+			"uplink_seconds": up_s,
+			"uplink_formatted": _format_duration(up_s),
+			"uplink_pct": up_pct,
+		}
+
 	var player_uplink_pct: float = clampf((player_uplink_time / safe_duration) * 100.0, 0.0, 100.0)
 	var enemy_uplink_pct: float = clampf((enemy_uplink_time / safe_duration) * 100.0, 0.0, 100.0)
-	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 	var p_totals: Dictionary = econ.get_all_totals_gathered(Unit.Team.PLAYER) if econ != null else {}
 	var e_totals: Dictionary = econ.get_all_totals_gathered(Unit.Team.ENEMY) if econ != null else {}
+
 	var stats: Dictionary = {
 		"winner_team": int(winner_team),
 		"winner_label": winner_label,
@@ -488,6 +787,8 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 		"structures_destroyed": enemy_structures_destroyed,
 		"timeline_samples": timeline_samples.duplicate(true),
 		"active_mutators": GameConfig.get_active_mutator_labels() if (GameConfig != null and GameConfig.has_method("get_active_mutator_labels")) else PackedStringArray(),
+		"active_teams": active_teams,
+		"teams": teams_stats_out,
 		"player": {
 			"biomass_gathered": int(p_totals.get(EconomyManager.RESOURCE_BIOMASS, 0)),
 			"silica_gathered": int(p_totals.get(EconomyManager.RESOURCE_SILICA, 0)),
@@ -563,10 +864,20 @@ func _hook_building(b: Building) -> void:
 func _on_building_construction_completed(building: Building) -> void:
 	if is_match_over or building == null:
 		return
-	if building.team == Unit.Team.PLAYER:
+	var tid: int = int(building.team)
+	var bucket: Dictionary = _ensure_team_stat_bucket(tid)
+	bucket["buildings_built"] = int(bucket["buildings_built"]) + 1
+	if tid == int(Unit.Team.PLAYER):
 		player_buildings_built += 1
-	elif building.team == Unit.Team.ENEMY:
+	elif tid == int(Unit.Team.ENEMY):
 		enemy_buildings_built += 1
+
+	if TIER2_STRUCTURE_IDS.has(building.building_type_id):
+		var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+		var is_visible_to_feed: bool = viewer < 0 or (TeamManager.are_allies(viewer, tid) if TeamManager != null else (tid == viewer))
+		if is_visible_to_feed:
+			var tag: String = TeamManager.get_team_short_label(tid, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (tid + 1))
+			emit_tactical_event(&"economy", "%s %s Online" % [tag, building.display_name], building.global_position, Color(0.28, 0.96, 0.92, 1.0))
 
 
 func _hook_production(prod: ProductionComponent) -> void:
@@ -594,27 +905,61 @@ func _hook_unit(u: Unit) -> void:
 func _on_unit_produced(unit: Unit) -> void:
 	if is_match_over or unit == null:
 		return
-	if unit.team == Unit.Team.PLAYER:
+	var tid: int = int(unit.team)
+	var bucket: Dictionary = _ensure_team_stat_bucket(tid)
+	bucket["units_trained"] = int(bucket["units_trained"]) + 1
+	if tid == int(Unit.Team.PLAYER):
 		player_units_trained += 1
-	elif unit.team == Unit.Team.ENEMY:
+	elif tid == int(Unit.Team.ENEMY):
 		enemy_units_trained += 1
 
 
 func _on_unit_died(unit: Unit) -> void:
 	if is_match_over or unit == null:
 		return
-	if unit.team == Unit.Team.PLAYER:
+	var tid: int = int(unit.team)
+	var bucket: Dictionary = _ensure_team_stat_bucket(tid)
+	bucket["units_lost"] = int(bucket["units_lost"]) + 1
+	# Credit kill count for 2-team / legacy counters and multi-team summaries
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	if active_teams.size() == 2:
+		var other_tid: int = active_teams[1] if tid == active_teams[0] else active_teams[0]
+		var other_b: Dictionary = _ensure_team_stat_bucket(other_tid)
+		other_b["enemies_destroyed"] = int(other_b["enemies_destroyed"]) + 1
+	if tid == int(Unit.Team.PLAYER):
 		player_units_lost += 1
-	elif unit.team == Unit.Team.ENEMY:
+	elif tid == int(Unit.Team.ENEMY):
 		enemy_units_destroyed += 1
+
+	# Log heavy unit losses in Tactical Event Feed
+	var uid: StringName = unit.get_unit_type_id()
+	if HEAVY_UNIT_IDS.has(uid):
+		var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+		var is_ally: bool = viewer >= 0 and (TeamManager.are_allies(viewer, tid) if TeamManager != null else (tid == viewer))
+		if is_ally or viewer < 0 or unit.visible:
+			var tag: String = TeamManager.get_team_short_label(tid, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (tid + 1))
+			var u_name: String = unit.data.display_name if unit.data != null else "Heavy Unit"
+			var col: Color = Color(1.0, 0.34, 0.28, 1.0) if is_ally else Color(1.0, 0.72, 0.28, 1.0)
+			emit_tactical_event(&"combat", "%s %s Destroyed" % [tag, u_name], unit.global_position, col)
 
 
 func _on_building_destroyed(building: Building) -> void:
 	if building != null and not is_match_over:
-		if building.team == Unit.Team.ENEMY:
+		var tid: int = int(building.team)
+		var bucket: Dictionary = _ensure_team_stat_bucket(tid)
+		bucket["buildings_lost"] = int(bucket["buildings_lost"]) + 1
+		if tid == int(Unit.Team.ENEMY):
 			enemy_structures_destroyed += 1
-		elif building.team == Unit.Team.PLAYER:
+		elif tid == int(Unit.Team.PLAYER):
 			player_buildings_lost += 1
+
+		if MAJOR_STRUCTURE_IDS.has(building.building_type_id) or building.is_core_hub:
+			var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+			var is_ally: bool = viewer >= 0 and (TeamManager.are_allies(viewer, tid) if TeamManager != null else (tid == viewer))
+			if is_ally or viewer < 0 or building.visible or building.is_core_hub:
+				var tag: String = TeamManager.get_team_short_label(tid, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (tid + 1))
+				var col: Color = Color(1.0, 0.30, 0.26, 1.0) if is_ally else Color(1.0, 0.72, 0.28, 1.0)
+				emit_tactical_event(&"combat", "%s %s Destroyed!" % [tag, building.display_name], building.global_position, col)
 	evaluate_match_state()
 
 

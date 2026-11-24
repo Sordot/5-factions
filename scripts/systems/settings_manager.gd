@@ -64,6 +64,7 @@ var edge_pan_speed: float = 900.0
 var edge_pan_margin: float = 24.0
 var keyboard_pan_speed: float = 650.0
 var zoom_speed: float = 0.12
+var zoom_to_cursor: bool = true
 var confine_cursor: bool = false
 var invert_zoom: bool = false
 var middle_drag_speed: float = 1.0
@@ -86,12 +87,13 @@ var attack_move_mode: int = AttackMoveMode.QUICK_CAST
 var smart_box_select_enabled: bool = false
 var show_alert_toasts: bool = true
 var camera_shake_enabled: bool = true
+var battle_scars_enabled: bool = true
 
 # Audio preferences
 var master_volume: float = 0.72
 var sfx_volume: float = 0.85
 var ui_volume: float = 0.85
-var ambience_volume: float = 0.55
+var ambience_volume: float = 0.35
 var muted: bool = false
 var mute_when_unfocused: bool = false
 
@@ -171,6 +173,7 @@ func load_settings() -> void:
 	edge_pan_margin = clampf(float(cfg.get_value("camera", "edge_pan_margin", 24.0)), 8.0, 64.0)
 	keyboard_pan_speed = clampf(float(cfg.get_value("camera", "keyboard_pan_speed", 650.0)), 250.0, 1400.0)
 	zoom_speed = clampf(float(cfg.get_value("camera", "zoom_speed", 0.12)), 0.05, 0.30)
+	zoom_to_cursor = bool(cfg.get_value("camera", "zoom_to_cursor", true))
 	confine_cursor = bool(cfg.get_value("camera", "confine_cursor", false))
 	invert_zoom = bool(cfg.get_value("camera", "invert_zoom", false))
 	middle_drag_speed = clampf(float(cfg.get_value("camera", "middle_drag_speed", 1.0)), 0.4, 2.5)
@@ -181,11 +184,12 @@ func load_settings() -> void:
 	smart_box_select_enabled = bool(cfg.get_value("gameplay", "smart_box_select_enabled", false))
 	show_alert_toasts = bool(cfg.get_value("gameplay", "show_alert_toasts", true))
 	camera_shake_enabled = bool(cfg.get_value("gameplay", "camera_shake_enabled", true))
+	battle_scars_enabled = bool(cfg.get_value("gameplay", "battle_scars_enabled", true))
 
 	master_volume = clampf(float(cfg.get_value("audio", "master_volume", 0.72)), 0.0, 1.0)
 	sfx_volume = clampf(float(cfg.get_value("audio", "sfx_volume", 0.85)), 0.0, 1.0)
 	ui_volume = clampf(float(cfg.get_value("audio", "ui_volume", 0.85)), 0.0, 1.0)
-	ambience_volume = clampf(float(cfg.get_value("audio", "ambience_volume", 0.55)), 0.0, 1.0)
+	ambience_volume = clampf(float(cfg.get_value("audio", "ambience_volume", 0.35)), 0.0, 1.0)
 	muted = bool(cfg.get_value("audio", "muted", false))
 	mute_when_unfocused = bool(cfg.get_value("audio", "mute_when_unfocused", false))
 
@@ -245,6 +249,7 @@ func save_settings() -> void:
 	cfg.set_value("camera", "edge_pan_margin", edge_pan_margin)
 	cfg.set_value("camera", "keyboard_pan_speed", keyboard_pan_speed)
 	cfg.set_value("camera", "zoom_speed", zoom_speed)
+	cfg.set_value("camera", "zoom_to_cursor", zoom_to_cursor)
 	cfg.set_value("camera", "confine_cursor", confine_cursor)
 	cfg.set_value("camera", "invert_zoom", invert_zoom)
 	cfg.set_value("camera", "middle_drag_speed", middle_drag_speed)
@@ -255,6 +260,7 @@ func save_settings() -> void:
 	cfg.set_value("gameplay", "smart_box_select_enabled", smart_box_select_enabled)
 	cfg.set_value("gameplay", "show_alert_toasts", show_alert_toasts)
 	cfg.set_value("gameplay", "camera_shake_enabled", camera_shake_enabled)
+	cfg.set_value("gameplay", "battle_scars_enabled", battle_scars_enabled)
 
 	cfg.set_value("audio", "master_volume", master_volume)
 	cfg.set_value("audio", "sfx_volume", sfx_volume)
@@ -286,7 +292,8 @@ func set_camera_settings(
 	p_zoom_speed: float,
 	p_confine_cursor: Variant = null,
 	p_invert_zoom: Variant = null,
-	p_middle_drag_speed: Variant = null
+	p_middle_drag_speed: Variant = null,
+	p_zoom_to_cursor: Variant = null
 ) -> void:
 	edge_pan_enabled = p_edge_pan_enabled
 	edge_pan_speed = clampf(p_edge_pan_speed, 300.0, 1800.0)
@@ -299,6 +306,8 @@ func set_camera_settings(
 		invert_zoom = bool(p_invert_zoom)
 	if p_middle_drag_speed is float or p_middle_drag_speed is int:
 		middle_drag_speed = clampf(float(p_middle_drag_speed), 0.4, 2.5)
+	if p_zoom_to_cursor is bool:
+		zoom_to_cursor = bool(p_zoom_to_cursor)
 	refresh_mouse_mode()
 	save_settings()
 	settings_changed.emit(&"camera")
@@ -310,7 +319,8 @@ func set_gameplay_settings(
 	p_camera_shake_enabled: Variant = null,
 	p_attack_range_mode: Variant = null,
 	p_attack_move_mode: Variant = null,
-	p_smart_box_select_enabled: Variant = null
+	p_smart_box_select_enabled: Variant = null,
+	p_battle_scars_enabled: Variant = null
 ) -> void:
 	health_bar_mode = clampi(p_health_bar_mode, 0, 2)
 	show_alert_toasts = p_show_alert_toasts
@@ -322,6 +332,8 @@ func set_gameplay_settings(
 		attack_move_mode = clampi(int(p_attack_move_mode), 0, 1)
 	if p_smart_box_select_enabled is bool:
 		smart_box_select_enabled = bool(p_smart_box_select_enabled)
+	if p_battle_scars_enabled is bool:
+		battle_scars_enabled = bool(p_battle_scars_enabled)
 	save_settings()
 	settings_changed.emit(&"gameplay")
 
@@ -648,6 +660,7 @@ func reset_category(category: StringName) -> void:
 			edge_pan_margin = 24.0
 			keyboard_pan_speed = 650.0
 			zoom_speed = 0.12
+			zoom_to_cursor = true
 			confine_cursor = false
 			invert_zoom = false
 			middle_drag_speed = 1.0
@@ -661,13 +674,14 @@ func reset_category(category: StringName) -> void:
 			smart_box_select_enabled = false
 			show_alert_toasts = true
 			camera_shake_enabled = true
+			battle_scars_enabled = true
 			save_settings()
 			settings_changed.emit(&"gameplay")
 		&"audio":
 			master_volume = 0.72
 			sfx_volume = 0.85
 			ui_volume = 0.85
-			ambience_volume = 0.55
+			ambience_volume = 0.35
 			muted = false
 			mute_when_unfocused = false
 			if AudioManager != null and AudioManager.has_method("set_unfocused_mute"):
@@ -698,6 +712,7 @@ func reset_all_to_defaults() -> void:
 	edge_pan_margin = 24.0
 	keyboard_pan_speed = 650.0
 	zoom_speed = 0.12
+	zoom_to_cursor = true
 	confine_cursor = false
 	invert_zoom = false
 	middle_drag_speed = 1.0
@@ -707,10 +722,11 @@ func reset_all_to_defaults() -> void:
 	smart_box_select_enabled = false
 	show_alert_toasts = true
 	camera_shake_enabled = true
+	battle_scars_enabled = true
 	master_volume = 0.72
 	sfx_volume = 0.85
 	ui_volume = 0.85
-	ambience_volume = 0.55
+	ambience_volume = 0.35
 	muted = false
 	mute_when_unfocused = false
 	if AudioManager != null and AudioManager.has_method("set_unfocused_mute"):

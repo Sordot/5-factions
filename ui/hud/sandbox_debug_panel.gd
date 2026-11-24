@@ -4,7 +4,11 @@ extends Control
 @export var spawner_path: NodePath
 @export var selection_controller_path: NodePath
 
+@onready var margin_container: MarginContainer = %MarginContainer
+@onready var panel_container: PanelContainer = %PanelContainer
 @onready var status_label: Label = %StatusLabel
+@onready var btn_collapse: Button = %BtnCollapse
+@onready var body_vbox: VBoxContainer = %BodyVBox
 @onready var groups_label: Label = %GroupsLabel
 @onready var btn_unit_1: Button = %BtnUnit1
 @onready var btn_unit_5: Button = %BtnUnit5
@@ -40,12 +44,25 @@ var _camera: RTSCamera = null
 var _match_manager: MatchManager = null
 var _catalog_team: Unit.Team = Unit.Team.PLAYER
 var _combat_lab_open: bool = false
+var _is_collapsed: bool = false
 
 
 func _ready() -> void:
-	var panel: Control = get_node_or_null("MarginContainer/PanelContainer") as Control
-	if panel != null:
-		panel.add_to_group("blocks_edge_pan")
+	add_to_group("sandbox_debug_panel")
+	if panel_container != null:
+		panel_container.add_to_group("blocks_edge_pan")
+	if btn_collapse != null:
+		btn_collapse.pressed.connect(_on_toggle_collapse)
+
+	# Auto-hide on skirmish maps; stay visible by default on Sandbox Testbed (milestone_0_test.tscn).
+	var scene_path: String = ""
+	if owner != null and not owner.scene_file_path.is_empty():
+		scene_path = owner.scene_file_path
+	elif is_inside_tree() and get_tree().current_scene != null:
+		scene_path = get_tree().current_scene.scene_file_path
+	var is_testbed: bool = scene_path.ends_with("milestone_0_test.tscn")
+	set_panel_visible(is_testbed)
+	_apply_collapsed_state()
 	_spawner = get_node_or_null(spawner_path) as SandboxSpawner
 	_selection_controller = get_node_or_null(selection_controller_path) as SelectionController
 	_camera = get_tree().get_first_node_in_group("rts_camera") as RTSCamera
@@ -280,15 +297,59 @@ func _refresh_fullscreen_button() -> void:
 	btn_toggle_fullscreen.modulate = Color(0.55, 1.0, 0.92, 1.0) if is_fs else Color(0.76, 0.82, 0.88, 0.9)
 
 
+func set_panel_visible(show_panel: bool) -> void:
+	visible = show_panel
+	if show_panel:
+		_refresh_edge_pan_button()
+		_refresh_fullscreen_button()
+		_refresh_aggro_ai_button()
+		_refresh_status()
+
+
+func toggle_panel_visible() -> bool:
+	set_panel_visible(not visible)
+	return visible
+
+
+func is_panel_visible() -> bool:
+	return visible
+
+
+func _on_toggle_collapse() -> void:
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	_is_collapsed = not _is_collapsed
+	_apply_collapsed_state()
+
+
+func _apply_collapsed_state() -> void:
+	if body_vbox != null:
+		body_vbox.visible = not _is_collapsed
+	if btn_collapse != null:
+		btn_collapse.text = "+" if _is_collapsed else "–"
+		btn_collapse.tooltip_text = "Expand Debug HUD" if _is_collapsed else "Minimize Debug HUD"
+	if margin_container != null:
+		margin_container.reset_size()
+	if panel_container != null:
+		panel_container.reset_size()
+	_refresh_status()
+
+
 func _process(_delta: float) -> void:
+	if not visible:
+		return
 	_connect_match_manager()
 	_refresh_status()
-	_refresh_fullscreen_button()
-	_refresh_aggro_ai_button()
+	if not _is_collapsed:
+		_refresh_fullscreen_button()
+		_refresh_aggro_ai_button()
 
 
 func _refresh_status() -> void:
 	if status_label == null:
+		return
+	if _is_collapsed:
+		status_label.text = "DEBUG HUD"
 		return
 	var player_count: int = 0
 	var dummy_count: int = 0

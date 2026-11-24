@@ -76,6 +76,7 @@ signal rally_changed(building: Building)
 
 var current_hp: float = 1500.0
 var is_selected: bool = false
+var is_marquee_highlighted: bool = false
 var is_destroyed: bool = false
 var has_been_spotted: bool = false
 var construction_progress: float = 1.0
@@ -436,7 +437,7 @@ func _complete_construction() -> void:
 		if mm != null:
 			mm.push_tactical_alert(global_position, &"tech_complete", "%s Complete" % display_name)
 		elif AudioManager != null:
-			AudioManager.play_sfx(&"build_complete", -2.5, 0.0)
+			AudioManager.play_build_sfx(&"build_complete", global_position)
 	health_changed.emit(self, current_hp, max_hp)
 	construction_progress_changed.emit(self, 1.0, true)
 	construction_completed.emit(self)
@@ -450,9 +451,20 @@ func set_selected(selected: bool) -> void:
 	if is_node_ready():
 		if selection_ring != null:
 			selection_ring.visible = is_selected
+		if _entity_visuals != null and is_instance_valid(_entity_visuals):
+			_entity_visuals.queue_redraw()
 		_update_health_bar()
 		queue_redraw()
 	selection_changed.emit(self, is_selected)
+
+
+func set_marquee_highlighted(active: bool) -> void:
+	if is_marquee_highlighted == active:
+		return
+	is_marquee_highlighted = active
+	if _entity_visuals != null and is_instance_valid(_entity_visuals):
+		_entity_visuals.queue_redraw()
+	queue_redraw()
 
 
 func set_rally_position(world_pos: Vector2) -> void:
@@ -1067,8 +1079,14 @@ func _destroy() -> void:
 	if econ_dead != null:
 		econ_dead.notify_building_tech_changed(team)
 	_request_navmesh_rebake()
-	if get_parent() != null and (team == Unit.Team.PLAYER or visible):
-		var burst_col: Color = Color(0.32, 0.96, 0.90, 1.0) if team == Unit.Team.PLAYER else Color(1.0, 0.40, 0.26, 1.0)
+	var burst_col: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else (Color(0.32, 0.96, 0.90, 1.0) if team == Unit.Team.PLAYER else Color(1.0, 0.40, 0.26, 1.0))
+	if is_inside_tree():
+		var scars: Node = get_tree().get_first_node_in_group("battle_scars")
+		if scars != null and scars.has_method("add_scar"):
+			scars.call("add_scar", &"scorch_large", global_position, maxf(34.0, footprint_radius * 0.92), burst_col)
+	var viewer_b: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	var is_friendly_b_view: bool = viewer_b < 0 or (TeamManager.are_allies(viewer_b, int(team)) if TeamManager != null else (team == Unit.Team.PLAYER))
+	if get_parent() != null and (is_friendly_b_view or visible):
 		var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
 		fx.z_index = 54
 		get_parent().add_child(fx)
@@ -1077,8 +1095,9 @@ func _destroy() -> void:
 		var cam: Node = get_tree().get_first_node_in_group("rts_camera")
 		if cam != null and cam.has_method("add_camera_shake"):
 			cam.call("add_camera_shake", 5.0, 0.20, global_position)
-	if AudioManager != null and (team == Unit.Team.PLAYER or visible):
-		AudioManager.play_sfx(&"entity_destroyed", -2.5, 0.06)
+	if AudioManager != null and (is_friendly_b_view or visible):
+		var is_major_explosion: bool = is_core_hub or building_type_id == &"nexus_vat" or (TeamManager != null and TeamManager.is_team_controlled_by_local_human(int(team)))
+		AudioManager.play_explosion_sfx(global_position, -2.5, is_major_explosion)
 	destroyed.emit(self)
 	queue_free()
 

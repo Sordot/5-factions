@@ -88,10 +88,32 @@ func _get_palette() -> Dictionary:
 
 func _draw() -> void:
 	var p: Dictionary = _get_palette()
+	_draw_marquee_preview_ring()
 	if mode == Mode.UNIT:
 		_draw_unit_silhouette(p)
 	else:
 		_draw_building_silhouette(p)
+
+
+func _draw_marquee_preview_ring() -> void:
+	var smart_mode: bool = SettingsManager != null and SettingsManager.smart_box_select_enabled
+	var ring_col: Color = Color(0.961, 0.620, 0.043, 0.92) if smart_mode else Color(0.220, 0.741, 0.973, 0.92)
+	if mode == Mode.UNIT:
+		if _owner_unit == null or not is_instance_valid(_owner_unit) or _owner_unit.is_dead:
+			return
+		if not _owner_unit.is_marquee_highlighted or _owner_unit.is_selected:
+			return
+		var r: float = _owner_unit.get_selection_radius() + 2.0
+		draw_circle(Vector2.ZERO, r, Color(ring_col.r, ring_col.g, ring_col.b, 0.14))
+		draw_arc(Vector2.ZERO, r, 0.0, TAU, 28, ring_col, 1.8, true)
+	else:
+		if _owner_building == null or not is_instance_valid(_owner_building) or _owner_building.is_destroyed:
+			return
+		if not _owner_building.is_marquee_highlighted or _owner_building.is_selected:
+			return
+		var r_b: float = maxf(_owner_building.selection_radius, _owner_building.footprint_radius + 6.0)
+		draw_circle(Vector2.ZERO, r_b, Color(ring_col.r, ring_col.g, ring_col.b, 0.11))
+		draw_arc(Vector2.ZERO, r_b, 0.0, TAU, 36, ring_col, 2.0, true)
 
 
 # =============================================================================
@@ -435,6 +457,17 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 	var outline: Color = p["outline"]
 	var pulse: float = 0.5 + 0.5 * sin(_anim_time * 3.4)
 	var is_training: bool = _owner_building.get_training_queue_size() > 0
+
+	# Subtle Technozen circuit grounding pad under completed structures
+	if SettingsManager == null or SettingsManager.battle_scars_enabled:
+		var pad_poly: PackedVector2Array = _scale_poly(hull_poly, 1.18)
+		draw_colored_polygon(pad_poly, Color(0.04, 0.07, 0.10, 0.42))
+		_draw_closed_outline(pad_poly, Color(core.r, core.g, core.b, 0.20), 1.1)
+		var pad_r: float = maxf(26.0, _owner_building.footprint_radius * 1.12)
+		for ci: int in range(4):
+			var c_ang: float = PI * 0.25 + float(ci) * (PI * 0.5)
+			var c_dir: Vector2 = Vector2.RIGHT.rotated(c_ang)
+			draw_line(c_dir * (pad_r * 0.86), c_dir * (pad_r * 1.06), Color(core.r, core.g, core.b, 0.26), 1.4, true)
 
 	match entity_type_id:
 		&"nexus_vat":

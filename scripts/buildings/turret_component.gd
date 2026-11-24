@@ -264,13 +264,13 @@ func _fire_at(target: Node2D) -> void:
 	if AudioManager != null and _is_audible(origin, end_pos):
 		match style:
 			&"rail":
-				AudioManager.play_weapon_for_unit(&"lance_rig")
+				AudioManager.play_weapon_for_unit(&"lance_rig", owner_building.global_position)
 			&"mortar":
-				AudioManager.play_weapon_for_unit(&"chrysalis_mortar")
+				AudioManager.play_weapon_for_unit(&"chrysalis_mortar", owner_building.global_position)
 			&"heavy":
-				AudioManager.play_weapon_for_unit(&"goliath_frame")
+				AudioManager.play_weapon_for_unit(&"goliath_frame", owner_building.global_position)
 			_:
-				AudioManager.play_weapon_for_unit(&"clone_trooper")
+				AudioManager.play_weapon_for_unit(&"clone_trooper", owner_building.global_position)
 		if AudioManager.has_method("notify_combat_activity"):
 			AudioManager.call("notify_combat_activity", 0.25)
 

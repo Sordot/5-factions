@@ -134,9 +134,7 @@ func issue_move_order(selected_units: Array[Unit], world_pos: Vector2, shift_que
 	for i: int in range(selected_units.size()):
 		selected_units[i].command_move(targets[i], shift_queued)
 	if AudioManager != null:
-		AudioManager.play_sfx(&"order_move", -4.0, 0.05)
-		if AudioManager.has_method("play_unit_bark_for_units"):
-			AudioManager.call("play_unit_bark_for_units", selected_units, &"order")
+		AudioManager.play_order_audio(selected_units, &"order_move")
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.MOVE)
 
 
@@ -146,19 +144,19 @@ func issue_attack_target_order(selected_units: Array[Unit], target: Node2D, shif
 	for unit: Unit in selected_units:
 		unit.command_attack_target(target, shift_queued)
 	if AudioManager != null:
-		AudioManager.play_sfx(&"order_attack", -3.5, 0.04)
-		if AudioManager.has_method("play_unit_bark_for_units"):
-			AudioManager.call("play_unit_bark_for_units", selected_units, &"order")
+		AudioManager.play_order_audio(selected_units, &"order_attack")
 	spawn_move_marker(target.global_position, MoveMarker.MarkerStyle.ATTACK)
 
 
 func issue_gather_order(selected_units: Array[Unit], resource_node: ResourceNode, shift_queued: bool = false) -> void:
 	if selected_units.is_empty() or resource_node == null or not is_instance_valid(resource_node):
 		return
+	var gatherers: Array[Unit] = []
 	var non_gatherers: Array[Unit] = []
 	for unit: Unit in selected_units:
 		if unit.can_gather_resource(resource_node.resource_type):
 			unit.command_gather(resource_node, shift_queued)
+			gatherers.append(unit)
 		else:
 			non_gatherers.append(unit)
 	if not non_gatherers.is_empty():
@@ -166,9 +164,7 @@ func issue_gather_order(selected_units: Array[Unit], resource_node: ResourceNode
 		for i: int in range(non_gatherers.size()):
 			non_gatherers[i].command_move(escort_targets[i], shift_queued)
 	if AudioManager != null:
-		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
-		if AudioManager.has_method("play_unit_bark_for_units"):
-			AudioManager.call("play_unit_bark_for_units", selected_units, &"order")
+		AudioManager.play_order_audio(gatherers if not gatherers.is_empty() else selected_units, &"order_gather")
 	spawn_move_marker(resource_node.global_position, MoveMarker.MarkerStyle.GATHER)
 
 
@@ -184,9 +180,7 @@ func issue_build_order(selected_units: Array[Unit], building: Building, shift_qu
 	for worker: Unit in builders:
 		worker.command_construct_building(building, shift_queued)
 	if AudioManager != null:
-		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
-		if AudioManager.has_method("play_unit_bark_for_units"):
-			AudioManager.call("play_unit_bark_for_units", builders, &"order")
+		AudioManager.play_order_audio(builders, &"order_gather")
 	spawn_move_marker(building.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 
@@ -203,9 +197,7 @@ func issue_repair_order(selected_units: Array[Unit], target: Node2D, shift_queue
 	for rep_unit: Unit in repairers:
 		rep_unit.command_repair(target, shift_queued)
 	if AudioManager != null:
-		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
-		if AudioManager.has_method("play_unit_bark_for_units"):
-			AudioManager.call("play_unit_bark_for_units", repairers, &"order")
+		AudioManager.play_order_audio(repairers, &"order_gather")
 	spawn_move_marker(target.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 
@@ -229,9 +221,7 @@ func issue_salvage_order(selected_units: Array[Unit], salvage_core: Node2D, shif
 		for i: int in range(escorts.size()):
 			escorts[i].command_move(escort_pts[i], shift_queued)
 	if AudioManager != null:
-		AudioManager.play_sfx(&"order_gather", -3.5, 0.04)
-		if AudioManager.has_method("play_unit_bark_for_units"):
-			AudioManager.call("play_unit_bark_for_units", extractors, &"order")
+		AudioManager.play_order_audio(extractors, &"order_gather")
 	spawn_move_marker(salvage_core.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 
@@ -255,7 +245,7 @@ func issue_staff_order(selected_units: Array[Unit], building: Building, shift_qu
 		for i: int in range(others.size()):
 			others[i].command_move(move_targets[i], shift_queued)
 	if AudioManager != null:
-		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
+		AudioManager.play_order_audio(engineers, &"order_gather")
 	spawn_move_marker(building.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 
@@ -281,8 +271,9 @@ func _assign_building_perimeter_destinations(units: Array[Unit], building: Build
 
 
 func _handle_multi_building_rally_right_click(buildings: Array[Building], world_pos: Vector2) -> void:
+	var local_t: Unit.Team = (TeamManager.get_local_human_team() as Unit.Team) if (TeamManager != null and TeamManager.get_local_human_team() >= 0) else Unit.Team.PLAYER
 	var clicked_res: ResourceNode = find_resource_node_at_point(world_pos)
-	var clicked_friendly_unit: Unit = find_unit_at_point(world_pos, Unit.Team.PLAYER)
+	var clicked_friendly_unit: Unit = find_unit_at_point(world_pos, local_t)
 
 	# Economy-only hubs keep resource-node priority even if a worker is standing right on the node.
 	var all_econ_only: bool = true
@@ -315,7 +306,7 @@ func _handle_multi_building_rally_right_click(buildings: Array[Building], world_
 		spawn_move_marker(clicked_res.global_position, MoveMarker.MarkerStyle.GATHER)
 		return
 
-	var clicked_friendly_building: Building = find_building_at_point(world_pos, Unit.Team.PLAYER)
+	var clicked_friendly_building: Building = find_building_at_point(world_pos, local_t)
 	if clicked_friendly_building != null and clicked_friendly_building.max_staff_slots > 0:
 		var applied_any: bool = false
 		for b: Building in buildings:
@@ -346,7 +337,7 @@ func issue_patrol_order(selected_units: Array[Unit], world_pos: Vector2, shift_q
 	for i: int in range(selected_units.size()):
 		selected_units[i].command_patrol(targets[i], shift_queued)
 	if AudioManager != null:
-		AudioManager.play_sfx(&"order_move", -3.5, 0.05)
+		AudioManager.play_order_audio(selected_units, &"order_move")
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.PATROL)
 
 
@@ -362,6 +353,8 @@ func issue_attack_move_order(selected_units: Array[Unit], world_pos: Vector2, sh
 	if clicked_enemy != null:
 		for unit: Unit in selected_units:
 			unit.command_attack_target(clicked_enemy, shift_queued)
+		if AudioManager != null:
+			AudioManager.play_order_audio(selected_units, &"order_attack")
 		spawn_move_marker(clicked_enemy.global_position, MoveMarker.MarkerStyle.ATTACK)
 		return
 
@@ -369,6 +362,8 @@ func issue_attack_move_order(selected_units: Array[Unit], world_pos: Vector2, sh
 	if clicked_enemy_building != null:
 		for unit: Unit in selected_units:
 			unit.command_attack_target(clicked_enemy_building, shift_queued)
+		if AudioManager != null:
+			AudioManager.play_order_audio(selected_units, &"order_attack")
 		spawn_move_marker(clicked_enemy_building.global_position, MoveMarker.MarkerStyle.ATTACK)
 		return
 
@@ -377,7 +372,7 @@ func issue_attack_move_order(selected_units: Array[Unit], world_pos: Vector2, sh
 		for unit: Unit in selected_units:
 			unit.command_attack_target(clicked_barricade, shift_queued)
 		if AudioManager != null:
-			AudioManager.play_sfx(&"order_attack", -3.5, 0.04)
+			AudioManager.play_order_audio(selected_units, &"order_attack")
 		spawn_move_marker(clicked_barricade.global_position, MoveMarker.MarkerStyle.ATTACK)
 		return
 
@@ -385,7 +380,7 @@ func issue_attack_move_order(selected_units: Array[Unit], world_pos: Vector2, sh
 	for i: int in range(selected_units.size()):
 		selected_units[i].command_attack_move(targets[i], shift_queued)
 	if AudioManager != null:
-		AudioManager.play_sfx(&"order_attack", -3.5, 0.04)
+		AudioManager.play_order_audio(selected_units, &"order_attack")
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.ATTACK)
 
 
@@ -552,13 +547,14 @@ func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_
 	if building_data == null or building_scene == null:
 		return false
 
-	var eval: Dictionary = evaluate_build_placement(building_data, world_pos)
+	var local_t: Unit.Team = (TeamManager.get_local_human_team() as Unit.Team) if (TeamManager != null and TeamManager.get_local_human_team() >= 0) else Unit.Team.PLAYER
+	var eval: Dictionary = evaluate_build_placement(building_data, world_pos, local_t)
 	if not bool(eval["valid"]):
 		var econ_fail: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
-		if econ_fail != null and not econ_fail.can_afford(Unit.Team.PLAYER, building_data.get_cost_dict()):
-			var missing: StringName = econ_fail.find_missing_resource(Unit.Team.PLAYER, building_data.get_cost_dict(), 0)
+		if econ_fail != null and not econ_fail.can_afford(local_t, building_data.get_cost_dict()):
+			var missing: StringName = econ_fail.find_missing_resource(local_t, building_data.get_cost_dict(), 0)
 			if missing != &"":
-				econ_fail.notify_insufficient(Unit.Team.PLAYER, missing)
+				econ_fail.notify_insufficient(local_t, missing)
 		elif AudioManager != null:
 			AudioManager.play_error()
 		return false
@@ -568,10 +564,10 @@ func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_
 		return false
 
 	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
-	if econ != null and not econ.spend_resources(Unit.Team.PLAYER, building_data.get_cost_dict()):
-		var missing2: StringName = econ.find_missing_resource(Unit.Team.PLAYER, building_data.get_cost_dict(), 0)
+	if econ != null and not econ.spend_resources(local_t, building_data.get_cost_dict()):
+		var missing2: StringName = econ.find_missing_resource(local_t, building_data.get_cost_dict(), 0)
 		if missing2 != &"":
-			econ.notify_insufficient(Unit.Team.PLAYER, missing2)
+			econ.notify_insufficient(local_t, missing2)
 		return false
 
 	var scene_root: Node = get_tree().current_scene
@@ -590,12 +586,12 @@ func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_
 	new_building.global_position = eval["pos"]
 	new_building.is_constructed = false
 	buildings_container.add_child(new_building)
-	new_building.begin_construction(building_data, Unit.Team.PLAYER, eval["vent"] as ResourceNode)
+	new_building.begin_construction(building_data, local_t, eval["vent"] as ResourceNode)
 	_nudge_units_out_of_building(new_building)
 
 	builder.command_construct_building(new_building, shift_queued)
 	if AudioManager != null:
-		AudioManager.play_sfx(&"order_gather", -3.5, 0.04)
+		AudioManager.play_order_audio([builder], &"order_gather")
 	spawn_move_marker(new_building.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 

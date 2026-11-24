@@ -132,7 +132,7 @@ func _destroy() -> void:
 		fx.call("setup_death_burst", global_position, maxf(30.0, get_footprint_radius() * 0.9), Color(1.0, 0.72, 0.28, 1.0), true)
 
 	if AudioManager != null:
-		AudioManager.play_sfx(&"entity_destroyed", -2.5, 0.06)
+		AudioManager.play_explosion_sfx(global_position, -2.5, false)
 
 	if is_inside_tree():
 		var nav_reg: Node = get_tree().get_first_node_in_group("arena_nav_region")
@@ -144,6 +144,12 @@ func _destroy() -> void:
 		var cam: Node = get_tree().get_first_node_in_group("rts_camera")
 		if cam != null and cam.has_method("add_camera_shake"):
 			cam.call("add_camera_shake", 3.2, 0.15, global_position)
+		var scars: Node = get_tree().get_first_node_in_group("battle_scars")
+		if scars != null and scars.has_method("add_scar"):
+			scars.call("add_scar", &"scorch_large", global_position, maxf(34.0, get_footprint_radius() * 0.72), Color(1.0, 0.72, 0.28, 1.0))
+		var mm: Node = get_tree().get_first_node_in_group("match_manager")
+		if mm != null and mm.has_method("emit_tactical_event"):
+			mm.call("emit_tactical_event", &"combat", "%s Breached!" % barricade_name, global_position, Color(1.0, 0.68, 0.26, 1.0))
 
 	destroyed.emit(self)
 	queue_free()
