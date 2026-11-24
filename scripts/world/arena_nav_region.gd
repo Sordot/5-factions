@@ -7,24 +7,50 @@ const MapLandmarkScript = preload("res://scripts/world/map_landmark.gd")
 @export var arena_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 @export var agent_radius: float = 24.0
 @export var obstacle_group_name: StringName = &"terrain_obstacles"
+@export var rebake_debounce_seconds: float = 0.15
 
 var _rebake_queued: bool = false
+var _rebake_pending: bool = false
+var _rebake_timer: float = 0.0
+var _rebake_wait_elapsed: float = 0.0
+var _has_initial_bake: bool = false
 
 
 func _ready() -> void:
 	add_to_group("arena_nav_region")
-	request_rebake()
+	_rebake_queued = true
+	call_deferred("_perform_initial_rebake")
+
+
+func _process(delta: float) -> void:
+	if not _rebake_pending:
+		return
+	_rebake_timer -= delta
+	_rebake_wait_elapsed += delta
+	if _rebake_timer <= 0.0 or _rebake_wait_elapsed >= maxf(0.35, rebake_debounce_seconds * 2.5):
+		_rebake_pending = false
+		_rebake_timer = 0.0
+		_rebake_wait_elapsed = 0.0
+		if is_inside_tree():
+			rebake_navmesh()
 
 
 func request_rebake() -> void:
-	if _rebake_queued:
+	if not _has_initial_bake:
+		if not _rebake_queued:
+			_rebake_queued = true
+			call_deferred("_perform_initial_rebake")
 		return
-	_rebake_queued = true
-	call_deferred("_perform_deferred_rebake")
+	_rebake_pending = true
+	_rebake_timer = maxf(0.05, rebake_debounce_seconds)
 
 
-func _perform_deferred_rebake() -> void:
+func _perform_initial_rebake() -> void:
 	_rebake_queued = false
+	_has_initial_bake = true
+	_rebake_pending = false
+	_rebake_timer = 0.0
+	_rebake_wait_elapsed = 0.0
 	if not is_inside_tree():
 		return
 	rebake_navmesh()

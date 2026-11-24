@@ -249,7 +249,7 @@ func _assign_idle_engineers() -> void:
 
 func _resume_unfinished_buildings() -> void:
 	for b: Building in _get_team_buildings(ai_team):
-		if b.is_constructed:
+		if b.is_destroyed or b.is_constructed:
 			continue
 		if _has_worker_building(b):
 			continue
@@ -827,12 +827,18 @@ func _find_available_worker(near_pos: Vector2) -> Unit:
 			continue
 		if u.command_state == Unit.CommandState.CONSTRUCTING:
 			continue
+		# Never interrupt a worker mid-way through a queued command chain.
+		if not u.command_queue.is_empty():
+			continue
 		var d_sq: float = u.global_position.distance_squared_to(near_pos)
 		if u.command_state == Unit.CommandState.IDLE:
 			if d_sq < best_idle_d_sq:
 				best_idle_d_sq = d_sq
 				best_idle = u
 		elif u.command_state == Unit.CommandState.GATHERING:
+			# Do not pull workers currently hauling cargo back to base.
+			if u.gather_component != null and u.gather_component.state == GatherComponent.GatherState.GATHER_RETURNING_TO_BASE and u.is_carrying_cargo():
+				continue
 			if d_sq < best_gather_d_sq:
 				best_gather_d_sq = d_sq
 				best_gathering = u
@@ -844,6 +850,9 @@ func _has_worker_building(target_b: Building) -> bool:
 	for u: Unit in _get_team_units(ai_team):
 		if u.command_state == Unit.CommandState.CONSTRUCTING and u._construction_target == target_b:
 			return true
+		for queued_cmd: Dictionary in u.command_queue:
+			if queued_cmd.get("type", &"") == &"build" and queued_cmd.get("target", null) == target_b:
+				return true
 	return false
 
 
@@ -961,20 +970,7 @@ func _prune_dispatched_units() -> void:
 
 
 func _nudge_units_out_of_building(building: Building) -> void:
-	if building == null or not is_instance_valid(building):
-		return
-	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not (node is Unit) or not is_instance_valid(node):
-			continue
-		var unit: Unit = node
-		if unit.is_dead or unit.is_staffed:
-			continue
-		var unit_r: float = unit.data.collision_radius if unit.data != null else 14.0
-		var min_dist: float = building.footprint_radius + unit_r + 6.0
-		var diff: Vector2 = unit.global_position - building.global_position
-		if diff.length_squared() < min_dist * min_dist:
-			var dir: Vector2 = diff.normalized() if diff.length_squared() > 0.01 else Vector2.RIGHT
-			unit.global_position = building.global_position + dir * min_dist
+	CommandRouter.nudge_units_out_of_building(building, arena_bounds)
 
 
 func _get_economy_manager() -> EconomyManager:

@@ -95,6 +95,7 @@ var _stuck_accum_time: float = 0.0
 var _stuck_nudge_timer: float = 0.0
 var _stuck_nudge_dir: Vector2 = Vector2.ZERO
 var _stuck_side_sign: float = 1.0
+var _stuck_consecutive_nudges: int = 0
 var _adrenal_timer: float = 0.0
 var _adrenal_speed_bonus: float = 0.0
 var _adrenal_attack_speed_bonus: float = 0.0
@@ -122,6 +123,11 @@ func _ready() -> void:
 		collision_layer = 0
 		collision_mask = 1
 		z_index = maxi(z_index, 8)
+	else:
+		# Team-separated unit layers (Layer 2 = Player, Layer 3 = Enemy) so workers in transit can slide
+		# past friendly teammates while still colliding with World (Layer 1) and hostile units.
+		collision_layer = 2 if team == Team.PLAYER else 4
+		collision_mask = 7
 
 	if nav_agent != null:
 		nav_agent.max_speed = maxf(1.0, get_effective_move_speed())
@@ -548,6 +554,8 @@ func enter_staffed_building(_building: Building) -> void:
 	if is_in_group("selectable_units"):
 		remove_from_group("selectable_units")
 	set_physics_process(false)
+	command_queue_changed.emit(self)
+	status_changed.emit(self)
 	staffed_state_changed.emit(self, true)
 
 
@@ -569,14 +577,8 @@ func exit_staffed_building(world_pos: Vector2) -> void:
 	staffed_state_changed.emit(self, false)
 
 
-func request_component_navigation(target_point: Vector2, repath_threshold: float = 10.0) -> void:
-	_request_nav_toward_point(target_point, repath_threshold)
-	if not _wants_nav_movement:
-		var to_target: Vector2 = target_point - global_position
-		if to_target.length_squared() > 4.0:
-			var dir: Vector2 = _steer_around_static_units(to_target.normalized())
-			_wants_nav_movement = true
-			_desired_move_velocity = dir * get_effective_move_speed()
+func request_component_navigation(target_point: Vector2, repath_threshold: float = 10.0, stop_distance: float = 4.0) -> void:
+	_request_nav_toward_point(target_point, repath_threshold, stop_distance)
 
 
 func face_world_point(world_point: Vector2, delta: float) -> void:
@@ -587,7 +589,50 @@ func stop_component_navigation() -> void:
 	_wants_nav_movement = false
 	_desired_move_velocity = Vector2.ZERO
 	velocity = Vector2.ZERO
+	_reset_progress_tracker()
 	_clear_nav_target()
+
+
+func reset_progress_tracker() -> void:
+	_reset_progress_tracker()
+
+
+func invalidate_nav_path() -> void:
+	_last_nav_target = Vector2.INF
+
+
+func find_clear_approach_point(
+	target_center: Vector2,
+	target_radius: float,
+	margin: float = 8.0,
+	ignore_building: Building = null,
+	ignore_resource: ResourceNode = null
+) -> Vector2:
+	var unit_r: float = data.collision_radius if data != null else 13.0
+	var stand_dist: float = target_radius + unit_r + margin
+	var offset: Vector2 = global_position - target_center
+	var base_angle: float = offset.angle() if offset.length_squared() > 0.01 else 0.0
+	var bounds: Rect2 = _get_arena_bounds()
+	var safe_bounds: Rect2 = Rect2(
+		bounds.position + Vector2(unit_r + 6.0, unit_r + 6.0),
+		bounds.size - Vector2((unit_r + 6.0) * 2.0, (unit_r + 6.0) * 2.0)
+	)
+
+	var steps: int = 16
+	var step_angle: float = TAU / float(steps)
+	for i: int in range(steps):
+		var ring_offset: int = 0 if i == 0 else ((i + 1) >> 1)
+		var sign_mult: float = 1.0 if (i % 2) == 1 else -1.0
+		var ang: float = base_angle + float(ring_offset) * step_angle * sign_mult
+		var cand: Vector2 = target_center + Vector2.RIGHT.rotated(ang) * stand_dist
+		if _is_point_clear_of_obstacles(cand, unit_r + 3.0, safe_bounds, ignore_building, ignore_resource):
+			return cand
+
+	var fallback: Vector2 = target_center + Vector2.RIGHT.rotated(base_angle) * stand_dist
+	if safe_bounds.has_area():
+		fallback.x = clampf(fallback.x, safe_bounds.position.x, safe_bounds.end.x)
+		fallback.y = clampf(fallback.y, safe_bounds.position.y, safe_bounds.end.y)
+	return fallback
 
 
 func heal(amount: float) -> void:
@@ -1145,10 +1190,14 @@ func _process_constructing(delta: float) -> void:
 			_advance_command_queue()
 		return
 
-	var offset: Vector2 = global_position - _construction_target.global_position
-	var dir: Vector2 = offset.normalized() if offset.length_squared() > 0.01 else Vector2.RIGHT
-	var approach: Vector2 = _construction_target.global_position + dir * (_construction_target.footprint_radius + unit_r + 8.0)
-	request_component_navigation(approach, 12.0)
+	var approach: Vector2 = find_clear_approach_point(
+		_construction_target.global_position,
+		_construction_target.footprint_radius,
+		8.0,
+		_construction_target,
+		null
+	)
+	request_component_navigation(approach, 12.0, 4.0)
 
 
 func _process_staffing_building(delta: float) -> void:
@@ -1246,16 +1295,35 @@ func _try_start_auto_gather() -> void:
 		command_gather(best)
 
 
-func _request_nav_toward_point(target_point: Vector2, repath_threshold: float) -> void:
+func _request_nav_toward_point(target_point: Vector2, repath_threshold: float, stop_distance: float = 0.0) -> void:
+	var dist_to_target: float = global_position.distance_to(target_point)
+	if stop_distance > 0.0 and dist_to_target <= stop_distance:
+		return
 	if nav_agent == null:
+		_steer_direct_toward(target_point)
 		return
 	if _last_nav_target == Vector2.INF or _last_nav_target.distance_squared_to(target_point) > repath_threshold * repath_threshold:
 		_set_nav_target(target_point)
 	if not _is_nav_map_ready():
+		_steer_direct_toward(target_point)
 		return
 	if nav_agent.is_navigation_finished():
+		var reach_cutoff: float = stop_distance if stop_distance > 0.0 else maxf(nav_agent.target_desired_distance, 6.0)
+		if dist_to_target > reach_cutoff:
+			_steer_direct_toward(target_point)
 		return
 	_compute_nav_desired_velocity()
+	if not _wants_nav_movement and dist_to_target > maxf(stop_distance, 4.0):
+		_steer_direct_toward(target_point)
+
+
+func _steer_direct_toward(target_point: Vector2) -> void:
+	var to_target: Vector2 = target_point - global_position
+	if to_target.length_squared() <= 4.0:
+		return
+	var dir: Vector2 = _steer_around_obstacles_and_units(to_target.normalized())
+	_wants_nav_movement = true
+	_desired_move_velocity = dir * get_effective_move_speed()
 
 
 func _compute_nav_desired_velocity() -> void:
@@ -1266,6 +1334,101 @@ func _compute_nav_desired_velocity() -> void:
 	var dir: Vector2 = _steer_around_static_units(to_next.normalized())
 	_wants_nav_movement = true
 	_desired_move_velocity = dir * get_effective_move_speed()
+
+
+func _steer_around_obstacles_and_units(move_dir: Vector2) -> Vector2:
+	var steer: Vector2 = _steer_around_static_units(move_dir)
+	if not is_inside_tree():
+		return steer
+	var my_r: float = data.collision_radius if data != null else 16.0
+	var probe_dist: float = my_r + 22.0
+	var probe_pt: Vector2 = global_position + steer * probe_dist
+	var ignore_b: Building = _get_active_target_building()
+	var ignore_rn: ResourceNode = _get_active_target_resource()
+	var bounds: Rect2 = _get_arena_bounds()
+	var safe_bounds: Rect2 = Rect2(
+		bounds.position + Vector2(my_r + 4.0, my_r + 4.0),
+		bounds.size - Vector2((my_r + 4.0) * 2.0, (my_r + 4.0) * 2.0)
+	)
+	if _is_point_clear_of_obstacles(probe_pt, my_r + 2.0, safe_bounds, ignore_b, ignore_rn):
+		return steer
+
+	var tangent_l: Vector2 = Vector2(-steer.y, steer.x)
+	var tangent_r: Vector2 = Vector2(steer.y, -steer.x)
+	var left_clear: bool = _is_point_clear_of_obstacles(global_position + (steer * 0.45 + tangent_l * 0.85).normalized() * probe_dist, my_r + 2.0, safe_bounds, ignore_b, ignore_rn)
+	var right_clear: bool = _is_point_clear_of_obstacles(global_position + (steer * 0.45 + tangent_r * 0.85).normalized() * probe_dist, my_r + 2.0, safe_bounds, ignore_b, ignore_rn)
+	if left_clear and not right_clear:
+		return (steer * 0.40 + tangent_l * 0.90).normalized()
+	if right_clear and not left_clear:
+		return (steer * 0.40 + tangent_r * 0.90).normalized()
+	var chosen_t: Vector2 = tangent_l if _stuck_side_sign >= 0.0 else tangent_r
+	return (steer * 0.35 + chosen_t * 0.92).normalized()
+
+
+func _get_active_target_building() -> Building:
+	if command_state == CommandState.CONSTRUCTING and is_instance_valid(_construction_target):
+		return _construction_target
+	if command_state == CommandState.STAFFING_BUILDING and staff_component != null and is_instance_valid(staff_component.target_building):
+		return staff_component.target_building
+	if command_state == CommandState.GATHERING and gather_component != null and gather_component.state == GatherComponent.GatherState.GATHER_RETURNING_TO_BASE and is_instance_valid(gather_component.dropoff_building):
+		return gather_component.dropoff_building
+	return null
+
+
+func _get_active_target_resource() -> ResourceNode:
+	if command_state == CommandState.GATHERING and gather_component != null and is_instance_valid(gather_component.target_node):
+		return gather_component.target_node
+	return null
+
+
+func _get_arena_bounds() -> Rect2:
+	if is_inside_tree():
+		var nav_reg: Node = get_tree().get_first_node_in_group("arena_nav_region")
+		if nav_reg != null and "arena_bounds" in nav_reg:
+			var b: Variant = nav_reg.get("arena_bounds")
+			if b is Rect2:
+				return b as Rect2
+	return Rect2(-1300.0, -950.0, 2600.0, 1900.0)
+
+
+func _is_point_clear_of_obstacles(
+	world_pos: Vector2,
+	clearance_radius: float,
+	safe_bounds: Rect2,
+	ignore_building: Building = null,
+	ignore_resource: ResourceNode = null
+) -> bool:
+	if safe_bounds.has_area() and not safe_bounds.has_point(world_pos):
+		return false
+	if not is_inside_tree():
+		return true
+	for node: Node in get_tree().get_nodes_in_group("terrain_obstacles"):
+		if is_instance_valid(node) and node.has_method("overlaps_circle"):
+			if node.call("overlaps_circle", world_pos, clearance_radius):
+				return false
+	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
+		if is_instance_valid(node) and node.has_method("overlaps_circle"):
+			if node.call("overlaps_circle", world_pos, clearance_radius):
+				return false
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not (node is Building) or not is_instance_valid(node):
+			continue
+		var b: Building = node
+		if b.is_destroyed or b == ignore_building:
+			continue
+		var min_d: float = b.footprint_radius + clearance_radius
+		if b.global_position.distance_squared_to(world_pos) < min_d * min_d:
+			return false
+	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+		if not (node is ResourceNode) or not is_instance_valid(node):
+			continue
+		var rn: ResourceNode = node
+		if rn.is_depleted() or rn.is_vent or rn == ignore_resource:
+			continue
+		var min_d: float = rn.collision_radius + clearance_radius
+		if rn.global_position.distance_squared_to(world_pos) < min_d * min_d:
+			return false
+	return true
 
 
 func _should_ignore_unit_collision(other: Unit) -> bool:
@@ -1347,11 +1510,32 @@ func _apply_stationary_separation(delta: float) -> void:
 
 
 func _update_worker_collision_passing() -> void:
-	if data == null or not data.can_gather or data.ignore_friendly_unit_collision:
+	if data == null or data.ignore_friendly_unit_collision:
 		return
-	# During active gathering/construction trips, collide only with World (Layer 1) so crossing friendly
-	# workers smoothly slide past each other via RVO + soft separation instead of deadlocking head-on.
-	var want_mask: int = 1 if (command_state == CommandState.GATHERING or command_state == CommandState.CONSTRUCTING) else 3
+	var is_worker_role: bool = data.can_gather or data.can_staff_compute or can_construct()
+	if not is_worker_role:
+		return
+	# During active task transit (gather, construct, staff, or moving on/into a task command),
+	# slide cleanly past friendly units while still colliding with World (Layer 1) and hostile units.
+	var active_type: StringName = active_command.get("type", &"")
+	var next_type: StringName = command_queue[0].get("type", &"") if not command_queue.is_empty() else &""
+	var is_task_transit: bool = (
+		command_state == CommandState.GATHERING
+		or command_state == CommandState.CONSTRUCTING
+		or command_state == CommandState.STAFFING_BUILDING
+		or (command_state == CommandState.MOVING and (
+			active_type == &"gather"
+			or active_type == &"return_cargo"
+			or active_type == &"build"
+			or active_type == &"staff"
+			or next_type == &"gather"
+			or next_type == &"return_cargo"
+			or next_type == &"build"
+			or next_type == &"staff"
+		))
+	)
+	var hostile_bit: int = 4 if team == Team.PLAYER else 2
+	var want_mask: int = (1 | hostile_bit) if is_task_transit else 7
 	if collision_mask != want_mask:
 		collision_mask = want_mask
 
@@ -1362,6 +1546,7 @@ func _apply_anti_stuck_steering(delta: float) -> void:
 		_stuck_sample_timer = 0.0
 		_stuck_accum_time = 0.0
 		_stuck_nudge_timer = 0.0
+		_stuck_consecutive_nudges = 0
 		return
 
 	_stuck_sample_timer += delta
@@ -1369,34 +1554,71 @@ func _apply_anti_stuck_steering(delta: float) -> void:
 		var moved_dist: float = global_position.distance_to(_stuck_sample_pos)
 		var actual_speed: float = moved_dist / maxf(0.05, _stuck_sample_timer)
 		var eff_speed: float = maxf(1.0, get_effective_move_speed())
-		if actual_speed < eff_speed * 0.15:
+		if actual_speed < eff_speed * 0.16:
 			_stuck_accum_time += _stuck_sample_timer
-			if _stuck_accum_time >= 0.6:
+			if _stuck_accum_time >= 0.55:
 				var forward: Vector2 = _desired_move_velocity.normalized()
+				if _stuck_consecutive_nudges == 0:
+					_stuck_side_sign = _pick_clearer_detour_side(forward)
+				elif _stuck_consecutive_nudges >= 2:
+					# Only flip side after two committed detour windows on the first side failed to clear.
+					_stuck_side_sign = -_stuck_side_sign
+					_stuck_consecutive_nudges = 0
+				_stuck_consecutive_nudges += 1
 				_stuck_nudge_dir = Vector2(-forward.y, forward.x) * _stuck_side_sign
-				_stuck_side_sign = -_stuck_side_sign
-				_stuck_nudge_timer = 0.35
+				_stuck_nudge_timer = 0.65
 				_stuck_accum_time = 0.0
 				# Force a fresh NavigationAgent2D path evaluation around the obstruction.
 				_last_nav_target = Vector2.INF
 		else:
 			_stuck_accum_time = 0.0
+			if actual_speed >= eff_speed * 0.30:
+				_stuck_consecutive_nudges = 0
 		_stuck_sample_pos = global_position
 		_stuck_sample_timer = 0.0
 
 	if _stuck_nudge_timer > 0.0:
 		_stuck_nudge_timer = maxf(0.0, _stuck_nudge_timer - delta)
 		var base_dir: Vector2 = _desired_move_velocity.normalized()
-		var blended: Vector2 = (base_dir * 0.45 + _stuck_nudge_dir * 0.85)
+		var blended: Vector2 = (base_dir * 0.35 + _stuck_nudge_dir * 0.90)
 		if blended.length_squared() > 0.001:
 			_desired_move_velocity = blended.normalized() * get_effective_move_speed()
+
+
+func _pick_clearer_detour_side(forward: Vector2) -> float:
+	var my_r: float = data.collision_radius if data != null else 16.0
+	var bounds: Rect2 = _get_arena_bounds()
+	var safe_bounds: Rect2 = Rect2(
+		bounds.position + Vector2(my_r + 6.0, my_r + 6.0),
+		bounds.size - Vector2((my_r + 6.0) * 2.0, (my_r + 6.0) * 2.0)
+	)
+	var ignore_b: Building = _get_active_target_building()
+	var ignore_rn: ResourceNode = _get_active_target_resource()
+	var probe_r: float = my_r + 24.0
+	var pos_dir: Vector2 = Vector2(-forward.y, forward.x)
+	var neg_dir: Vector2 = Vector2(forward.y, -forward.x)
+	var pos_clear: bool = _is_point_clear_of_obstacles(global_position + pos_dir * probe_r, my_r + 2.0, safe_bounds, ignore_b, ignore_rn)
+	var neg_clear: bool = _is_point_clear_of_obstacles(global_position + neg_dir * probe_r, my_r + 2.0, safe_bounds, ignore_b, ignore_rn)
+	if pos_clear and not neg_clear:
+		return 1.0
+	if neg_clear and not pos_clear:
+		return -1.0
+	return _stuck_side_sign
 
 
 func _compute_overlap_separation(extra_margin: float) -> Vector2:
 	var push: Vector2 = Vector2.ZERO
 	var my_r: float = data.collision_radius if data != null else 16.0
 	var max_push: float = get_effective_move_speed() * 0.85 if data != null else 220.0
-	var self_is_worker: bool = data != null and data.can_gather
+	var self_is_worker: bool = data != null and (data.can_gather or data.can_staff_compute or can_construct())
+	var self_in_task: bool = (
+		command_state == CommandState.GATHERING
+		or command_state == CommandState.CONSTRUCTING
+		or command_state == CommandState.STAFFING_BUILDING
+	)
+	var active_dest: Variant = get_active_command_destination() if self_in_task else null
+	var self_near_task: bool = active_dest is Vector2 and global_position.distance_squared_to(active_dest as Vector2) <= 105.0 * 105.0
+
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node) or not (node is Unit) or node == self:
 			continue
@@ -1415,9 +1637,16 @@ func _compute_overlap_separation(extra_margin: float) -> Vector2:
 		var dir: Vector2 = Vector2.RIGHT.rotated(fmod(float(get_instance_id() % 360) * 1.618, TAU)) if dist < 0.01 else (diff / dist)
 		var overlap_ratio: float = clampf((min_dist - dist) / maxf(1.0, min_dist), 0.15, 1.0)
 		var push_scale: float = 1.0
-		if self_is_worker and other.team == team and other.data != null and other.data.can_gather:
-			if command_state == CommandState.GATHERING or other.command_state == CommandState.GATHERING:
-				push_scale = 0.35
+		if self_is_worker and other.team == team and other.data != null and (other.data.can_gather or other.data.can_staff_compute or other.can_construct()):
+			var other_stationary_working: bool = (
+				(other.command_state == CommandState.GATHERING and other.gather_component != null and other.gather_component.is_harvesting_in_place())
+				or (other.command_state == CommandState.CONSTRUCTING and not other._wants_nav_movement)
+			)
+			if self_near_task and other_stationary_working:
+				# Do not let stationary harvesting/constructing workers push approaching teammates off reach.
+				continue
+			if self_in_task or other.command_state == CommandState.GATHERING or other.command_state == CommandState.CONSTRUCTING:
+				push_scale = 0.25
 		push += dir * max_push * overlap_ratio * push_scale
 	return push.normalized() * max_push if push.length() > max_push else push
 
@@ -1429,6 +1658,7 @@ func _reset_progress_tracker() -> void:
 	_stuck_sample_timer = 0.0
 	_stuck_accum_time = 0.0
 	_stuck_nudge_timer = 0.0
+	_stuck_consecutive_nudges = 0
 
 
 func _should_settle_at_destination(goal_pos: Vector2, delta: float) -> bool:

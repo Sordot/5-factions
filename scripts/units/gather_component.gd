@@ -127,7 +127,11 @@ func _tick_moving_to_node(owner_unit: Unit) -> void:
 		gather_progress_changed.emit(0.0, true)
 		return
 
-	owner_unit.request_component_navigation(_get_approach_point(owner_unit, target_node.global_position, target_node.collision_radius), 12.0)
+	owner_unit.request_component_navigation(
+		_get_approach_point(owner_unit, target_node.global_position, target_node.collision_radius, null, target_node),
+		12.0,
+		4.0
+	)
 
 
 func _tick_gathering(owner_unit: Unit, delta: float) -> void:
@@ -182,17 +186,26 @@ func _tick_gathering(owner_unit: Unit, delta: float) -> void:
 			_set_state(GatherState.GATHER_RETURNING_TO_BASE)
 		else:
 			cancel()
-			owner_unit.command_state = Unit.CommandState.IDLE
+			owner_unit.stop_component_navigation()
+			if not owner_unit.advance_command_queue():
+				owner_unit.command_state = Unit.CommandState.IDLE
 	else:
 		if _ensure_valid_target_node(owner_unit):
 			_set_state(GatherState.GATHER_MOVING_TO_NODE)
 		else:
 			cancel()
-			owner_unit.command_state = Unit.CommandState.IDLE
+			owner_unit.stop_component_navigation()
+			if not owner_unit.advance_command_queue():
+				owner_unit.command_state = Unit.CommandState.IDLE
 
 
 func _tick_returning_to_base(owner_unit: Unit) -> void:
 	if carried_amount <= 0 or carried_type == &"":
+		if owner_unit.has_queued_commands():
+			cancel()
+			owner_unit.stop_component_navigation()
+			owner_unit.advance_command_queue()
+			return
 		if _ensure_valid_target_node(owner_unit):
 			_set_state(GatherState.GATHER_MOVING_TO_NODE)
 		else:
@@ -210,12 +223,16 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 				return
 			cancel()
 			owner_unit.stop_component_navigation()
-			owner_unit.command_state = Unit.CommandState.IDLE
+			if owner_unit.has_queued_commands():
+				owner_unit.advance_command_queue()
+			else:
+				owner_unit.command_state = Unit.CommandState.IDLE
 			return
 
 	var reach: float = _get_dropoff_reach(owner_unit, dropoff_building)
 	var dist: float = owner_unit.global_position.distance_to(dropoff_building.global_position)
 	if dist <= reach:
+		owner_unit.stop_component_navigation()
 		var econ: EconomyManager = _get_economy_manager(owner_unit)
 		if econ != null:
 			econ.add_resource(owner_unit.team, carried_type, carried_amount)
@@ -228,7 +245,6 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 
 		if owner_unit.has_queued_commands():
 			cancel()
-			owner_unit.stop_component_navigation()
 			owner_unit.advance_command_queue()
 			return
 
@@ -236,18 +252,24 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 			_set_state(GatherState.GATHER_MOVING_TO_NODE)
 		else:
 			cancel()
-			owner_unit.stop_component_navigation()
 			owner_unit.command_state = Unit.CommandState.IDLE
 		return
 
-	owner_unit.request_component_navigation(_get_approach_point(owner_unit, dropoff_building.global_position, dropoff_building.footprint_radius), 12.0)
+	owner_unit.request_component_navigation(
+		_get_approach_point(owner_unit, dropoff_building.global_position, dropoff_building.footprint_radius, dropoff_building, null),
+		12.0,
+		4.0
+	)
 
 
-func _get_approach_point(owner_unit: Unit, target_center: Vector2, target_radius: float) -> Vector2:
-	var offset: Vector2 = owner_unit.global_position - target_center
-	var dir: Vector2 = offset.normalized() if offset.length_squared() > 0.01 else Vector2.RIGHT
-	var unit_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 13.0
-	return target_center + dir * (target_radius + unit_r + 8.0)
+func _get_approach_point(
+	owner_unit: Unit,
+	target_center: Vector2,
+	target_radius: float,
+	ignore_building: Building = null,
+	ignore_resource: ResourceNode = null
+) -> Vector2:
+	return owner_unit.find_clear_approach_point(target_center, target_radius, 8.0, ignore_building, ignore_resource)
 
 
 func _ensure_valid_target_node(owner_unit: Unit) -> bool:

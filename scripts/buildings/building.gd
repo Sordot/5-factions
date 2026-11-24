@@ -219,8 +219,9 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 	_update_construction_visuals()
 	_update_health_bar()
 	_update_staff_slot_visuals()
-	add_to_group("nav_bake_obstacles")
-	_request_navmesh_rebake()
+	if not is_in_group("nav_bake_obstacles"):
+		add_to_group("nav_bake_obstacles")
+		_request_navmesh_rebake()
 
 	if build_time <= 0.0:
 		_complete_construction()

@@ -639,9 +639,14 @@ func _has_any_gatherer_for(units: Array[Unit], resource_type: StringName) -> boo
 
 
 func _nudge_units_out_of_building(building: Building) -> void:
-	if building == null or not is_instance_valid(building):
+	CommandRouter.nudge_units_out_of_building(building, buildable_bounds)
+
+
+static func nudge_units_out_of_building(building: Building, bounds: Rect2) -> void:
+	if building == null or not is_instance_valid(building) or not building.is_inside_tree():
 		return
-	for node: Node in get_tree().get_nodes_in_group("units"):
+	var tree: SceneTree = building.get_tree()
+	for node: Node in tree.get_nodes_in_group("units"):
 		if not (node is Unit) or not is_instance_valid(node):
 			continue
 		var unit: Unit = node
@@ -650,6 +655,81 @@ func _nudge_units_out_of_building(building: Building) -> void:
 		var unit_r: float = unit.data.collision_radius if unit.data != null else 14.0
 		var min_dist: float = building.footprint_radius + unit_r + 6.0
 		var diff: Vector2 = unit.global_position - building.global_position
-		if diff.length_squared() < min_dist * min_dist:
-			var dir: Vector2 = diff.normalized() if diff.length_squared() > 0.01 else Vector2.RIGHT
-			unit.global_position = building.global_position + dir * min_dist
+		if diff.length_squared() >= min_dist * min_dist:
+			continue
+		var base_angle: float = diff.angle() if diff.length_squared() > 0.01 else 0.0
+		var ejected: Vector2 = _find_safe_ejection_spot(tree, building, unit_r, base_angle, bounds)
+		unit.global_position = ejected
+		unit.invalidate_nav_path()
+
+
+static func _find_safe_ejection_spot(
+	tree: SceneTree,
+	building: Building,
+	unit_r: float,
+	base_angle: float,
+	bounds: Rect2
+) -> Vector2:
+	var safe_bounds: Rect2 = Rect2(
+		bounds.position + Vector2(unit_r + 8.0, unit_r + 8.0),
+		bounds.size - Vector2((unit_r + 8.0) * 2.0, (unit_r + 8.0) * 2.0)
+	)
+	var rings: PackedFloat32Array = PackedFloat32Array([
+		building.footprint_radius + unit_r + 10.0,
+		building.footprint_radius + unit_r * 3.0 + 14.0,
+	])
+	var steps: int = 24
+	var step_angle: float = TAU / float(steps)
+
+	for ring_dist: float in rings:
+		for i: int in range(steps):
+			var ring_offset: int = 0 if i == 0 else ((i + 1) >> 1)
+			var sign_mult: float = 1.0 if (i % 2) == 1 else -1.0
+			var ang: float = base_angle + float(ring_offset) * step_angle * sign_mult
+			var cand: Vector2 = building.global_position + Vector2.RIGHT.rotated(ang) * ring_dist
+			if _is_ejection_spot_clear(tree, cand, unit_r + 4.0, safe_bounds, building):
+				return cand
+
+	var fallback: Vector2 = building.global_position + Vector2.RIGHT.rotated(base_angle) * (building.footprint_radius + unit_r + 10.0)
+	if safe_bounds.has_area():
+		fallback.x = clampf(fallback.x, safe_bounds.position.x, safe_bounds.end.x)
+		fallback.y = clampf(fallback.y, safe_bounds.position.y, safe_bounds.end.y)
+	return fallback
+
+
+static func _is_ejection_spot_clear(
+	tree: SceneTree,
+	world_pos: Vector2,
+	clearance_r: float,
+	safe_bounds: Rect2,
+	ignore_building: Building
+) -> bool:
+	if safe_bounds.has_area() and not safe_bounds.has_point(world_pos):
+		return false
+	for node: Node in tree.get_nodes_in_group("terrain_obstacles"):
+		if is_instance_valid(node) and node.has_method("overlaps_circle"):
+			if node.call("overlaps_circle", world_pos, clearance_r):
+				return false
+	for node: Node in tree.get_nodes_in_group("map_landmarks"):
+		if is_instance_valid(node) and node.has_method("overlaps_circle"):
+			if node.call("overlaps_circle", world_pos, clearance_r):
+				return false
+	for node: Node in tree.get_nodes_in_group("buildings"):
+		if not (node is Building) or not is_instance_valid(node):
+			continue
+		var b: Building = node
+		if b.is_destroyed or b == ignore_building:
+			continue
+		var min_d: float = b.footprint_radius + clearance_r
+		if b.global_position.distance_squared_to(world_pos) < min_d * min_d:
+			return false
+	for node: Node in tree.get_nodes_in_group("resource_nodes"):
+		if not (node is ResourceNode) or not is_instance_valid(node):
+			continue
+		var rn: ResourceNode = node
+		if rn.is_depleted() or rn.is_vent:
+			continue
+		var min_d: float = rn.collision_radius + clearance_r
+		if rn.global_position.distance_squared_to(world_pos) < min_d * min_d:
+			return false
+	return true
