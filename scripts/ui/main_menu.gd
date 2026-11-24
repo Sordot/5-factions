@@ -20,6 +20,9 @@ const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.
 @onready var opt_ai_playstyle: OptionButton = %OptAIPlaystyle
 @onready var btn_res_standard: Button = %BtnResStandard
 @onready var btn_res_fast: Button = %BtnResFast
+@onready var chk_mutator_yield: CheckBox = %ChkMutatorYield
+@onready var chk_mutator_no_fog: CheckBox = %ChkMutatorNoFog
+@onready var chk_mutator_fast_build: CheckBox = %ChkMutatorFastBuild
 @onready var summary_label: Label = %MatchSummaryLabel
 @onready var dossier_notice_label: Label = %DossierNoticeLabel
 @onready var btn_launch: Button = %BtnLaunch
@@ -38,6 +41,9 @@ var _team0_playstyle: int = 1
 var _ai_difficulty: int = 1
 var _ai_playstyle: int = 0
 var _resource_preset: StringName = GameConfig.PRESET_STANDARD
+var _mutator_high_yield: bool = false
+var _mutator_no_fog: bool = false
+var _mutator_fast_build: bool = false
 var _bg_time: float = 0.0
 var _settings_instance: SettingsMenu = null
 var _inspected_locked_btn: Button = null
@@ -55,6 +61,9 @@ func _ready() -> void:
 	_ai_difficulty = int(GameConfig.ai_difficulty)
 	_ai_playstyle = int(GameConfig.ai_playstyle)
 	_resource_preset = GameConfig.resource_preset
+	_mutator_high_yield = GameConfig.mutator_high_yield
+	_mutator_no_fog = GameConfig.mutator_no_fog
+	_mutator_fast_build = GameConfig.mutator_fast_build
 
 	if map_option != null:
 		map_option.clear()
@@ -148,6 +157,28 @@ func _ready() -> void:
 			_refresh_ui()
 		)
 
+	if chk_mutator_yield != null:
+		chk_mutator_yield.button_pressed = _mutator_high_yield
+		chk_mutator_yield.toggled.connect(func(pressed: bool) -> void:
+			AudioManager.play_ui_click()
+			_mutator_high_yield = pressed
+			_refresh_ui()
+		)
+	if chk_mutator_no_fog != null:
+		chk_mutator_no_fog.button_pressed = _mutator_no_fog
+		chk_mutator_no_fog.toggled.connect(func(pressed: bool) -> void:
+			AudioManager.play_ui_click()
+			_mutator_no_fog = pressed
+			_refresh_ui()
+		)
+	if chk_mutator_fast_build != null:
+		chk_mutator_fast_build.button_pressed = _mutator_fast_build
+		chk_mutator_fast_build.toggled.connect(func(pressed: bool) -> void:
+			AudioManager.play_ui_click()
+			_mutator_fast_build = pressed
+			_refresh_ui()
+		)
+
 	if btn_audio_mute != null:
 		btn_audio_mute.pressed.connect(func() -> void:
 			AudioManager.toggle_mute()
@@ -192,6 +223,7 @@ func _ready() -> void:
 		btn_audio_mute, map_option, btn_mode_pvai, btn_mode_aivai,
 		btn_ai_standard, btn_ai_passive, opt_team0_diff, opt_team0_style,
 		opt_ai_difficulty, opt_ai_playstyle, btn_res_standard, btn_res_fast,
+		chk_mutator_yield, chk_mutator_no_fog, chk_mutator_fast_build,
 		btn_launch, btn_settings, btn_quit,
 		locked_slot_2, locked_slot_3, locked_slot_4, locked_slot_5,
 	])
@@ -384,15 +416,23 @@ func _refresh_ui() -> void:
 	if summary_label != null:
 		var map_name: String = GameConfig.get_map_label(_selected_map_path)
 		var res_str: String = "1000 B / 500 S / 200 C" if is_fast else "200 B / 50 S / 0 C"
+		var mut_parts: PackedStringArray = PackedStringArray()
+		if _mutator_high_yield:
+			mut_parts.append("2x Yield")
+		if _mutator_no_fog:
+			mut_parts.append("No Fog")
+		if _mutator_fast_build:
+			mut_parts.append("Fast Build")
+		var mut_line: String = ("\nMUTATORS: %s" % " • ".join(mut_parts)) if not mut_parts.is_empty() else ""
 		if is_spec:
 			var t0_str: String = "%s (%s)" % [GameConfig.get_playstyle_label(_team0_playstyle), GameConfig.get_difficulty_label(_team0_difficulty)]
 			var t1_str: String = "%s (%s)" % [GameConfig.get_playstyle_label(_ai_playstyle), GameConfig.get_difficulty_label(_ai_difficulty)]
-			summary_label.text = "MODE: AI vs AI SPECTATOR\nMAP: %s\nMATCHUP: %s vs %s\nRESOURCES: %s" % [map_name, t0_str, t1_str, res_str]
+			summary_label.text = "MODE: AI vs AI SPECTATOR\nMAP: %s\nMATCHUP: %s vs %s\nRESOURCES: %s%s" % [map_name, t0_str, t1_str, res_str, mut_line]
 		else:
 			var ai_str: String = "Passive / Sandbox (Aggro OFF)"
 			if _aggro_ai_enabled:
 				ai_str = "%s AI  •  %s" % [GameConfig.get_difficulty_label(_ai_difficulty), GameConfig.get_playstyle_label(_ai_playstyle)]
-			summary_label.text = "FACTION: GENESIS_V2 (The Vat-Born)\nMAP: %s\nOPPONENT: %s\nRESOURCES: %s" % [map_name, ai_str, res_str]
+			summary_label.text = "FACTION: GENESIS_V2 (The Vat-Born)\nMAP: %s\nOPPONENT: %s\nRESOURCES: %s%s" % [map_name, ai_str, res_str, mut_line]
 
 
 func _on_launch_pressed() -> void:
@@ -406,7 +446,10 @@ func _on_launch_pressed() -> void:
 		_ai_playstyle,
 		_match_mode,
 		_team0_difficulty,
-		_team0_playstyle
+		_team0_playstyle,
+		_mutator_high_yield,
+		_mutator_no_fog,
+		_mutator_fast_build
 	)
 	get_tree().change_scene_to_file(_selected_map_path)
 

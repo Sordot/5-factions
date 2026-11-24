@@ -35,7 +35,7 @@ var _blocker_dirty: bool = true
 
 func _ready() -> void:
 	add_to_group("fog_of_war")
-	if TeamManager != null and TeamManager.is_spectator_mode():
+	if (TeamManager != null and TeamManager.is_spectator_mode()) or (GameConfig != null and GameConfig.mutator_no_fog):
 		fog_enabled = false
 	_initialize_grid()
 	call_deferred("_post_ready_init")
@@ -143,7 +143,7 @@ func refresh_visibility() -> void:
 		return
 
 	var total: int = grid_width * grid_height
-	if not fog_enabled:
+	if not fog_enabled or (GameConfig != null and GameConfig.mutator_no_fog):
 		for i: int in range(total):
 			_grid[i] = VisibilityState.VISIBLE
 		_sync_texture_if_dirty()

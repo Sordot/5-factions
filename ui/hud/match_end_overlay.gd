@@ -6,10 +6,21 @@ extends CanvasLayer
 @onready var subtitle_label: Label = %SubtitleLabel
 @onready var duration_value: Label = %DurationValue
 @onready var winner_value: Label = %WinnerValue
+@onready var mutators_label: Label = %MutatorsLabel
+@onready var btn_tab_summary: Button = %BtnTabSummary
+@onready var btn_tab_timeline: Button = %BtnTabTimeline
 @onready var scoreboard_grid: GridContainer = %ScoreboardGrid
+@onready var timeline_tab_box: VBoxContainer = %TimelineTabBox
+@onready var btn_metric_army: Button = %BtnMetricArmy
+@onready var btn_metric_income: Button = %BtnMetricIncome
+@onready var btn_metric_units: Button = %BtnMetricUnits
+@onready var timeline_graph: TimelineGraph = %TimelineGraph
 @onready var btn_play_again: Button = %BtnPlayAgain
 @onready var btn_main_menu: Button = %BtnMainMenu
 @onready var btn_sandbox_mode: Button = %BtnSandboxMode
+
+var _active_tab: StringName = &"summary"
+var _active_metric: StringName = TimelineGraph.METRIC_ARMY_VALUE
 
 
 func _ready() -> void:
@@ -17,12 +28,69 @@ func _ready() -> void:
 	layer = 10
 	if root_control != null:
 		root_control.visible = false
+	if btn_tab_summary != null:
+		btn_tab_summary.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			_set_active_tab(&"summary")
+		)
+	if btn_tab_timeline != null:
+		btn_tab_timeline.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			_set_active_tab(&"timeline")
+		)
+	if btn_metric_army != null:
+		btn_metric_army.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			_set_active_metric(TimelineGraph.METRIC_ARMY_VALUE)
+		)
+	if btn_metric_income != null:
+		btn_metric_income.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			_set_active_metric(TimelineGraph.METRIC_INCOME_RATE)
+		)
+	if btn_metric_units != null:
+		btn_metric_units.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			_set_active_metric(TimelineGraph.METRIC_UNIT_COUNT)
+		)
 	if btn_play_again != null:
 		btn_play_again.pressed.connect(_on_play_again_pressed)
 	if btn_main_menu != null:
 		btn_main_menu.pressed.connect(_on_main_menu_pressed)
 	if btn_sandbox_mode != null:
 		btn_sandbox_mode.pressed.connect(_on_sandbox_mode_pressed)
+	_set_active_tab(&"summary")
+	_set_active_metric(TimelineGraph.METRIC_ARMY_VALUE)
+
+
+func _set_active_tab(tab: StringName) -> void:
+	_active_tab = tab
+	var show_summary_tab: bool = (_active_tab == &"summary")
+	if scoreboard_grid != null:
+		scoreboard_grid.visible = show_summary_tab
+	if timeline_tab_box != null:
+		timeline_tab_box.visible = not show_summary_tab
+	if btn_tab_summary != null:
+		btn_tab_summary.modulate = Color(0.32, 1.0, 0.90, 1.0) if show_summary_tab else Color(0.68, 0.78, 0.84, 0.80)
+	if btn_tab_timeline != null:
+		btn_tab_timeline.modulate = Color(0.32, 1.0, 0.90, 1.0) if not show_summary_tab else Color(0.68, 0.78, 0.84, 0.80)
+
+
+func _set_active_metric(metric_key: StringName) -> void:
+	_active_metric = metric_key
+	if timeline_graph != null:
+		timeline_graph.set_metric(metric_key)
+	if btn_metric_army != null:
+		btn_metric_army.modulate = Color(0.32, 1.0, 0.90, 1.0) if metric_key == TimelineGraph.METRIC_ARMY_VALUE else Color(0.68, 0.78, 0.84, 0.80)
+	if btn_metric_income != null:
+		btn_metric_income.modulate = Color(1.0, 0.84, 0.34, 1.0) if metric_key == TimelineGraph.METRIC_INCOME_RATE else Color(0.68, 0.78, 0.84, 0.80)
+	if btn_metric_units != null:
+		btn_metric_units.modulate = Color(0.46, 0.86, 1.0, 1.0) if metric_key == TimelineGraph.METRIC_UNIT_COUNT else Color(0.68, 0.78, 0.84, 0.80)
 
 
 func is_summary_visible() -> bool:
@@ -48,12 +116,50 @@ func show_summary(stats: Dictionary) -> void:
 	if winner_value != null:
 		winner_value.text = "WINNER: %s" % str(stats.get("winner_label", "--"))
 
+	if mutators_label != null:
+		var mut_list: PackedStringArray = PackedStringArray()
+		var raw_mut: Variant = stats.get("active_mutators", PackedStringArray())
+		if raw_mut is PackedStringArray:
+			mut_list = raw_mut as PackedStringArray
+		elif raw_mut is Array:
+			for m_item: Variant in raw_mut:
+				mut_list.append(String(m_item))
+		if mut_list.is_empty() and GameConfig != null and GameConfig.has_method("get_active_mutator_labels"):
+			mut_list = GameConfig.get_active_mutator_labels()
+		mutators_label.visible = not mut_list.is_empty()
+		if not mut_list.is_empty():
+			mutators_label.text = "MUTATORS: %s" % " • ".join(mut_list)
+
 	_populate_scoreboard(stats)
+	_populate_timeline_graph(stats)
+	_set_active_tab(&"summary")
 
 	if root_control != null:
 		root_control.visible = true
 	if SettingsManager != null:
 		SettingsManager.refresh_mouse_mode()
+
+
+func _populate_timeline_graph(stats: Dictionary) -> void:
+	if timeline_graph == null:
+		return
+	var samples: Array = stats.get("timeline_samples", []) as Array
+	var team_names: Dictionary = {}
+	var team_colors: Dictionary = {}
+	var is_spec: bool = bool(stats.get("is_spectator", false))
+	if is_spec and GameConfig != null:
+		team_names[0] = "AI-01"
+		team_names[1] = "AI-02"
+	else:
+		team_names[0] = "PLAYER"
+		team_names[1] = "AI"
+	if TeamManager != null:
+		for tid: int in TeamManager.get_active_teams():
+			if not team_names.has(tid):
+				team_names[tid] = TeamManager.get_team_display_name(tid)
+			team_colors[tid] = TeamManager.get_team_color(tid)
+	timeline_graph.set_samples(samples, team_names, team_colors)
+	_set_active_metric(_active_metric)
 
 
 func _populate_scoreboard(stats: Dictionary) -> void:

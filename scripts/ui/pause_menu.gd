@@ -52,9 +52,21 @@ func toggle_pause() -> void:
 		open_pause()
 
 
+func _reset_gameplay_cursors() -> void:
+	if not is_inside_tree():
+		return
+	var sel: Node = get_tree().get_first_node_in_group("selection_controller")
+	if sel != null and is_instance_valid(sel) and sel.has_method("reset_command_cursors"):
+		sel.call("reset_command_cursors")
+	else:
+		Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
+		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+
+
 func open_pause() -> void:
 	if is_pause_open():
 		return
+	_reset_gameplay_cursors()
 	if AudioManager != null:
 		AudioManager.play_ui_click()
 	Engine.time_scale = 1.0
@@ -91,6 +103,7 @@ func close_pause() -> void:
 func _open_tech_tree() -> void:
 	if _tech_tree_instance != null and is_instance_valid(_tech_tree_instance):
 		return
+	_reset_gameplay_cursors()
 	if AudioManager != null:
 		AudioManager.play_ui_click()
 	var tech_scene: PackedScene = load(TECH_TREE_SCENE_PATH) as PackedScene

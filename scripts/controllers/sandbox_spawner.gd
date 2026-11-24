@@ -23,6 +23,44 @@ const GENESIS_BUILDING_CATALOG: Array = [
 	{"id": &"cloning_vat", "label": "Cloning Vat", "scene": "res://scenes/buildings/cloning_vat.tscn"},
 	{"id": &"calibration_foundry", "label": "Calibration Foundry", "scene": "res://scenes/buildings/calibration_foundry.tscn"},
 	{"id": &"synthetics_fabricator", "label": "Synthetics Fabricator", "scene": "res://scenes/buildings/synthetics_fabricator.tscn"},
+	{"id": &"defense_turret", "label": "Sentry Pylon (Turret)", "scene": "res://scenes/buildings/defense_turret.tscn"},
+]
+
+const DEFENSE_TURRET_SCENE_PATH: String = "res://scenes/buildings/defense_turret.tscn"
+
+const COMBAT_LAB_PRESETS: Array = [
+	{
+		"label": "Clone Squad (8) vs. Stingers (8)",
+		"half_sep": 210.0,
+		"team0_units": [{"id": &"clone_trooper", "count": 8}],
+		"team1_units": [{"id": &"stinger", "count": 8}],
+		"team0_buildings": [],
+		"team1_buildings": [],
+	},
+	{
+		"label": "Lance-Rigs (5) vs. Goliath Frames (2)",
+		"half_sep": 230.0,
+		"team0_units": [{"id": &"lance_rig", "count": 5}],
+		"team1_units": [{"id": &"goliath_frame", "count": 2}],
+		"team0_buildings": [],
+		"team1_buildings": [],
+	},
+	{
+		"label": "Mortar Siege (3) vs. Turret Line (2) + Clones (6)",
+		"half_sep": 265.0,
+		"team0_units": [{"id": &"chrysalis_mortar", "count": 3}],
+		"team1_units": [{"id": &"clone_trooper", "count": 6}],
+		"team0_buildings": [],
+		"team1_buildings": [{"id": &"defense_turret", "count": 2}],
+	},
+	{
+		"label": "Mixed Heavy Clash (Goliath + Arc-Lancer + Symbiote Mirror)",
+		"half_sep": 240.0,
+		"team0_units": [{"id": &"goliath_frame", "count": 2}, {"id": &"arc_lancer", "count": 2}, {"id": &"symbiote", "count": 2}],
+		"team1_units": [{"id": &"goliath_frame", "count": 2}, {"id": &"arc_lancer", "count": 2}, {"id": &"symbiote", "count": 2}],
+		"team0_buildings": [],
+		"team1_buildings": [],
+	},
 ]
 
 @export var arena_safe_bounds: Rect2 = Rect2(-580.0, -300.0, 1160.0, 600.0)
@@ -294,3 +332,167 @@ func _get_selection_controller() -> SelectionController:
 	if not selection_controller_path.is_empty():
 		return get_node_or_null(selection_controller_path) as SelectionController
 	return get_parent().get_node_or_null("SelectionController") as SelectionController
+
+
+func _get_camera_center_or_zero() -> Vector2:
+	if is_inside_tree():
+		var cam: RTSCamera = get_tree().get_first_node_in_group("rts_camera") as RTSCamera
+		if cam != null:
+			return _clamp_to_walkable_arena(cam.global_position)
+	return _clamp_to_walkable_arena(Vector2.ZERO)
+
+
+func _find_unit_scene_path(unit_id: StringName) -> String:
+	for entry: Dictionary in GENESIS_UNIT_CATALOG:
+		if entry["id"] == unit_id:
+			return String(entry["scene"])
+	return ""
+
+
+func _find_building_scene_path(bldg_id: StringName) -> String:
+	for entry: Dictionary in GENESIS_BUILDING_CATALOG:
+		if entry["id"] == bldg_id:
+			return String(entry["scene"])
+	return ""
+
+
+func spawn_defense_turret(target_team: Unit.Team = Unit.Team.PLAYER, origin: Vector2 = Vector2.INF) -> Building:
+	var scene: PackedScene = load(DEFENSE_TURRET_SCENE_PATH) as PackedScene
+	if scene == null:
+		return null
+	var container: Node = _get_buildings_container()
+	if container == null:
+		return null
+	var node: Node = scene.instantiate()
+	if not (node is Building):
+		node.queue_free()
+		return null
+	var building: Building = node
+	building.team = target_team
+	building.is_constructed = true
+	var anchor: Vector2 = _clamp_to_walkable_arena(origin) if origin != Vector2.INF else _get_camera_center_or_zero()
+	building.global_position = _find_open_building_spot(anchor, building.footprint_radius)
+	container.add_child(building)
+	building.add_to_group("combat_lab_entities")
+	entities_changed.emit()
+	return building
+
+
+func spawn_combat_lab_preset(preset_index: int) -> void:
+	if preset_index < 0 or preset_index >= COMBAT_LAB_PRESETS.size():
+		return
+	var preset: Dictionary = COMBAT_LAB_PRESETS[preset_index]
+	var half_sep: float = float(preset.get("half_sep", 220.0))
+	var center: Vector2 = _get_camera_center_or_zero()
+	# Keep both opposing squads comfortably inside arena bounds
+	var margin_x: float = half_sep + 90.0
+	var margin_y: float = 130.0
+	center.x = clampf(center.x, arena_safe_bounds.position.x + margin_x, arena_safe_bounds.end.x - margin_x)
+	center.y = clampf(center.y, arena_safe_bounds.position.y + margin_y, arena_safe_bounds.end.y - margin_y)
+
+	var left_origin: Vector2 = center + Vector2(-half_sep, 0.0)
+	var right_origin: Vector2 = center + Vector2(half_sep, 0.0)
+
+	var spawned_t0: Array[Unit] = _spawn_lab_squad(preset.get("team0_units", []) as Array, Unit.Team.PLAYER, left_origin)
+	var spawned_t1: Array[Unit] = _spawn_lab_squad(preset.get("team1_units", []) as Array, Unit.Team.ENEMY, right_origin)
+	_spawn_lab_buildings(preset.get("team0_buildings", []) as Array, Unit.Team.PLAYER, left_origin + Vector2(56.0, 0.0))
+	_spawn_lab_buildings(preset.get("team1_buildings", []) as Array, Unit.Team.ENEMY, right_origin + Vector2(-56.0, 0.0))
+
+	# Issue opposing Attack-Move orders toward center so the test engagement begins immediately
+	for u0: Unit in spawned_t0:
+		u0.call_deferred("command_attack_move", center + Vector2(40.0, 0.0))
+	for u1: Unit in spawned_t1:
+		u1.call_deferred("command_attack_move", center + Vector2(-40.0, 0.0))
+	entities_changed.emit()
+
+
+func _spawn_lab_squad(spec_list: Array, target_team: Unit.Team, anchor: Vector2) -> Array[Unit]:
+	var out: Array[Unit] = []
+	var group_count: int = spec_list.size()
+	for idx: int in range(group_count):
+		var item: Dictionary = spec_list[idx] as Dictionary
+		var uid: StringName = item.get("id", &"clone_trooper") as StringName
+		var cnt: int = int(item.get("count", 1))
+		var scene_path: String = _find_unit_scene_path(uid)
+		if scene_path.is_empty():
+			continue
+		var scene: PackedScene = load(scene_path) as PackedScene
+		var y_off: float = (float(idx) - float(group_count - 1) * 0.5) * 96.0
+		var batch: Array[Unit] = _spawn_batch(scene, cnt, anchor + Vector2(0.0, y_off), 42.0, int(target_team))
+		for u: Unit in batch:
+			u.add_to_group("combat_lab_entities")
+			out.append(u)
+	return out
+
+
+func _spawn_lab_buildings(spec_list: Array, target_team: Unit.Team, anchor: Vector2) -> void:
+	var container: Node = _get_buildings_container()
+	if container == null:
+		return
+	for item_v: Variant in spec_list:
+		if not (item_v is Dictionary):
+			continue
+		var item: Dictionary = item_v as Dictionary
+		var bid: StringName = item.get("id", &"defense_turret") as StringName
+		var cnt: int = int(item.get("count", 1))
+		var scene_path: String = _find_building_scene_path(bid)
+		if scene_path.is_empty():
+			continue
+		var scene: PackedScene = load(scene_path) as PackedScene
+		if scene == null:
+			continue
+		for k: int in range(cnt):
+			var node: Node = scene.instantiate()
+			if not (node is Building):
+				node.queue_free()
+				continue
+			var b: Building = node
+			b.team = target_team
+			b.is_constructed = true
+			var y_off: float = (float(k) - float(cnt - 1) * 0.5) * 116.0
+			b.global_position = _find_open_building_spot(anchor + Vector2(0.0, y_off), b.footprint_radius)
+			container.add_child(b)
+			b.add_to_group("combat_lab_entities")
+
+
+func clear_combat_lab_entities() -> void:
+	if not is_inside_tree():
+		return
+	var cleared_ids: Dictionary = {}
+	for node: Node in get_tree().get_nodes_in_group("combat_lab_entities"):
+		if not is_instance_valid(node) or node.is_queued_for_deletion():
+			continue
+		if node is Building:
+			var b: Building = node
+			if b.is_core_hub or b.building_type_id == &"nexus_vat":
+				continue
+		cleared_ids[node.get_instance_id()] = true
+		node.queue_free()
+
+	# Also clear nearby combat test units & defense turrets within lab radius of camera center (never touching core hubs or economy workers)
+	var center: Vector2 = _get_camera_center_or_zero()
+	var lab_r_sq: float = 520.0 * 520.0
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(node) or not (node is Unit) or node.is_queued_for_deletion():
+			continue
+		if cleared_ids.has(node.get_instance_id()):
+			continue
+		var u: Unit = node
+		if u.global_position.distance_squared_to(center) > lab_r_sq:
+			continue
+		if u.data != null and (u.data.can_gather or u.data.can_staff_compute):
+			continue
+		u.queue_free()
+
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node) or not (node is Building) or node.is_queued_for_deletion():
+			continue
+		if cleared_ids.has(node.get_instance_id()):
+			continue
+		var b: Building = node
+		if b.is_core_hub or b.building_type_id == &"nexus_vat":
+			continue
+		if b.building_type_id == &"defense_turret" and b.global_position.distance_squared_to(center) <= lab_r_sq:
+			b.queue_free()
+
+	entities_changed.emit()

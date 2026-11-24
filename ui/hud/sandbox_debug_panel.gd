@@ -27,12 +27,19 @@ extends Control
 @onready var btn_spawn_catalog_unit: Button = %BtnSpawnCatalogUnit
 @onready var building_catalog_option: OptionButton = %BuildingCatalogOption
 @onready var btn_spawn_catalog_building: Button = %BtnSpawnCatalogBuilding
+@onready var btn_spawn_turret: Button = %BtnSpawnTurret
+@onready var btn_toggle_combat_lab: Button = %BtnToggleCombatLab
+@onready var combat_lab_row: HBoxContainer = %CombatLabRow
+@onready var combat_lab_preset_option: OptionButton = %CombatLabPresetOption
+@onready var btn_lab_spawn_fight: Button = %BtnLabSpawnFight
+@onready var btn_lab_clear: Button = %BtnLabClear
 
 var _spawner: SandboxSpawner = null
 var _selection_controller: SelectionController = null
 var _camera: RTSCamera = null
 var _match_manager: MatchManager = null
 var _catalog_team: Unit.Team = Unit.Team.PLAYER
+var _combat_lab_open: bool = false
 
 
 func _ready() -> void:
@@ -166,7 +173,50 @@ func _setup_genesis_catalog_controls() -> void:
 			if _spawner != null and building_catalog_option != null:
 				_spawner.spawn_genesis_building_by_index(building_catalog_option.selected, _catalog_team)
 		)
+	if btn_spawn_turret != null:
+		btn_spawn_turret.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			if _spawner != null:
+				_spawner.spawn_defense_turret(_catalog_team)
+		)
+	if combat_lab_preset_option != null:
+		combat_lab_preset_option.clear()
+		for i: int in range(SandboxSpawner.COMBAT_LAB_PRESETS.size()):
+			combat_lab_preset_option.add_item(String(SandboxSpawner.COMBAT_LAB_PRESETS[i]["label"]), i)
+	if btn_toggle_combat_lab != null:
+		btn_toggle_combat_lab.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			_combat_lab_open = not _combat_lab_open
+			_refresh_combat_lab_visibility()
+		)
+	if btn_lab_spawn_fight != null:
+		btn_lab_spawn_fight.modulate = Color(0.36, 1.0, 0.86, 1.0)
+		btn_lab_spawn_fight.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			if _spawner != null and combat_lab_preset_option != null:
+				_spawner.spawn_combat_lab_preset(combat_lab_preset_option.selected)
+		)
+	if btn_lab_clear != null:
+		btn_lab_clear.modulate = Color(1.0, 0.62, 0.42, 1.0)
+		btn_lab_clear.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			if _spawner != null:
+				_spawner.clear_combat_lab_entities()
+		)
+	_refresh_combat_lab_visibility()
 	_refresh_catalog_team_button()
+
+
+func _refresh_combat_lab_visibility() -> void:
+	if combat_lab_row != null:
+		combat_lab_row.visible = _combat_lab_open
+	if btn_toggle_combat_lab != null:
+		btn_toggle_combat_lab.text = "Combat Lab ▾" if _combat_lab_open else "Combat Lab ▸"
+		btn_toggle_combat_lab.modulate = Color(0.36, 1.0, 0.88, 1.0) if _combat_lab_open else Color(0.84, 0.92, 0.96, 0.92)
 
 
 func _refresh_catalog_team_button() -> void:
@@ -263,7 +313,7 @@ func _refresh_status() -> void:
 	if groups_label != null and _selection_controller != null:
 		var summary: Dictionary = _selection_controller.get_control_groups_summary()
 		if summary.is_empty():
-			groups_label.text = "Control Groups: None (Ctrl/Shift/Alt + 1-9)"
+			groups_label.text = "Control Groups: None (Ctrl=Set, Shift=Add, Alt=Steal + 1-9)"
 		else:
 			var parts: PackedStringArray = PackedStringArray()
 			for num: int in range(1, 10):

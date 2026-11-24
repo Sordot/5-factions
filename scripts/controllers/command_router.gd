@@ -14,16 +14,39 @@ func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspect
 		return
 	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 
-	# 1. Rally point assignment when inspecting/selecting friendly rally-capable building(s).
+	# 1. Turret explicit focus-fire OR rally point assignment when inspecting/selecting friendly building(s).
 	if selected_units.is_empty():
+		var turret_buildings: Array[Building] = []
 		var rally_buildings: Array[Building] = []
 		for b: Building in selected_buildings:
-			if is_instance_valid(b) and not b.is_destroyed and int(b.team) == local_team and b.is_constructed and b.can_set_rally:
-				rally_buildings.append(b)
-		if rally_buildings.is_empty() and inspected_entity is Building and is_instance_valid(inspected_entity):
+			if is_instance_valid(b) and not b.is_destroyed and int(b.team) == local_team and b.is_constructed:
+				if b.has_turret and b.turret_component != null:
+					turret_buildings.append(b)
+				if b.can_set_rally:
+					rally_buildings.append(b)
+		if turret_buildings.is_empty() and rally_buildings.is_empty() and inspected_entity is Building and is_instance_valid(inspected_entity):
 			var building: Building = inspected_entity
-			if int(building.team) == local_team and building.is_constructed and building.can_set_rally:
-				rally_buildings.append(building)
+			if int(building.team) == local_team and building.is_constructed:
+				if building.has_turret and building.turret_component != null:
+					turret_buildings.append(building)
+				if building.can_set_rally:
+					rally_buildings.append(building)
+		if not turret_buildings.is_empty():
+			var focus_target: Node2D = find_hostile_unit_at_point(world_pos, local_team)
+			if focus_target == null:
+				focus_target = find_hostile_building_at_point(world_pos, local_team)
+			if focus_target == null:
+				focus_target = find_barricade_at_point(world_pos)
+			if focus_target != null:
+				var locked_any: bool = false
+				for tb: Building in turret_buildings:
+					if tb.command_turret_focus_target(focus_target):
+						locked_any = true
+				if locked_any:
+					if AudioManager != null:
+						AudioManager.play_sfx(&"order_attack", -3.5, 0.04)
+					spawn_move_marker(focus_target.global_position, MoveMarker.MarkerStyle.ATTACK)
+					return
 		if not rally_buildings.is_empty():
 			_handle_multi_building_rally_right_click(rally_buildings, world_pos)
 		return

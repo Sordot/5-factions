@@ -38,6 +38,35 @@ var team1_ai_playstyle: int = AIPlaystyle.SYNTHETICS_TECH
 var resource_preset: StringName = PRESET_STANDARD
 var configured_from_menu: bool = false
 
+# Skirmish Lobby Mutators
+var mutator_high_yield: bool = false
+var mutator_no_fog: bool = false
+var mutator_fast_build: bool = false
+
+
+func get_yield_multiplier() -> float:
+	return 2.0 if mutator_high_yield else 1.0
+
+
+func get_build_speed_multiplier() -> float:
+	return 2.0 if mutator_fast_build else 1.0
+
+
+func get_active_mutator_labels() -> PackedStringArray:
+	var labels: PackedStringArray = PackedStringArray()
+	if mutator_high_yield:
+		labels.append("2x YIELD")
+	if mutator_no_fog:
+		labels.append("NO FOG")
+	if mutator_fast_build:
+		labels.append("FAST BUILD")
+	return labels
+
+
+func get_active_mutators_summary() -> String:
+	var labels: PackedStringArray = get_active_mutator_labels()
+	return " • ".join(labels) if not labels.is_empty() else "None"
+
 
 func get_starting_resources() -> Dictionary:
 	if resource_preset == PRESET_FAST_TECH:
@@ -103,7 +132,10 @@ func set_match_config(
 	playstyle: int = AIPlaystyle.BALANCED,
 	p_match_mode: int = MatchMode.PLAYER_VS_AI,
 	p_team0_diff: int = -1,
-	p_team0_style: int = -1
+	p_team0_style: int = -1,
+	p_high_yield: bool = false,
+	p_no_fog: bool = false,
+	p_fast_build: bool = false
 ) -> void:
 	selected_map_path = map_path if not map_path.is_empty() else MAP_SKIRMISH_01
 	match_mode = clampi(p_match_mode, 0, 1)
@@ -118,6 +150,9 @@ func set_match_config(
 		team0_ai_difficulty = clampi(p_team0_diff, 0, 2)
 	if p_team0_style >= 0:
 		team0_ai_playstyle = clampi(p_team0_style, 0, 2)
+	mutator_high_yield = p_high_yield
+	mutator_no_fog = p_no_fog
+	mutator_fast_build = p_fast_build
 	configured_from_menu = true
 	if TeamManager != null:
 		TeamManager.configure_from_game_config()

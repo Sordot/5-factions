@@ -41,7 +41,7 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.56, 0.78, 0.86, 0.92)
 theme_override_font_sizes/font_size = 11
-text = "Control Groups: None (Ctrl/Shift/Alt + 1-9)"
+text = "Control Groups: None (Ctrl=Set, Shift=Add, Alt=Steal + 1-9)"
 
 [node name="ButtonRow" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
 layout_mode = 2
@@ -205,6 +205,54 @@ layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+Structure"
+
+[node name="BtnSpawnTurret" type="Button" parent="MarginContainer/PanelContainer/VBox/GenesisRosterRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "+Sentry Pylon"
+
+[node name="BtnToggleCombatLab" type="Button" parent="MarginContainer/PanelContainer/VBox/GenesisRosterRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Combat Lab ▸"
+
+[node name="CombatLabRow" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="CombatLabLabel" type="Label" parent="MarginContainer/PanelContainer/VBox/CombatLabRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.36, 0.96, 0.9, 0.95)
+theme_override_font_sizes/font_size = 11
+text = "COMBAT LAB:"
+
+[node name="CombatLabPresetOption" type="OptionButton" parent="MarginContainer/PanelContainer/VBox/CombatLabRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(310, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+
+[node name="BtnLabSpawnFight" type="Button" parent="MarginContainer/PanelContainer/VBox/CombatLabRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Spawn & Fight"
+
+[node name="BtnLabClear" type="Button" parent="MarginContainer/PanelContainer/VBox/CombatLabRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Clear Combatants"
 
 [node name="ControlsLabel" type="Label" parent="MarginContainer/PanelContainer/VBox"]
 layout_mode = 2

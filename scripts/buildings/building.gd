@@ -2,6 +2,7 @@ class_name Building
 extends StaticBody2D
 
 const PRODUCTION_COMPONENT_SCRIPT: GDScript = preload("res://scripts/buildings/production_component.gd")
+const TURRET_COMPONENT_SCRIPT: GDScript = preload("res://scripts/buildings/turret_component.gd")
 const ENTITY_VISUALS_SCRIPT: GDScript = preload("res://ui/overlays/entity_visuals.gd")
 const COMBAT_VFX_SCRIPT: GDScript = preload("res://ui/overlays/combat_vfx.gd")
 const HEALTH_BAR_WIDTH: float = 76.0
@@ -17,6 +18,7 @@ const DEFAULT_BUILDING_COSTS: Dictionary = {
 	&"cloning_vat": {"biomass": 150, "silica": 50, "compute": 0},
 	&"calibration_foundry": {"biomass": 125, "silica": 75, "compute": 0},
 	&"synthetics_fabricator": {"biomass": 150, "silica": 100, "compute": 50},
+	&"defense_turret": {"biomass": 100, "silica": 50, "compute": 0},
 }
 
 signal selection_changed(building: Building, selected: bool)
@@ -29,6 +31,7 @@ signal staffing_changed(building: Building, assigned_count: int, max_slots: int)
 signal training_changed(building: Building)
 signal rally_changed(building: Building)
 
+@export var building_data: BuildingData = null
 @export var team: Unit.Team = Unit.Team.PLAYER
 @export var building_type_id: StringName = &"nexus_vat"
 @export var display_name: String = "Nexus Vat"
@@ -52,6 +55,15 @@ signal rally_changed(building: Building)
 @export var trainable_unit_data: Array[UnitData] = []
 @export var trainable_unit_scenes: Array[PackedScene] = []
 @export var researchable_upgrades: Array[UpgradeData] = []
+@export var has_turret: bool = false
+@export var turret_damage: float = 0.0
+@export var turret_attack_interval: float = 1.0
+@export var turret_attack_range: float = 260.0
+@export var turret_min_range: float = 0.0
+@export var turret_splash_radius: float = 0.0
+@export var turret_bonus_vs_armored: float = 1.0
+@export var turret_tracer_style: StringName = &"pulse"
+@export var turret_turn_speed: float = 7.0
 
 @onready var selection_ring: Node2D = get_node_or_null("SelectionRing") as Node2D
 @onready var body_visual: Node2D = get_node_or_null("BodyVisual") as Node2D
@@ -70,6 +82,7 @@ var construction_progress: float = 1.0
 var claimed_vent: ResourceNode = null
 var assigned_engineers: Array[Unit] = []
 var production_component: ProductionComponent = null
+var turret_component: TurretComponent = null
 
 var _has_rally: bool = false
 var _rally_position: Vector2 = Vector2.ZERO
@@ -91,6 +104,8 @@ func _ready() -> void:
 	add_to_group("selectable_buildings")
 	if SpatialGrid != null:
 		SpatialGrid.register_building(self)
+	if building_data != null:
+		_sync_turret_from_data(building_data)
 	if building_type_id == &"nexus_vat":
 		is_core_hub = true
 	if construction_costs.is_empty():
@@ -120,6 +135,8 @@ func _ready() -> void:
 			training_changed.emit(self)
 			status_changed.emit(self)
 		)
+
+	_ensure_turret_component()
 
 	_update_construction_visuals()
 	_update_health_bar()
@@ -191,11 +208,57 @@ func _process(delta: float) -> void:
 	if production_component != null and not is_salvaging:
 		production_component.tick(self, delta)
 
+	if turret_component != null and has_turret:
+		turret_component.tick(delta)
+		if is_selected and turret_component.explicit_target != null:
+			queue_redraw()
+
 	if is_selected and has_rally() and not _has_rally_overlay():
 		queue_redraw()
 
 
+func _should_draw_turret_range_ring() -> bool:
+	if not is_selected or not has_turret or turret_attack_range <= 0.0:
+		return false
+	var mode: int = SettingsManager.attack_range_mode if SettingsManager != null else 1
+	if mode == 2:
+		return false
+	if mode == 0:
+		return true
+	if turret_component != null and turret_component.explicit_target != null and is_instance_valid(turret_component.explicit_target):
+		return true
+	if is_inside_tree():
+		var sel: Node = get_tree().get_first_node_in_group("selection_controller")
+		if sel != null and sel.has_method("is_targeting_command_active") and bool(sel.call("is_targeting_command_active")):
+			return true
+	return false
+
+
+func _draw_dashed_ring(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:
+	var step: float = TAU / float(maxi(8, dash_count))
+	for i: int in range(dash_count):
+		var a0: float = float(i) * step
+		var a1: float = a0 + step * 0.54
+		draw_arc(center, radius, a0, a1, 4, col, width, true)
+
+
 func _draw() -> void:
+	if _should_draw_turret_range_ring():
+		var atk_r: float = turret_attack_range + footprint_radius
+		var tc: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else (Color(0.28, 0.94, 0.96, 1.0) if team == Unit.Team.PLAYER else Color(1.0, 0.38, 0.28, 1.0))
+		var ring_col: Color = Color(tc.r, tc.g, tc.b, 0.34)
+		draw_circle(Vector2.ZERO, atk_r, Color(tc.r, tc.g, tc.b, 0.03))
+		_draw_dashed_ring(Vector2.ZERO, atk_r, ring_col, 1.6, 44 if atk_r > 240.0 else 32)
+		if turret_min_range > 0.0:
+			var min_r: float = turret_min_range + footprint_radius
+			draw_circle(Vector2.ZERO, min_r, Color(1.0, 0.28, 0.24, 0.05))
+			_draw_dashed_ring(Vector2.ZERO, min_r, Color(1.0, 0.36, 0.28, 0.44), 1.4, 20)
+
+	if is_selected and turret_component != null and turret_component.explicit_target != null and is_instance_valid(turret_component.explicit_target):
+		var tgt_local: Vector2 = to_local(turret_component.explicit_target.global_position)
+		draw_line(Vector2.ZERO, tgt_local, Color(1.0, 0.34, 0.32, 0.55), 1.4, true)
+		draw_arc(tgt_local, 14.0, 0.0, TAU, 18, Color(1.0, 0.38, 0.32, 0.85), 1.6, true)
+
 	if is_salvaging and is_constructed and not is_destroyed:
 		var prog: float = clampf(salvage_elapsed / SALVAGE_DURATION, 0.0, 1.0)
 		var bar_w: float = 72.0
@@ -227,6 +290,7 @@ func _draw() -> void:
 func begin_construction(data: BuildingData, target_team: Unit.Team, vent: ResourceNode = null) -> void:
 	team = target_team
 	if data != null:
+		building_data = data
 		building_type_id = data.building_id
 		display_name = data.display_name
 		construction_costs = data.get_cost_dict()
@@ -241,6 +305,7 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 		is_core_hub = data.is_core_hub or building_type_id == &"nexus_vat"
 		batch_production_count = maxi(1, data.batch_production_count)
 		base_batch_cost_multiplier = maxf(1.0, data.base_batch_cost_multiplier)
+		_sync_turret_from_data(data)
 		var resolved_units: Array[UnitData] = data.resolve_trainable_units()
 		if not resolved_units.is_empty():
 			trainable_unit_data = resolved_units
@@ -258,6 +323,8 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 			training_changed.emit(self)
 			status_changed.emit(self)
 		)
+
+	_ensure_turret_component()
 
 	claimed_vent = vent
 	if claimed_vent != null and is_instance_valid(claimed_vent):
@@ -278,13 +345,64 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 		_complete_construction()
 
 
+func _sync_turret_from_data(data: BuildingData) -> void:
+	if data == null:
+		return
+	has_turret = data.has_turret
+	turret_damage = data.turret_damage
+	turret_attack_interval = data.turret_attack_interval
+	turret_attack_range = data.turret_attack_range
+	turret_min_range = data.turret_min_range
+	turret_splash_radius = data.turret_splash_radius
+	turret_bonus_vs_armored = data.turret_bonus_vs_armored
+	turret_tracer_style = data.turret_tracer_style
+	turret_turn_speed = data.turret_turn_speed
+
+
+func _ensure_turret_component() -> void:
+	if not has_turret:
+		return
+	if turret_component == null:
+		turret_component = get_node_or_null("TurretComponent") as TurretComponent
+	if turret_component == null:
+		turret_component = TURRET_COMPONENT_SCRIPT.new() as TurretComponent
+		turret_component.name = "TurretComponent"
+		add_child(turret_component)
+	if turret_component != null:
+		turret_component.bind_building(self)
+
+
+func command_turret_focus_target(target: Node2D) -> bool:
+	if turret_component == null or not has_turret:
+		return false
+	var ok: bool = turret_component.set_explicit_target(target)
+	if ok:
+		queue_redraw()
+		status_changed.emit(self)
+	return ok
+
+
+func get_turret_angle() -> float:
+	if turret_component != null:
+		return turret_component.turret_angle
+	return 0.0 if int(team) == 0 else PI
+
+
+func get_turret_recoil() -> float:
+	if turret_component != null:
+		return turret_component.recoil_offset
+	return 0.0
+
+
 func advance_construction(delta: float) -> bool:
 	if is_destroyed or is_constructed:
 		return true
+	var speed_mult: float = GameConfig.get_build_speed_multiplier() if (GameConfig != null and GameConfig.has_method("get_build_speed_multiplier")) else 1.0
+	var eff_delta: float = delta * speed_mult
 	var total_time: float = maxf(0.1, build_time)
-	_construction_elapsed = minf(total_time, _construction_elapsed + delta)
+	_construction_elapsed = minf(total_time, _construction_elapsed + eff_delta)
 	construction_progress = clampf(_construction_elapsed / total_time, 0.0, 1.0)
-	var hp_gain: float = (max_hp * 0.90) * (delta / total_time)
+	var hp_gain: float = (max_hp * 0.90) * (eff_delta / total_time)
 	current_hp = minf(max_hp, current_hp + hp_gain)
 	_update_construction_visuals()
 	_update_health_bar()
@@ -822,7 +940,8 @@ func get_inspection_data() -> Dictionary:
 	if max_staff_slots > 0:
 		subtitle = "COMPUTE FACILITY"
 		var staffed: int = get_assigned_engineer_count()
-		var rate: int = staffed * compute_per_engineer
+		var yield_mult: float = GameConfig.get_yield_multiplier() if (GameConfig != null and GameConfig.has_method("get_yield_multiplier")) else 1.0
+		var rate: int = int(round(float(staffed * compute_per_engineer) * yield_mult))
 		show_primary = true
 		primary_label = "Engineers: %d / %d Staffed" % [staffed, max_staff_slots]
 		primary_val = float(staffed)
@@ -833,6 +952,17 @@ func get_inspection_data() -> Dictionary:
 		stats.append({"label": "Vent Status", "value": "Active Thermal Vent"})
 		stats.append({"label": "Staff Slots", "value": "%d / %d Engineers" % [staffed, max_staff_slots]})
 		stats.append({"label": "Construction", "value": "Operational"})
+	elif has_turret:
+		subtitle = "STATIC DEFENSE TURRET" if is_local_owned else "HOSTILE DEFENSE TURRET"
+		var dmg_str: String = "%d (%.2fx Arm)" % [int(round(turret_damage)), turret_bonus_vs_armored] if turret_bonus_vs_armored > 1.0 else "%d" % int(round(turret_damage))
+		stats.append({"label": "Damage", "value": dmg_str})
+		stats.append({"label": "Range / Rate", "value": "%dpx / %.2fs" % [int(round(turret_attack_range)), turret_attack_interval]})
+		if turret_splash_radius > 0.0:
+			stats.append({"label": "Splash", "value": "%dpx Radius" % int(round(turret_splash_radius))})
+		else:
+			stats.append({"label": "Armor Class", "value": "Armored Structure"})
+		var tgt_txt: String = "Locked Target" if (turret_component != null and turret_component.explicit_target != null and is_instance_valid(turret_component.explicit_target)) else ("Auto (RMB Focus)" if is_local_owned else "Automated")
+		stats.append({"label": "Targeting", "value": tgt_txt})
 	elif is_core_hub or building_type_id == &"nexus_vat":
 		subtitle = "GENESIS_V2 PRIMARY HUB" if team == Unit.Team.PLAYER else "HOSTILE NEXUS VAT"
 		var bw_str: String = "%d / %d" % [econ.get_bandwidth_used(team), econ.get_bandwidth_cap(team)] if econ != null else "--"
@@ -982,7 +1112,8 @@ func _tick_compute_generation(delta: float) -> void:
 
 	var econ: EconomyManager = _get_economy_manager()
 	if econ != null:
-		var yield_amount: int = assigned_engineers.size() * compute_per_engineer
+		var yield_mult: float = GameConfig.get_yield_multiplier() if (GameConfig != null and GameConfig.has_method("get_yield_multiplier")) else 1.0
+		var yield_amount: int = maxi(1, int(round(float(assigned_engineers.size() * compute_per_engineer) * yield_mult)))
 		econ.add_resource(team, EconomyManager.RESOURCE_COMPUTE, yield_amount)
 	pulse_deposit_feedback()
 

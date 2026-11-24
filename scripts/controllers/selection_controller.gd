@@ -14,6 +14,7 @@ signal inspection_changed(entity: Node)
 signal control_groups_changed(summary: Dictionary)
 signal ability_targeting_changed(active_ability: AbilityData)
 signal patrol_targeting_changed(active: bool)
+signal attack_move_targeting_changed(active: bool)
 signal idle_workers_changed(idle_workers: Array[Unit])
 signal idle_workers_updated(count: int)
 signal army_count_updated(count: int)
@@ -39,6 +40,7 @@ var inspected_enemy: Unit = null
 var control_groups: Dictionary = {}
 var active_targeting_ability: AbilityData = null
 var is_patrol_targeting: bool = false
+var is_attack_move_targeting: bool = false
 var idle_worker_count: int = 0
 var army_unit_count: int = 0
 
@@ -51,6 +53,7 @@ var _last_army_select_ms: int = 0
 var _last_click_unit: Unit = null
 var _last_click_building: Building = null
 var _last_click_time_ms: int = 0
+var _last_click_building_time_ms: int = 0
 var _click_was_double_click: bool = false
 var _click_ctrl_pressed: bool = false
 var _tracked_death_units: Array[Unit] = []
@@ -59,10 +62,13 @@ var _idle_refresh_timer: float = 0.0
 var _last_idle_ids: PackedInt64Array = PackedInt64Array()
 var _amove_preview_timer: float = 0.0
 var _last_targeting_active: bool = false
+var _command_cursors: Dictionary = {}
+var _active_cursor_state: StringName = &""
 
 
 func _ready() -> void:
 	add_to_group("selection_controller")
+	_build_command_cursors()
 	command_router = get_node_or_null("CommandRouter") as CommandRouter
 	if command_router == null:
 		command_router = COMMAND_ROUTER_SCRIPT.new()
@@ -87,6 +93,10 @@ func _ready() -> void:
 	call_deferred("_refresh_idle_workers", true)
 
 
+func _exit_tree() -> void:
+	_clear_custom_cursor()
+
+
 func _process(delta: float) -> void:
 	_idle_refresh_timer += delta
 	if _idle_refresh_timer >= 0.15:
@@ -99,6 +109,8 @@ func _process(delta: float) -> void:
 	if cur_targeting != _last_targeting_active:
 		_last_targeting_active = cur_targeting
 		_redraw_selected_units()
+
+	_update_command_cursor()
 
 	# Drop inspection if an inspected non-local entity disappears into Fog of War.
 	if inspected_entity != null and is_instance_valid(inspected_entity):
@@ -115,7 +127,9 @@ func _process(delta: float) -> void:
 
 	if active_targeting_ability == null or command_router == null:
 		if ability_reticle != null:
-			if is_patrol_targeting:
+			if is_attack_move_targeting:
+				ability_reticle.set_command_mode_reticle(&"attack_move", get_global_mouse_position())
+			elif is_patrol_targeting:
 				ability_reticle.set_command_mode_reticle(&"patrol", get_global_mouse_position())
 			else:
 				ability_reticle.clear_command_mode_reticle()
@@ -155,6 +169,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("cmd_cancel"):
 		if active_targeting_ability != null:
 			cancel_ability_targeting()
+			get_viewport().set_input_as_handled()
+			return
+		if is_attack_move_targeting:
+			cancel_attack_move_targeting()
 			get_viewport().set_input_as_handled()
 			return
 		if is_patrol_targeting:
@@ -229,17 +247,16 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 
-	if event.is_action_pressed("cmd_attack_move"):
-		var shift_amove: bool = Input.is_key_pressed(KEY_SHIFT)
+	if event.is_action_pressed("cmd_attack_move") and not event.is_echo():
 		if event is InputEventKey:
 			var a_key: InputEventKey = event
-			if a_key.ctrl_pressed or a_key.alt_pressed or a_key.echo:
+			if a_key.ctrl_pressed or a_key.alt_pressed:
 				return
-			shift_amove = a_key.shift_pressed or shift_amove
-		cancel_ability_targeting()
-		cancel_patrol_targeting()
-		issue_attack_move_at(get_global_mouse_position(), shift_amove)
-		get_viewport().set_input_as_handled()
+		if not selected_units.is_empty():
+			begin_attack_move_targeting()
+			get_viewport().set_input_as_handled()
+		elif event is InputEventMouseButton:
+			get_viewport().set_input_as_handled()
 		return
 
 	if event.is_action_pressed("cmd_patrol") and not event.is_echo():
@@ -256,6 +273,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if event.is_action_pressed("cmd_stop"):
 		cancel_ability_targeting()
+		cancel_attack_move_targeting()
 		cancel_patrol_targeting()
 		issue_stop_command()
 		get_viewport().set_input_as_handled()
@@ -263,6 +281,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if event.is_action_pressed("cmd_hold"):
 		cancel_ability_targeting()
+		cancel_attack_move_targeting()
 		cancel_patrol_targeting()
 		issue_hold_command()
 		get_viewport().set_input_as_handled()
@@ -274,6 +293,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			if mouse_event.pressed:
 				if active_targeting_ability != null:
 					confirm_ability_target_at(get_global_mouse_position(), mouse_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT))
+					get_viewport().set_input_as_handled()
+					return
+				if is_attack_move_targeting:
+					var shift_amove: bool = mouse_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT)
+					confirm_attack_move_target_at(get_global_mouse_position(), shift_amove)
 					get_viewport().set_input_as_handled()
 					return
 				if is_patrol_targeting:
@@ -298,6 +322,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				cancel_ability_targeting()
 				get_viewport().set_input_as_handled()
 				return
+			if is_attack_move_targeting:
+				cancel_attack_move_targeting()
+				get_viewport().set_input_as_handled()
+				return
 			if is_patrol_targeting:
 				cancel_patrol_targeting()
 				get_viewport().set_input_as_handled()
@@ -313,6 +341,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func clear_selection() -> void:
 	cancel_ability_targeting()
+	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
 	_set_selected_buildings([])
 	_set_inspected_entity(null)
@@ -321,11 +350,15 @@ func clear_selection() -> void:
 
 func select_in_world_rect(world_rect: Rect2) -> void:
 	cancel_ability_targeting()
+	cancel_attack_move_targeting()
+	cancel_patrol_targeting()
 	_select_in_rect(world_rect, false)
 
 
 func select_at_world_point(world_point: Vector2) -> void:
 	cancel_ability_targeting()
+	cancel_attack_move_targeting()
+	cancel_patrol_targeting()
 	_select_at_point(world_point, false)
 
 
@@ -333,6 +366,7 @@ func select_single_entity(entity: Node, focus_camera: bool = false) -> void:
 	if entity == null or not is_instance_valid(entity):
 		return
 	cancel_ability_targeting()
+	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
 	if entity is Building:
 		var b: Building = entity
@@ -428,8 +462,10 @@ func request_ability_slot(ability: AbilityData, shift_queued: bool = false) -> b
 			return false
 		if command_router.find_closest_builder(subgroup_units, get_global_mouse_position()) == null:
 			return false
+		cancel_attack_move_targeting()
+		cancel_patrol_targeting()
 		active_targeting_ability = ability
-		Input.set_default_cursor_shape(Input.CURSOR_CROSS)
+		_update_command_cursor()
 		if ability_reticle != null:
 			ability_reticle.clear_targeting()
 		if AudioManager != null:
@@ -444,8 +480,10 @@ func request_ability_slot(ability: AbilityData, shift_queued: bool = false) -> b
 		cancel_ability_targeting()
 		return command_router.issue_ability_order(subgroup_units, ability, get_global_mouse_position(), null, shift_queued)
 
+	cancel_attack_move_targeting()
+	cancel_patrol_targeting()
 	active_targeting_ability = ability
-	Input.set_default_cursor_shape(Input.CURSOR_CROSS)
+	_update_command_cursor()
 	if build_ghost_preview != null:
 		build_ghost_preview.clear_preview()
 	ability_targeting_changed.emit(active_targeting_ability)
@@ -482,8 +520,7 @@ func cancel_ability_targeting() -> void:
 	if active_targeting_ability == null:
 		return
 	active_targeting_ability = null
-	if not is_patrol_targeting:
-		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	_update_command_cursor()
 	if ability_reticle != null:
 		ability_reticle.clear_targeting()
 	if build_ghost_preview != null:
@@ -491,13 +528,47 @@ func cancel_ability_targeting() -> void:
 	ability_targeting_changed.emit(null)
 
 
+func begin_attack_move_targeting() -> void:
+	_prune_invalid_units()
+	if selected_units.is_empty():
+		return
+	cancel_ability_targeting()
+	cancel_patrol_targeting()
+	is_attack_move_targeting = true
+	_update_command_cursor()
+	_redraw_selected_units()
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	attack_move_targeting_changed.emit(true)
+
+
+func cancel_attack_move_targeting() -> void:
+	if not is_attack_move_targeting:
+		return
+	is_attack_move_targeting = false
+	_update_command_cursor()
+	_redraw_selected_units()
+	if ability_reticle != null and not is_patrol_targeting:
+		ability_reticle.clear_command_mode_reticle()
+	attack_move_targeting_changed.emit(false)
+
+
+func confirm_attack_move_target_at(world_pos: Vector2, shift_queued: bool = false) -> void:
+	_prune_invalid_units()
+	issue_attack_move_at(world_pos, shift_queued)
+	if not shift_queued:
+		cancel_attack_move_targeting()
+
+
 func begin_patrol_targeting() -> void:
 	_prune_invalid_units()
 	if selected_units.is_empty():
 		return
 	cancel_ability_targeting()
+	cancel_attack_move_targeting()
 	is_patrol_targeting = true
-	Input.set_default_cursor_shape(Input.CURSOR_CROSS)
+	_update_command_cursor()
+	_redraw_selected_units()
 	if AudioManager != null:
 		AudioManager.play_ui_click()
 	patrol_targeting_changed.emit(true)
@@ -507,9 +578,9 @@ func cancel_patrol_targeting() -> void:
 	if not is_patrol_targeting:
 		return
 	is_patrol_targeting = false
-	if active_targeting_ability == null:
-		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
-	if ability_reticle != null:
+	_update_command_cursor()
+	_redraw_selected_units()
+	if ability_reticle != null and not is_attack_move_targeting:
 		ability_reticle.clear_command_mode_reticle()
 	patrol_targeting_changed.emit(false)
 
@@ -523,15 +594,23 @@ func confirm_patrol_target_at(world_pos: Vector2, shift_queued: bool = false) ->
 	_refresh_idle_workers(false)
 
 
+func reset_command_cursors() -> void:
+	cancel_ability_targeting()
+	cancel_attack_move_targeting()
+	cancel_patrol_targeting()
+	_clear_custom_cursor()
+
+
 func issue_right_click_at(world_point: Vector2, shift_queued: bool = false) -> void:
 	_prune_invalid_units()
 	if command_router != null:
 		command_router.handle_right_click(world_point, selected_units, inspected_entity, shift_queued, selected_buildings)
 	_refresh_idle_workers(false)
+	_update_command_cursor()
 
 
 func is_targeting_command_active() -> bool:
-	if is_patrol_targeting:
+	if is_patrol_targeting or is_attack_move_targeting:
 		return true
 	if active_targeting_ability != null and active_targeting_ability.target_type != AbilityData.TargetType.BUILD_PLACEMENT:
 		return true
@@ -544,6 +623,11 @@ func _redraw_selected_units() -> void:
 	for u: Unit in selected_units:
 		if is_instance_valid(u) and not u.is_dead:
 			u.queue_redraw()
+	for b: Building in selected_buildings:
+		if is_instance_valid(b) and not b.is_destroyed:
+			b.queue_redraw()
+	if inspected_entity is Building and is_instance_valid(inspected_entity):
+		(inspected_entity as Building).queue_redraw()
 
 
 func issue_attack_move_at(world_point: Vector2, shift_queued: bool = false) -> void:
@@ -588,6 +672,7 @@ func select_next_idle_worker(focus_camera: bool = true) -> Unit:
 	_idle_cycle_index = next_idx
 	var chosen: Unit = idle_list[next_idx]
 	cancel_ability_targeting()
+	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
 	_set_selected_buildings([])
 	_set_inspected_entity(null)
@@ -632,6 +717,7 @@ func select_all_army(allow_double_tap_center: bool = true) -> int:
 	if army.is_empty():
 		return 0
 	cancel_ability_targeting()
+	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
 	_set_selected_buildings([])
 	_set_inspected_entity(null)
@@ -769,6 +855,78 @@ func remove_from_control_group(group_num: int) -> void:
 		_emit_control_groups_changed()
 
 
+func steal_assign_control_group(group_num: int) -> void:
+	if group_num < 1 or group_num > 9:
+		return
+	_prune_invalid_units()
+	if not selected_units.is_empty():
+		_strip_from_other_control_groups(group_num, selected_units, [])
+		control_groups[group_num] = selected_units.duplicate()
+		_watch_control_group_units(selected_units)
+		_emit_control_groups_changed()
+		return
+	if not selected_buildings.is_empty():
+		_strip_from_other_control_groups(group_num, [], selected_buildings)
+		control_groups[group_num] = selected_buildings.duplicate()
+		_watch_control_group_buildings(selected_buildings)
+		_emit_control_groups_changed()
+
+
+func steal_append_control_group(group_num: int) -> void:
+	if group_num < 1 or group_num > 9:
+		return
+	_prune_invalid_units()
+	if not selected_units.is_empty():
+		_strip_from_other_control_groups(group_num, selected_units, [])
+		var group_units: Array[Unit] = _get_pruned_group(group_num)
+		for unit: Unit in selected_units:
+			if not group_units.has(unit):
+				group_units.append(unit)
+		if not group_units.is_empty():
+			control_groups[group_num] = group_units
+			_watch_control_group_units(group_units)
+		_emit_control_groups_changed()
+		return
+	if not selected_buildings.is_empty():
+		_strip_from_other_control_groups(group_num, [], selected_buildings)
+		var group_buildings: Array[Building] = _get_pruned_building_group(group_num)
+		for b: Building in selected_buildings:
+			if not group_buildings.has(b):
+				group_buildings.append(b)
+		if not group_buildings.is_empty():
+			control_groups[group_num] = group_buildings
+			_watch_control_group_buildings(group_buildings)
+		_emit_control_groups_changed()
+
+
+func _strip_from_other_control_groups(exclude_group: int, units_to_strip: Array[Unit], buildings_to_strip: Array[Building]) -> void:
+	for num: int in range(1, 10):
+		if num == exclude_group or not control_groups.has(num):
+			continue
+		if not units_to_strip.is_empty():
+			var group_units: Array[Unit] = _get_pruned_group(num)
+			if not group_units.is_empty():
+				var remaining: Array[Unit] = []
+				for u: Unit in group_units:
+					if not units_to_strip.has(u):
+						remaining.append(u)
+				if remaining.is_empty():
+					control_groups.erase(num)
+				else:
+					control_groups[num] = remaining
+		if not buildings_to_strip.is_empty():
+			var group_buildings: Array[Building] = _get_pruned_building_group(num)
+			if not group_buildings.is_empty():
+				var rem_b: Array[Building] = []
+				for b: Building in group_buildings:
+					if not buildings_to_strip.has(b):
+						rem_b.append(b)
+				if rem_b.is_empty():
+					control_groups.erase(num)
+				else:
+					control_groups[num] = rem_b
+
+
 func recall_control_group(group_num: int, allow_double_tap_center: bool = true) -> void:
 	if group_num < 1 or group_num > 9:
 		return
@@ -776,6 +934,7 @@ func recall_control_group(group_num: int, allow_double_tap_center: bool = true) 
 	if not group_units.is_empty():
 		control_groups[group_num] = group_units
 		cancel_ability_targeting()
+		cancel_attack_move_targeting()
 		cancel_patrol_targeting()
 		_set_selected_buildings([])
 		_set_inspected_entity(null)
@@ -796,6 +955,7 @@ func recall_control_group(group_num: int, allow_double_tap_center: bool = true) 
 	if not group_buildings.is_empty():
 		control_groups[group_num] = group_buildings
 		cancel_ability_targeting()
+		cancel_attack_move_targeting()
 		cancel_patrol_targeting()
 		_set_selected_units([])
 		_set_selected_buildings(group_buildings)
@@ -886,12 +1046,14 @@ func clear_control_groups() -> void:
 
 
 func _handle_control_group_key(group_num: int, key_event: InputEventKey) -> void:
-	if key_event.ctrl_pressed:
+	if key_event.alt_pressed and key_event.shift_pressed:
+		steal_append_control_group(group_num)
+	elif key_event.alt_pressed:
+		steal_assign_control_group(group_num)
+	elif key_event.ctrl_pressed:
 		assign_control_group(group_num)
 	elif key_event.shift_pressed:
 		append_control_group(group_num)
-	elif key_event.alt_pressed:
-		remove_from_control_group(group_num)
 	else:
 		recall_control_group(group_num, true)
 
@@ -1048,12 +1210,12 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 	var clicked_building: Building = command_router.find_building_at_point(world_point, Unit.Team.PLAYER)
 	if clicked_building != null:
 		var now_b_ms: int = Time.get_ticks_msec()
-		var rapid_second_b: bool = (_last_click_building == clicked_building and (now_b_ms - _last_click_time_ms) <= DOUBLE_TAP_WINDOW_MS)
+		var rapid_second_b: bool = (_last_click_building == clicked_building and (now_b_ms - _last_click_building_time_ms) <= DOUBLE_TAP_WINDOW_MS)
 		_set_selected_units([])
 		if is_double_click or ctrl_pressed or (not shift_pressed and rapid_second_b):
 			var same_b: Array[Building] = _find_visible_buildings_of_type(clicked_building.building_type_id, Unit.Team.PLAYER)
 			_last_click_building = null
-			_last_click_time_ms = 0
+			_last_click_building_time_ms = 0
 			_set_selected_buildings(same_b)
 		elif shift_pressed:
 			var next_b: Array[Building] = selected_buildings.duplicate()
@@ -1064,11 +1226,12 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 			_set_selected_buildings(next_b)
 		else:
 			_last_click_building = clicked_building
-			_last_click_time_ms = now_b_ms
+			_last_click_building_time_ms = now_b_ms
 			_set_selected_buildings([clicked_building])
 		return
 
 	_last_click_building = null
+	_last_click_building_time_ms = 0
 
 	var clicked_enemy: Unit = command_router.find_unit_at_point(world_point, Unit.Team.ENEMY)
 	if clicked_enemy != null:
@@ -1111,13 +1274,24 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 		_set_selected_units([])
 
 
+func _is_utility_unit(unit: Unit) -> bool:
+	if unit == null or unit.data == null:
+		return false
+	if unit.data.can_gather or unit.data.can_staff_compute:
+		return true
+	var uid: StringName = unit.get_unit_type_id()
+	return uid == &"worker" or uid == &"worker_unit" or uid == &"silica_harvester" or uid == &"engineer" or uid == &"engineer_unit"
+
+
 func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
 	if TeamManager != null and TeamManager.is_spectator_mode():
 		return
 	_last_click_unit = null
 	_last_click_building = null
 	_last_click_time_ms = 0
-	var hits: Array[Unit] = []
+	_last_click_building_time_ms = 0
+	var combat_hits: Array[Unit] = []
+	var utility_hits: Array[Unit] = []
 	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
 		if not (node is Unit):
 			continue
@@ -1125,12 +1299,26 @@ func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
 		if not is_instance_valid(unit) or unit.is_dead or unit.is_staffed or unit.team != Unit.Team.PLAYER:
 			continue
 		if world_rect.has_point(unit.global_position):
-			hits.append(unit)
+			if _is_utility_unit(unit):
+				utility_hits.append(unit)
+			else:
+				combat_hits.append(unit)
+
+	# Smart box-selection priority: combat units always take precedence over economy/utility units.
+	var hits: Array[Unit] = combat_hits if not combat_hits.is_empty() else utility_hits
 
 	if not hits.is_empty():
 		if shift_pressed:
+			var existing_has_combat: bool = false
+			for prev_u: Unit in selected_units:
+				if is_instance_valid(prev_u) and not prev_u.is_dead and not _is_utility_unit(prev_u):
+					existing_has_combat = true
+					break
+			var to_add: Array[Unit] = hits
+			if existing_has_combat and not combat_hits.is_empty():
+				to_add = combat_hits
 			var combined: Array[Unit] = selected_units.duplicate()
-			for u: Unit in hits:
+			for u: Unit in to_add:
 				if not combined.has(u):
 					combined.append(u)
 			_set_selected_buildings([])
@@ -1329,6 +1517,8 @@ func _set_selected_units(new_selection: Array[Unit], reset_subgroup_index: bool 
 
 	if selected_units.is_empty():
 		cancel_ability_targeting()
+		cancel_attack_move_targeting()
+		cancel_patrol_targeting()
 	elif AudioManager != null:
 		AudioManager.play_sfx(&"unit_select", -4.5, 0.04)
 		if not subgroups.is_empty() and AudioManager.has_method("play_unit_bark_for_units"):
@@ -1495,3 +1685,210 @@ func _prune_invalid_units() -> void:
 
 func _build_world_rect(a: Vector2, b: Vector2) -> Rect2:
 	return Rect2(Vector2(minf(a.x, b.x), minf(a.y, b.y)), Vector2(absf(a.x - b.x), absf(a.y - b.y)))
+
+
+# =============================================================================
+# PROCEDURAL TECHNOZEN COMMAND CURSORS (32x32, HOTSPOT 16,16)
+# =============================================================================
+
+func _build_command_cursors() -> void:
+	_command_cursors.clear()
+	_command_cursors[&"attack_move"] = _make_reticle_cursor(&"attack_move")
+	_command_cursors[&"patrol"] = _make_reticle_cursor(&"patrol")
+	_command_cursors[&"repair"] = _make_reticle_cursor(&"repair")
+	_command_cursors[&"ability_target"] = _make_reticle_cursor(&"ability_target")
+
+
+func _make_reticle_cursor(style: StringName) -> ImageTexture:
+	var img: Image = Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.0, 0.0, 0.0, 0.0))
+
+	var primary: Color = Color(1.0, 0.30, 0.43, 1.0) # Crimson #FF4D6D
+	var secondary: Color = Color(1.0, 0.78, 0.84, 0.95)
+	var shadow: Color = Color(0.02, 0.04, 0.07, 0.85)
+	match style:
+		&"patrol":
+			primary = Color(0.22, 0.74, 0.97, 1.0) # Cyan/Azure #38BDF8
+			secondary = Color(0.86, 0.97, 1.0, 0.96)
+		&"repair":
+			primary = Color(0.20, 0.83, 0.60, 1.0) # Emerald #34D399
+			secondary = Color(0.84, 1.0, 0.92, 0.96)
+		&"ability_target":
+			primary = Color(0.96, 0.62, 0.04, 1.0) # Amber #F59E0B
+			secondary = Color(0.76, 0.48, 1.0, 0.96) # Violet accent
+
+	var put_px: Callable = func(px: int, py: int, col: Color) -> void:
+		if px >= 0 and px < 32 and py >= 0 and py < 32:
+			img.set_pixel(px, py, col)
+
+	var draw_dot_outlined: Callable = func(px: int, py: int, col: Color) -> void:
+		for oy: int in [-1, 0, 1]:
+			for ox: int in [-1, 0, 1]:
+				if ox == 0 and oy == 0:
+					continue
+				var nx: int = px + ox
+				var ny: int = py + oy
+				if nx >= 0 and nx < 32 and ny >= 0 and ny < 32 and img.get_pixel(nx, ny).a < 0.05:
+					img.set_pixel(nx, ny, shadow)
+		put_px.call(px, py, col)
+
+	var draw_seg: Callable = func(x0: int, y0: int, x1: int, y1: int, col: Color) -> void:
+		var steps: int = maxi(absi(x1 - x0), absi(y1 - y0))
+		if steps <= 0:
+			draw_dot_outlined.call(x0, y0, col)
+			return
+		for i: int in range(steps + 1):
+			var t: float = float(i) / float(steps)
+			var rx: int = int(round(lerpf(float(x0), float(x1), t)))
+			var ry: int = int(round(lerpf(float(y0), float(y1), t)))
+			draw_dot_outlined.call(rx, ry, col)
+
+	var draw_ring: Callable = func(radius: float, col: Color) -> void:
+		for a_i: int in range(64):
+			var ang: float = TAU * float(a_i) / 64.0
+			var rx: int = int(round(16.0 + cos(ang) * radius))
+			var ry: int = int(round(16.0 + sin(ang) * radius))
+			draw_dot_outlined.call(rx, ry, col)
+
+	match style:
+		&"attack_move":
+			# Sharp crimson reticle with 4 corner brackets + cardinal ticks + hot center pip
+			draw_seg.call(5, 5, 10, 5, primary)
+			draw_seg.call(5, 5, 5, 10, primary)
+			draw_seg.call(26, 5, 21, 5, primary)
+			draw_seg.call(26, 5, 26, 10, primary)
+			draw_seg.call(5, 26, 10, 26, primary)
+			draw_seg.call(5, 26, 5, 21, primary)
+			draw_seg.call(26, 26, 21, 26, primary)
+			draw_seg.call(26, 26, 26, 21, primary)
+			draw_seg.call(16, 4, 16, 11, primary)
+			draw_seg.call(16, 21, 16, 28, primary)
+			draw_seg.call(4, 16, 11, 16, primary)
+			draw_seg.call(21, 16, 28, 16, primary)
+			draw_seg.call(15, 16, 17, 16, secondary)
+			draw_seg.call(16, 15, 16, 17, secondary)
+
+		&"patrol":
+			# Crisp cyan/azure reticle with ring + directional ticks + chevron accents
+			draw_ring.call(10.0, primary)
+			draw_seg.call(16, 2, 16, 8, secondary)
+			draw_seg.call(16, 24, 16, 30, secondary)
+			draw_seg.call(2, 16, 8, 16, secondary)
+			draw_seg.call(24, 16, 30, 16, secondary)
+			# Small directional diamond center
+			draw_seg.call(16, 13, 19, 16, primary)
+			draw_seg.call(19, 16, 16, 19, primary)
+			draw_seg.call(16, 19, 13, 16, primary)
+			draw_seg.call(13, 16, 16, 13, primary)
+
+		&"repair":
+			# Bioluminescent emerald reticle with bold inner repair cross + corner brackets
+			draw_ring.call(11.0, primary)
+			draw_seg.call(16, 10, 16, 22, secondary)
+			draw_seg.call(15, 11, 15, 21, primary)
+			draw_seg.call(17, 11, 17, 21, primary)
+			draw_seg.call(10, 16, 22, 16, secondary)
+			draw_seg.call(11, 15, 21, 15, primary)
+			draw_seg.call(11, 17, 21, 17, primary)
+
+		&"ability_target":
+			# Luminous amber/violet concentric reticle + diagonal ticks
+			draw_ring.call(11.5, primary)
+			draw_ring.call(5.5, secondary)
+			draw_seg.call(16, 2, 16, 6, primary)
+			draw_seg.call(16, 26, 16, 30, primary)
+			draw_seg.call(2, 16, 6, 16, primary)
+			draw_seg.call(26, 16, 30, 16, primary)
+			draw_dot_outlined.call(16, 16, secondary)
+
+	return ImageTexture.create_from_image(img)
+
+
+func _clear_custom_cursor() -> void:
+	if _active_cursor_state != &"":
+		_active_cursor_state = &""
+		Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
+		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+
+
+func _apply_command_cursor(state: StringName) -> void:
+	if _active_cursor_state == state:
+		return
+	if state == &"" or not _command_cursors.has(state):
+		_clear_custom_cursor()
+		return
+	_active_cursor_state = state
+	Input.set_custom_mouse_cursor(_command_cursors[state] as Texture2D, Input.CURSOR_ARROW, Vector2(16, 16))
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+
+
+func _is_any_modal_open() -> bool:
+	if not is_inside_tree():
+		return true
+	if get_tree().paused:
+		return true
+	var pause_node: Node = get_tree().get_first_node_in_group("pause_menu")
+	if pause_node != null and is_instance_valid(pause_node):
+		if pause_node.has_method("is_pause_open") and bool(pause_node.call("is_pause_open")):
+			return true
+		if pause_node.has_method("is_settings_open") and bool(pause_node.call("is_settings_open")):
+			return true
+		if pause_node.has_method("is_tech_tree_open") and bool(pause_node.call("is_tech_tree_open")):
+			return true
+	var settings_node: Node = get_tree().get_first_node_in_group("settings_menu")
+	if settings_node != null and is_instance_valid(settings_node) and not settings_node.is_queued_for_deletion():
+		return true
+	var tech_node: Node = get_tree().get_first_node_in_group("tech_tree_overlay")
+	if tech_node != null and is_instance_valid(tech_node) and not tech_node.is_queued_for_deletion():
+		return true
+	var end_node: Node = get_tree().get_first_node_in_group("match_end_overlay")
+	if end_node != null and is_instance_valid(end_node) and end_node.has_method("is_summary_visible"):
+		if bool(end_node.call("is_summary_visible")):
+			return true
+	return false
+
+
+func _is_hovering_repairable_target() -> bool:
+	if command_router == null or selected_units.is_empty() or _is_dragging:
+		return false
+	var has_repairer: bool = false
+	for u: Unit in selected_units:
+		if is_instance_valid(u) and not u.is_dead and not u.is_staffed:
+			var uid: StringName = u.get_unit_type_id()
+			if uid == &"engineer" or uid == &"worker":
+				has_repairer = true
+				break
+	if not has_repairer:
+		return false
+	var world_pt: Vector2 = get_global_mouse_position()
+	var local_team: Unit.Team = (TeamManager.get_local_human_team() as Unit.Team) if (TeamManager != null and TeamManager.get_local_human_team() >= 0) else Unit.Team.PLAYER
+	var hovered_u: Unit = command_router.find_unit_at_point(world_pt, local_team)
+	if hovered_u != null:
+		for u: Unit in selected_units:
+			if is_instance_valid(u) and u.can_repair_target(hovered_u):
+				return true
+	var hovered_b: Building = command_router.find_building_at_point(world_pt, local_team)
+	if hovered_b != null and hovered_b.is_constructed and hovered_b.current_hp < hovered_b.max_hp - 0.5:
+		for u: Unit in selected_units:
+			if is_instance_valid(u) and u.can_repair_target(hovered_b):
+				return true
+	return false
+
+
+func _update_command_cursor() -> void:
+	if _is_any_modal_open():
+		_clear_custom_cursor()
+		return
+	if active_targeting_ability != null:
+		_apply_command_cursor(&"ability_target")
+		return
+	if is_attack_move_targeting:
+		_apply_command_cursor(&"attack_move")
+		return
+	if is_patrol_targeting:
+		_apply_command_cursor(&"patrol")
+		return
+	if _is_hovering_repairable_target():
+		_apply_command_cursor(&"repair")
+		return
+	_clear_custom_cursor()

@@ -235,7 +235,9 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 		owner_unit.stop_component_navigation()
 		var econ: EconomyManager = _get_economy_manager(owner_unit)
 		if econ != null:
-			econ.add_resource(owner_unit.team, carried_type, carried_amount)
+			var yield_mult: float = GameConfig.get_yield_multiplier() if (GameConfig != null and GameConfig.has_method("get_yield_multiplier")) else 1.0
+			var deposit_amount: int = maxi(1, int(round(float(carried_amount) * yield_mult)))
+			econ.add_resource(owner_unit.team, carried_type, deposit_amount)
 		dropoff_building.pulse_deposit_feedback()
 
 		last_resource_type = carried_type

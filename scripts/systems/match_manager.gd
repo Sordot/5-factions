@@ -7,6 +7,7 @@ const SPEED_PRESETS: Array = [0.5, 1.0, 1.5, 2.0]
 const ALERT_REGION_RADIUS: float = 300.0
 const ALERT_DAMAGE_THROTTLE_S: float = 4.0
 const MAX_RECENT_ALERTS: int = 3
+const TIMELINE_SAMPLE_INTERVAL: float = 5.0
 
 signal match_ended(winner_team: int, stats: Dictionary)
 signal aggro_ai_toggled(enabled: bool)
@@ -45,12 +46,16 @@ var _recent_alerts: Array[Dictionary] = []
 var _damage_alert_log: Array[Dictionary] = []
 var _pause_menu: PauseMenu = null
 var current_game_speed: float = 1.0
+var timeline_samples: Array[Dictionary] = []
+var _timeline_sample_timer: float = 0.0
 
 
 func _ready() -> void:
 	add_to_group("match_manager")
 	Engine.time_scale = 1.0
 	current_game_speed = 1.0
+	timeline_samples.clear()
+	_timeline_sample_timer = 0.0
 	if GameConfig != null and GameConfig.configured_from_menu:
 		aggro_ai_enabled = GameConfig.aggro_ai_enabled
 		if TeamManager != null:
@@ -62,6 +67,7 @@ func _ready() -> void:
 	call_deferred("_ensure_spectator_ai_commanders")
 	call_deferred("_hook_initial_entities")
 	call_deferred("_hook_economy_manager")
+	call_deferred("_record_timeline_sample")
 	if not get_tree().node_added.is_connected(_on_tree_node_added):
 		get_tree().node_added.connect(_on_tree_node_added)
 
@@ -323,10 +329,68 @@ func _process(delta: float) -> void:
 		elif uplink.controlling_team == int(Unit.Team.ENEMY):
 			enemy_uplink_time += delta
 
+	_timeline_sample_timer += delta
+	if _timeline_sample_timer >= TIMELINE_SAMPLE_INTERVAL:
+		_timeline_sample_timer -= TIMELINE_SAMPLE_INTERVAL
+		_record_timeline_sample()
+
 	_eval_timer += delta
 	if _eval_timer >= 0.5:
 		_eval_timer = 0.0
 		evaluate_match_state()
+
+
+func _record_timeline_sample(force_append: bool = false) -> void:
+	if not is_inside_tree():
+		return
+	if not force_append and not timeline_samples.is_empty():
+		var last_t: float = float(timeline_samples[timeline_samples.size() - 1].get("time", -1.0))
+		if absf(match_elapsed - last_t) < 0.25:
+			return
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	var army_values: Dictionary = {}
+	var unit_counts: Dictionary = {}
+	for tid: int in active_teams:
+		army_values[tid] = 0
+		unit_counts[tid] = 0
+
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if not (node is Unit) or not is_instance_valid(node):
+			continue
+		var u: Unit = node
+		if u.is_dead or u.is_queued_for_deletion():
+			continue
+		var tid: int = int(u.team)
+		if not unit_counts.has(tid):
+			unit_counts[tid] = 0
+			army_values[tid] = 0
+		unit_counts[tid] = int(unit_counts[tid]) + 1
+		if u.data != null and not u.data.can_gather and not u.data.can_staff_compute:
+			var uid: StringName = u.get_unit_type_id()
+			if uid != &"worker" and uid != &"silica_harvester" and uid != &"engineer" and uid != &"target_dummy":
+				var val: int = maxi(0, u.data.biomass_cost) + maxi(0, u.data.silica_cost) + maxi(0, u.data.compute_cost)
+				army_values[tid] = int(army_values[tid]) + val
+
+	var teams_snapshot: Dictionary = {}
+	for tid: int in active_teams:
+		var inc_rate: float = 0.0
+		if econ != null:
+			inc_rate = float(
+				econ.get_income_rate_per_minute(tid, EconomyManager.RESOURCE_BIOMASS)
+				+ econ.get_income_rate_per_minute(tid, EconomyManager.RESOURCE_SILICA)
+				+ econ.get_income_rate_per_minute(tid, EconomyManager.RESOURCE_COMPUTE)
+			)
+		teams_snapshot[tid] = {
+			"income_rate": inc_rate,
+			"army_value": int(army_values.get(tid, 0)),
+			"unit_count": int(unit_counts.get(tid, 0)),
+		}
+
+	timeline_samples.append({
+		"time": match_elapsed,
+		"teams": teams_snapshot,
+	})
 
 
 func enter_sandbox_mode() -> void:
@@ -385,6 +449,7 @@ func evaluate_match_state() -> void:
 func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 	if is_match_over:
 		return
+	_record_timeline_sample(true)
 	is_match_over = true
 	reset_game_speed()
 
@@ -421,6 +486,8 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 		"units_lost": player_units_lost,
 		"enemies_destroyed": enemy_units_destroyed,
 		"structures_destroyed": enemy_structures_destroyed,
+		"timeline_samples": timeline_samples.duplicate(true),
+		"active_mutators": GameConfig.get_active_mutator_labels() if (GameConfig != null and GameConfig.has_method("get_active_mutator_labels")) else PackedStringArray(),
 		"player": {
 			"biomass_gathered": int(p_totals.get(EconomyManager.RESOURCE_BIOMASS, 0)),
 			"silica_gathered": int(p_totals.get(EconomyManager.RESOURCE_SILICA, 0)),

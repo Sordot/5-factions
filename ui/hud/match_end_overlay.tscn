@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://ui/hud/match_end_overlay.gd" id="1_overlay_script"]
 [ext_resource type="Theme" path="res://resources/themes/technozen_theme.tres" id="2_theme"]
+[ext_resource type="Script" path="res://ui/hud/timeline_graph.gd" id="3_timeline_script"]
 
 [node name="MatchEndOverlay" type="CanvasLayer"]
 layer = 10
@@ -37,18 +38,18 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="ModalPanel" type="PanelContainer" parent="RootControl/CenterContainer"]
-custom_minimum_size = Vector2(560, 0)
+custom_minimum_size = Vector2(588, 0)
 layout_mode = 2
 
 [node name="VBox" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel"]
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 7
 
 [node name="TitleLabel" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.22, 0.98, 0.9, 1)
-theme_override_font_sizes/font_size = 28
+theme_override_font_sizes/font_size = 26
 text = "VICTORY"
 horizontal_alignment = 1
 
@@ -56,7 +57,7 @@ horizontal_alignment = 1
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.86, 0.92, 0.92)
-theme_override_font_sizes/font_size = 13
+theme_override_font_sizes/font_size = 12
 text = "Hostile Nexus Vat Neutralized"
 horizontal_alignment = 1
 
@@ -79,6 +80,36 @@ theme_override_colors/font_color = Color(0.32, 0.98, 0.88, 0.96)
 theme_override_font_sizes/font_size = 12
 text = "WINNER: PLAYER COMMANDER"
 
+[node name="MutatorsLabel" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.82, 0.34, 0.96)
+theme_override_font_sizes/font_size = 11
+text = "MUTATORS: 2x YIELD"
+horizontal_alignment = 1
+
+[node name="TabRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="BtnTabSummary" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TabRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(156, 26)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 12
+text = "Summary Table"
+
+[node name="BtnTabTimeline" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TabRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(156, 26)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 12
+text = "Timeline Graphs"
+
 [node name="SepTop" type="HSeparator" parent="RootControl/CenterContainer/ModalPanel/VBox"]
 layout_mode = 2
 
@@ -88,6 +119,47 @@ layout_mode = 2
 theme_override_constants/h_separation = 16
 theme_override_constants/v_separation = 5
 columns = 3
+
+[node name="TimelineTabBox" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="MetricRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/TimelineTabBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="BtnMetricArmy" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TimelineTabBox/MetricRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(126, 24)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Army Value"
+
+[node name="BtnMetricIncome" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TimelineTabBox/MetricRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(138, 24)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Resource Income"
+
+[node name="BtnMetricUnits" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/TimelineTabBox/MetricRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(116, 24)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Unit Count"
+
+[node name="TimelineGraph" type="Control" parent="RootControl/CenterContainer/ModalPanel/VBox/TimelineTabBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(548, 224)
+layout_mode = 2
+script = ExtResource("3_timeline_script")
 
 [node name="SepBottom" type="HSeparator" parent="RootControl/CenterContainer/ModalPanel/VBox"]
 layout_mode = 2
@@ -99,21 +171,21 @@ alignment = 1
 
 [node name="BtnPlayAgain" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(140, 34)
+custom_minimum_size = Vector2(140, 32)
 layout_mode = 2
 focus_mode = 0
 text = "Play Again"
 
 [node name="BtnMainMenu" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(140, 34)
+custom_minimum_size = Vector2(140, 32)
 layout_mode = 2
 focus_mode = 0
 text = "Main Menu"
 
 [node name="BtnSandboxMode" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(140, 34)
+custom_minimum_size = Vector2(140, 32)
 layout_mode = 2
 focus_mode = 0
 text = "Sandbox Mode"

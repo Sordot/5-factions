@@ -26,6 +26,17 @@ extends Resource
 @export var required_building_id: StringName = &""
 @export var is_core_hub: bool = false
 
+# Optional static defense / turret weapon parameters (disabled by default)
+@export var has_turret: bool = false
+@export var turret_damage: float = 0.0
+@export var turret_attack_interval: float = 1.0
+@export var turret_attack_range: float = 260.0
+@export var turret_min_range: float = 0.0
+@export var turret_splash_radius: float = 0.0
+@export var turret_bonus_vs_armored: float = 1.0
+@export var turret_tracer_style: StringName = &"pulse"
+@export var turret_turn_speed: float = 7.0
+
 
 func resolve_scene() -> PackedScene:
 	if scene != null:

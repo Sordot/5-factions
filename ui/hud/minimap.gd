@@ -120,6 +120,26 @@ func _on_map_viewport_gui_input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
+				if _selection_controller == null:
+					_resolve_references()
+				if _selection_controller != null and _selection_controller.is_attack_move_targeting:
+					var amove_world: Vector2 = _minimap_to_world(mb.position)
+					_selection_controller.confirm_attack_move_target_at(amove_world, mb.shift_pressed or Input.is_key_pressed(KEY_SHIFT))
+					_ping_color = Color(1.0, 0.36, 0.28, 1.0)
+					_ping_pos = _world_to_minimap(amove_world)
+					_ping_timer = 0.45
+					map_viewport.queue_redraw()
+					map_viewport.accept_event()
+					return
+				if _selection_controller != null and _selection_controller.is_patrol_targeting:
+					var patrol_world: Vector2 = _minimap_to_world(mb.position)
+					_selection_controller.confirm_patrol_target_at(patrol_world, mb.shift_pressed or Input.is_key_pressed(KEY_SHIFT))
+					_ping_color = Color(0.22, 0.74, 0.98, 1.0)
+					_ping_pos = _world_to_minimap(patrol_world)
+					_ping_timer = 0.45
+					map_viewport.queue_redraw()
+					map_viewport.accept_event()
+					return
 				_is_left_dragging = true
 				_move_camera_to_minimap_point(mb.position)
 				map_viewport.accept_event()

@@ -43,6 +43,7 @@ var _ability_buttons: Dictionary = {}
 var _building_action_buttons: Array[Dictionary] = []
 var _targeting_ability: AbilityData = null
 var _patrol_targeting: bool = false
+var _amove_targeting: bool = false
 var _hp_fill_style: StyleBoxFlat = null
 var _gauge_fill_style: StyleBoxFlat = null
 
@@ -57,6 +58,8 @@ func _ready() -> void:
 		_selection_controller.control_groups_changed.connect(_on_control_groups_changed)
 		_selection_controller.ability_targeting_changed.connect(_on_ability_targeting_changed)
 		_selection_controller.patrol_targeting_changed.connect(_on_patrol_targeting_changed)
+		if _selection_controller.has_signal("attack_move_targeting_changed"):
+			_selection_controller.attack_move_targeting_changed.connect(_on_attack_move_targeting_changed)
 		_on_control_groups_changed(_selection_controller.get_control_groups_summary())
 
 	if SettingsManager != null and not SettingsManager.keybind_changed.is_connected(_on_keybind_changed):
@@ -83,8 +86,13 @@ func _ready() -> void:
 			if _selection_controller != null:
 				_selection_controller.begin_patrol_targeting()
 		)
+	if btn_cmd_amove != null:
+		btn_cmd_amove.disabled = false
+		btn_cmd_amove.pressed.connect(func() -> void:
+			if _selection_controller != null:
+				_selection_controller.begin_attack_move_targeting()
+		)
 	btn_cmd_move.disabled = true
-	btn_cmd_amove.disabled = true
 
 	_bind_static_command_tooltips()
 	_refresh_dynamic_command_labels()
@@ -140,7 +148,7 @@ func _bind_static_command_tooltips() -> void:
 	_attach_dynamic_action_tooltip(btn_cmd_stop, "Stop", &"cmd_stop", "Immediate", "Cancels current movement, patrol, gathering, construction, or target and flushes command queue.")
 	_attach_dynamic_action_tooltip(btn_cmd_hold, "Hold Position", &"cmd_hold", "Immediate", "Locks unit position while engaging enemies inside attack range.")
 	_attach_dynamic_action_tooltip(btn_cmd_patrol, "Patrol", &"cmd_patrol", "Click Waypoint (Shift Chains Loop)", "Loops units continuously between waypoints while engaging enemies encountered along the path.")
-	_attach_dynamic_action_tooltip(btn_cmd_amove, "Attack-Move", &"cmd_attack_move", "Smart-Cast at Cursor", "Moves toward cursor and automatically engages hostile targets along the way.")
+	_attach_dynamic_action_tooltip(btn_cmd_amove, "Attack-Move", &"cmd_attack_move", "Click Target (Shift Chains)", "Moves toward target point and automatically engages hostile targets along the way.")
 
 
 func _attach_dynamic_action_tooltip(btn: Button, title: String, action_name: StringName, meta: String, desc: String) -> void:
@@ -217,11 +225,18 @@ func _refresh_dynamic_command_labels() -> void:
 		btn_cmd_patrol.text = ("%s (%s)" % [p_prefix, k_patrol]) if not k_patrol.is_empty() else p_prefix
 		btn_cmd_patrol.modulate = Color(1.0, 0.86, 0.30, 1.0) if _patrol_targeting else Color.WHITE
 	if btn_cmd_amove != null:
-		btn_cmd_amove.text = ("Atk-Mv (%s)" % k_amove) if not k_amove.is_empty() else "Atk-Mv"
+		var a_prefix: String = "Atk-Mv*" if _amove_targeting else "Atk-Mv"
+		btn_cmd_amove.text = ("%s (%s)" % [a_prefix, k_amove]) if not k_amove.is_empty() else a_prefix
+		btn_cmd_amove.modulate = Color(1.0, 0.36, 0.44, 1.0) if _amove_targeting else Color.WHITE
 
 
 func _on_patrol_targeting_changed(active: bool) -> void:
 	_patrol_targeting = active
+	_refresh_dynamic_command_labels()
+
+
+func _on_attack_move_targeting_changed(active: bool) -> void:
+	_amove_targeting = active
 	_refresh_dynamic_command_labels()
 
 
@@ -339,7 +354,7 @@ func _on_control_groups_changed(summary: Dictionary) -> void:
 			"Control Group %d — %s" % [num, label_str],
 			str(num),
 			"%d %s Assigned" % [count, kind_label],
-			"Click or press %d to select. Double-click or double-tap to center camera. Ctrl+%d to reassign." % [num, num]
+			"Click or press %d to select. Double-tap to center. Ctrl+%d assign, Shift+%d add, Alt+%d steal." % [num, num, num, num]
 		)
 		control_group_row.add_child(pill)
 

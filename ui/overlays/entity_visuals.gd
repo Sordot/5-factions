@@ -579,10 +579,77 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 			draw_arc(Vector2.ZERO, 13.5, spin + PI, spin + PI * 1.75, 16, Color(0.92, 1.0, 1.0, 0.9), 2.4, true)
 			draw_circle(Vector2.ZERO, 6.8 + pulse * 1.4, fab_col)
 
+		&"defense_turret":
+			# Armored Sentry Pylon bastion base with corner stabilizer lugs & turret ring
+			var tur_col: Color = Color(0.28, 0.96, 0.92, 1.0) if team == 0 else core
+			_poly_outlined(hull_poly, shell_hi, tur_col, 2.2)
+			draw_colored_polygon(_scale_poly(hull_poly, 0.72), deck)
+			# 4 armored corner anchor lugs
+			for lug: Vector2 in [Vector2(-19, -19), Vector2(19, -19), Vector2(19, 19), Vector2(-19, 19)]:
+				draw_circle(lug, 4.2, trim)
+				draw_circle(lug, 1.8, tur_col)
+			# Turret bearing ring
+			draw_circle(Vector2.ZERO, 14.5, Color(0.08, 0.14, 0.20, 1.0))
+			draw_arc(Vector2.ZERO, 14.5, 0.0, TAU, 24, Color(tur_col.r, tur_col.g, tur_col.b, 0.65 + pulse * 0.25), 1.8, true)
+
 		_:
 			_poly_outlined(hull_poly, shell, outline, 2.2)
 			draw_colored_polygon(_scale_poly(hull_poly, 0.65), deck)
 			draw_circle(Vector2.ZERO, _owner_building.footprint_radius * 0.32, core)
+
+	if _owner_building.has_turret:
+		_draw_building_turret_overlay(p)
+
+
+func _draw_building_turret_overlay(p: Dictionary) -> void:
+	if _owner_building == null or not _owner_building.is_constructed:
+		return
+	var shell_hi: Color = p["shell_hi"]
+	var deck: Color = p["deck"]
+	var trim: Color = p["trim"]
+	var core: Color = p["core"]
+	var core_alt: Color = p["core_alt"]
+	var ang: float = _owner_building.get_turret_angle()
+	var recoil: float = _owner_building.get_turret_recoil()
+	var dir: Vector2 = Vector2.RIGHT.rotated(ang)
+	var perp: Vector2 = Vector2(-dir.y, dir.x)
+	var style: StringName = _owner_building.turret_tracer_style
+	var accent: Color = Color(1.0, 0.82, 0.32, 1.0) if (style == &"rail" and team == 0) else core
+	if style == &"mortar" and team == 0:
+		accent = core_alt
+
+	# Rotating armored turret housing
+	var base_pts: PackedVector2Array = PackedVector2Array([
+		dir * 12.0 + perp * -6.5,
+		dir * 12.0 + perp * 6.5,
+		dir * -8.0 + perp * 9.5,
+		dir * -12.0 + perp * 4.5,
+		dir * -12.0 + perp * -4.5,
+		dir * -8.0 + perp * -9.5,
+	])
+	_poly_outlined(base_pts, shell_hi, accent, 1.6)
+
+	# Barrel assembly (slides back slightly with recoil kick)
+	var b_start: Vector2 = dir * (6.0 - recoil)
+	var b_end: Vector2 = dir * (26.0 - recoil)
+	if style == &"heavy":
+		draw_line(b_start + perp * -4.0, b_end + perp * -4.0, deck, 4.2, true)
+		draw_line(b_start + perp * 4.0, b_end + perp * 4.0, deck, 4.2, true)
+		draw_line(b_start + perp * -4.0, b_end + perp * -4.0, accent, 1.6, true)
+		draw_line(b_start + perp * 4.0, b_end + perp * 4.0, accent, 1.6, true)
+	elif style == &"mortar":
+		draw_line(b_start, dir * (21.0 - recoil), trim, 9.0, true)
+		draw_circle(dir * (20.0 - recoil), 4.2, deck)
+		draw_circle(dir * (20.0 - recoil), 2.4, accent)
+	else:
+		# Rail / Pulse twin-rail barrel with glowing central emitter channel
+		draw_line(b_start + perp * -3.2, b_end + perp * -2.6, trim, 2.8, true)
+		draw_line(b_start + perp * 3.2, b_end + perp * 2.6, trim, 2.8, true)
+		draw_line(dir * (4.0 - recoil), dir * (27.5 - recoil), accent, 2.2, true)
+
+	# Central sensor dome
+	draw_circle(Vector2.ZERO, 6.2, deck)
+	draw_circle(dir * 1.5, 3.2, accent)
 
 
 func _get_building_outer_poly(type_id: StringName, radius: float) -> PackedVector2Array:
