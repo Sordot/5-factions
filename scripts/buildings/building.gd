@@ -64,6 +64,7 @@ var production_component: ProductionComponent = null
 var _has_rally: bool = false
 var _rally_position: Vector2 = Vector2.ZERO
 var _rally_target: Node2D = null
+var rally_target_unit: Unit = null
 var _construction_elapsed: float = 0.0
 var _deposit_pulse_timer: float = 0.0
 var _hit_flash_timer: float = 0.0
@@ -118,6 +119,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	_disconnect_rally_unit_signal()
 	if SettingsManager != null and SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.disconnect(_on_settings_changed)
 	if is_in_group("nav_bake_obstacles"):
@@ -274,11 +276,11 @@ func _complete_construction() -> void:
 	if econ_done != null:
 		econ_done.notify_building_tech_changed(team)
 	if team == Unit.Team.PLAYER:
-		if AudioManager != null:
-			AudioManager.play_sfx(&"build_complete", -2.5, 0.0)
 		var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
 		if mm != null:
-			mm.record_tactical_alert(global_position, &"construction", "%s Complete" % display_name)
+			mm.push_tactical_alert(global_position, &"tech_complete", "%s Complete" % display_name)
+		elif AudioManager != null:
+			AudioManager.play_sfx(&"build_complete", -2.5, 0.0)
 	health_changed.emit(self, current_hp, max_hp)
 	construction_progress_changed.emit(self, 1.0, true)
 	construction_completed.emit(self)
@@ -300,9 +302,11 @@ func set_selected(selected: bool) -> void:
 func set_rally_position(world_pos: Vector2) -> void:
 	if not can_set_rally:
 		return
+	_disconnect_rally_unit_signal()
 	_has_rally = true
 	_rally_position = world_pos
 	_rally_target = null
+	rally_target_unit = null
 	queue_redraw()
 	rally_changed.emit(self)
 	status_changed.emit(self)
@@ -311,27 +315,88 @@ func set_rally_position(world_pos: Vector2) -> void:
 func set_rally_target(target: Node2D) -> void:
 	if not can_set_rally or target == null or not is_instance_valid(target):
 		return
+	if target is Unit:
+		set_rally_target_unit(target as Unit)
+		return
+	_disconnect_rally_unit_signal()
 	_has_rally = true
 	_rally_target = target
+	rally_target_unit = null
 	_rally_position = target.global_position
 	queue_redraw()
 	rally_changed.emit(self)
 	status_changed.emit(self)
 
 
+func set_rally_target_unit(target_unit: Unit) -> void:
+	if not can_set_rally or target_unit == null or not is_instance_valid(target_unit):
+		return
+	if target_unit.is_dead or target_unit.is_staffed or target_unit.team != team:
+		return
+	_disconnect_rally_unit_signal()
+	_has_rally = true
+	rally_target_unit = target_unit
+	_rally_target = target_unit
+	_rally_position = target_unit.global_position
+	if not target_unit.died.is_connected(_on_rally_target_unit_died):
+		target_unit.died.connect(_on_rally_target_unit_died)
+	queue_redraw()
+	rally_changed.emit(self)
+	status_changed.emit(self)
+
+
+func _disconnect_rally_unit_signal() -> void:
+	if rally_target_unit != null and is_instance_valid(rally_target_unit):
+		if rally_target_unit.died.is_connected(_on_rally_target_unit_died):
+			rally_target_unit.died.disconnect(_on_rally_target_unit_died)
+
+
+func _on_rally_target_unit_died(unit: Unit) -> void:
+	if unit != rally_target_unit:
+		return
+	if is_instance_valid(unit):
+		_rally_position = unit.global_position
+	rally_target_unit = null
+	_rally_target = null
+	queue_redraw()
+	rally_changed.emit(self)
+	status_changed.emit(self)
+
+
 func has_rally() -> bool:
-	if _rally_target != null and not is_instance_valid(_rally_target):
+	if rally_target_unit != null:
+		if not is_instance_valid(rally_target_unit) or rally_target_unit.is_dead or rally_target_unit.is_staffed:
+			if is_instance_valid(rally_target_unit):
+				_rally_position = rally_target_unit.global_position
+			rally_target_unit = null
+			_rally_target = null
+		else:
+			_rally_position = rally_target_unit.global_position
+	elif _rally_target != null and not is_instance_valid(_rally_target):
 		_rally_target = null
 	return _has_rally
 
 
 func get_rally_world_position() -> Vector2:
+	if rally_target_unit != null:
+		if is_instance_valid(rally_target_unit) and not rally_target_unit.is_dead and not rally_target_unit.is_staffed:
+			_rally_position = rally_target_unit.global_position
+			return _rally_position
+		if is_instance_valid(rally_target_unit):
+			_rally_position = rally_target_unit.global_position
+		rally_target_unit = null
+		_rally_target = null
 	if _rally_target != null and is_instance_valid(_rally_target):
 		return _rally_target.global_position
 	return _rally_position
 
 
 func get_rally_target() -> Node2D:
+	if rally_target_unit != null:
+		if is_instance_valid(rally_target_unit) and not rally_target_unit.is_dead and not rally_target_unit.is_staffed:
+			return rally_target_unit
+		rally_target_unit = null
+		_rally_target = null
 	if _rally_target != null and is_instance_valid(_rally_target):
 		return _rally_target
 	return null
@@ -345,6 +410,14 @@ func apply_rally_to_unit(unit: Unit) -> void:
 	if unit == null or not is_instance_valid(unit) or unit.is_dead:
 		return
 	if not has_rally():
+		return
+
+	if rally_target_unit != null and is_instance_valid(rally_target_unit) and not rally_target_unit.is_dead and not rally_target_unit.is_staffed:
+		_rally_position = rally_target_unit.global_position
+		if unit.data != null and unit.data.attack_damage > 0.0 and not unit.data.can_gather:
+			unit.command_attack_move(_rally_position)
+		else:
+			unit.command_move(_rally_position)
 		return
 
 	if _rally_target != null and is_instance_valid(_rally_target):
@@ -502,7 +575,7 @@ func pulse_deposit_feedback() -> void:
 	_deposit_pulse_timer = DEPOSIT_PULSE_DURATION
 
 
-func take_damage(amount: float) -> void:
+func take_damage(amount: float, attacker: Node = null) -> void:
 	if is_destroyed or amount <= 0.0:
 		return
 	current_hp = maxf(0.0, current_hp - amount)
@@ -513,10 +586,14 @@ func take_damage(amount: float) -> void:
 	if team == Unit.Team.PLAYER and is_inside_tree():
 		var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
 		if mm != null:
-			mm.record_tactical_alert(global_position, &"damage", "%s Under Attack!" % display_name)
+			mm.push_tactical_alert(global_position, &"under_attack", "%s Under Attack!" % display_name)
 	health_changed.emit(self, current_hp, max_hp)
 	status_changed.emit(self)
 	if current_hp <= 0.0:
+		if attacker != null and is_instance_valid(attacker) and attacker is Unit:
+			var killer: Unit = attacker as Unit
+			if not killer.is_dead and killer.team != team:
+				killer.register_kill(self)
 		_destroy()
 
 
@@ -656,6 +733,9 @@ func get_inspection_data() -> Dictionary:
 func _get_rally_summary() -> String:
 	if not has_rally():
 		return "Default (RMB to Set)"
+	if rally_target_unit != null and is_instance_valid(rally_target_unit) and not rally_target_unit.is_dead:
+		var u_name: String = rally_target_unit.data.display_name if rally_target_unit.data != null else "Unit"
+		return "Follow (%s)" % u_name
 	if _rally_target != null and is_instance_valid(_rally_target):
 		if _rally_target is ResourceNode:
 			return "Auto-Gather (%s)" % (_rally_target as ResourceNode).display_name

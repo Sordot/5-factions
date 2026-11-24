@@ -15,11 +15,13 @@ const MapLandmarkScript = preload("res://scripts/world/map_landmark.gd")
 var _camera: RTSCamera = null
 var _selection_controller: SelectionController = null
 var _fog_system: FogOfWarSystem = null
+var _match_manager: MatchManager = null
 var _is_left_dragging: bool = false
 var _redraw_timer: float = 0.0
 var _ping_pos: Vector2 = Vector2.ZERO
 var _ping_color: Color = Color(0.24, 0.96, 0.90, 1.0)
 var _ping_timer: float = 0.0
+var _alert_pings: Array[Dictionary] = []
 
 
 func _ready() -> void:
@@ -52,6 +54,32 @@ func _resolve_references() -> void:
 		if not _fog_system.visibility_updated.is_connected(_on_fog_updated):
 			_fog_system.visibility_updated.connect(_on_fog_updated)
 
+	if _match_manager == null and is_inside_tree():
+		_match_manager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+	if _match_manager != null and not _match_manager.tactical_alert_triggered.is_connected(_on_tactical_alert_triggered):
+		_match_manager.tactical_alert_triggered.connect(_on_tactical_alert_triggered)
+
+	if map_viewport != null:
+		map_viewport.queue_redraw()
+
+
+func _on_tactical_alert_triggered(world_pos: Vector2, alert_type: StringName, _message: String) -> void:
+	var col: Color = Color(0.24, 0.98, 0.86, 1.0)
+	match alert_type:
+		&"under_attack", &"damage":
+			col = Color(1.0, 0.24, 0.24, 1.0)
+		&"uplink_contested", &"uplink":
+			col = Color(1.0, 0.80, 0.22, 1.0)
+		&"tech_complete", &"upgrade", &"construction":
+			col = Color(0.24, 0.98, 0.86, 1.0)
+	_alert_pings.append({
+		"world_pos": world_pos,
+		"color": col,
+		"age": 0.0,
+		"duration": 2.4,
+	})
+	while _alert_pings.size() > 8:
+		_alert_pings.pop_front()
 	if map_viewport != null:
 		map_viewport.queue_redraw()
 
@@ -60,9 +88,18 @@ func _process(delta: float) -> void:
 	if _ping_timer > 0.0:
 		_ping_timer = maxf(0.0, _ping_timer - delta)
 
+	if not _alert_pings.is_empty():
+		var active: Array[Dictionary] = []
+		for p: Dictionary in _alert_pings:
+			var next_age: float = float(p["age"]) + delta
+			if next_age < float(p["duration"]):
+				p["age"] = next_age
+				active.append(p)
+		_alert_pings = active
+
 	_redraw_timer += delta
 	var interval: float = 1.0 / maxf(5.0, refresh_rate_hz)
-	if _redraw_timer >= interval:
+	if _redraw_timer >= interval or not _alert_pings.is_empty():
 		_redraw_timer = 0.0
 		if map_viewport != null:
 			map_viewport.queue_redraw()
@@ -278,6 +315,34 @@ func _on_map_viewport_draw() -> void:
 		var ring_col: Color = _ping_color
 		ring_col.a = (1.0 - pt) * 0.95
 		map_viewport.draw_arc(_ping_pos, lerpf(3.0, 13.0, pt), 0.0, TAU, 16, ring_col, 1.6)
+
+	# 9.5. Tactical Alert Pings (two staggered expanding rings + bright center diamond above Fog of War).
+	for ping: Dictionary in _alert_pings:
+		var age: float = float(ping["age"])
+		var dur: float = maxf(0.1, float(ping["duration"]))
+		var u: float = clampf(age / dur, 0.0, 1.0)
+		var base_fade: float = 1.0 - u
+		var p_col: Color = ping["color"] as Color
+		var mp: Vector2 = _world_to_minimap(ping["world_pos"] as Vector2)
+
+		# Two staggered expanding pulse rings cycling twice over the 2.4s lifetime
+		for k: int in range(2):
+			var phase: float = fmod(u * 2.2 + float(k) * 0.5, 1.0)
+			var r_px: float = lerpf(4.0, 22.0, phase)
+			var ring_a: float = (1.0 - phase) * base_fade * 0.95
+			if ring_a > 0.02:
+				map_viewport.draw_arc(mp, r_px, 0.0, TAU, 24, Color(p_col.r, p_col.g, p_col.b, ring_a), 1.8)
+
+		# Bright center diamond pip
+		var d_sz: float = lerpf(4.5, 2.2, u)
+		var d_pts: PackedVector2Array = PackedVector2Array([
+			mp + Vector2(0.0, -d_sz),
+			mp + Vector2(d_sz, 0.0),
+			mp + Vector2(0.0, d_sz),
+			mp + Vector2(-d_sz, 0.0),
+		])
+		map_viewport.draw_colored_polygon(d_pts, Color(p_col.r, p_col.g, p_col.b, base_fade))
+		map_viewport.draw_polyline(d_pts + PackedVector2Array([d_pts[0]]), Color(1.0, 1.0, 1.0, base_fade * 0.9), 1.0)
 
 	# 10. White Camera Viewport Rectangle.
 	if _camera != null and is_instance_valid(_camera):

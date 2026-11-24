@@ -7,6 +7,7 @@ enum VFXMode {
 	ARMOR_PIERCE_SPARK,
 	DEATH_BURST,
 	HEAL_TICK,
+	RANK_UP_PULSE,
 }
 
 var _mode: VFXMode = VFXMode.DEATH_BURST
@@ -27,6 +28,7 @@ var _on_impact: Callable = Callable()
 # Cleave / spark / burst state
 var _dir: Vector2 = Vector2.RIGHT
 var _is_heavy: bool = false
+var _rank_level: int = 1
 var _seed: int = 1337
 var _draw_visuals: bool = true
 
@@ -101,6 +103,16 @@ func setup_heal_tick(world_pos: Vector2, vfx_color: Color = Color(0.32, 1.0, 0.6
 	queue_redraw()
 
 
+func setup_rank_up_pulse(world_pos: Vector2, rank_level: int = 1) -> void:
+	_mode = VFXMode.RANK_UP_PULSE
+	_target_world = world_pos
+	_rank_level = clampi(rank_level, 1, 3)
+	_color = Color(1.0, 0.86, 0.28, 1.0) if _rank_level >= 3 else Color(0.42, 0.96, 1.0, 1.0)
+	_duration = 0.62
+	_elapsed = 0.0
+	queue_redraw()
+
+
 func _process(delta: float) -> void:
 	_elapsed += delta
 	if _mode == VFXMode.MORTAR_SHELL:
@@ -144,6 +156,8 @@ func _draw() -> void:
 			_draw_death_burst()
 		VFXMode.HEAL_TICK:
 			_draw_heal_tick()
+		VFXMode.RANK_UP_PULSE:
+			_draw_rank_up_pulse()
 
 
 func _draw_mortar_shell() -> void:
@@ -285,6 +299,26 @@ func _draw_heal_tick() -> void:
 	var arm: float = 4.2
 	draw_line(p + Vector2(-arm, 0.0), p + Vector2(arm, 0.0), col, 2.0, true)
 	draw_line(p + Vector2(0.0, -arm), p + Vector2(0.0, arm), col, 2.0, true)
+
+
+func _draw_rank_up_pulse() -> void:
+	var t: float = clampf(_elapsed / _duration, 0.0, 1.0)
+	var fade: float = 1.0 - t
+	var p: Vector2 = to_local(_target_world)
+	var ring_r: float = lerpf(12.0, 38.0, sqrt(t))
+	draw_circle(p, ring_r * 0.72, Color(_color.r, _color.g, _color.b, fade * 0.16))
+	draw_arc(p, ring_r, 0.0, TAU, 28, Color(_color.r, _color.g, _color.b, fade * 0.94), 2.4, true)
+	draw_arc(p, ring_r * 0.68, 0.0, TAU, 20, Color(1.0, 0.98, 0.84, fade * 0.80), 1.5, true)
+	# Rising rank chevrons above unit
+	var lift: float = -18.0 - t * 24.0
+	for i: int in range(_rank_level):
+		var cy: float = lift - float(i) * 5.5
+		var chev: PackedVector2Array = PackedVector2Array([
+			p + Vector2(-5.5, cy + 3.2),
+			p + Vector2(0.0, cy - 2.2),
+			p + Vector2(5.5, cy + 3.2),
+		])
+		draw_polyline(chev, Color(_color.r, _color.g, _color.b, fade * 0.96), 2.0, true)
 
 
 func _draw_dashed_circle(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:

@@ -366,6 +366,21 @@ custom_minimum_size = Vector2(260, 32)
 layout_mode = 2
 focus_mode = 0
 
+[node name="AttackRangeModeRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/AttackRangeModeRow"]
+custom_minimum_size = Vector2(210, 0)
+layout_mode = 2
+text = "Attack Range Indicator"
+
+[node name="OptAttackRangeMode" type="OptionButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/AttackRangeModeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(260, 32)
+layout_mode = 2
+focus_mode = 0
+
 [node name="AlertToastsRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
 layout_mode = 2
 

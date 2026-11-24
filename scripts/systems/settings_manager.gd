@@ -63,8 +63,15 @@ var confine_cursor: bool = false
 var invert_zoom: bool = false
 var middle_drag_speed: float = 1.0
 
+enum AttackRangeMode {
+	ALWAYS_SHOW = 0,
+	SHOW_WHILE_TARGETING = 1,
+	DONT_SHOW = 2,
+}
+
 # Gameplay / HUD preferences
 var health_bar_mode: int = 0 # 0 = Damaged / Selected, 1 = Always On, 2 = Selected Only
+var attack_range_mode: int = AttackRangeMode.SHOW_WHILE_TARGETING
 var show_alert_toasts: bool = true
 var camera_shake_enabled: bool = true
 
@@ -156,6 +163,7 @@ func load_settings() -> void:
 	middle_drag_speed = clampf(float(cfg.get_value("camera", "middle_drag_speed", 1.0)), 0.4, 2.5)
 
 	health_bar_mode = clampi(int(cfg.get_value("gameplay", "health_bar_mode", 0)), 0, 2)
+	attack_range_mode = clampi(int(cfg.get_value("gameplay", "attack_range_mode", AttackRangeMode.SHOW_WHILE_TARGETING)), 0, 2)
 	show_alert_toasts = bool(cfg.get_value("gameplay", "show_alert_toasts", true))
 	camera_shake_enabled = bool(cfg.get_value("gameplay", "camera_shake_enabled", true))
 
@@ -226,6 +234,7 @@ func save_settings() -> void:
 	cfg.set_value("camera", "middle_drag_speed", middle_drag_speed)
 
 	cfg.set_value("gameplay", "health_bar_mode", health_bar_mode)
+	cfg.set_value("gameplay", "attack_range_mode", attack_range_mode)
 	cfg.set_value("gameplay", "show_alert_toasts", show_alert_toasts)
 	cfg.set_value("gameplay", "camera_shake_enabled", camera_shake_enabled)
 
@@ -279,12 +288,15 @@ func set_camera_settings(
 func set_gameplay_settings(
 	p_health_bar_mode: int,
 	p_show_alert_toasts: bool,
-	p_camera_shake_enabled: Variant = null
+	p_camera_shake_enabled: Variant = null,
+	p_attack_range_mode: Variant = null
 ) -> void:
 	health_bar_mode = clampi(p_health_bar_mode, 0, 2)
 	show_alert_toasts = p_show_alert_toasts
 	if p_camera_shake_enabled is bool:
 		camera_shake_enabled = bool(p_camera_shake_enabled)
+	if p_attack_range_mode is int:
+		attack_range_mode = clampi(int(p_attack_range_mode), 0, 2)
 	save_settings()
 	settings_changed.emit(&"gameplay")
 
@@ -601,6 +613,7 @@ func reset_category(category: StringName) -> void:
 			settings_changed.emit(&"camera")
 		&"gameplay":
 			health_bar_mode = 0
+			attack_range_mode = AttackRangeMode.SHOW_WHILE_TARGETING
 			show_alert_toasts = true
 			camera_shake_enabled = true
 			save_settings()
@@ -643,6 +656,7 @@ func reset_all_to_defaults() -> void:
 	invert_zoom = false
 	middle_drag_speed = 1.0
 	health_bar_mode = 0
+	attack_range_mode = AttackRangeMode.SHOW_WHILE_TARGETING
 	show_alert_toasts = true
 	camera_shake_enabled = true
 	master_volume = 0.72

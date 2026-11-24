@@ -54,6 +54,8 @@ var _tracked_death_units: Array[Unit] = []
 var _idle_cycle_index: int = -1
 var _idle_refresh_timer: float = 0.0
 var _last_idle_ids: PackedInt64Array = PackedInt64Array()
+var _amove_preview_timer: float = 0.0
+var _last_targeting_active: bool = false
 
 
 func _ready() -> void:
@@ -87,6 +89,13 @@ func _process(delta: float) -> void:
 	if _idle_refresh_timer >= 0.15:
 		_idle_refresh_timer = 0.0
 		_refresh_idle_workers(false)
+
+	if _amove_preview_timer > 0.0:
+		_amove_preview_timer = maxf(0.0, _amove_preview_timer - delta)
+	var cur_targeting: bool = is_targeting_command_active()
+	if cur_targeting != _last_targeting_active:
+		_last_targeting_active = cur_targeting
+		_redraw_selected_units()
 
 	# Drop inspection if an inspected hostile entity disappears into Fog of War.
 	if inspected_entity != null and is_instance_valid(inspected_entity):
@@ -504,8 +513,27 @@ func issue_right_click_at(world_point: Vector2, shift_queued: bool = false) -> v
 	_refresh_idle_workers(false)
 
 
+func is_targeting_command_active() -> bool:
+	if is_patrol_targeting:
+		return true
+	if active_targeting_ability != null and active_targeting_ability.target_type != AbilityData.TargetType.BUILD_PLACEMENT:
+		return true
+	if _amove_preview_timer > 0.0 or Input.is_action_pressed("cmd_attack_move"):
+		return true
+	return false
+
+
+func _redraw_selected_units() -> void:
+	for u: Unit in selected_units:
+		if is_instance_valid(u) and not u.is_dead:
+			u.queue_redraw()
+
+
 func issue_attack_move_at(world_point: Vector2, shift_queued: bool = false) -> void:
 	_prune_invalid_units()
+	_amove_preview_timer = 0.85
+	_last_targeting_active = true
+	_redraw_selected_units()
 	if command_router != null:
 		command_router.issue_attack_move(world_point, selected_units, shift_queued)
 	_refresh_idle_workers(false)

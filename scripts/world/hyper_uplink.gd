@@ -74,7 +74,7 @@ func _process(delta: float) -> void:
 		if is_contested and not prev_contested:
 			var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
 			if mm != null:
-				mm.record_tactical_alert(global_position, &"uplink", "Hyper-Uplink Contested!")
+				mm.push_tactical_alert(global_position, &"uplink_contested", "Hyper-Uplink Contested!")
 
 	queue_redraw()
 
@@ -89,7 +89,7 @@ func _set_controller(next_team: int) -> void:
 	var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
 	if mm != null and controlling_team >= 0:
 		var msg: String = "Hyper-Uplink Captured (+5%%)" if controlling_team == int(Unit.Team.PLAYER) else "Hostile Captured Hyper-Uplink!"
-		mm.record_tactical_alert(global_position, &"uplink", msg)
+		mm.push_tactical_alert(global_position, &"uplink_contested", msg)
 	controller_changed.emit(controlling_team)
 
 

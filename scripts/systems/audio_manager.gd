@@ -16,6 +16,10 @@ const UI_SFX_IDS: Array = [
 	&"upgrade_complete",
 	&"unit_ready",
 	&"error_insufficient",
+	&"alert_under_attack",
+	&"alert_uplink",
+	&"alert_complete",
+	&"veterancy_rank_up",
 	&"match_victory",
 	&"match_defeat",
 ]
@@ -49,6 +53,10 @@ var _cooldowns_ms: Dictionary = {
 	&"ability_slam": 100,
 	&"ability_barrage": 100,
 	&"entity_destroyed": 85,
+	&"alert_under_attack": 1800,
+	&"alert_uplink": 1400,
+	&"alert_complete": 700,
+	&"veterancy_rank_up": 350,
 	&"match_victory": 500,
 	&"match_defeat": 500,
 }
@@ -189,6 +197,20 @@ func play_ability_sfx(ability_id: StringName) -> void:
 			play_sfx(&"ability_adrenal", -4.0, 0.04)
 
 
+func play_tactical_alert(alert_type: StringName) -> void:
+	if SettingsManager != null and not SettingsManager.show_alert_toasts:
+		return
+	match alert_type:
+		&"under_attack", &"damage":
+			play_sfx(&"alert_under_attack", -3.5, 0.02)
+		&"uplink_contested", &"uplink":
+			play_sfx(&"alert_uplink", -3.0, 0.02)
+		&"tech_complete", &"upgrade", &"construction":
+			play_sfx(&"alert_complete", -3.5, 0.01)
+		_:
+			play_sfx(&"alert_complete", -4.5, 0.02)
+
+
 func _acquire_player() -> AudioStreamPlayer:
 	for p: AudioStreamPlayer in _players:
 		if not p.playing:
@@ -232,6 +254,12 @@ func _generate_procedural_library() -> void:
 	_streams[&"ability_slam"] = _synth_seismic_slam()
 	_streams[&"ability_barrage"] = _synth_mortar_thud()
 	_streams[&"entity_destroyed"] = _synth_destruction_boom()
+
+	# Tactical Alerts & Veterancy
+	_streams[&"alert_under_attack"] = _synth_alert_under_attack()
+	_streams[&"alert_uplink"] = _synth_alert_uplink()
+	_streams[&"alert_complete"] = _synth_alert_complete()
+	_streams[&"veterancy_rank_up"] = _synth_rank_up_chime()
 
 	# Match Flow
 	_streams[&"match_victory"] = _synth_chime(PackedFloat32Array([523.25, 659.25, 783.99, 1046.5, 1318.5]), 0.11, 0.30)
@@ -510,3 +538,47 @@ func _synth_destruction_boom() -> AudioStreamWAV:
 		var env: float = minf(1.0, t / 0.005) * exp(-u * 4.5)
 		out[i] = (sin(phase) * 0.5 + lp * 0.65) * env * 0.32
 	return _make_wav(out)
+
+
+func _synth_alert_under_attack() -> AudioStreamWAV:
+	# Urgent two-tone low-mid pulse (non-shrill Technozen warning)
+	var duration: float = 0.28
+	var count: int = int(SAMPLE_RATE * duration)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var second: bool = t >= 0.135
+		var lt: float = (t - 0.135) if second else t
+		var freq: float = 340.0 if second else 440.0
+		var env: float = minf(1.0, lt / 0.006) * exp(-lt * 15.0)
+		if t > 0.105 and t < 0.135:
+			env = 0.0
+		var wave: float = sin(TAU * freq * lt) * 0.72 + sin(TAU * freq * 1.5 * lt) * 0.28
+		out[i] = wave * env * 0.28
+	return _make_wav(out)
+
+
+func _synth_alert_uplink() -> AudioStreamWAV:
+	# Resonant ascending sonar ping
+	var duration: float = 0.34
+	var count: int = int(SAMPLE_RATE * duration)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / duration
+		var freq: float = lerpf(520.0, 980.0, pow(u, 0.7))
+		phase += TAU * freq / float(SAMPLE_RATE)
+		var env: float = minf(1.0, t / 0.01) * exp(-u * 3.8)
+		out[i] = (sin(phase) * 0.76 + sin(phase * 2.0) * 0.24) * env * 0.26
+	return _make_wav(out)
+
+
+func _synth_alert_complete() -> AudioStreamWAV:
+	return _synth_chime(PackedFloat32Array([587.33, 880.0, 1174.66]), 0.065, 0.23)
+
+
+func _synth_rank_up_chime() -> AudioStreamWAV:
+	return _synth_chime(PackedFloat32Array([659.25, 880.0, 1318.5]), 0.055, 0.22)

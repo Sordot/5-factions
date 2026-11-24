@@ -17,6 +17,7 @@ extends Resource
 @export var aggro_range: float = 280.0
 @export var vision_range: float = 360.0
 @export var attack_cooldown: float = 0.7
+@export var attack_windup: float = -1.0 # < 0 uses role default (infantry 0.06s, heavy 0.11s, siege/beam 0.15s)
 @export var is_armored: bool = false
 @export var bonus_vs_armored: float = 0.0
 @export var damage_reduction: float = 0.0

@@ -630,7 +630,8 @@ func _rebuild_telemetry_grid(stats: Variant) -> void:
 		var v_label: Label = Label.new()
 		v_label.text = String(entry.get("value", ""))
 		v_label.add_theme_font_size_override("font_size", 12)
-		v_label.add_theme_color_override("font_color", Color(0.92, 0.98, 1.0, 1.0))
+		var val_col: Color = entry.get("color", Color(0.92, 0.98, 1.0, 1.0)) as Color
+		v_label.add_theme_color_override("font_color", val_col)
 		cell.add_child(v_label)
 
 		telemetry_grid.add_child(cell)
@@ -1044,7 +1045,7 @@ func _rebuild_unit_badges(units: Array[Unit]) -> void:
 		if not is_instance_valid(unit) or unit.is_dead:
 			continue
 		var badge: Label = Label.new()
-		var max_hp: float = maxf(1.0, unit.data.max_hp if unit.data != null else 100.0)
+		var max_hp: float = maxf(1.0, unit.get_max_hp())
 		var pct: int = int(round((unit.current_hp / max_hp) * 100.0))
 		badge.text = "[%d%%]" % pct
 		badge.add_theme_font_size_override("font_size", 11)

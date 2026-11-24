@@ -183,6 +183,31 @@ func _assign_building_perimeter_destinations(units: Array[Unit], building: Build
 
 func _handle_multi_building_rally_right_click(buildings: Array[Building], world_pos: Vector2) -> void:
 	var clicked_res: ResourceNode = find_resource_node_at_point(world_pos)
+	var clicked_friendly_unit: Unit = find_unit_at_point(world_pos, Unit.Team.PLAYER)
+
+	# Economy-only hubs keep resource-node priority even if a worker is standing right on the node.
+	var all_econ_only: bool = true
+	for b_chk: Building in buildings:
+		if not b_chk.is_resource_dropoff:
+			all_econ_only = false
+			break
+
+	if all_econ_only and clicked_res != null and not clicked_res.is_vent:
+		for b: Building in buildings:
+			b.set_rally_target(clicked_res)
+		if AudioManager != null:
+			AudioManager.play_sfx(&"order_gather", -4.5, 0.04)
+		spawn_move_marker(clicked_res.global_position, MoveMarker.MarkerStyle.GATHER)
+		return
+
+	if clicked_friendly_unit != null:
+		for b: Building in buildings:
+			b.set_rally_target_unit(clicked_friendly_unit)
+		if AudioManager != null:
+			AudioManager.play_sfx(&"order_move", -4.0, 0.05)
+		spawn_move_marker(clicked_friendly_unit.global_position, MoveMarker.MarkerStyle.INTERACT)
+		return
+
 	if clicked_res != null and not clicked_res.is_vent:
 		for b: Building in buildings:
 			b.set_rally_target(clicked_res)

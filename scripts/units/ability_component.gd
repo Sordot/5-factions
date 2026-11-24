@@ -167,7 +167,7 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 			if b.is_destroyed or b.is_queued_for_deletion() or b.team == owner_unit.team:
 				continue
 			if b.global_position.distance_to(target_pos) <= ability.aoe_radius + b.footprint_radius:
-				b.take_damage(ability.damage_or_value)
+				b.take_damage(ability.damage_or_value, owner_unit)
 
 
 func _execute_unit_target(owner_unit: Unit, ability: AbilityData, target_unit: Unit) -> void:
@@ -225,7 +225,7 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 				if b.is_destroyed or b.is_queued_for_deletion() or b.team == owner_unit.team:
 					continue
 				if b.global_position.distance_to(origin) <= radius + b.footprint_radius:
-					b.take_damage(ability.damage_or_value)
+					b.take_damage(ability.damage_or_value, owner_unit)
 		return
 
 	# Default instant heal (e.g. Nanite Surge)

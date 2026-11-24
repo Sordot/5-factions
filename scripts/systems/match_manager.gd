@@ -2,13 +2,14 @@ class_name MatchManager
 extends Node
 
 const PAUSE_MENU_SCENE: PackedScene = preload("res://scenes/ui/pause_menu.tscn")
-const ALERT_REGION_RADIUS: float = 260.0
+const ALERT_REGION_RADIUS: float = 300.0
 const ALERT_DAMAGE_THROTTLE_S: float = 4.0
 const MAX_RECENT_ALERTS: int = 3
 
 signal match_ended(winner_team: int, stats: Dictionary)
 signal aggro_ai_toggled(enabled: bool)
 signal tactical_alert_recorded(world_pos: Vector2, message: String)
+signal tactical_alert_triggered(world_pos: Vector2, alert_type: StringName, message: String)
 
 static var _global_aggro_ai_enabled: bool = true
 
@@ -100,47 +101,62 @@ func _ensure_pause_menu() -> void:
 		host.add_child(_pause_menu)
 
 
-func record_tactical_alert(world_pos: Vector2, category: StringName, message: String = "") -> void:
+func push_tactical_alert(world_pos: Vector2, alert_type: StringName, message: String = "") -> void:
 	if is_match_over:
 		return
+	var normalized_type: StringName = alert_type
+	match alert_type:
+		&"damage", &"under_attack":
+			normalized_type = &"under_attack"
+		&"uplink", &"uplink_contested":
+			normalized_type = &"uplink_contested"
+		&"construction", &"upgrade", &"tech_complete":
+			normalized_type = &"tech_complete"
+
 	var now_s: float = float(Time.get_ticks_msec()) * 0.001
-	if category == &"damage":
-		# Prune stale throttle entries and skip duplicate damage alerts in the same 260px region within 4.0s.
+	if normalized_type == &"under_attack" or normalized_type == &"uplink_contested":
+		# Spatial + temporal throttling: suppress duplicate alerts of same type within 300px for 4.0s
 		var kept: Array[Dictionary] = []
 		var r_sq: float = ALERT_REGION_RADIUS * ALERT_REGION_RADIUS
 		for item: Dictionary in _damage_alert_log:
 			if now_s - float(item["time"]) < ALERT_DAMAGE_THROTTLE_S:
 				kept.append(item)
-				if (item["pos"] as Vector2).distance_squared_to(world_pos) <= r_sq:
+				if item.get("type", &"") == normalized_type and (item["pos"] as Vector2).distance_squared_to(world_pos) <= r_sq:
 					_damage_alert_log = kept
 					return
-		kept.append({"pos": world_pos, "time": now_s})
+		kept.append({"pos": world_pos, "type": normalized_type, "time": now_s})
 		_damage_alert_log = kept
 
 	var label: String = message
 	if label.is_empty():
-		match category:
-			&"damage":
+		match normalized_type:
+			&"under_attack":
 				label = "Forces Under Attack"
-			&"construction":
-				label = "Structure Complete"
-			&"upgrade":
-				label = "Upgrade Complete"
-			&"uplink":
+			&"uplink_contested":
 				label = "Hyper-Uplink Alert"
+			&"tech_complete":
+				label = "Production / Tech Complete"
 			_:
 				label = "Tactical Alert"
 
 	_recent_alerts.push_front({
 		"pos": world_pos,
-		"category": category,
+		"category": normalized_type,
 		"message": label,
 		"time": now_s,
 	})
 	while _recent_alerts.size() > MAX_RECENT_ALERTS:
 		_recent_alerts.pop_back()
 
+	if AudioManager != null and AudioManager.has_method("play_tactical_alert"):
+		AudioManager.play_tactical_alert(normalized_type)
+
+	tactical_alert_triggered.emit(world_pos, normalized_type, label)
 	tactical_alert_recorded.emit(world_pos, label)
+
+
+func record_tactical_alert(world_pos: Vector2, category: StringName, message: String = "") -> void:
+	push_tactical_alert(world_pos, category, message)
 
 
 func get_recent_alerts() -> Array[Dictionary]:

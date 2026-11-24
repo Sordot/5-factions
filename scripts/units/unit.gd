@@ -34,6 +34,8 @@ const HEAL_AURA_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/heal_a
 const ENTITY_VISUALS_SCRIPT: GDScript = preload("res://ui/overlays/entity_visuals.gd")
 const COMBAT_VFX_SCRIPT: GDScript = preload("res://ui/overlays/combat_vfx.gd")
 const AUTO_RETARGET_INTERVAL: float = 0.25
+const VETERANCY_THRESHOLDS: Array = [0, 3, 6, 10]
+const VETERANCY_NAMES: Array = ["Standard", "Veteran", "Elite", "Apex"]
 const HIT_FLASH_DURATION: float = 0.08
 const HEALTH_BAR_WIDTH: float = 36.0
 const GATHER_BAR_WIDTH: float = 32.0
@@ -72,6 +74,8 @@ var is_selected: bool = false
 var is_dead: bool = false
 var is_staffed: bool = false
 var current_hp: float = 100.0
+var kill_count: int = 0
+var veterancy_rank: int = 0
 var command_state: CommandState = CommandState.IDLE
 var current_target: Node2D = null
 var ability_component: AbilityComponent = null
@@ -224,6 +228,40 @@ func issue_move_command(target_pos: Vector2) -> void:
 
 func get_unit_type_id() -> StringName:
 	return data.unit_type_id if data != null else &"unit"
+
+
+func is_alive() -> bool:
+	return not is_dead and not is_queued_for_deletion() and current_hp > 0.0
+
+
+func get_max_hp() -> float:
+	return data.max_hp if data != null else 100.0
+
+
+func get_veterancy_rank_name() -> String:
+	return String(VETERANCY_NAMES[clampi(veterancy_rank, 0, VETERANCY_NAMES.size() - 1)])
+
+
+func register_kill(_victim: Node = null) -> void:
+	if is_dead:
+		return
+	kill_count += 1
+	var target_rank: int = 0
+	for r: int in range(VETERANCY_THRESHOLDS.size() - 1, -1, -1):
+		if kill_count >= int(VETERANCY_THRESHOLDS[r]):
+			target_rank = r
+			break
+	if target_rank > veterancy_rank:
+		veterancy_rank = target_rank
+		if get_parent() != null and (team == Team.PLAYER or visible):
+			var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
+			fx.z_index = 56
+			get_parent().add_child(fx)
+			fx.call("setup_rank_up_pulse", global_position, veterancy_rank)
+		if team == Team.PLAYER and AudioManager != null:
+			AudioManager.play_sfx(&"veterancy_rank_up", -3.0, 0.03)
+		queue_redraw()
+	status_changed.emit(self)
 
 
 func get_vision_range() -> float:
@@ -754,12 +792,13 @@ func find_clear_approach_point(
 func heal(amount: float) -> void:
 	if is_dead or amount <= 0.0 or data == null:
 		return
-	var next_hp: float = minf(data.max_hp, current_hp + amount)
+	var max_hp_val: float = get_max_hp()
+	var next_hp: float = minf(max_hp_val, current_hp + amount)
 	if is_equal_approx(next_hp, current_hp):
 		return
 	current_hp = next_hp
 	_update_health_bar()
-	health_changed.emit(self, current_hp, data.max_hp)
+	health_changed.emit(self, current_hp, max_hp_val)
 	status_changed.emit(self)
 
 
@@ -770,6 +809,8 @@ func command_move(target_pos: Vector2, append_to_queue: bool = false) -> void:
 func _start_move(target_pos: Vector2) -> bool:
 	if is_dead or is_staffed or not _can_move():
 		return false
+	if combat_component != null:
+		combat_component.cancel_attack_animation()
 	_cancel_active_tasks(false)
 	command_state = CommandState.MOVING
 	current_target = null
@@ -852,8 +893,18 @@ func _start_attack_move(target_pos: Vector2) -> bool:
 	_attack_move_destination = target_pos
 	_move_destination = target_pos
 	current_target = null
+	_auto_retarget_timer = 0.0
 	_reset_progress_tracker()
-	_set_nav_target(target_pos)
+	if _can_attack() and combat_component != null:
+		# Instant target scan on A-click so rapid stutter-step kiting fires without scan lag
+		var immediate_target: Node2D = combat_component.force_immediate_target_scan(self, data.aggro_range)
+		if immediate_target != null and is_instance_valid(immediate_target):
+			current_target = immediate_target
+			if combat_component.is_within_attack_envelope(self, current_target):
+				_face_point(current_target.global_position, _last_delta)
+				combat_component.process_attack_at(self, current_target, 0.0)
+	if current_target == null:
+		_set_nav_target(target_pos)
 	status_changed.emit(self)
 	return true
 
@@ -884,6 +935,8 @@ func set_stance(new_stance: Stance) -> void:
 func command_stop() -> void:
 	if is_dead or is_staffed:
 		return
+	if combat_component != null:
+		combat_component.cancel_attack_animation()
 	clear_command_queue()
 	_cancel_active_tasks(false)
 	command_state = CommandState.HOLD_POSITION if stance == Stance.HOLD_POSITION else CommandState.IDLE
@@ -900,7 +953,7 @@ func command_hold_position() -> void:
 	set_stance(Stance.HOLD_POSITION)
 
 
-func take_damage(amount: float, attacker: Unit = null) -> void:
+func take_damage(amount: float, attacker: Node = null) -> void:
 	if is_dead or amount <= 0.0:
 		return
 	var mitigation: float = get_effective_damage_reduction()
@@ -916,16 +969,20 @@ func take_damage(amount: float, attacker: Unit = null) -> void:
 		var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
 		if mm != null:
 			var unit_label: String = data.display_name if data != null else "Unit"
-			mm.record_tactical_alert(global_position, &"damage", "%s Under Attack!" % unit_label)
-	health_changed.emit(self, current_hp, data.max_hp)
+			mm.push_tactical_alert(global_position, &"under_attack", "%s Under Attack!" % unit_label)
+	health_changed.emit(self, current_hp, get_max_hp())
 	status_changed.emit(self)
 
 	# Idle aggressive combatants retaliate against attackers even if attacked from beyond aggro range (when Aggro AI is ON).
-	if MatchManager.is_aggro_ai_enabled(get_tree()) and command_state == CommandState.IDLE and (current_target == null or not is_instance_valid(current_target)) and attacker != null and is_instance_valid(attacker) and _can_attack():
+	if MatchManager.is_aggro_ai_enabled(get_tree()) and command_state == CommandState.IDLE and (current_target == null or not is_instance_valid(current_target)) and attacker != null and is_instance_valid(attacker) and attacker is Unit and _can_attack():
 		if combat_component != null and combat_component.should_pursue_targets(self) and combat_component.is_valid_target(self, attacker):
-			current_target = attacker
+			current_target = attacker as Node2D
 
 	if current_hp <= 0.0:
+		if attacker != null and is_instance_valid(attacker) and attacker is Unit:
+			var killer: Unit = attacker as Unit
+			if not killer.is_dead and killer.team != team:
+				killer.register_kill(self)
 		_die()
 
 
@@ -1007,13 +1064,28 @@ func _get_economy_manager() -> EconomyManager:
 	return get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 
 
+func _should_draw_attack_range() -> bool:
+	if not is_selected or not _can_attack() or data == null:
+		return false
+	var mode: int = SettingsManager.attack_range_mode if SettingsManager != null else 1
+	if mode == 2:
+		return false
+	if mode == 0:
+		return true
+	if is_inside_tree():
+		var sel: Node = get_tree().get_first_node_in_group("selection_controller")
+		if sel != null and sel.has_method("is_targeting_command_active"):
+			return bool(sel.call("is_targeting_command_active"))
+	return false
+
+
 func _draw() -> void:
 	var type_id: StringName = get_unit_type_id()
-	# Selected unit attack-range & min-range tactical previews (especially readable on Chrysalis Mortar / ranged units)
-	if is_selected and _can_attack() and data != null:
+	# Selected unit attack-range & min-range tactical previews (gated by Settings -> Gameplay -> Attack Range Indicator)
+	if _should_draw_attack_range():
 		var atk_r: float = data.attack_range + data.collision_radius
 		var is_siege: bool = data.min_attack_range > 0.0 or data.aoe_attack_radius > 0.0
-		var range_col: Color = (Color(0.46, 1.0, 0.56, 0.34) if is_siege else Color(0.32, 0.94, 0.96, 0.22)) if team == Team.PLAYER else Color(1.0, 0.38, 0.28, 0.26)
+		var range_col: Color = (Color(0.46, 1.0, 0.56, 0.34) if is_siege else Color(0.32, 0.94, 0.96, 0.24)) if team == Team.PLAYER else Color(1.0, 0.38, 0.28, 0.26)
 		_draw_dashed_ring(Vector2.ZERO, atk_r, range_col, 1.5 if is_siege else 1.2, 40 if atk_r > 220.0 else 28)
 		if data.min_attack_range > 0.0:
 			var min_r: float = data.min_attack_range + data.collision_radius
@@ -1059,6 +1131,22 @@ func _draw() -> void:
 			draw_arc(Vector2.ZERO, r + 3.0, a0, a0 + 1.15, 10, arc_col, 2.3, true)
 			var crack_dir: Vector2 = Vector2.RIGHT.rotated(a0 + 0.55)
 			draw_line(crack_dir * (r - 1.0), crack_dir * (r + 6.5), arc_col, 1.4, true)
+
+	# Diegetic Veterancy rank chevron pips beside unit's health bar
+	if veterancy_rank > 0:
+		var base_y: float = health_bar_root.position.y + 1.0 if health_bar_root != null else -(r + 8.0)
+		var base_x: float = -(HEALTH_BAR_WIDTH * 0.5 + 8.0)
+		var pip_col: Color = Color(1.0, 0.86, 0.28, 1.0) if veterancy_rank >= 3 else Color(0.76, 0.96, 1.0, 0.96)
+		var badge_h: float = 4.0 + float(veterancy_rank) * 3.8
+		draw_rect(Rect2(base_x - 5.0, base_y - badge_h * 0.5 - 1.5, 10.0, badge_h + 3.0), Color(0.03, 0.06, 0.10, 0.80), true)
+		for i: int in range(veterancy_rank):
+			var cy: float = base_y + (float(veterancy_rank - 1) * 0.5 - float(i)) * 3.6
+			var chev_pts: PackedVector2Array = PackedVector2Array([
+				Vector2(base_x - 3.2, cy + 1.5),
+				Vector2(base_x, cy - 1.7),
+				Vector2(base_x + 3.2, cy + 1.5),
+			])
+			draw_polyline(chev_pts, pip_col, 1.6, true)
 
 
 func _draw_dashed_ring(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:
@@ -1231,10 +1319,12 @@ func _process_idle(delta: float) -> void:
 		if current_target != null and is_instance_valid(current_target):
 			if combat_component.is_within_attack_envelope(self, current_target):
 				_face_point(current_target.global_position, delta)
-				combat_component.try_fire_at(self, current_target)
+				combat_component.process_attack_at(self, current_target, delta)
 			elif combat_component.is_target_inside_min_range(self, current_target):
+				combat_component.cancel_attack_animation()
 				current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
 			else:
+				combat_component.cancel_attack_animation()
 				_request_nav_toward_point(current_target.global_position, 8.0)
 		return
 
@@ -1244,7 +1334,7 @@ func _process_idle(delta: float) -> void:
 		_maybe_retarget_higher_threat(delta, data.attack_range)
 	if current_target != null and is_instance_valid(current_target):
 		_face_point(current_target.global_position, delta)
-		combat_component.try_fire_at(self, current_target)
+		combat_component.process_attack_at(self, current_target, delta)
 
 
 func _process_moving(delta: float) -> void:
@@ -1284,8 +1374,9 @@ func _process_attack_moving(delta: float) -> void:
 		_reset_progress_tracker()
 		if combat_component.is_within_attack_envelope(self, current_target):
 			_face_point(current_target.global_position, delta)
-			combat_component.try_fire_at(self, current_target)
+			combat_component.process_attack_at(self, current_target, delta)
 			return
+		combat_component.cancel_attack_animation()
 		if combat_component.is_target_inside_min_range(self, current_target):
 			current_target = null
 		else:
@@ -1308,15 +1399,18 @@ func _process_attack_moving(delta: float) -> void:
 
 func _process_attacking_target(delta: float) -> void:
 	if current_target == null or not is_instance_valid(current_target) or combat_component == null or not combat_component.is_valid_target(self, current_target):
+		if combat_component != null:
+			combat_component.cancel_attack_animation()
 		current_target = null
 		_advance_command_queue()
 		return
 
 	if combat_component.is_within_attack_envelope(self, current_target):
 		_face_point(current_target.global_position, delta)
-		combat_component.try_fire_at(self, current_target)
+		combat_component.process_attack_at(self, current_target, delta)
 		return
 
+	combat_component.cancel_attack_animation()
 	if combat_component.is_target_inside_min_range(self, current_target):
 		_face_point(current_target.global_position, delta)
 		velocity = Vector2.ZERO
@@ -1338,7 +1432,7 @@ func _process_hold_position(delta: float) -> void:
 		_maybe_retarget_higher_threat(delta, data.attack_range)
 	if current_target != null and is_instance_valid(current_target):
 		_face_point(current_target.global_position, delta)
-		combat_component.try_fire_at(self, current_target)
+		combat_component.process_attack_at(self, current_target, delta)
 
 
 func _process_casting_ability(delta: float) -> void:
@@ -1428,8 +1522,9 @@ func _process_patrolling(delta: float) -> void:
 		_reset_progress_tracker()
 		if combat_component.is_within_attack_envelope(self, current_target):
 			_face_point(current_target.global_position, delta)
-			combat_component.try_fire_at(self, current_target)
+			combat_component.process_attack_at(self, current_target, delta)
 			return
+		combat_component.cancel_attack_animation()
 		if combat_component.is_target_inside_min_range(self, current_target):
 			current_target = null
 		else:
@@ -1457,6 +1552,8 @@ func _process_patrolling(delta: float) -> void:
 
 func _cancel_active_tasks(keep_gather: bool) -> void:
 	clear_cached_approach_point()
+	if combat_component != null:
+		combat_component.cancel_attack_animation()
 	if ability_component != null:
 		ability_component.cancel_pending_cast()
 	if not keep_gather and gather_component != null:
@@ -1942,7 +2039,7 @@ func _can_attack() -> bool:
 func _update_health_bar() -> void:
 	if health_bar_root == null or health_bar_fill == null or data == null:
 		return
-	var max_val: float = maxf(1.0, data.max_hp)
+	var max_val: float = maxf(1.0, get_max_hp())
 	var ratio: float = clampf(current_hp / max_val, 0.0, 1.0)
 	health_bar_fill.size.x = HEALTH_BAR_WIDTH * ratio
 	var mode: int = SettingsManager.health_bar_mode if SettingsManager != null else 0
@@ -2086,7 +2183,7 @@ func get_inspection_data() -> Dictionary:
 			accent = Color(0.28, 0.94, 0.56, 1.0)
 			subtitle = "LIGHT  •  UTILITY WORKER"
 
-	var max_hp_val: float = data.max_hp if data != null else 100.0
+	var max_hp_val: float = get_max_hp()
 	var stats: Array[Dictionary] = []
 	var show_primary: bool = false
 	var primary_label: String = ""
@@ -2142,6 +2239,17 @@ func get_inspection_data() -> Dictionary:
 			stats.append({"label": "Class", "value": "%s • %.1f/s" % [get_armor_class_label(), 1.0 / get_effective_attack_cooldown()]})
 		else:
 			stats.append({"label": "Class", "value": get_armor_class_label()})
+
+		if data.attack_damage > 0.0 or kill_count > 0:
+			if veterancy_rank > 0:
+				var rank_col: Color = Color(1.0, 0.86, 0.28, 1.0) if veterancy_rank >= 3 else Color(0.46, 0.98, 1.0, 1.0)
+				stats.append({
+					"label": "Rank",
+					"value": "%s (%d Kills)" % [get_veterancy_rank_name().to_upper(), kill_count],
+					"color": rank_col,
+				})
+			else:
+				stats.append({"label": "Kills", "value": "%d" % kill_count})
 
 	return {
 		"title": data.display_name if data != null else name,

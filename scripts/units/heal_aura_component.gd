@@ -50,7 +50,7 @@ func _apply_heal_tick(owner_unit: Unit) -> void:
 		var ally: Unit = node
 		if ally.is_dead or ally.is_staffed or ally.team != owner_unit.team or ally.data == null:
 			continue
-		if ally.current_hp >= ally.data.max_hp:
+		if ally.current_hp >= ally.get_max_hp():
 			continue
 		if owner_unit.global_position.distance_squared_to(ally.global_position) <= radius_sq:
 			ally.heal(heal_amount)

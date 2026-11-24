@@ -106,9 +106,16 @@ func _draw_building_rally(building: Building) -> void:
 	var tag_text: String = "RALLY"
 	var is_resource_rally: bool = false
 	var is_building_rally: bool = false
+	var is_unit_rally: bool = false
 
 	if rally_target != null and is_instance_valid(rally_target):
-		if rally_target is ResourceNode:
+		if rally_target is Unit:
+			var ru: Unit = rally_target
+			is_unit_rally = true
+			rally_col = Color(0.22, 1.0, 0.82, 0.95)
+			var u_label: String = ru.data.display_name if ru.data != null else "UNIT"
+			tag_text = "FOLLOW: %s" % u_label.to_upper()
+		elif rally_target is ResourceNode:
 			var rn: ResourceNode = rally_target
 			is_resource_rally = true
 			if rn.resource_type == &"silica":
@@ -148,7 +155,15 @@ func _draw_building_rally(building: Building) -> void:
 	draw_circle(p1, pulse_r * 0.75, Color(rally_col.r, rally_col.g, rally_col.b, 0.16))
 	draw_arc(p1, pulse_r, 0.0, TAU, 24, rally_col, 2.0, true)
 
-	if is_resource_rally:
+	if is_unit_rally:
+		# Orbiting Technozen follow ring + dual chevron brackets around the rallied unit
+		var unit_r: float = ((rally_target as Unit).data.collision_radius + 10.0) if (rally_target is Unit and (rally_target as Unit).data != null) else 26.0
+		var spin: float = _pulse_time * 2.4
+		draw_arc(p1, unit_r, spin, spin + PI * 0.65, 16, rally_col, 2.2, true)
+		draw_arc(p1, unit_r, spin + PI, spin + PI * 1.65, 16, rally_col, 2.2, true)
+		var orb: Vector2 = p1 + Vector2.RIGHT.rotated(spin) * unit_r
+		draw_circle(orb, 3.2, Color(0.94, 1.0, 0.98, 0.95))
+	elif is_resource_rally:
 		var d: float = 8.0
 		var diamond: PackedVector2Array = PackedVector2Array([
 			p1 + Vector2(0.0, -d),

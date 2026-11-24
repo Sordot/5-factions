@@ -5,16 +5,74 @@ const ATTACK_TRACER_SCRIPT: GDScript = preload("res://ui/overlays/attack_tracer.
 const ABILITY_EFFECT_SCRIPT: GDScript = preload("res://ui/overlays/ability_effect.gd")
 const COMBAT_VFX_SCRIPT: GDScript = preload("res://ui/overlays/combat_vfx.gd")
 
+enum AttackPhase {
+	IDLE = 0,
+	WINDUP = 1,
+	BACKSWING = 2,
+}
+
 const TIER_COMBAT_UNIT: int = 1
 const TIER_SUPPORT_OR_ECON: int = 2
 const TIER_BUILDING: int = 3
+const BACKSWING_DURATION: float = 0.10
 
 var _attack_cooldown_timer: float = 0.0
+var attack_phase: AttackPhase = AttackPhase.IDLE
+var _windup_timer: float = 0.0
+var _backswing_timer: float = 0.0
+var _windup_target: Node2D = null
 
 
 func tick_cooldown(delta: float) -> void:
 	if _attack_cooldown_timer > 0.0:
 		_attack_cooldown_timer = maxf(0.0, _attack_cooldown_timer - delta)
+	if attack_phase == AttackPhase.BACKSWING:
+		_backswing_timer = maxf(0.0, _backswing_timer - delta)
+		if _backswing_timer <= 0.0:
+			attack_phase = AttackPhase.IDLE
+
+
+func cancel_attack_animation() -> void:
+	# Instant cancel of windup (without wasting cooldown) or backswing (while cooldown continues ticking)
+	attack_phase = AttackPhase.IDLE
+	_windup_timer = 0.0
+	_backswing_timer = 0.0
+	_windup_target = null
+
+
+func is_in_windup() -> bool:
+	return attack_phase == AttackPhase.WINDUP
+
+
+func is_in_backswing() -> bool:
+	return attack_phase == AttackPhase.BACKSWING
+
+
+func get_effective_windup(owner_unit: Unit) -> float:
+	if owner_unit == null or owner_unit.data == null:
+		return 0.08
+	var base_w: float = owner_unit.data.attack_windup
+	if base_w < 0.0:
+		var uid: StringName = owner_unit.get_unit_type_id()
+		match uid:
+			&"clone_trooper", &"stinger", &"scout_unit":
+				base_w = 0.06
+			&"goliath_frame", &"lance_rig":
+				base_w = 0.11
+			&"chrysalis_mortar", &"arc_lancer":
+				base_w = 0.15
+			_:
+				base_w = 0.08
+	var base_cd: float = maxf(0.05, owner_unit.data.attack_cooldown)
+	var eff_cd: float = owner_unit.get_effective_attack_cooldown()
+	var scale: float = clampf(eff_cd / base_cd, 0.55, 1.35)
+	return clampf(base_w * scale, 0.0, eff_cd * 0.45)
+
+
+func force_immediate_target_scan(owner_unit: Unit, max_range: float) -> Node2D:
+	if attack_phase == AttackPhase.BACKSWING:
+		cancel_attack_animation()
+	return find_nearest_enemy(owner_unit, max_range)
 
 
 func can_attack(owner_unit: Unit) -> bool:
@@ -213,12 +271,51 @@ func find_higher_priority_threat(owner_unit: Unit, current_target: Node2D, scan_
 	return current_target
 
 
+func process_attack_at(owner_unit: Unit, target: Variant, delta: float) -> bool:
+	if target == null or not is_instance_valid(target) or not is_within_attack_envelope(owner_unit, target):
+		if attack_phase == AttackPhase.WINDUP:
+			cancel_attack_animation()
+		return false
+	var target_node: Node2D = target as Node2D
+
+	if attack_phase == AttackPhase.WINDUP:
+		_windup_target = target_node
+		_windup_timer = maxf(0.0, _windup_timer - delta)
+		if _windup_timer <= 0.0:
+			attack_phase = AttackPhase.BACKSWING
+			_backswing_timer = BACKSWING_DURATION
+			_windup_target = null
+			return _execute_weapon_shot(owner_unit, target_node)
+		return false
+
+	if _attack_cooldown_timer > 0.0:
+		return false
+
+	var windup: float = get_effective_windup(owner_unit)
+	if windup <= 0.001:
+		attack_phase = AttackPhase.BACKSWING
+		_backswing_timer = BACKSWING_DURATION
+		return _execute_weapon_shot(owner_unit, target_node)
+
+	attack_phase = AttackPhase.WINDUP
+	_windup_timer = windup
+	_windup_target = target_node
+	return false
+
+
 func try_fire_at(owner_unit: Unit, target: Variant) -> bool:
 	if target == null or not is_instance_valid(target):
 		return false
 	if _attack_cooldown_timer > 0.0 or not is_within_attack_envelope(owner_unit, target):
 		return false
-	var target_node: Node2D = target as Node2D
+	attack_phase = AttackPhase.BACKSWING
+	_backswing_timer = BACKSWING_DURATION
+	return _execute_weapon_shot(owner_unit, target as Node2D)
+
+
+func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
+	if target_node == null or not is_instance_valid(target_node) or not is_within_attack_envelope(owner_unit, target_node):
+		return false
 	_attack_cooldown_timer = owner_unit.get_effective_attack_cooldown()
 	var muzzle_offset: Vector2 = Vector2.RIGHT.rotated(owner_unit.body_visual.rotation) * owner_unit.data.collision_radius
 	var tracer_origin: Vector2 = owner_unit.global_position + muzzle_offset
@@ -305,7 +402,7 @@ func _apply_damage_to_target(owner_unit: Unit, target: Variant, base_dmg: float,
 	var total_dmg: float = base_dmg
 	if target is Building:
 		total_dmg += bonus_vs_armored
-		(target as Building).take_damage(total_dmg)
+		(target as Building).take_damage(total_dmg, owner_unit)
 	elif target is Unit:
 		var u: Unit = target
 		if u.data != null and u.data.is_armored:
@@ -348,7 +445,7 @@ func _apply_aoe_damage_for_team(
 		if b.is_destroyed or b.is_queued_for_deletion() or b.team == attacker_team:
 			continue
 		if b.global_position.distance_to(center) <= radius + b.footprint_radius:
-			b.take_damage(base_dmg + bonus_vs_armored)
+			b.take_damage(base_dmg + bonus_vs_armored, attacker)
 
 
 func _apply_line_pierce_damage(
