@@ -18,13 +18,13 @@ extends Resource
 @export var upgrade_roster: Array[UpgradeData] = []
 
 ## Maps logical AI roles (&"hub", &"supply", &"barracks_t1", &"counter_foundry", &"heavy_t2", &"refinery", &"compute_hub")
-## to building_type_id StringNames or BuildingData resource paths.
+## to building_id StringNames or BuildingData resource paths.
 @export var ai_build_profile: Dictionary = {}
 
 
 func get_building_by_id(type_id: StringName) -> BuildingData:
 	for b: BuildingData in building_roster:
-		if b != null and b.building_type_id == type_id:
+		if b != null and b.building_id == type_id:
 			return b
 	return null
 

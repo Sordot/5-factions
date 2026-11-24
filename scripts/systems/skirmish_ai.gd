@@ -1063,6 +1063,12 @@ func _get_team_units(target_team: Unit.Team) -> Array[Unit]:
 	return out
 
 
+func _is_enemy_team(other_team: int) -> bool:
+	if TeamManager != null:
+		return TeamManager.are_enemies(int(ai_team), other_team)
+	return other_team != int(ai_team)
+
+
 func _is_combat_unit(unit: Unit) -> bool:
 	if unit == null or unit.data == null:
 		return false
