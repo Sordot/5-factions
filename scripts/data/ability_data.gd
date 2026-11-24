@@ -21,5 +21,7 @@ enum TargetType {
 @export var attack_speed_modifier: float = 0.0
 @export var effect_color: Color = Color(0.42, 0.88, 1.0, 0.95)
 @export var cast_on_all_ready: bool = false
+@export var allow_autocast: bool = false
+@export var default_autocast: bool = false
 @export_multiline var description: String = ""
 @export var building_to_build: BuildingData = null

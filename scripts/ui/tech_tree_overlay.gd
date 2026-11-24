@@ -65,7 +65,10 @@ func _rebuild_tree() -> void:
 		btn_close.text = ("Close (%s)" % hk) if not hk.is_empty() else "Close"
 	if subtitle_label != null:
 		var team_tag: String = TeamManager.get_team_display_name(_tracked_team) if TeamManager != null else "PLAYER // GENESIS_V2"
-		subtitle_label.text = "Tracking: %s  •  Owned structures & researched tech highlighted live  •  Press %s or Esc to close" % [team_tag, hk if not hk.is_empty() else "Esc"]
+		var fac_id: StringName = TeamManager.get_team_faction(_tracked_team) if TeamManager != null else &"genesis_v2"
+		var fac_res: Resource = TeamManager.get_faction_data(fac_id) if (TeamManager != null and TeamManager.has_method("get_faction_data")) else null
+		var fac_name: String = String(fac_res.get("display_name")) if (fac_res != null and fac_res.get("display_name") != null) else "GENESIS_V2"
+		subtitle_label.text = "%s  •  Tracking: %s  •  Owned structures & tech highlighted live  •  Press %s or Esc to close" % [fac_name, team_tag, hk if not hk.is_empty() else "Esc"]
 
 	var tiers: Array = [
 		{

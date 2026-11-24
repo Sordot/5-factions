@@ -18,6 +18,7 @@ enum CommandState {
 	STAFFING_BUILDING,
 	PATROLLING,
 	REPAIRING,
+	SALVAGING,
 }
 
 enum Stance {
@@ -33,16 +34,17 @@ const ABILITY_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/ability_
 const COMBAT_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/combat_component.gd")
 const HEAL_AURA_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/heal_aura_component.gd")
 const REPAIR_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/repair_component.gd")
+const MOVEMENT_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/movement_component.gd")
+const STATUS_EFFECT_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/status_effect_component.gd")
 const ENTITY_VISUALS_SCRIPT: GDScript = preload("res://ui/overlays/entity_visuals.gd")
 const COMBAT_VFX_SCRIPT: GDScript = preload("res://ui/overlays/combat_vfx.gd")
+const SALVAGE_CORE_SCENE_PATH: String = "res://scenes/world/salvage_core.tscn"
 const AUTO_RETARGET_INTERVAL: float = 0.25
 const VETERANCY_THRESHOLDS: Array = [0, 3, 6, 10]
 const VETERANCY_NAMES: Array = ["Standard", "Veteran", "Elite", "Apex"]
 const HIT_FLASH_DURATION: float = 0.08
 const HEALTH_BAR_WIDTH: float = 36.0
 const GATHER_BAR_WIDTH: float = 32.0
-const SETTLE_PROXIMITY_RADIUS: float = 160.0
-const SETTLE_NO_PROGRESS_TIME: float = 0.45
 
 signal selection_changed(unit: Unit, selected: bool)
 signal health_changed(unit: Unit, current_hp: float, max_hp: float)
@@ -83,37 +85,21 @@ var current_target: Node2D = null
 var ability_component: AbilityComponent = null
 var combat_component: CombatComponent = null
 var repair_component: Node = null
+var movement_component: Node = null
+var status_effect_component: Node = null
 var command_queue: Array[Dictionary] = []
 var active_command: Dictionary = {}
 var patrol_waypoints: Array[Vector2] = []
 var patrol_index: int = 0
 
 var _construction_target: Building = null
+var _salvage_target: Node2D = null
+var _is_salvaging_in_place: bool = false
+var _salvage_vfx_timer: float = 0.0
 var _move_destination: Vector2 = Vector2.ZERO
 var _attack_move_destination: Vector2 = Vector2.ZERO
 var _hit_flash_timer: float = 0.0
-var _last_nav_target: Vector2 = Vector2.INF
-var _wants_nav_movement: bool = false
-var _desired_move_velocity: Vector2 = Vector2.ZERO
 var _last_delta: float = 1.0 / 60.0
-var _no_progress_timer: float = 0.0
-var _best_dist_to_goal: float = INF
-var _stuck_sample_pos: Vector2 = Vector2.ZERO
-var _stuck_sample_timer: float = 0.0
-var _stuck_accum_time: float = 0.0
-var _stuck_nudge_timer: float = 0.0
-var _stuck_nudge_dir: Vector2 = Vector2.ZERO
-var _stuck_side_sign: float = 1.0
-var _stuck_consecutive_nudges: int = 0
-var _cached_approach_point: Vector2 = Vector2.INF
-var _cached_approach_target_pos: Vector2 = Vector2.INF
-var _cached_approach_target_id: int = 0
-var _adrenal_timer: float = 0.0
-var _adrenal_speed_bonus: float = 0.0
-var _adrenal_attack_speed_bonus: float = 0.0
-var _slow_timer: float = 0.0
-var _slow_move_penalty: float = 0.0
-var _slow_attack_penalty: float = 0.0
 var _entity_visuals: EntityVisuals = null
 var _trail_points: Array[Vector2] = []
 var _trail_sample_timer: float = 0.0
@@ -174,12 +160,22 @@ func _ready() -> void:
 	ability_component = ABILITY_COMPONENT_SCRIPT.new()
 	ability_component.name = "AbilityComponent"
 	add_child(ability_component)
+	ability_component.init_autocast_defaults(self)
 	ability_component.ability_cooldown_updated.connect(func(ability_id: StringName, remaining: float, duration: float) -> void:
 		ability_cooldown_updated.emit(ability_id, remaining, duration)
 	)
 	ability_component.ability_executed.connect(func(ability_id: StringName, target_pos: Vector2) -> void:
 		ability_executed.emit(ability_id, target_pos)
 	)
+
+	movement_component = MOVEMENT_COMPONENT_SCRIPT.new()
+	movement_component.name = "MovementComponent"
+	add_child(movement_component)
+	movement_component.call("initialize_for_unit", self)
+
+	status_effect_component = STATUS_EFFECT_COMPONENT_SCRIPT.new()
+	status_effect_component.name = "StatusEffectComponent"
+	add_child(status_effect_component)
 
 	if gather_component != null:
 		if not gather_component.cargo_changed.is_connected(_on_gather_cargo_changed):
@@ -194,15 +190,17 @@ func _ready() -> void:
 		gather_bar_root.visible = false
 
 	_register_with_economy()
+	if SpatialGrid != null:
+		SpatialGrid.register_unit(self)
 	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.connect(_on_settings_changed)
-	_stuck_sample_pos = global_position
-	_stuck_side_sign = 1.0 if (get_instance_id() % 2) == 0 else -1.0
 	if data != null and data.auto_gather_on_spawn and can_gather():
 		call_deferred("_try_start_auto_gather")
 
 
 func _exit_tree() -> void:
+	if SpatialGrid != null:
+		SpatialGrid.unregister_unit(self)
 	if SettingsManager != null and SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.disconnect(_on_settings_changed)
 	_unregister_from_economy()
@@ -329,7 +327,7 @@ func _start_cast_ability(ability: AbilityData, target_pos: Vector2, target_unit:
 		command_state = CommandState.CASTING_ABILITY
 		current_target = null
 		_reset_progress_tracker()
-		_last_nav_target = Vector2.INF
+		invalidate_nav_path()
 		status_changed.emit(self)
 		return CMD_EXEC_ACTIVE
 	return CMD_EXEC_IMMEDIATE_DONE
@@ -383,7 +381,41 @@ func _start_repair(target: Node2D) -> bool:
 	command_state = CommandState.REPAIRING
 	current_target = null
 	_reset_progress_tracker()
-	_last_nav_target = Vector2.INF
+	invalidate_nav_path()
+	status_changed.emit(self)
+	return true
+
+
+func can_salvage_core() -> bool:
+	if is_dead or is_staffed or data == null:
+		return false
+	var uid: StringName = get_unit_type_id()
+	return data.can_gather or data.can_staff_compute or uid == &"worker" or uid == &"engineer"
+
+
+func is_salvaging_in_place() -> bool:
+	return command_state == CommandState.SALVAGING and _is_salvaging_in_place
+
+
+func command_salvage(salvage_core: Node2D, append_to_queue: bool = false) -> bool:
+	if salvage_core == null or not is_instance_valid(salvage_core):
+		return false
+	return issue_command({"type": &"salvage", "target": salvage_core, "pos": salvage_core.global_position}, append_to_queue)
+
+
+func _start_salvage(salvage_core: Node2D) -> bool:
+	if is_dead or is_staffed or not _can_move() or not can_salvage_core():
+		return false
+	if salvage_core == null or not is_instance_valid(salvage_core) or bool(salvage_core.get("is_claimed")):
+		return false
+	_cancel_active_tasks(false)
+	_salvage_target = salvage_core
+	_is_salvaging_in_place = false
+	_salvage_vfx_timer = 0.0
+	command_state = CommandState.SALVAGING
+	current_target = null
+	_reset_progress_tracker()
+	invalidate_nav_path()
 	status_changed.emit(self)
 	return true
 
@@ -521,6 +553,10 @@ func _execute_command(cmd: Dictionary) -> int:
 			var rep_t: Variant = cmd.get("target", null)
 			if rep_t != null and is_instance_valid(rep_t) and rep_t is Node2D and not (rep_t as Node).is_queued_for_deletion():
 				result = CMD_EXEC_ACTIVE if _start_repair(rep_t as Node2D) else CMD_EXEC_FAILED
+		&"salvage":
+			var salv_t: Variant = cmd.get("target", null)
+			if salv_t != null and is_instance_valid(salv_t) and salv_t is Node2D and not (salv_t as Node).is_queued_for_deletion():
+				result = CMD_EXEC_ACTIVE if _start_salvage(salv_t as Node2D) else CMD_EXEC_FAILED
 	if result == CMD_EXEC_ACTIVE:
 		active_command = cmd.duplicate()
 		command_queue_changed.emit(self)
@@ -559,6 +595,9 @@ func get_active_command_destination() -> Variant:
 				var rep_node: Variant = repair_component.get("target_entity")
 				if rep_node is Node2D and is_instance_valid(rep_node):
 					return (rep_node as Node2D).global_position
+		CommandState.SALVAGING:
+			if _salvage_target != null and is_instance_valid(_salvage_target):
+				return _salvage_target.global_position
 	return null
 
 
@@ -577,7 +616,7 @@ func _start_gather(resource_node: ResourceNode) -> bool:
 	command_state = CommandState.GATHERING
 	current_target = null
 	_reset_progress_tracker()
-	_last_nav_target = Vector2.INF
+	invalidate_nav_path()
 	status_changed.emit(self)
 	return true
 
@@ -596,7 +635,7 @@ func _start_return_cargo(building: Building = null) -> bool:
 	command_state = CommandState.GATHERING
 	current_target = null
 	_reset_progress_tracker()
-	_last_nav_target = Vector2.INF
+	invalidate_nav_path()
 	status_changed.emit(self)
 	return true
 
@@ -617,7 +656,7 @@ func _start_construct_building(building: Building) -> bool:
 	command_state = CommandState.CONSTRUCTING
 	current_target = null
 	_reset_progress_tracker()
-	_last_nav_target = Vector2.INF
+	invalidate_nav_path()
 	status_changed.emit(self)
 	return true
 
@@ -639,7 +678,7 @@ func _start_staff_building(building: Building) -> bool:
 	command_state = CommandState.STAFFING_BUILDING
 	current_target = null
 	_reset_progress_tracker()
-	_last_nav_target = Vector2.INF
+	invalidate_nav_path()
 	status_changed.emit(self)
 	return true
 
@@ -659,6 +698,8 @@ func enter_staffed_building(_building: Building) -> void:
 		collision_shape.set_deferred("disabled", true)
 	if is_in_group("selectable_units"):
 		remove_from_group("selectable_units")
+	if SpatialGrid != null:
+		SpatialGrid.unregister_unit(self)
 	set_physics_process(false)
 	command_queue_changed.emit(self)
 	status_changed.emit(self)
@@ -679,8 +720,18 @@ func exit_staffed_building(world_pos: Vector2) -> void:
 		collision_shape.set_deferred("disabled", false)
 	if not is_in_group("selectable_units"):
 		add_to_group("selectable_units")
+	if SpatialGrid != null:
+		SpatialGrid.register_unit(self)
 	set_physics_process(true)
 	staffed_state_changed.emit(self, false)
+
+
+func is_nav_movement_active() -> bool:
+	return movement_component != null and bool(movement_component.get("wants_nav_movement"))
+
+
+func can_unit_move() -> bool:
+	return _can_move()
 
 
 func request_component_navigation(target_point: Vector2, repath_threshold: float = 10.0, stop_distance: float = 4.0) -> void:
@@ -692,12 +743,10 @@ func face_world_point(world_point: Vector2, delta: float) -> void:
 
 
 func stop_component_navigation() -> void:
-	_wants_nav_movement = false
-	_desired_move_velocity = Vector2.ZERO
-	velocity = Vector2.ZERO
-	_reset_progress_tracker()
-	clear_cached_approach_point()
-	_clear_nav_target()
+	if movement_component != null:
+		movement_component.call("stop_navigation", self)
+	else:
+		velocity = Vector2.ZERO
 
 
 func reset_progress_tracker() -> void:
@@ -705,18 +754,17 @@ func reset_progress_tracker() -> void:
 
 
 func invalidate_nav_path() -> void:
-	_last_nav_target = Vector2.INF
-	clear_cached_approach_point()
+	if movement_component != null:
+		movement_component.call("invalidate_nav_path")
 
 
 func get_cached_approach_point() -> Vector2:
-	return _cached_approach_point
+	return (movement_component.call("get_cached_approach_point") as Vector2) if movement_component != null else Vector2.INF
 
 
 func clear_cached_approach_point() -> void:
-	_cached_approach_point = Vector2.INF
-	_cached_approach_target_pos = Vector2.INF
-	_cached_approach_target_id = 0
+	if movement_component != null:
+		movement_component.call("clear_cached_approach_point")
 
 
 func get_or_compute_approach_point(
@@ -726,38 +774,9 @@ func get_or_compute_approach_point(
 	ignore_building: Building = null,
 	ignore_resource: ResourceNode = null
 ) -> Vector2:
-	if target_node == null or not is_instance_valid(target_node):
-		clear_cached_approach_point()
-		return global_position
-	var unit_r: float = data.collision_radius if data != null else 13.0
-	var bounds: Rect2 = _get_arena_bounds()
-	var safe_bounds: Rect2 = Rect2(
-		bounds.position + Vector2(unit_r + 6.0, unit_r + 6.0),
-		bounds.size - Vector2((unit_r + 6.0) * 2.0, (unit_r + 6.0) * 2.0)
-	)
-	var target_id: int = target_node.get_instance_id()
-	var can_reuse: bool = (
-		_cached_approach_point != Vector2.INF
-		and _cached_approach_target_id == target_id
-		and _cached_approach_target_pos.distance_squared_to(target_node.global_position) <= 16.0
-		and _last_nav_target != Vector2.INF
-		and _is_point_clear_of_obstacles(_cached_approach_point, unit_r + 2.0, safe_bounds, ignore_building, ignore_resource)
-	)
-	if can_reuse:
-		return _cached_approach_point
-
-	var computed: Vector2 = find_clear_approach_point(
-		target_node.global_position,
-		target_radius,
-		margin,
-		ignore_building,
-		ignore_resource,
-		true
-	)
-	_cached_approach_point = computed
-	_cached_approach_target_pos = target_node.global_position
-	_cached_approach_target_id = target_id
-	return computed
+	if movement_component != null:
+		return movement_component.call("get_or_compute_approach_point", self, target_node, target_radius, margin, ignore_building, ignore_resource) as Vector2
+	return target_node.global_position if (target_node != null and is_instance_valid(target_node)) else global_position
 
 
 func find_clear_approach_point(
@@ -768,75 +787,9 @@ func find_clear_approach_point(
 	ignore_resource: ResourceNode = null,
 	avoid_friendly_workers: bool = true
 ) -> Vector2:
-	var unit_r: float = data.collision_radius if data != null else 13.0
-	var stand_dist: float = target_radius + unit_r + margin
-	var offset: Vector2 = global_position - target_center
-	var base_angle: float = offset.angle() if offset.length_squared() > 0.01 else 0.0
-	# Subtle per-unit deterministic angular bias spreads simultaneous multi-worker clicks cleanly.
-	var slot_bias: float = float((get_instance_id() % 5) - 2) * 0.14 if avoid_friendly_workers else 0.0
-	var bounds: Rect2 = _get_arena_bounds()
-	var safe_bounds: Rect2 = Rect2(
-		bounds.position + Vector2(unit_r + 6.0, unit_r + 6.0),
-		bounds.size - Vector2((unit_r + 6.0) * 2.0, (unit_r + 6.0) * 2.0)
-	)
-
-	var busy_slots: Array[Vector2] = []
-	if avoid_friendly_workers and is_inside_tree():
-		var nearby_r_sq: float = (stand_dist + 84.0) * (stand_dist + 84.0)
-		for node: Node in get_tree().get_nodes_in_group("units"):
-			if not (node is Unit) or not is_instance_valid(node) or node == self:
-				continue
-			var other: Unit = node
-			if other.is_dead or other.is_staffed or other.team != team:
-				continue
-			if other.data == null or not (other.data.can_gather or other.data.can_staff_compute or other.can_construct()):
-				continue
-			var other_working_or_approaching: bool = (
-				other.command_state == CommandState.GATHERING
-				or other.command_state == CommandState.CONSTRUCTING
-				or other.command_state == CommandState.STAFFING_BUILDING
-			)
-			if not other_working_or_approaching:
-				continue
-			if other.global_position.distance_squared_to(target_center) <= nearby_r_sq:
-				busy_slots.append(other.global_position)
-			var other_cached: Vector2 = other.get_cached_approach_point()
-			if other_cached != Vector2.INF and other_cached.distance_squared_to(target_center) <= nearby_r_sq:
-				busy_slots.append(other_cached)
-
-	var slot_clear_dist: float = unit_r * 1.85
-	var slot_clear_sq: float = slot_clear_dist * slot_clear_dist
-	var best_fallback: Vector2 = Vector2.INF
-	var best_fallback_clearance: float = -1.0
-
-	var steps: int = 16
-	var step_angle: float = TAU / float(steps)
-	for i: int in range(steps):
-		var ring_offset: int = 0 if i == 0 else ((i + 1) >> 1)
-		var sign_mult: float = 1.0 if (i % 2) == 1 else -1.0
-		var ang: float = base_angle + slot_bias + float(ring_offset) * step_angle * sign_mult
-		var cand: Vector2 = target_center + Vector2.RIGHT.rotated(ang) * stand_dist
-		if not _is_point_clear_of_obstacles(cand, unit_r + 3.0, safe_bounds, ignore_building, ignore_resource):
-			continue
-		if busy_slots.is_empty():
-			return cand
-		var min_slot_sq: float = INF
-		for occ: Vector2 in busy_slots:
-			min_slot_sq = minf(min_slot_sq, cand.distance_squared_to(occ))
-		if min_slot_sq >= slot_clear_sq:
-			return cand
-		if min_slot_sq > best_fallback_clearance:
-			best_fallback_clearance = min_slot_sq
-			best_fallback = cand
-
-	if best_fallback != Vector2.INF:
-		return best_fallback
-
-	var fallback: Vector2 = target_center + Vector2.RIGHT.rotated(base_angle) * stand_dist
-	if safe_bounds.has_area():
-		fallback.x = clampf(fallback.x, safe_bounds.position.x, safe_bounds.end.x)
-		fallback.y = clampf(fallback.y, safe_bounds.position.y, safe_bounds.end.y)
-	return fallback
+	if movement_component != null:
+		return movement_component.call("find_clear_approach_point", self, target_center, target_radius, margin, ignore_building, ignore_resource, avoid_friendly_workers) as Vector2
+	return target_center
 
 
 func heal(amount: float) -> void:
@@ -889,7 +842,7 @@ func _start_attack_target(target: Node2D) -> bool:
 	command_state = CommandState.ATTACKING_TARGET
 	current_target = target
 	_reset_progress_tracker()
-	_last_nav_target = Vector2.INF
+	invalidate_nav_path()
 	status_changed.emit(self)
 	return true
 
@@ -969,11 +922,7 @@ func set_stance(new_stance: Stance) -> void:
 		_cancel_active_tasks(false)
 		command_state = CommandState.HOLD_POSITION
 		current_target = null
-		_wants_nav_movement = false
-		_desired_move_velocity = Vector2.ZERO
-		_reset_progress_tracker()
-		velocity = Vector2.ZERO
-		_clear_nav_target()
+		stop_component_navigation()
 	elif command_state == CommandState.HOLD_POSITION:
 		command_state = CommandState.IDLE
 		current_target = null
@@ -991,11 +940,7 @@ func command_stop() -> void:
 	_cancel_active_tasks(false)
 	command_state = CommandState.HOLD_POSITION if stance == Stance.HOLD_POSITION else CommandState.IDLE
 	current_target = null
-	_wants_nav_movement = false
-	_desired_move_velocity = Vector2.ZERO
-	_reset_progress_tracker()
-	velocity = Vector2.ZERO
-	_clear_nav_target()
+	stop_component_navigation()
 	status_changed.emit(self)
 
 
@@ -1007,7 +952,8 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 	if is_dead or amount <= 0.0:
 		return
 	var mitigation: float = get_effective_damage_reduction()
-	var effective_damage: float = amount * (1.0 - mitigation)
+	var dmg_mult: float = float(status_effect_component.call("get_damage_taken_multiplier")) if status_effect_component != null else 1.0
+	var effective_damage: float = amount * (1.0 - mitigation) * dmg_mult
 	if effective_damage <= 0.0:
 		return
 	current_hp = maxf(0.0, current_hp - effective_damage)
@@ -1041,9 +987,8 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 func apply_adrenal_surge(duration: float, speed_bonus: float, attack_speed_bonus: float) -> void:
 	if is_dead or duration <= 0.0:
 		return
-	_adrenal_timer = maxf(_adrenal_timer, duration)
-	_adrenal_speed_bonus = maxf(_adrenal_speed_bonus, speed_bonus)
-	_adrenal_attack_speed_bonus = maxf(_adrenal_attack_speed_bonus, attack_speed_bonus)
+	if status_effect_component != null:
+		status_effect_component.call("apply_adrenal_surge", duration, speed_bonus, attack_speed_bonus)
 	_sync_nav_max_speed()
 	queue_redraw()
 	status_changed.emit(self)
@@ -1052,12 +997,21 @@ func apply_adrenal_surge(duration: float, speed_bonus: float, attack_speed_bonus
 func apply_slow_debuff(duration: float, move_penalty: float, attack_penalty: float) -> void:
 	if is_dead or duration <= 0.0:
 		return
-	_slow_timer = maxf(_slow_timer, duration)
-	_slow_move_penalty = clampf(maxf(_slow_move_penalty, move_penalty), 0.0, 0.75)
-	_slow_attack_penalty = clampf(maxf(_slow_attack_penalty, attack_penalty), 0.0, 0.75)
+	if status_effect_component != null:
+		status_effect_component.call("apply_slow_debuff", duration, move_penalty, attack_penalty)
 	_sync_nav_max_speed()
 	queue_redraw()
 	status_changed.emit(self)
+
+
+func has_status_effect(effect_id: StringName) -> bool:
+	return status_effect_component != null and bool(status_effect_component.call("has_effect", effect_id))
+
+
+func get_active_status_effects() -> Array[Dictionary]:
+	if status_effect_component != null:
+		return status_effect_component.call("get_active_effects_summary") as Array[Dictionary]
+	return []
 
 
 func on_team_upgrade_completed(_upgrade_id: StringName) -> void:
@@ -1076,21 +1030,15 @@ func get_effective_move_speed() -> float:
 		var econ: EconomyManager = _get_economy_manager()
 		if econ != null:
 			spd *= econ.get_goliath_speed_multiplier(team)
-	if _adrenal_timer > 0.0:
-		spd *= (1.0 + _adrenal_speed_bonus)
-	if _slow_timer > 0.0:
-		spd *= maxf(0.25, 1.0 - _slow_move_penalty)
+	if status_effect_component != null:
+		spd *= float(status_effect_component.call("get_move_speed_multiplier"))
 	return spd
 
 
 func get_effective_attack_cooldown() -> float:
 	if data == null or data.attack_cooldown <= 0.0:
 		return 1.0
-	var rate_mult: float = 1.0
-	if _adrenal_timer > 0.0:
-		rate_mult *= (1.0 + _adrenal_attack_speed_bonus)
-	if _slow_timer > 0.0:
-		rate_mult *= maxf(0.35, 1.0 - _slow_attack_penalty)
+	var rate_mult: float = float(status_effect_component.call("get_attack_speed_multiplier")) if status_effect_component != null else 1.0
 	return data.attack_cooldown / maxf(0.25, rate_mult)
 
 
@@ -1159,7 +1107,7 @@ func _draw() -> void:
 			draw_line(p0, p1, Color(trail_base.r, trail_base.g, trail_base.b, t * 0.45), 1.4 + t * 2.2, true)
 
 	var r: float = (data.collision_radius + 6.0) if data != null else 22.0
-	if _adrenal_timer > 0.0:
+	if has_status_effect(&"adrenal_surge"):
 		# Pulsing emerald/gold rim + upward chevron pip
 		var pulse: float = 0.5 + 0.5 * sin(_vfx_anim_time * 10.0)
 		var rim_col: Color = Color(0.28, 1.0, 0.72, 0.88).lerp(Color(1.0, 0.88, 0.34, 0.96), pulse * 0.55)
@@ -1172,7 +1120,7 @@ func _draw() -> void:
 			Vector2(4.5, chev_y + 3.0),
 		])
 		draw_polyline(chev, Color(0.98, 0.94, 0.42, 0.95), 2.0, true)
-	if _slow_timer > 0.0:
+	if has_status_effect(&"static_slow"):
 		# Flickering violet/cyan static disruption interference arcs
 		var spin: float = _vfx_anim_time * 4.5
 		var flicker: float = 0.65 + 0.35 * sin(_vfx_anim_time * 24.0)
@@ -1217,10 +1165,21 @@ func _die() -> void:
 	_cancel_active_tasks(false)
 	command_state = CommandState.IDLE
 	current_target = null
-	_wants_nav_movement = false
+	stop_component_navigation()
 	velocity = Vector2.ZERO
 	set_selected(false)
+	if SpatialGrid != null:
+		SpatialGrid.unregister_unit(self)
 	_unregister_from_economy()
+	if data != null and (data.salvage_silica > 0 or data.salvage_compute > 0) and get_parent() != null:
+		var salvage_scene: PackedScene = load(SALVAGE_CORE_SCENE_PATH) as PackedScene
+		if salvage_scene != null:
+			var core: Node2D = salvage_scene.instantiate() as Node2D
+			if core != null:
+				core.global_position = global_position
+				get_parent().add_child(core)
+				if core.has_method("configure_payload"):
+					core.call("configure_payload", data.salvage_silica, data.salvage_compute, data.display_name)
 	if get_parent() != null and (team == Team.PLAYER or visible):
 		var uid: StringName = get_unit_type_id()
 		var is_heavy: bool = (uid == &"goliath_frame" or uid == &"arc_lancer" or uid == &"chrysalis_mortar")
@@ -1252,6 +1211,9 @@ func _physics_process(delta: float) -> void:
 		combat_component.tick_cooldown(delta)
 	if ability_component != null:
 		ability_component.tick_cooldowns(delta)
+		ability_component.tick_autocast(self, delta)
+	if repair_component != null:
+		repair_component.call("tick_auto_repair", self, delta)
 	_tick_status_effects(delta)
 
 	if _hit_flash_timer > 0.0:
@@ -1265,8 +1227,8 @@ func _physics_process(delta: float) -> void:
 	if not _can_move() and not _can_attack():
 		return
 
-	_wants_nav_movement = false
-	_desired_move_velocity = Vector2.ZERO
+	if movement_component != null:
+		movement_component.call("begin_frame")
 
 	match command_state:
 		CommandState.IDLE:
@@ -1291,42 +1253,24 @@ func _physics_process(delta: float) -> void:
 			_process_patrolling(delta)
 		CommandState.REPAIRING:
 			_process_repairing(delta)
+		CommandState.SALVAGING:
+			_process_salvaging(delta)
 
-	_update_worker_collision_passing()
-	_apply_anti_stuck_steering(delta)
-
-	if _can_move() and nav_agent != null and nav_agent.avoidance_enabled:
-		nav_agent.set_velocity(_desired_move_velocity)
-		if not _wants_nav_movement:
-			_apply_stationary_separation(delta)
-	else:
-		_apply_direct_motion(_desired_move_velocity, delta)
+	if movement_component != null:
+		movement_component.call("finish_physics_step", self, delta)
 
 
 func _on_nav_velocity_computed(safe_velocity: Vector2) -> void:
-	if is_dead or is_staffed or not _wants_nav_movement:
-		return
-	if nav_agent != null and not nav_agent.avoidance_enabled:
-		return
-	_apply_direct_motion(safe_velocity, _last_delta)
+	if movement_component != null:
+		movement_component.call("on_nav_velocity_computed", self, safe_velocity, _last_delta)
 
 
 func _tick_status_effects(delta: float) -> void:
-	var changed: bool = false
-	var any_active: bool = _adrenal_timer > 0.0 or _slow_timer > 0.0
-	if _adrenal_timer > 0.0:
-		_adrenal_timer = maxf(0.0, _adrenal_timer - delta)
-		if _adrenal_timer <= 0.0:
-			_adrenal_speed_bonus = 0.0
-			_adrenal_attack_speed_bonus = 0.0
-			changed = true
-	if _slow_timer > 0.0:
-		_slow_timer = maxf(0.0, _slow_timer - delta)
-		if _slow_timer <= 0.0:
-			_slow_move_penalty = 0.0
-			_slow_attack_penalty = 0.0
-			changed = true
-	if any_active:
+	if status_effect_component == null:
+		return
+	var had_any: bool = bool(status_effect_component.call("has_any_active"))
+	var changed: bool = bool(status_effect_component.call("tick", delta))
+	if had_any:
 		_vfx_anim_time += delta
 		queue_redraw()
 	if changed:
@@ -1440,7 +1384,8 @@ func _process_attack_moving(delta: float) -> void:
 	if nav_agent == null:
 		_advance_command_queue()
 		return
-	if _last_nav_target == Vector2.INF or _last_nav_target.distance_squared_to(_attack_move_destination) > 1.0:
+	var last_t: Vector2 = (movement_component.get("last_nav_target") as Vector2) if movement_component != null else Vector2.INF
+	if last_t == Vector2.INF or last_t.distance_squared_to(_attack_move_destination) > 1.0:
 		_set_nav_target(_attack_move_destination)
 	if not _is_nav_map_ready():
 		return
@@ -1557,6 +1502,49 @@ func _process_repairing(delta: float) -> void:
 	repair_component.call("tick", self, delta)
 
 
+func _process_salvaging(delta: float) -> void:
+	if _salvage_target == null or not is_instance_valid(_salvage_target) or bool(_salvage_target.get("is_claimed")) or _salvage_target.is_queued_for_deletion():
+		_salvage_target = null
+		_is_salvaging_in_place = false
+		stop_component_navigation()
+		if gather_bar_root != null:
+			gather_bar_root.visible = false
+		_advance_command_queue()
+		return
+
+	var unit_r: float = data.collision_radius if data != null else 13.0
+	var core_r: float = float(_salvage_target.get("interaction_radius")) if _salvage_target.get("interaction_radius") != null else 22.0
+	var reach: float = core_r + unit_r + 32.0
+	var dist: float = global_position.distance_to(_salvage_target.global_position)
+	if dist <= reach:
+		_is_salvaging_in_place = true
+		stop_component_navigation()
+		_face_point(_salvage_target.global_position, delta)
+		var completed: bool = bool(_salvage_target.call("advance_extraction", self, delta))
+		if gather_bar_root != null and gather_bar_fill != null:
+			var prog: float = float(_salvage_target.get("extraction_progress")) if is_instance_valid(_salvage_target) else 1.0
+			gather_bar_root.visible = not completed
+			gather_bar_fill.size.x = GATHER_BAR_WIDTH * clampf(prog, 0.0, 1.0)
+		_salvage_vfx_timer -= delta
+		if _salvage_vfx_timer <= 0.0 and get_parent() != null and visible and is_instance_valid(_salvage_target):
+			_salvage_vfx_timer = 0.18
+			var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
+			fx.z_index = 53
+			get_parent().add_child(fx)
+			fx.call("setup_repair_beam", global_position, _salvage_target.global_position, Color(1.0, 0.80, 0.30, 0.96))
+		if completed:
+			_salvage_target = null
+			_is_salvaging_in_place = false
+			if gather_bar_root != null:
+				gather_bar_root.visible = false
+			_advance_command_queue()
+		return
+
+	_is_salvaging_in_place = false
+	var approach: Vector2 = get_or_compute_approach_point(_salvage_target, core_r, 6.0, null, null)
+	request_component_navigation(approach, 10.0, 4.0)
+
+
 func _process_patrolling(delta: float) -> void:
 	if patrol_waypoints.size() < 2:
 		patrol_waypoints.clear()
@@ -1599,7 +1587,8 @@ func _process_patrolling(delta: float) -> void:
 
 	patrol_index = clampi(patrol_index, 0, patrol_waypoints.size() - 1)
 	var dest: Vector2 = patrol_waypoints[patrol_index]
-	if _last_nav_target == Vector2.INF or _last_nav_target.distance_squared_to(dest) > 1.0:
+	var last_p: Vector2 = (movement_component.get("last_nav_target") as Vector2) if movement_component != null else Vector2.INF
+	if last_p == Vector2.INF or last_p.distance_squared_to(dest) > 1.0:
 		_set_nav_target(dest)
 	if not _is_nav_map_ready():
 		return
@@ -1629,6 +1618,11 @@ func _cancel_active_tasks(keep_gather: bool) -> void:
 		_construction_target = null
 		if gather_bar_root != null:
 			gather_bar_root.visible = false
+	if _salvage_target != null or _is_salvaging_in_place:
+		_salvage_target = null
+		_is_salvaging_in_place = false
+		if gather_bar_root != null:
+			gather_bar_root.visible = false
 
 
 func _try_start_auto_gather() -> void:
@@ -1654,447 +1648,43 @@ func _try_start_auto_gather() -> void:
 
 
 func _request_nav_toward_point(target_point: Vector2, repath_threshold: float, stop_distance: float = 0.0) -> void:
-	var dist_to_target: float = global_position.distance_to(target_point)
-	if stop_distance > 0.0 and dist_to_target <= stop_distance:
-		return
-	if nav_agent == null:
-		_steer_direct_toward(target_point)
-		return
-	if _last_nav_target == Vector2.INF or _last_nav_target.distance_squared_to(target_point) > repath_threshold * repath_threshold:
-		_set_nav_target(target_point)
-	if not _is_nav_map_ready():
-		_steer_direct_toward(target_point)
-		return
-	if nav_agent.is_navigation_finished():
-		var reach_cutoff: float = stop_distance if stop_distance > 0.0 else maxf(nav_agent.target_desired_distance, 6.0)
-		if dist_to_target > reach_cutoff:
-			_steer_direct_toward(target_point)
-		return
-	_compute_nav_desired_velocity()
-	if not _wants_nav_movement and dist_to_target > maxf(stop_distance, 4.0):
-		_steer_direct_toward(target_point)
-
-
-func _steer_direct_toward(target_point: Vector2) -> void:
-	var to_target: Vector2 = target_point - global_position
-	if to_target.length_squared() <= 4.0:
-		return
-	var dir: Vector2 = _steer_around_obstacles_and_units(to_target.normalized())
-	_wants_nav_movement = true
-	_desired_move_velocity = dir * get_effective_move_speed()
+	if movement_component != null:
+		movement_component.call("request_nav_toward_point", self, target_point, repath_threshold, stop_distance)
 
 
 func _compute_nav_desired_velocity() -> void:
-	var next_point: Vector2 = nav_agent.get_next_path_position()
-	var to_next: Vector2 = next_point - global_position
-	if to_next.length_squared() < 1.0:
-		return
-	var dir: Vector2 = _steer_around_static_units(to_next.normalized())
-	_wants_nav_movement = true
-	_desired_move_velocity = dir * get_effective_move_speed()
-
-
-func _steer_around_obstacles_and_units(move_dir: Vector2) -> Vector2:
-	var steer: Vector2 = _steer_around_static_units(move_dir)
-	if not is_inside_tree():
-		return steer
-	var my_r: float = data.collision_radius if data != null else 16.0
-	var probe_dist: float = my_r + 22.0
-	var probe_pt: Vector2 = global_position + steer * probe_dist
-	var ignore_b: Building = _get_active_target_building()
-	var ignore_rn: ResourceNode = _get_active_target_resource()
-	var bounds: Rect2 = _get_arena_bounds()
-	var safe_bounds: Rect2 = Rect2(
-		bounds.position + Vector2(my_r + 4.0, my_r + 4.0),
-		bounds.size - Vector2((my_r + 4.0) * 2.0, (my_r + 4.0) * 2.0)
-	)
-	if _is_point_clear_of_obstacles(probe_pt, my_r + 2.0, safe_bounds, ignore_b, ignore_rn):
-		return steer
-
-	var tangent_l: Vector2 = Vector2(-steer.y, steer.x)
-	var tangent_r: Vector2 = Vector2(steer.y, -steer.x)
-	var left_clear: bool = _is_point_clear_of_obstacles(global_position + (steer * 0.45 + tangent_l * 0.85).normalized() * probe_dist, my_r + 2.0, safe_bounds, ignore_b, ignore_rn)
-	var right_clear: bool = _is_point_clear_of_obstacles(global_position + (steer * 0.45 + tangent_r * 0.85).normalized() * probe_dist, my_r + 2.0, safe_bounds, ignore_b, ignore_rn)
-	if left_clear and not right_clear:
-		return (steer * 0.40 + tangent_l * 0.90).normalized()
-	if right_clear and not left_clear:
-		return (steer * 0.40 + tangent_r * 0.90).normalized()
-	var chosen_t: Vector2 = tangent_l if _stuck_side_sign >= 0.0 else tangent_r
-	return (steer * 0.35 + chosen_t * 0.92).normalized()
-
-
-func _get_active_target_building() -> Building:
-	if command_state == CommandState.CONSTRUCTING and is_instance_valid(_construction_target):
-		return _construction_target
-	if command_state == CommandState.STAFFING_BUILDING and staff_component != null and is_instance_valid(staff_component.target_building):
-		return staff_component.target_building
-	if command_state == CommandState.GATHERING and gather_component != null and gather_component.state == GatherComponent.GatherState.GATHER_RETURNING_TO_BASE and is_instance_valid(gather_component.dropoff_building):
-		return gather_component.dropoff_building
-	return null
-
-
-func _get_active_target_resource() -> ResourceNode:
-	if command_state == CommandState.GATHERING and gather_component != null and is_instance_valid(gather_component.target_node):
-		return gather_component.target_node
-	return null
-
-
-func _get_arena_bounds() -> Rect2:
-	if is_inside_tree():
-		var nav_reg: Node = get_tree().get_first_node_in_group("arena_nav_region")
-		if nav_reg != null and "arena_bounds" in nav_reg:
-			var b: Variant = nav_reg.get("arena_bounds")
-			if b is Rect2:
-				return b as Rect2
-	return Rect2(-1300.0, -950.0, 2600.0, 1900.0)
-
-
-func _is_point_clear_of_obstacles(
-	world_pos: Vector2,
-	clearance_radius: float,
-	safe_bounds: Rect2,
-	ignore_building: Building = null,
-	ignore_resource: ResourceNode = null
-) -> bool:
-	if safe_bounds.has_area() and not safe_bounds.has_point(world_pos):
-		return false
-	if not is_inside_tree():
-		return true
-	for node: Node in get_tree().get_nodes_in_group("terrain_obstacles"):
-		if is_instance_valid(node) and node.has_method("overlaps_circle"):
-			if node.call("overlaps_circle", world_pos, clearance_radius):
-				return false
-	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
-		if is_instance_valid(node) and node.has_method("overlaps_circle"):
-			if node.call("overlaps_circle", world_pos, clearance_radius):
-				return false
-	for node: Node in get_tree().get_nodes_in_group("buildings"):
-		if not (node is Building) or not is_instance_valid(node):
-			continue
-		var b: Building = node
-		if b.is_destroyed or b == ignore_building:
-			continue
-		var min_d: float = b.footprint_radius + clearance_radius
-		if b.global_position.distance_squared_to(world_pos) < min_d * min_d:
-			return false
-	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
-		if not (node is ResourceNode) or not is_instance_valid(node):
-			continue
-		var rn: ResourceNode = node
-		if rn.is_depleted() or rn.is_vent or rn == ignore_resource:
-			continue
-		var min_d: float = rn.collision_radius + clearance_radius
-		if rn.global_position.distance_squared_to(world_pos) < min_d * min_d:
-			return false
-	return true
-
-
-func _should_ignore_unit_collision(other: Unit) -> bool:
-	if other == null or data == null or other.data == null:
-		return false
-	if other.team != team:
-		return false
-	var self_strider: bool = data.ignore_friendly_unit_collision
-	var other_strider: bool = other.data.ignore_friendly_unit_collision
-	# Colossus Striders walk cleanly over non-strider friendly units, and allies walk cleanly underneath.
-	return self_strider != other_strider
-
-
-func _steer_around_static_units(move_dir: Vector2) -> Vector2:
-	var steer: Vector2 = move_dir
-	var my_r: float = data.collision_radius if data != null else 16.0
-	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not is_instance_valid(node) or not (node is Unit) or node == self:
-			continue
-		var other: Unit = node
-		if other.is_dead or other.is_staffed or other.is_queued_for_deletion() or other._can_move():
-			continue
-		if _should_ignore_unit_collision(other):
-			continue
-		var to_other: Vector2 = other.global_position - global_position
-		var dist: float = to_other.length()
-		var other_r: float = other.data.collision_radius if other.data != null else 18.0
-		var avoid_dist: float = my_r + other_r + 36.0
-		if dist <= 0.001 or dist > avoid_dist:
-			continue
-		var to_other_dir: Vector2 = to_other / dist
-		if move_dir.dot(to_other_dir) <= 0.15:
-			continue
-		var side: float = -1.0 if move_dir.cross(to_other_dir) >= 0.0 else 1.0
-		var tangent: Vector2 = Vector2(-to_other_dir.y, to_other_dir.x) * side
-		var weight: float = clampf((avoid_dist - dist) / avoid_dist, 0.25, 1.0) * 1.4
-		steer += tangent * weight
-	return steer.normalized() if steer.length_squared() > 0.0001 else move_dir
-
-
-func _apply_direct_motion(target_velocity: Vector2, delta: float) -> void:
-	var accel: float = data.acceleration if data.acceleration > 0.0 else 1800.0
-	var eff_speed: float = get_effective_move_speed()
-	if _wants_nav_movement:
-		var combined: Vector2 = target_velocity + _compute_overlap_separation(1.0)
-		if combined.length() > eff_speed:
-			combined = combined.normalized() * eff_speed
-		velocity = velocity.move_toward(combined, accel * delta)
-		if velocity.length_squared() > 4.0:
-			_face_angle(velocity.angle(), delta)
-		move_and_slide()
-		_check_post_slide_settling()
-	else:
-		_apply_stationary_separation(delta)
-
-
-func _apply_stationary_separation(delta: float) -> void:
-	if not _can_move():
-		return
-	if command_state == CommandState.GATHERING and gather_component != null and gather_component.is_harvesting_in_place():
-		velocity = Vector2.ZERO
-		return
-	if command_state == CommandState.REPAIRING and repair_component != null and bool(repair_component.get("is_repairing_in_place")):
-		velocity = Vector2.ZERO
-		return
-	if command_state == CommandState.CONSTRUCTING and _construction_target != null and is_instance_valid(_construction_target):
-		var unit_r: float = data.collision_radius if data != null else 13.0
-		if global_position.distance_to(_construction_target.global_position) <= _construction_target.footprint_radius + unit_r + 28.0:
-			velocity = Vector2.ZERO
-			return
-	var sep_margin: float = 0.0 if command_state == CommandState.HOLD_POSITION else 2.5
-	var sep: Vector2 = _compute_overlap_separation(sep_margin)
-	if sep.length_squared() > 1.0:
-		velocity = sep
-		move_and_slide()
-	elif velocity.length_squared() > 0.01:
-		var decel: float = data.acceleration if data.acceleration > 0.0 else 1800.0
-		velocity = velocity.move_toward(Vector2.ZERO, decel * delta)
-		move_and_slide()
-	else:
-		velocity = Vector2.ZERO
-
-
-func _update_worker_collision_passing() -> void:
-	if data == null or data.ignore_friendly_unit_collision:
-		return
-	var is_worker_role: bool = data.can_gather or data.can_staff_compute or can_construct()
-	if not is_worker_role:
-		return
-	# During active task transit (gather, construct, staff, or moving on/into a task command),
-	# slide cleanly past friendly units while still colliding with World (Layer 1) and hostile units.
-	var active_type: StringName = active_command.get("type", &"")
-	var next_type: StringName = command_queue[0].get("type", &"") if not command_queue.is_empty() else &""
-	var is_task_transit: bool = (
-		command_state == CommandState.GATHERING
-		or command_state == CommandState.CONSTRUCTING
-		or command_state == CommandState.STAFFING_BUILDING
-		or command_state == CommandState.REPAIRING
-		or (command_state == CommandState.MOVING and (
-			active_type == &"gather"
-			or active_type == &"return_cargo"
-			or active_type == &"build"
-			or active_type == &"staff"
-			or active_type == &"repair"
-			or next_type == &"gather"
-			or next_type == &"return_cargo"
-			or next_type == &"build"
-			or next_type == &"staff"
-			or next_type == &"repair"
-		))
-	)
-	var hostile_bit: int = 4 if team == Team.PLAYER else 2
-	var want_mask: int = (1 | hostile_bit) if is_task_transit else 7
-	if collision_mask != want_mask:
-		collision_mask = want_mask
-
-	# Disable RVO avoidance on workers during active task transit (and while stationary working) so
-	# Godot's RVO2 solver never zeros safe_velocity behind teammates or resource nodes. Workers keep
-	# NavigationAgent2D pathfinding + direct motion + soft separation, and re-enable RVO when idle/moving.
-	if nav_agent != null:
-		var want_avoidance: bool = not is_task_transit
-		if nav_agent.avoidance_enabled != want_avoidance:
-			nav_agent.avoidance_enabled = want_avoidance
-			if not want_avoidance:
-				nav_agent.set_velocity(Vector2.ZERO)
-
-
-func _apply_anti_stuck_steering(delta: float) -> void:
-	if not _wants_nav_movement or _desired_move_velocity.length_squared() <= 4.0:
-		_stuck_sample_pos = global_position
-		_stuck_sample_timer = 0.0
-		_stuck_accum_time = 0.0
-		_stuck_nudge_timer = 0.0
-		_stuck_consecutive_nudges = 0
-		return
-
-	_stuck_sample_timer += delta
-	if _stuck_sample_timer >= 0.25:
-		var moved_dist: float = global_position.distance_to(_stuck_sample_pos)
-		var actual_speed: float = moved_dist / maxf(0.05, _stuck_sample_timer)
-		var eff_speed: float = maxf(1.0, get_effective_move_speed())
-		if actual_speed < eff_speed * 0.16:
-			_stuck_accum_time += _stuck_sample_timer
-			if _stuck_accum_time >= 0.55:
-				var forward: Vector2 = _desired_move_velocity.normalized()
-				if _stuck_consecutive_nudges == 0:
-					_stuck_side_sign = _pick_clearer_detour_side(forward)
-				elif _stuck_consecutive_nudges >= 2:
-					# Only flip side after two committed detour windows on the first side failed to clear.
-					_stuck_side_sign = -_stuck_side_sign
-					_stuck_consecutive_nudges = 0
-				_stuck_consecutive_nudges += 1
-				_stuck_nudge_dir = Vector2(-forward.y, forward.x) * _stuck_side_sign
-				_stuck_nudge_timer = 0.65
-				_stuck_accum_time = 0.0
-				# Force a fresh NavigationAgent2D path & approach slot evaluation around the obstruction.
-				invalidate_nav_path()
-		else:
-			_stuck_accum_time = 0.0
-			if actual_speed >= eff_speed * 0.30:
-				_stuck_consecutive_nudges = 0
-		_stuck_sample_pos = global_position
-		_stuck_sample_timer = 0.0
-
-	if _stuck_nudge_timer > 0.0:
-		_stuck_nudge_timer = maxf(0.0, _stuck_nudge_timer - delta)
-		var base_dir: Vector2 = _desired_move_velocity.normalized()
-		var blended: Vector2 = (base_dir * 0.35 + _stuck_nudge_dir * 0.90)
-		if blended.length_squared() > 0.001:
-			_desired_move_velocity = blended.normalized() * get_effective_move_speed()
-
-
-func _pick_clearer_detour_side(forward: Vector2) -> float:
-	var my_r: float = data.collision_radius if data != null else 16.0
-	var bounds: Rect2 = _get_arena_bounds()
-	var safe_bounds: Rect2 = Rect2(
-		bounds.position + Vector2(my_r + 6.0, my_r + 6.0),
-		bounds.size - Vector2((my_r + 6.0) * 2.0, (my_r + 6.0) * 2.0)
-	)
-	var ignore_b: Building = _get_active_target_building()
-	var ignore_rn: ResourceNode = _get_active_target_resource()
-	var probe_r: float = my_r + 24.0
-	var pos_dir: Vector2 = Vector2(-forward.y, forward.x)
-	var neg_dir: Vector2 = Vector2(forward.y, -forward.x)
-	var pos_clear: bool = _is_point_clear_of_obstacles(global_position + pos_dir * probe_r, my_r + 2.0, safe_bounds, ignore_b, ignore_rn)
-	var neg_clear: bool = _is_point_clear_of_obstacles(global_position + neg_dir * probe_r, my_r + 2.0, safe_bounds, ignore_b, ignore_rn)
-	if pos_clear and not neg_clear:
-		return 1.0
-	if neg_clear and not pos_clear:
-		return -1.0
-	return _stuck_side_sign
-
-
-func _compute_overlap_separation(extra_margin: float) -> Vector2:
-	var push: Vector2 = Vector2.ZERO
-	var my_r: float = data.collision_radius if data != null else 16.0
-	var max_push: float = get_effective_move_speed() * 0.85 if data != null else 220.0
-	var self_is_worker: bool = data != null and (data.can_gather or data.can_staff_compute or can_construct())
-	var self_in_task: bool = (
-		command_state == CommandState.GATHERING
-		or command_state == CommandState.CONSTRUCTING
-		or command_state == CommandState.STAFFING_BUILDING
-	)
-	var active_dest: Variant = get_active_command_destination() if self_in_task else null
-	var self_near_task: bool = active_dest is Vector2 and global_position.distance_squared_to(active_dest as Vector2) <= 105.0 * 105.0
-
-	for node: Node in get_tree().get_nodes_in_group("units"):
-		if not is_instance_valid(node) or not (node is Unit) or node == self:
-			continue
-		var other: Unit = node
-		if other.is_dead or other.is_staffed or other.is_queued_for_deletion():
-			continue
-		if _should_ignore_unit_collision(other):
-			continue
-		var other_r: float = other.data.collision_radius if other.data != null else 16.0
-		var min_dist: float = my_r + other_r + extra_margin
-		var diff: Vector2 = global_position - other.global_position
-		var dist_sq: float = diff.length_squared()
-		if dist_sq >= min_dist * min_dist:
-			continue
-		var dist: float = sqrt(dist_sq)
-		var dir: Vector2 = Vector2.RIGHT.rotated(fmod(float(get_instance_id() % 360) * 1.618, TAU)) if dist < 0.01 else (diff / dist)
-		var overlap_ratio: float = clampf((min_dist - dist) / maxf(1.0, min_dist), 0.15, 1.0)
-		var push_scale: float = 1.0
-		if self_is_worker and other.team == team and other.data != null and (other.data.can_gather or other.data.can_staff_compute or other.can_construct()):
-			var other_stationary_working: bool = (
-				(other.command_state == CommandState.GATHERING and other.gather_component != null and other.gather_component.is_harvesting_in_place())
-				or (other.command_state == CommandState.CONSTRUCTING and not other._wants_nav_movement)
-			)
-			if self_near_task and other_stationary_working:
-				# Do not let stationary harvesting/constructing workers push approaching teammates off reach.
-				continue
-			if self_in_task or other.command_state == CommandState.GATHERING or other.command_state == CommandState.CONSTRUCTING:
-				push_scale = 0.25
-		push += dir * max_push * overlap_ratio * push_scale
-	return push.normalized() * max_push if push.length() > max_push else push
+	if movement_component != null:
+		movement_component.call("compute_nav_desired_velocity", self)
 
 
 func _reset_progress_tracker() -> void:
-	_no_progress_timer = 0.0
-	_best_dist_to_goal = INF
-	_stuck_sample_pos = global_position
-	_stuck_sample_timer = 0.0
-	_stuck_accum_time = 0.0
-	_stuck_nudge_timer = 0.0
-	_stuck_consecutive_nudges = 0
+	if movement_component != null:
+		movement_component.call("reset_progress_tracker", self)
 
 
 func _should_settle_at_destination(goal_pos: Vector2, delta: float) -> bool:
-	var dist_to_goal: float = global_position.distance_to(goal_pos)
-	var arrive_dist: float = nav_agent.target_desired_distance + (14.0 if not command_queue.is_empty() else 0.0)
-	if dist_to_goal <= arrive_dist or nav_agent.is_navigation_finished():
-		return true
-	if dist_to_goal < _best_dist_to_goal - 4.0:
-		_best_dist_to_goal = dist_to_goal
-		_no_progress_timer = 0.0
-	elif dist_to_goal <= SETTLE_PROXIMITY_RADIUS:
-		_no_progress_timer += delta
-		if _no_progress_timer >= SETTLE_NO_PROGRESS_TIME:
-			return true
-	return false
-
-
-func _check_post_slide_settling() -> void:
-	if command_state != CommandState.MOVING and not (command_state == CommandState.ATTACK_MOVING and current_target == null):
-		return
-	var goal_pos: Vector2 = _move_destination if command_state == CommandState.MOVING else _attack_move_destination
-	if global_position.distance_to(goal_pos) > SETTLE_PROXIMITY_RADIUS:
-		return
-	for i: int in range(get_slide_collision_count()):
-		var collider: Object = get_slide_collision(i).get_collider()
-		if collider is Unit:
-			var other: Unit = collider
-			if other.team == team and other.command_state == CommandState.IDLE:
-				_wants_nav_movement = false
-				_reset_progress_tracker()
-				_advance_command_queue()
-				return
+	if movement_component != null:
+		return bool(movement_component.call("should_settle_at_destination", self, goal_pos, delta))
+	return true
 
 
 func _face_point(world_point: Vector2, delta: float) -> void:
-	var to_point: Vector2 = world_point - global_position
-	if to_point.length_squared() > 0.01:
-		_face_angle(to_point.angle(), delta)
-
-
-func _face_angle(target_angle: float, delta: float) -> void:
-	var turn_speed: float = data.turn_speed if data != null else 14.0
-	body_visual.rotation = lerp_angle(body_visual.rotation, target_angle, clampf(turn_speed * delta, 0.0, 1.0))
+	if movement_component != null:
+		movement_component.call("face_point", self, world_point, delta)
 
 
 func _set_nav_target(target_pos: Vector2) -> void:
-	if nav_agent == null:
-		return
-	nav_agent.target_position = target_pos
-	_last_nav_target = target_pos
+	if movement_component != null:
+		movement_component.call("set_nav_target", self, target_pos)
 
 
 func _clear_nav_target() -> void:
-	_last_nav_target = Vector2.INF
-	if nav_agent != null and is_inside_tree():
-		nav_agent.target_position = global_position
-		if nav_agent.avoidance_enabled:
-			nav_agent.set_velocity(Vector2.ZERO)
+	if movement_component != null:
+		movement_component.call("clear_nav_target", self)
 
 
 func _is_nav_map_ready() -> bool:
-	return nav_agent != null and NavigationServer2D.map_get_iteration_id(nav_agent.get_navigation_map()) > 0
+	return movement_component != null and bool(movement_component.call("is_nav_map_ready", self))
 
 
 func _can_move() -> bool:
@@ -2292,9 +1882,9 @@ func get_inspection_data() -> Dictionary:
 		stats.append({"label": "Range", "value": range_str})
 
 		var spd_str: String = "%d px/s" % int(round(get_effective_move_speed()))
-		if _adrenal_timer > 0.0:
+		if has_status_effect(&"adrenal_surge"):
 			spd_str += " [SURGE]"
-		elif _slow_timer > 0.0:
+		elif has_status_effect(&"static_slow"):
 			spd_str += " [SLOW]"
 		stats.append({"label": "Speed", "value": spd_str})
 
@@ -2374,6 +1964,8 @@ func _get_command_state_label() -> String:
 			return "Patrolling"
 		CommandState.REPAIRING:
 			return "Repairing"
+		CommandState.SALVAGING:
+			return "Extracting Salvage"
 	return "Active"
 
 

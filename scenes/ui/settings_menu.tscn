@@ -500,6 +500,31 @@ layout_mode = 2
 text = "85%"
 horizontal_alignment = 2
 
+[node name="AmbienceRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/AmbienceRow"]
+custom_minimum_size = Vector2(210, 0)
+layout_mode = 2
+text = "Ambience Volume"
+
+[node name="SldAmbienceVol" type="HSlider" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/AmbienceRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 100.0
+step = 1.0
+value = 55.0
+
+[node name="ValAmbienceVol" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio/AmbienceRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "55%"
+horizontal_alignment = 2
+
 [node name="MuteRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelAudio"]
 layout_mode = 2
 theme_override_constants/separation = 12

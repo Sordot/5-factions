@@ -217,10 +217,13 @@ func find_nearest_enemy(owner_unit: Unit, max_range: float) -> Node2D:
 		return null
 
 	var min_range: float = owner_unit.data.min_attack_range if owner_unit.data != null else 0.0
+	var my_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 16.0
+	var query_r: float = max_range + my_r + 16.0
 	var best_target: Node2D = null
 	var best_score: float = -INF
 
-	for node: Node in owner_unit.get_tree().get_nodes_in_group("units"):
+	var unit_candidates: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, query_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+	for node: Variant in unit_candidates:
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var candidate: Unit = node
@@ -234,7 +237,8 @@ func find_nearest_enemy(owner_unit: Unit, max_range: float) -> Node2D:
 			best_score = s
 			best_target = candidate
 
-	for node: Node in owner_unit.get_tree().get_nodes_in_group("buildings"):
+	var bldg_candidates: Array = SpatialGrid.query_buildings_in_radius(owner_unit.global_position, query_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("buildings")
+	for node: Variant in bldg_candidates:
 		if not is_instance_valid(node) or not (node is Building):
 			continue
 		var b: Building = node
@@ -339,6 +343,8 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 
 	if AudioManager != null and _is_pos_audible(owner_unit, tracer_origin, tracer_end):
 		AudioManager.play_weapon_for_unit(unit_id)
+		if AudioManager.has_method("notify_combat_activity"):
+			AudioManager.call("notify_combat_activity", 0.35)
 
 	if aoe_radius > 0.0:
 		# Chrysalis Mortar: lobbed parabolic caustic shell with ground impact telegraph ring & delayed splash
@@ -443,6 +449,35 @@ func _apply_aoe_damage_for_team(
 ) -> void:
 	if tree == null:
 		return
+	var entities: Array = SpatialGrid.query_entities_in_radius(center, radius, true, true) if SpatialGrid != null else []
+	if SpatialGrid != null:
+		for node: Variant in entities:
+			if not is_instance_valid(node):
+				continue
+			if node is Unit:
+				var candidate: Unit = node
+				if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not _are_teams_hostile(int(attacker_team), int(candidate.team)):
+					continue
+				var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
+				if candidate.global_position.distance_to(center) <= radius + enemy_r:
+					var dmg: float = base_dmg + (bonus_vs_armored if (candidate.data != null and candidate.data.is_armored) else 0.0)
+					candidate.take_damage(dmg, attacker)
+			elif node is Building:
+				var b: Building = node
+				if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(int(attacker_team), int(b.team)):
+					continue
+				if b.global_position.distance_to(center) <= radius + b.footprint_radius:
+					b.take_damage(base_dmg + bonus_vs_armored, attacker)
+			elif node is Node2D and (node as Node).is_in_group("destructible_barricades"):
+				var bar: Node2D = node as Node2D
+				if bool(bar.get("is_destroyed")) or bar.is_queued_for_deletion():
+					continue
+				var bar_r: float = float(bar.call("get_footprint_radius")) if bar.has_method("get_footprint_radius") else 40.0
+				if bar.global_position.distance_to(center) <= radius + bar_r:
+					var bar_dmg: float = base_dmg + (bonus_vs_armored if bool(bar.get("is_armored")) else 0.0)
+					bar.call("take_damage", bar_dmg, attacker)
+		return
+
 	for node: Node in tree.get_nodes_in_group("units"):
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
@@ -485,7 +520,10 @@ func _apply_line_pierce_damage(
 ) -> void:
 	if not is_instance_valid(owner_unit) or not owner_unit.is_inside_tree():
 		return
-	for node: Node in owner_unit.get_tree().get_nodes_in_group("units"):
+	var seg_mid: Vector2 = (seg_start + seg_end) * 0.5
+	var seg_r: float = seg_start.distance_to(seg_end) * 0.5 + half_width + 24.0
+	var unit_list: Array = SpatialGrid.query_units_in_radius(seg_mid, seg_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+	for node: Variant in unit_list:
 		if not is_instance_valid(node) or not (node is Unit) or node == primary_target:
 			continue
 		var candidate: Unit = node
@@ -496,7 +534,8 @@ func _apply_line_pierce_damage(
 		if candidate.global_position.distance_to(closest) <= half_width + enemy_r:
 			_apply_damage_to_target(owner_unit, candidate, pierce_dmg, bonus_vs_armored)
 
-	for node: Node in owner_unit.get_tree().get_nodes_in_group("buildings"):
+	var bldg_list: Array = SpatialGrid.query_buildings_in_radius(seg_mid, seg_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("buildings")
+	for node: Variant in bldg_list:
 		if not is_instance_valid(node) or not (node is Building) or node == primary_target:
 			continue
 		var b: Building = node

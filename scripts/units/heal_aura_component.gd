@@ -44,7 +44,8 @@ func _apply_heal_tick(owner_unit: Unit) -> void:
 	var now_ms: int = Time.get_ticks_msec()
 	var tick_col: Color = Color(0.32, 1.0, 0.68, 0.95) if owner_unit.team == Unit.Team.PLAYER else Color(1.0, 0.48, 0.36, 0.95)
 
-	for node: Node in owner_unit.get_tree().get_nodes_in_group("units"):
+	var candidates: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+	for node: Variant in candidates:
 		if not (node is Unit) or node == owner_unit or not is_instance_valid(node):
 			continue
 		var ally: Unit = node

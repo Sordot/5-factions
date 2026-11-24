@@ -951,6 +951,13 @@ func _connect_inspected_signals(entity: Node) -> void:
 			entity.connect("status_changed", _on_inspected_entity_updated)
 		if entity.has_signal("destroyed") and not entity.is_connected("destroyed", _on_inspected_entity_removed):
 			entity.connect("destroyed", _on_inspected_entity_removed)
+	elif entity.is_in_group("salvage_cores"):
+		if entity.has_signal("status_changed") and not entity.is_connected("status_changed", _on_inspected_entity_updated):
+			entity.connect("status_changed", _on_inspected_entity_updated)
+		if entity.has_signal("claimed") and not entity.is_connected("claimed", _on_inspected_entity_removed):
+			entity.connect("claimed", _on_inspected_entity_removed)
+		if entity.has_signal("expired") and not entity.is_connected("expired", _on_inspected_entity_removed):
+			entity.connect("expired", _on_inspected_entity_removed)
 
 
 func _disconnect_inspected_signals() -> void:
@@ -987,6 +994,13 @@ func _disconnect_inspected_signals() -> void:
 			_inspected_entity.disconnect("status_changed", _on_inspected_entity_updated)
 		if _inspected_entity.has_signal("destroyed") and _inspected_entity.is_connected("destroyed", _on_inspected_entity_removed):
 			_inspected_entity.disconnect("destroyed", _on_inspected_entity_removed)
+	elif _inspected_entity.is_in_group("salvage_cores"):
+		if _inspected_entity.has_signal("status_changed") and _inspected_entity.is_connected("status_changed", _on_inspected_entity_updated):
+			_inspected_entity.disconnect("status_changed", _on_inspected_entity_updated)
+		if _inspected_entity.has_signal("claimed") and _inspected_entity.is_connected("claimed", _on_inspected_entity_removed):
+			_inspected_entity.disconnect("claimed", _on_inspected_entity_removed)
+		if _inspected_entity.has_signal("expired") and _inspected_entity.is_connected("expired", _on_inspected_entity_removed):
+			_inspected_entity.disconnect("expired", _on_inspected_entity_removed)
 
 
 func _on_ability_targeting_changed(active_ability: AbilityData) -> void:
@@ -1163,7 +1177,9 @@ func _rebuild_ability_buttons(active_group: Dictionary) -> void:
 	for ab: AbilityData in data.abilities:
 		if ab != null:
 			valid_count += 1
-	var use_grid_4x2: bool = valid_count > 4
+	var supports_auto_repair: bool = data.can_gather or data.can_staff_compute or data.unit_type_id == &"worker" or data.unit_type_id == &"engineer"
+	var total_slots: int = valid_count + (1 if supports_auto_repair else 0)
+	var use_grid_4x2: bool = total_slots > 4
 	ability_row.columns = 4 if use_grid_4x2 else 2
 	var ab_min_size: Vector2 = Vector2(114.0, 27.0) if use_grid_4x2 else Vector2(214.0, 29.0)
 	var ab_font_size: int = 10 if use_grid_4x2 else 11
@@ -1182,6 +1198,21 @@ func _rebuild_ability_buttons(active_group: Dictionary) -> void:
 			if _selection_controller != null:
 				_selection_controller.request_ability_slot(captured_ability, Input.is_key_pressed(KEY_SHIFT))
 		)
+		var border_fx: Control = null
+		if ability.allow_autocast:
+			border_fx = _AutoCastBorderOverlay.new()
+			border_fx.name = "AutoCastBorder"
+			border_fx.set_anchors_preset(Control.PRESET_FULL_RECT)
+			border_fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			border_fx.visible = false
+			btn.add_child(border_fx)
+			btn.gui_input.connect(func(ev: InputEvent) -> void:
+				if ev is InputEventMouseButton:
+					var mb: InputEventMouseButton = ev as InputEventMouseButton
+					if mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT:
+						_toggle_subgroup_autocast(captured_ability.ability_id)
+						btn.accept_event()
+			)
 		btn.tooltip_text = ""
 		btn.mouse_entered.connect(func() -> void:
 			if command_tooltip != null:
@@ -1197,7 +1228,111 @@ func _rebuild_ability_buttons(active_group: Dictionary) -> void:
 		_ability_buttons[ability.ability_id] = {
 			"button": btn,
 			"ability": ability,
+			"autocast_fx": border_fx,
 		}
+
+	if supports_auto_repair:
+		var rep_btn: Button = Button.new()
+		rep_btn.focus_mode = Control.FOCUS_NONE
+		rep_btn.custom_minimum_size = ab_min_size
+		rep_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		rep_btn.add_theme_font_size_override("font_size", ab_font_size)
+		var rep_fx: Control = _AutoCastBorderOverlay.new()
+		rep_fx.name = "AutoCastBorder"
+		rep_fx.set_anchors_preset(Control.PRESET_FULL_RECT)
+		rep_fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		rep_fx.visible = false
+		rep_btn.add_child(rep_fx)
+		rep_btn.pressed.connect(func() -> void:
+			_toggle_subgroup_auto_repair()
+		)
+		rep_btn.gui_input.connect(func(ev: InputEvent) -> void:
+			if ev is InputEventMouseButton:
+				var mb: InputEventMouseButton = ev as InputEventMouseButton
+				if mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT:
+					_toggle_subgroup_auto_repair()
+					rep_btn.accept_event()
+		)
+		rep_btn.tooltip_text = ""
+		rep_btn.mouse_entered.connect(func() -> void:
+			if command_tooltip != null:
+				var is_on: bool = _is_subgroup_auto_repair_enabled()
+				var state_str: String = "Auto-Cast ON" if is_on else "Auto-Cast OFF"
+				var scope_str: String = "damaged friendly buildings & heavy synthetic units within 220px" if data.can_staff_compute else "damaged friendly buildings within 220px"
+				command_tooltip.show_tooltip(
+					"Auto-Repair",
+					"RMB / LMB",
+					"Radius: 220 px  •  [Right-Click: %s]" % state_str,
+					"When IDLE, automatically repairs %s (~2B/1S per sec)." % scope_str
+				)
+		)
+		rep_btn.mouse_exited.connect(func() -> void:
+			if command_tooltip != null:
+				command_tooltip.hide_tooltip()
+		)
+		ability_row.add_child(rep_btn)
+		_ability_buttons[&"__auto_repair__"] = {
+			"button": rep_btn,
+			"ability": null,
+			"autocast_fx": rep_fx,
+		}
+
+
+func _toggle_subgroup_autocast(ability_id: StringName) -> void:
+	var any_on: bool = _is_subgroup_autocast_enabled(ability_id)
+	var next_state: bool = not any_on
+	for item: Variant in _active_subgroup_units:
+		if is_instance_valid(item) and item is Unit:
+			var u: Unit = item as Unit
+			if not u.is_dead and u.ability_component != null:
+				u.ability_component.set_autocast_enabled(ability_id, next_state)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"autocast_toggle", -3.0, 0.03)
+	_refresh_single_ability_button(ability_id)
+
+
+func _is_subgroup_autocast_enabled(ability_id: StringName) -> bool:
+	for item: Variant in _active_subgroup_units:
+		if is_instance_valid(item) and item is Unit:
+			var u: Unit = item as Unit
+			if not u.is_dead and u.ability_component != null and u.ability_component.is_autocast_enabled(ability_id):
+				return true
+	return false
+
+
+func _toggle_subgroup_auto_repair() -> void:
+	var next_state: bool = not _is_subgroup_auto_repair_enabled()
+	for item: Variant in _active_subgroup_units:
+		if is_instance_valid(item) and item is Unit:
+			var u: Unit = item as Unit
+			if not u.is_dead and u.repair_component != null and u.repair_component.has_method("set_auto_repair_enabled"):
+				u.repair_component.call("set_auto_repair_enabled", next_state)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"autocast_toggle", -3.0, 0.03)
+	_refresh_auto_repair_button()
+
+
+func _is_subgroup_auto_repair_enabled() -> bool:
+	for item: Variant in _active_subgroup_units:
+		if is_instance_valid(item) and item is Unit:
+			var u: Unit = item as Unit
+			if not u.is_dead and u.repair_component != null and bool(u.repair_component.get("auto_repair_enabled")):
+				return true
+	return false
+
+
+func _refresh_auto_repair_button() -> void:
+	if not _ability_buttons.has(&"__auto_repair__"):
+		return
+	var entry: Dictionary = _ability_buttons[&"__auto_repair__"]
+	var btn: Button = entry["button"] as Button
+	var fx: Control = entry.get("autocast_fx", null) as Control
+	var is_on: bool = _is_subgroup_auto_repair_enabled()
+	if btn != null:
+		btn.text = "Auto-Repair: ON" if is_on else "Auto-Repair: OFF"
+		btn.modulate = Color(0.42, 1.0, 0.88, 1.0) if is_on else Color(0.76, 0.84, 0.90, 0.88)
+	if fx != null:
+		fx.visible = is_on
 
 
 func _build_ability_tooltip_meta(ability: AbilityData) -> String:
@@ -1225,12 +1360,16 @@ func _build_ability_tooltip_meta(ability: AbilityData) -> String:
 		ab_parts.append("Radius: %d px" % int(round(ability.aoe_radius)))
 	if ability.effect_duration > 0.0:
 		ab_parts.append("Duration: %.1fs" % ability.effect_duration)
+	if ability.allow_autocast:
+		var ac_on: bool = _is_subgroup_autocast_enabled(ability.ability_id)
+		ab_parts.append("[Right-Click: Auto-Cast %s]" % ("ON" if ac_on else "OFF"))
 	return "  •  ".join(ab_parts)
 
 
 func _refresh_all_ability_states() -> void:
 	for ability: AbilityData in _active_abilities:
 		_refresh_single_ability_button(ability.ability_id)
+	_refresh_auto_repair_button()
 
 
 func _refresh_single_ability_button(ability_id: StringName) -> void:
@@ -1239,6 +1378,12 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 	var entry: Dictionary = _ability_buttons[ability_id]
 	var btn: Button = entry["button"]
 	var ability: AbilityData = entry["ability"]
+	if ability == null:
+		return
+	var ac_fx: Control = entry.get("autocast_fx", null) as Control
+	var ac_on: bool = ability.allow_autocast and _is_subgroup_autocast_enabled(ability_id)
+	if ac_fx != null:
+		ac_fx.visible = ac_on
 
 	var is_targeting: bool = (_targeting_ability != null and _targeting_ability.ability_id == ability_id)
 	var hk_compact: String = _get_ability_hotkey_display(ability.hotkey_label, true)
@@ -1290,16 +1435,60 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 		else:
 			min_cd = minf(min_cd, rem)
 
+	var ac_tag: String = " [AUTO]" if ac_on else ""
 	if ready_count > 0:
 		btn.disabled = false
 		if is_targeting:
 			btn.text = "%s%s (TARGET)" % [hk_prefix, ability.display_name]
 			btn.modulate = Color(1.0, 0.85, 0.32, 1.0)
 		else:
-			btn.text = "%s%s" % [hk_prefix, ability.display_name]
-			btn.modulate = Color(0.55, 1.0, 0.95, 1.0)
+			btn.text = "%s%s%s" % [hk_prefix, ability.display_name, ac_tag]
+			btn.modulate = Color(0.58, 1.0, 0.92, 1.0) if ac_on else Color(0.55, 1.0, 0.95, 1.0)
 	else:
 		var display_cd: float = 0.0 if min_cd == INF else min_cd
-		btn.disabled = true
-		btn.text = "%s%s (%.1fs)" % [hk_prefix, ability.display_name, display_cd]
-		btn.modulate = Color(0.6, 0.64, 0.7, 0.75)
+		btn.disabled = false if ability.allow_autocast else true
+		btn.text = "%s%s (%.1fs)%s" % [hk_prefix, ability.display_name, display_cd, ac_tag]
+		btn.modulate = Color(0.68, 0.74, 0.80, 0.85) if ac_on else Color(0.6, 0.64, 0.7, 0.75)
+
+
+class _AutoCastBorderOverlay extends Control:
+	var _t: float = 0.0
+
+	func _process(delta: float) -> void:
+		if not visible:
+			return
+		_t += delta * 1.4
+		queue_redraw()
+
+	func _draw() -> void:
+		var w: float = size.x
+		var h: float = size.y
+		if w <= 6.0 or h <= 6.0:
+			return
+		var rect: Rect2 = Rect2(Vector2(1.0, 1.0), Vector2(w - 2.0, h - 2.0))
+		draw_rect(rect, Color(0.28, 0.96, 1.0, 0.65), false, 1.4)
+		# Animated chasing gold/cyan corner runners around the perimeter
+		var perim: float = (w + h) * 2.0
+		for k: int in range(2):
+			var d0: float = fmod((_t + float(k) * 0.5) * perim, perim)
+			var seg_len: float = minf(26.0, perim * 0.14)
+			var p_start: Vector2 = _point_on_rect(rect, d0)
+			var p_end: Vector2 = _point_on_rect(rect, fmod(d0 + seg_len, perim))
+			var col: Color = Color(1.0, 0.86, 0.32, 0.98) if (k == 0) else Color(0.32, 1.0, 0.90, 0.98)
+			if absf(p_start.x - p_end.x) < 1.0 or absf(p_start.y - p_end.y) < 1.0:
+				draw_line(p_start, p_end, col, 2.4, true)
+			draw_circle(p_start, 2.2, col)
+
+	func _point_on_rect(r: Rect2, dist: float) -> Vector2:
+		var w: float = r.size.x
+		var h: float = r.size.y
+		if dist <= w:
+			return Vector2(r.position.x + dist, r.position.y)
+		dist -= w
+		if dist <= h:
+			return Vector2(r.end.x, r.position.y + dist)
+		dist -= h
+		if dist <= w:
+			return Vector2(r.end.x - dist, r.end.y)
+		dist -= w
+		return Vector2(r.position.x, r.end.y - clampf(dist, 0.0, h))

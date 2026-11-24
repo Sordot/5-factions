@@ -83,6 +83,7 @@ var camera_shake_enabled: bool = true
 var master_volume: float = 0.72
 var sfx_volume: float = 0.85
 var ui_volume: float = 0.85
+var ambience_volume: float = 0.55
 var muted: bool = false
 var mute_when_unfocused: bool = false
 
@@ -174,6 +175,7 @@ func load_settings() -> void:
 	master_volume = clampf(float(cfg.get_value("audio", "master_volume", 0.72)), 0.0, 1.0)
 	sfx_volume = clampf(float(cfg.get_value("audio", "sfx_volume", 0.85)), 0.0, 1.0)
 	ui_volume = clampf(float(cfg.get_value("audio", "ui_volume", 0.85)), 0.0, 1.0)
+	ambience_volume = clampf(float(cfg.get_value("audio", "ambience_volume", 0.55)), 0.0, 1.0)
 	muted = bool(cfg.get_value("audio", "muted", false))
 	mute_when_unfocused = bool(cfg.get_value("audio", "mute_when_unfocused", false))
 
@@ -245,6 +247,7 @@ func save_settings() -> void:
 	cfg.set_value("audio", "master_volume", master_volume)
 	cfg.set_value("audio", "sfx_volume", sfx_volume)
 	cfg.set_value("audio", "ui_volume", ui_volume)
+	cfg.set_value("audio", "ambience_volume", ambience_volume)
 	cfg.set_value("audio", "muted", muted)
 	cfg.set_value("audio", "mute_when_unfocused", mute_when_unfocused)
 
@@ -310,11 +313,14 @@ func set_audio_settings(
 	p_sfx: float,
 	p_ui: float,
 	p_muted: bool,
-	p_mute_unfocused: Variant = null
+	p_mute_unfocused: Variant = null,
+	p_ambience: Variant = null
 ) -> void:
 	master_volume = clampf(p_master, 0.0, 1.0)
 	sfx_volume = clampf(p_sfx, 0.0, 1.0)
 	ui_volume = clampf(p_ui, 0.0, 1.0)
+	if p_ambience is float or p_ambience is int:
+		ambience_volume = clampf(float(p_ambience), 0.0, 1.0)
 	muted = p_muted
 	if p_mute_unfocused is bool:
 		mute_when_unfocused = bool(p_mute_unfocused)
@@ -634,6 +640,7 @@ func reset_category(category: StringName) -> void:
 			master_volume = 0.72
 			sfx_volume = 0.85
 			ui_volume = 0.85
+			ambience_volume = 0.55
 			muted = false
 			mute_when_unfocused = false
 			if AudioManager != null and AudioManager.has_method("set_unfocused_mute"):
@@ -674,6 +681,7 @@ func reset_all_to_defaults() -> void:
 	master_volume = 0.72
 	sfx_volume = 0.85
 	ui_volume = 0.85
+	ambience_volume = 0.55
 	muted = false
 	mute_when_unfocused = false
 	if AudioManager != null and AudioManager.has_method("set_unfocused_mute"):

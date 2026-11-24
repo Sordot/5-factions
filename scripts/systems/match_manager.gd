@@ -223,6 +223,8 @@ func push_tactical_alert(world_pos: Vector2, alert_type: StringName, message: St
 
 	if AudioManager != null and AudioManager.has_method("play_tactical_alert"):
 		AudioManager.play_tactical_alert(normalized_type)
+		if normalized_type == &"under_attack" and AudioManager.has_method("notify_combat_activity"):
+			AudioManager.call("notify_combat_activity", 0.85)
 
 	tactical_alert_triggered.emit(world_pos, normalized_type, label)
 	tactical_alert_recorded.emit(world_pos, label)

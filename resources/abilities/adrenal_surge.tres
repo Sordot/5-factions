@@ -17,4 +17,6 @@ move_speed_modifier = 0.35
 attack_speed_modifier = 0.3
 effect_color = Color(0.28, 1, 0.72, 0.95)
 cast_on_all_ready = true
+allow_autocast = true
+default_autocast = false
 description = "Injects bio-stimulants, boosting move speed (+35%) and attack speed (+30%) for 4.0s (extended to 6.0s and +45% attack speed with Adrenal Potency)."

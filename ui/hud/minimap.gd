@@ -287,6 +287,24 @@ func _on_map_viewport_draw() -> void:
 	if _fog_system != null and _fog_system.fog_enabled and _fog_system.fog_texture != null:
 		map_viewport.draw_texture_rect(_fog_system.fog_texture, rect, false)
 
+	# 5.5. Salvage Cores (pulsing amber/cyan diamonds when explored/visible).
+	for node: Node in get_tree().get_nodes_in_group("salvage_cores"):
+		if not is_instance_valid(node) or not (node is Node2D) or bool(node.get("is_claimed")):
+			continue
+		var sc: Node2D = node as Node2D
+		if _fog_system != null and _fog_system.fog_enabled and not _fog_system.is_world_pos_explored(sc.global_position):
+			continue
+		var sp: Vector2 = _world_to_minimap(sc.global_position)
+		var sr: float = 2.6 + pulse * 0.9
+		var s_dia: PackedVector2Array = PackedVector2Array([
+			sp + Vector2(0.0, -sr),
+			sp + Vector2(sr, 0.0),
+			sp + Vector2(0.0, sr),
+			sp + Vector2(-sr, 0.0),
+		])
+		map_viewport.draw_colored_polygon(s_dia, Color(1.0, 0.80, 0.26, 0.96))
+		map_viewport.draw_polyline(s_dia + PackedVector2Array([s_dia[0]]), Color(0.32, 0.96, 1.0, 0.95), 1.0)
+
 	# 6. Buildings (Team-colored via TeamManager; Enemy hidden until spotted).
 	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 	for node: Node in get_tree().get_nodes_in_group("buildings"):

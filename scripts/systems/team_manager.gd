@@ -52,14 +52,54 @@ const DEFAULT_TEAM_PALETTES: Array = [
 	},
 ]
 
+const FACTION_MANIFEST_PATHS: Array = [
+	"res://resources/factions/genesis_v2_faction.tres",
+]
+
 signal teams_reconfigured(mode: StringName)
 
 var match_mode: StringName = &"player_vs_ai"
 var team_configs: Dictionary = {}
+var _factions: Dictionary = {}
 
 
 func _ready() -> void:
+	_load_faction_registry()
 	_setup_default_1v1()
+
+
+func _load_faction_registry() -> void:
+	_factions.clear()
+	for raw_path: Variant in FACTION_MANIFEST_PATHS:
+		var path_str: String = String(raw_path)
+		if not ResourceLoader.exists(path_str):
+			continue
+		var res: Resource = load(path_str)
+		if res != null and res.get("faction_id") != null:
+			var fid: StringName = res.get("faction_id") as StringName
+			if fid != &"":
+				_factions[fid] = res
+
+
+func get_faction_data(faction_id: StringName) -> Resource:
+	if _factions.is_empty():
+		_load_faction_registry()
+	if _factions.has(faction_id):
+		return _factions[faction_id] as Resource
+	if _factions.has(&"genesis_v2"):
+		return _factions[&"genesis_v2"] as Resource
+	return null
+
+
+func get_playable_factions() -> Array:
+	if _factions.is_empty():
+		_load_faction_registry()
+	var out: Array = []
+	for raw_id: Variant in _factions.keys():
+		var res: Resource = _factions[raw_id] as Resource
+		if res != null and bool(res.get("is_playable")):
+			out.append(res)
+	return out
 
 
 func _setup_default_1v1() -> void:

@@ -49,6 +49,11 @@ func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspect
 	if clicked_friendly_unit != null and issue_repair_order(selected_units, clicked_friendly_unit, shift_queued):
 		return
 
+	# 2.75. SalvageCore extraction for Workers and Engineers.
+	var clicked_salvage: Node2D = find_salvage_core_at_point(world_pos)
+	if clicked_salvage != null and issue_salvage_order(selected_units, clicked_salvage, shift_queued):
+		return
+
 	# 3. Resource node gathering.
 	var clicked_resource: ResourceNode = find_resource_node_at_point(world_pos)
 	if clicked_resource != null and not clicked_resource.is_vent and _has_any_gatherer_for(selected_units, clicked_resource.resource_type):
@@ -107,6 +112,8 @@ func issue_move_order(selected_units: Array[Unit], world_pos: Vector2, shift_que
 		selected_units[i].command_move(targets[i], shift_queued)
 	if AudioManager != null:
 		AudioManager.play_sfx(&"order_move", -4.0, 0.05)
+		if AudioManager.has_method("play_unit_bark_for_units"):
+			AudioManager.call("play_unit_bark_for_units", selected_units, &"order")
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.MOVE)
 
 
@@ -117,6 +124,8 @@ func issue_attack_target_order(selected_units: Array[Unit], target: Node2D, shif
 		unit.command_attack_target(target, shift_queued)
 	if AudioManager != null:
 		AudioManager.play_sfx(&"order_attack", -3.5, 0.04)
+		if AudioManager.has_method("play_unit_bark_for_units"):
+			AudioManager.call("play_unit_bark_for_units", selected_units, &"order")
 	spawn_move_marker(target.global_position, MoveMarker.MarkerStyle.ATTACK)
 
 
@@ -135,6 +144,8 @@ func issue_gather_order(selected_units: Array[Unit], resource_node: ResourceNode
 			non_gatherers[i].command_move(escort_targets[i], shift_queued)
 	if AudioManager != null:
 		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
+		if AudioManager.has_method("play_unit_bark_for_units"):
+			AudioManager.call("play_unit_bark_for_units", selected_units, &"order")
 	spawn_move_marker(resource_node.global_position, MoveMarker.MarkerStyle.GATHER)
 
 
@@ -151,6 +162,8 @@ func issue_build_order(selected_units: Array[Unit], building: Building, shift_qu
 		worker.command_construct_building(building, shift_queued)
 	if AudioManager != null:
 		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
+		if AudioManager.has_method("play_unit_bark_for_units"):
+			AudioManager.call("play_unit_bark_for_units", builders, &"order")
 	spawn_move_marker(building.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 
@@ -168,7 +181,35 @@ func issue_repair_order(selected_units: Array[Unit], target: Node2D, shift_queue
 		rep_unit.command_repair(target, shift_queued)
 	if AudioManager != null:
 		AudioManager.play_sfx(&"order_gather", -4.0, 0.04)
+		if AudioManager.has_method("play_unit_bark_for_units"):
+			AudioManager.call("play_unit_bark_for_units", repairers, &"order")
 	spawn_move_marker(target.global_position, MoveMarker.MarkerStyle.INTERACT)
+	return true
+
+
+func issue_salvage_order(selected_units: Array[Unit], salvage_core: Node2D, shift_queued: bool = false) -> bool:
+	if selected_units.is_empty() or salvage_core == null or not is_instance_valid(salvage_core):
+		return false
+	var extractors: Array[Unit] = []
+	var escorts: Array[Unit] = []
+	for unit: Unit in selected_units:
+		if is_instance_valid(unit) and unit.can_salvage_core():
+			extractors.append(unit)
+		elif is_instance_valid(unit):
+			escorts.append(unit)
+	if extractors.is_empty():
+		return false
+	for ext_u: Unit in extractors:
+		ext_u.command_salvage(salvage_core, shift_queued)
+	if not escorts.is_empty():
+		var escort_pts: Array[Vector2] = assign_group_destinations(escorts, salvage_core.global_position)
+		for i: int in range(escorts.size()):
+			escorts[i].command_move(escort_pts[i], shift_queued)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"order_gather", -3.5, 0.04)
+		if AudioManager.has_method("play_unit_bark_for_units"):
+			AudioManager.call("play_unit_bark_for_units", extractors, &"order")
+	spawn_move_marker(salvage_core.global_position, MoveMarker.MarkerStyle.INTERACT)
 	return true
 
 
@@ -566,6 +607,24 @@ func find_nearest_unoccupied_vent(world_point: Vector2, max_radius: float) -> Re
 			best_dist_sq = d_sq
 			best = res_node
 	return best
+
+
+func find_salvage_core_at_point(world_point: Vector2) -> Node2D:
+	var closest: Node2D = null
+	var closest_dist_sq: float = INF
+	var candidates: Array = SpatialGrid.query_salvage_in_radius(world_point, 48.0) if SpatialGrid != null else get_tree().get_nodes_in_group("salvage_cores")
+	for node: Variant in candidates:
+		if not is_instance_valid(node) or not (node is Node2D):
+			continue
+		var sc: Node2D = node as Node2D
+		if bool(sc.get("is_claimed")) or sc.is_queued_for_deletion() or not sc.visible:
+			continue
+		if sc.has_method("contains_point") and bool(sc.call("contains_point", world_point)):
+			var d_sq: float = sc.global_position.distance_squared_to(world_point)
+			if d_sq < closest_dist_sq:
+				closest_dist_sq = d_sq
+				closest = sc
+	return closest
 
 
 func find_barricade_at_point(world_point: Vector2) -> Node2D:

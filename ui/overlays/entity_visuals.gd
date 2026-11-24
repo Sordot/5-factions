@@ -48,7 +48,7 @@ func _process(delta: float) -> void:
 			or entity_type_id == &"arc_lancer"
 			or entity_type_id == &"goliath_frame"
 			or entity_type_id == &"clone_trooper"
-			or _owner_unit._adrenal_timer > 0.0
+			or _owner_unit.has_status_effect(&"adrenal_surge")
 		):
 			queue_redraw()
 	else:
@@ -163,7 +163,7 @@ func _draw_unit_silhouette(p: Dictionary) -> void:
 
 		&"clone_trooper":
 			# Crisp infantry silhouette with rifle barrel + glowing cyan/crimson visor (flashes green/gold in Adrenal Surge)
-			var adrenal_active: bool = (_owner_unit != null and _owner_unit._adrenal_timer > 0.0)
+			var adrenal_active: bool = (_owner_unit != null and _owner_unit.has_status_effect(&"adrenal_surge"))
 			var visor_col: Color = core
 			var border_col: Color = outline
 			if adrenal_active:

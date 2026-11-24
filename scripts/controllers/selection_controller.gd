@@ -998,6 +998,10 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 		if spec_bar != null:
 			_set_inspected_entity(spec_bar)
 			return
+		var spec_salvage: Node2D = command_router.find_salvage_core_at_point(world_point)
+		if spec_salvage != null:
+			_set_inspected_entity(spec_salvage)
+			return
 		var spec_res: ResourceNode = command_router.find_resource_node_at_point(world_point)
 		if spec_res != null:
 			_set_inspected_entity(spec_res)
@@ -1085,6 +1089,13 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 		_set_selected_units([])
 		_set_selected_buildings([])
 		_set_inspected_entity(clicked_barricade)
+		return
+
+	var clicked_salvage: Node2D = command_router.find_salvage_core_at_point(world_point)
+	if clicked_salvage != null:
+		_set_selected_units([])
+		_set_selected_buildings([])
+		_set_inspected_entity(clicked_salvage)
 		return
 
 	var clicked_resource: ResourceNode = command_router.find_resource_node_at_point(world_point)
@@ -1320,6 +1331,9 @@ func _set_selected_units(new_selection: Array[Unit], reset_subgroup_index: bool 
 		cancel_ability_targeting()
 	elif AudioManager != null:
 		AudioManager.play_sfx(&"unit_select", -4.5, 0.04)
+		if not subgroups.is_empty() and AudioManager.has_method("play_unit_bark_for_units"):
+			var primary_units: Array[Unit] = subgroups[active_subgroup_index]["units"]
+			AudioManager.call("play_unit_bark_for_units", primary_units, &"select")
 
 	selection_updated.emit(selected_units.size())
 	selection_changed.emit(selected_units, subgroups, active_subgroup_index)
@@ -1357,6 +1371,8 @@ func _set_inspected_entity(entity: Node) -> void:
 			next_entity = entity
 		elif entity.is_in_group("destructible_barricades") and not bool(entity.get("is_destroyed")):
 			next_entity = entity
+		elif entity.is_in_group("salvage_cores") and not bool(entity.get("is_claimed")):
+			next_entity = entity
 
 	if inspected_entity == next_entity:
 		return
@@ -1380,6 +1396,13 @@ func _set_inspected_entity(entity: Node) -> void:
 		elif inspected_entity.is_in_group("destructible_barricades"):
 			if inspected_entity.has_signal("destroyed") and inspected_entity.is_connected("destroyed", _on_inspected_entity_removed):
 				inspected_entity.disconnect("destroyed", _on_inspected_entity_removed)
+			if inspected_entity.has_method("set_selected"):
+				inspected_entity.call("set_selected", false)
+		elif inspected_entity.is_in_group("salvage_cores"):
+			if inspected_entity.has_signal("claimed") and inspected_entity.is_connected("claimed", _on_inspected_entity_removed):
+				inspected_entity.disconnect("claimed", _on_inspected_entity_removed)
+			if inspected_entity.has_signal("expired") and inspected_entity.is_connected("expired", _on_inspected_entity_removed):
+				inspected_entity.disconnect("expired", _on_inspected_entity_removed)
 			if inspected_entity.has_method("set_selected"):
 				inspected_entity.call("set_selected", false)
 
@@ -1409,6 +1432,13 @@ func _set_inspected_entity(entity: Node) -> void:
 				inspected_entity.call("set_selected", true)
 			if inspected_entity.has_signal("destroyed") and not inspected_entity.is_connected("destroyed", _on_inspected_entity_removed):
 				inspected_entity.connect("destroyed", _on_inspected_entity_removed)
+		elif inspected_entity.is_in_group("salvage_cores"):
+			if inspected_entity.has_method("set_selected"):
+				inspected_entity.call("set_selected", true)
+			if inspected_entity.has_signal("claimed") and not inspected_entity.is_connected("claimed", _on_inspected_entity_removed):
+				inspected_entity.connect("claimed", _on_inspected_entity_removed)
+			if inspected_entity.has_signal("expired") and not inspected_entity.is_connected("expired", _on_inspected_entity_removed):
+				inspected_entity.connect("expired", _on_inspected_entity_removed)
 
 	if prev_building != selected_building:
 		building_selection_changed.emit(selected_building)

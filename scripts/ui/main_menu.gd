@@ -196,6 +196,17 @@ func _ready() -> void:
 		locked_slot_2, locked_slot_3, locked_slot_4, locked_slot_5,
 	])
 
+	if dossier_notice_label != null and TeamManager != null and TeamManager.has_method("get_faction_data"):
+		var fac_res: Resource = TeamManager.get_faction_data(GameConfig.selected_faction_id)
+		if fac_res != null:
+			var fac_name: String = String(fac_res.get("display_name"))
+			var fac_tag: String = String(fac_res.get("tagline"))
+			var b_roster: Variant = fac_res.get("building_roster")
+			var u_roster: Variant = fac_res.get("unit_roster")
+			var b_cnt: int = (b_roster as Array).size() if b_roster is Array else 7
+			var u_cnt: int = (u_roster as Array).size() if u_roster is Array else 11
+			dossier_notice_label.text = "%s (%d Structures • %d Units): %s" % [fac_name, b_cnt, u_cnt, fac_tag]
+
 	_refresh_audio_button()
 	_refresh_ui()
 

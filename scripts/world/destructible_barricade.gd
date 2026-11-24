@@ -28,8 +28,15 @@ func _ready() -> void:
 	z_index = 4
 	add_to_group("destructible_barricades")
 	add_to_group("nav_bake_obstacles")
+	if SpatialGrid != null:
+		SpatialGrid.register_barricade(self)
 	_ensure_collider()
 	queue_redraw()
+
+
+func _exit_tree() -> void:
+	if SpatialGrid != null:
+		SpatialGrid.unregister_barricade(self)
 
 
 func _ensure_collider() -> void:
@@ -114,6 +121,8 @@ func _destroy() -> void:
 		remove_from_group("nav_bake_obstacles")
 	if is_in_group("destructible_barricades"):
 		remove_from_group("destructible_barricades")
+	if SpatialGrid != null:
+		SpatialGrid.unregister_barricade(self)
 	set_selected(false)
 
 	if get_parent() != null:
@@ -129,6 +138,9 @@ func _destroy() -> void:
 		var nav_reg: Node = get_tree().get_first_node_in_group("arena_nav_region")
 		if nav_reg != null and nav_reg.has_method("request_rebake"):
 			nav_reg.call("request_rebake")
+		var fog: Node = get_tree().get_first_node_in_group("fog_of_war")
+		if fog != null and fog.has_method("rebuild_blocker_grid"):
+			fog.call("rebuild_blocker_grid")
 		var cam: Node = get_tree().get_first_node_in_group("rts_camera")
 		if cam != null and cam.has_method("add_camera_shake"):
 			cam.call("add_camera_shake", 3.2, 0.15, global_position)

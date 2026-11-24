@@ -7,6 +7,8 @@ const ENGINEER_REPAIR_RATE: float = 24.0
 const BIOMASS_COST_PER_SEC: float = 2.0
 const SILICA_COST_PER_SEC: float = 1.0
 const BEAM_VFX_INTERVAL: float = 0.18
+const AUTO_REPAIR_RADIUS: float = 220.0
+const AUTO_REPAIR_SCAN_INTERVAL: float = 0.40
 
 const ENGINEER_REPAIRABLE_UNIT_IDS: Array = [
 	&"goliath_frame",
@@ -18,13 +20,82 @@ const ENGINEER_REPAIRABLE_UNIT_IDS: Array = [
 ]
 
 signal repair_target_changed(target: Node2D)
+signal auto_repair_changed(enabled: bool)
 
 var target_entity: Node2D = null
 var is_repairing_in_place: bool = false
+var auto_repair_enabled: bool = false
 
 var _bio_accum: float = 0.0
 var _sil_accum: float = 0.0
 var _vfx_timer: float = 0.0
+var _auto_scan_timer: float = 0.0
+
+
+func set_auto_repair_enabled(enabled: bool) -> void:
+	if auto_repair_enabled == enabled:
+		return
+	auto_repair_enabled = enabled
+	auto_repair_changed.emit(auto_repair_enabled)
+
+
+func toggle_auto_repair() -> bool:
+	set_auto_repair_enabled(not auto_repair_enabled)
+	return auto_repair_enabled
+
+
+func tick_auto_repair(owner_unit: Unit, delta: float) -> void:
+	if not auto_repair_enabled or owner_unit == null or owner_unit.is_dead or owner_unit.is_staffed:
+		return
+	if owner_unit.command_state != Unit.CommandState.IDLE or is_active():
+		return
+	_auto_scan_timer += delta
+	if _auto_scan_timer < AUTO_REPAIR_SCAN_INTERVAL:
+		return
+	_auto_scan_timer = 0.0
+
+	var best: Node2D = _find_most_damaged_nearby_target(owner_unit)
+	if best != null:
+		owner_unit.command_repair(best, false)
+
+
+func _find_most_damaged_nearby_target(owner_unit: Unit) -> Node2D:
+	if not owner_unit.is_inside_tree():
+		return null
+	var best: Node2D = null
+	var best_missing_ratio: float = 0.0
+	var is_engineer: bool = owner_unit.data != null and (owner_unit.data.can_staff_compute or owner_unit.get_unit_type_id() == &"engineer")
+
+	var bldgs: Array = SpatialGrid.query_buildings_in_radius(owner_unit.global_position, AUTO_REPAIR_RADIUS) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("buildings")
+	for node: Variant in bldgs:
+		if not (node is Building) or not is_instance_valid(node):
+			continue
+		var b: Building = node
+		if not is_eligible_target(owner_unit, b):
+			continue
+		if owner_unit.global_position.distance_to(b.global_position) > AUTO_REPAIR_RADIUS + b.footprint_radius:
+			continue
+		var missing: float = 1.0 - clampf(b.current_hp / maxf(1.0, b.max_hp), 0.0, 1.0)
+		if missing > best_missing_ratio:
+			best_missing_ratio = missing
+			best = b
+
+	if is_engineer:
+		var units: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, AUTO_REPAIR_RADIUS) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		for node: Variant in units:
+			if not (node is Unit) or not is_instance_valid(node):
+				continue
+			var u: Unit = node
+			if not is_eligible_target(owner_unit, u):
+				continue
+			if owner_unit.global_position.distance_to(u.global_position) > AUTO_REPAIR_RADIUS:
+				continue
+			var missing_u: float = 1.0 - clampf(u.current_hp / maxf(1.0, u.get_max_hp()), 0.0, 1.0)
+			if missing_u > best_missing_ratio:
+				best_missing_ratio = missing_u
+				best = u
+
+	return best
 
 
 func is_active() -> bool:

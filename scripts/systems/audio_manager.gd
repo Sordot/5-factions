@@ -5,6 +5,7 @@ signal volume_changed(volume_linear: float)
 
 const SAMPLE_RATE: int = 22050
 const POOL_SIZE: int = 16
+const UNIT_BARK_COOLDOWN_MS: int = 600
 
 const UI_SFX_IDS: Array = [
 	&"ui_click",
@@ -20,6 +21,8 @@ const UI_SFX_IDS: Array = [
 	&"alert_uplink",
 	&"alert_complete",
 	&"veterancy_rank_up",
+	&"salvage_claimed",
+	&"autocast_toggle",
 	&"match_victory",
 	&"match_defeat",
 ]
@@ -28,12 +31,22 @@ var is_muted: bool = false
 var master_volume_linear: float = 0.72
 var sfx_volume_linear: float = 0.85
 var ui_volume_linear: float = 0.85
+var ambience_volume_linear: float = 0.55
 
 var _unfocused_muted: bool = false
 var _streams: Dictionary = {}
 var _players: Array[AudioStreamPlayer] = []
 var _next_player_idx: int = 0
 var _last_play_ms: Dictionary = {}
+var _last_bark_ms: int = -9999
+var _amb_base_player: AudioStreamPlayer = null
+var _amb_combat_player: AudioStreamPlayer = null
+var _amb_uplink_player: AudioStreamPlayer = null
+var _combat_intensity: float = 0.0
+var _combat_target: float = 0.0
+var _combat_hold_timer: float = 0.0
+var _uplink_tension: float = 0.0
+var _amb_poll_timer: float = 0.0
 var _cooldowns_ms: Dictionary = {
 	&"ui_click": 30,
 	&"unit_select": 45,
@@ -57,6 +70,8 @@ var _cooldowns_ms: Dictionary = {
 	&"alert_uplink": 1400,
 	&"alert_complete": 700,
 	&"veterancy_rank_up": 350,
+	&"salvage_claimed": 180,
+	&"autocast_toggle": 60,
 	&"match_victory": 500,
 	&"match_defeat": 500,
 }
@@ -71,10 +86,97 @@ func _ready() -> void:
 		add_child(player)
 		_players.append(player)
 	_generate_procedural_library()
+	_setup_ambience_players()
 	_sync_from_settings()
 	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.connect(_on_settings_changed)
 	_apply_master_bus_settings()
+
+
+func _process(delta: float) -> void:
+	if _amb_base_player == null:
+		return
+	var unscaled_dt: float = clampf(delta / maxf(0.25, Engine.time_scale), 0.0, 0.1)
+
+	if _combat_hold_timer > 0.0:
+		_combat_hold_timer = maxf(0.0, _combat_hold_timer - unscaled_dt)
+	else:
+		_combat_target = 0.0
+
+	if _combat_intensity < _combat_target:
+		_combat_intensity = minf(_combat_target, _combat_intensity + unscaled_dt / 1.5)
+	elif _combat_intensity > _combat_target:
+		_combat_intensity = maxf(_combat_target, _combat_intensity - unscaled_dt / 5.0)
+
+	_amb_poll_timer += unscaled_dt
+	var uplink_target: float = 0.0
+	var in_match: bool = false
+	var is_paused: bool = is_inside_tree() and get_tree().paused
+	if _amb_poll_timer >= 0.35 and is_inside_tree():
+		_amb_poll_timer = 0.0
+		var mm: Node = get_tree().get_first_node_in_group("match_manager")
+		in_match = mm != null and is_instance_valid(mm)
+		if not in_match:
+			_combat_target = 0.0
+			_combat_hold_timer = 0.0
+		else:
+			for node: Node in get_tree().get_nodes_in_group("hyper_uplinks"):
+				if is_instance_valid(node) and node is HyperUplink:
+					var up: HyperUplink = node as HyperUplink
+					if up.is_contested:
+						uplink_target = 1.0
+					elif absf(up.capture_progress) >= 0.65 and up.controlling_team < 0:
+						uplink_target = maxf(uplink_target, 0.75)
+		_uplink_tension = move_toward(_uplink_tension, uplink_target, 0.25)
+
+	_update_ambience_mix(is_paused)
+
+
+func notify_combat_activity(weight: float = 0.45) -> void:
+	_combat_target = clampf(maxf(_combat_target, weight), 0.0, 1.0)
+	_combat_hold_timer = maxf(_combat_hold_timer, 2.5)
+
+
+func _setup_ambience_players() -> void:
+	_amb_base_player = AudioStreamPlayer.new()
+	_amb_base_player.name = "AmbBasePlayer"
+	_amb_base_player.bus = &"Master"
+	_amb_base_player.stream = _synth_ambience_base_loop()
+	_amb_base_player.volume_db = -80.0
+	add_child(_amb_base_player)
+	_amb_base_player.play()
+
+	_amb_combat_player = AudioStreamPlayer.new()
+	_amb_combat_player.name = "AmbCombatPlayer"
+	_amb_combat_player.bus = &"Master"
+	_amb_combat_player.stream = _synth_ambience_combat_loop()
+	_amb_combat_player.volume_db = -80.0
+	add_child(_amb_combat_player)
+	_amb_combat_player.play()
+
+	_amb_uplink_player = AudioStreamPlayer.new()
+	_amb_uplink_player.name = "AmbUplinkPlayer"
+	_amb_uplink_player.bus = &"Master"
+	_amb_uplink_player.stream = _synth_ambience_uplink_loop()
+	_amb_uplink_player.volume_db = -80.0
+	add_child(_amb_uplink_player)
+	_amb_uplink_player.play()
+
+
+func _update_ambience_mix(is_paused: bool) -> void:
+	var muted_now: bool = is_effectively_muted() or master_volume_linear <= 0.001 or ambience_volume_linear <= 0.001
+	var duck: float = 0.40 if is_paused else 1.0
+	var amb_gain: float = 0.0 if muted_now else (ambience_volume_linear * duck)
+
+	if _amb_base_player != null:
+		var g_base: float = amb_gain * 0.42
+		_amb_base_player.volume_db = linear_to_db(g_base) if g_base > 0.0005 else -80.0
+	if _amb_combat_player != null:
+		var g_combat: float = amb_gain * _combat_intensity * 0.46
+		_amb_combat_player.volume_db = linear_to_db(g_combat) if g_combat > 0.0005 else -80.0
+	if _amb_uplink_player != null:
+		var g_uplink: float = amb_gain * _uplink_tension * 0.34
+		_amb_uplink_player.volume_db = linear_to_db(g_uplink) if g_uplink > 0.0005 else -80.0
 
 
 func _on_settings_changed(category: StringName) -> void:
@@ -90,8 +192,10 @@ func _sync_from_settings() -> void:
 	master_volume_linear = clampf(SettingsManager.master_volume, 0.0, 1.0)
 	sfx_volume_linear = clampf(SettingsManager.sfx_volume, 0.0, 1.0)
 	ui_volume_linear = clampf(SettingsManager.ui_volume, 0.0, 1.0)
+	ambience_volume_linear = clampf(SettingsManager.ambience_volume, 0.0, 1.0)
 	is_muted = SettingsManager.muted
 	_apply_master_bus_settings()
+	_update_ambience_mix(is_inside_tree() and get_tree().paused)
 	if prev_muted != is_muted:
 		mute_changed.emit(is_muted)
 	if not is_equal_approx(prev_master, master_volume_linear):
@@ -158,6 +262,56 @@ func play_sfx(sfx_id: StringName, volume_db_offset: float = 0.0, pitch_jitter: f
 		player.pitch_scale = 1.0 + randf_range(-pitch_jitter, pitch_jitter)
 	else:
 		player.pitch_scale = 1.0
+	player.play()
+
+
+func play_unit_bark_for_units(units: Array, bark_type: StringName) -> void:
+	if units.is_empty():
+		return
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		return
+	for item: Variant in units:
+		if is_instance_valid(item) and item is Unit:
+			var u: Unit = item as Unit
+			if not u.is_dead:
+				play_unit_bark(classify_unit_bark_class(u.get_unit_type_id()), bark_type)
+				return
+
+
+func classify_unit_bark_class(unit_type_id: StringName) -> StringName:
+	match unit_type_id:
+		&"worker", &"silica_harvester", &"engineer":
+			return &"worker"
+		&"clone_trooper", &"stinger", &"scout_unit":
+			return &"swarm"
+		&"lance_rig", &"signal_jammer":
+			return &"counter"
+		&"symbiote":
+			return &"support"
+		&"goliath_frame", &"arc_lancer", &"chrysalis_mortar":
+			return &"heavy"
+		_:
+			return &"swarm"
+
+
+func play_unit_bark(unit_class: StringName, bark_type: StringName) -> void:
+	if is_effectively_muted() or master_volume_linear <= 0.001 or ui_volume_linear <= 0.001:
+		return
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		return
+	var now_ms: int = Time.get_ticks_msec()
+	if now_ms - _last_bark_ms < UNIT_BARK_COOLDOWN_MS:
+		return
+	var key: StringName = StringName("bark_%s_%s" % [String(unit_class), String(bark_type)])
+	if not _streams.has(key):
+		return
+	_last_bark_ms = now_ms
+	var player: AudioStreamPlayer = _acquire_player()
+	if player == null:
+		return
+	player.stream = _streams[key] as AudioStreamWAV
+	player.volume_db = -4.5 + linear_to_db(ui_volume_linear)
+	player.pitch_scale = 1.0 + randf_range(-0.05, 0.05)
 	player.play()
 
 
@@ -255,11 +409,25 @@ func _generate_procedural_library() -> void:
 	_streams[&"ability_barrage"] = _synth_mortar_thud()
 	_streams[&"entity_destroyed"] = _synth_destruction_boom()
 
-	# Tactical Alerts & Veterancy
+	# Tactical Alerts, Veterancy, Salvage & Auto-Cast
 	_streams[&"alert_under_attack"] = _synth_alert_under_attack()
 	_streams[&"alert_uplink"] = _synth_alert_uplink()
 	_streams[&"alert_complete"] = _synth_alert_complete()
 	_streams[&"veterancy_rank_up"] = _synth_rank_up_chime()
+	_streams[&"salvage_claimed"] = _synth_chime(PackedFloat32Array([587.33, 783.99, 1174.66, 1567.98]), 0.045, 0.25)
+	_streams[&"autocast_toggle"] = _synth_chime(PackedFloat32Array([880.0, 1318.5]), 0.04, 0.20)
+
+	# Unit-Class Procedural Synth Barks (150–240ms)
+	_streams[&"bark_worker_select"] = _synth_bark_worker(false)
+	_streams[&"bark_worker_order"] = _synth_bark_worker(true)
+	_streams[&"bark_swarm_select"] = _synth_bark_swarm(false)
+	_streams[&"bark_swarm_order"] = _synth_bark_swarm(true)
+	_streams[&"bark_counter_select"] = _synth_bark_counter(false)
+	_streams[&"bark_counter_order"] = _synth_bark_counter(true)
+	_streams[&"bark_support_select"] = _synth_bark_support(false)
+	_streams[&"bark_support_order"] = _synth_bark_support(true)
+	_streams[&"bark_heavy_select"] = _synth_bark_heavy(false)
+	_streams[&"bark_heavy_order"] = _synth_bark_heavy(true)
 
 	# Match Flow
 	_streams[&"match_victory"] = _synth_chime(PackedFloat32Array([523.25, 659.25, 783.99, 1046.5, 1318.5]), 0.11, 0.30)
@@ -582,3 +750,141 @@ func _synth_alert_complete() -> AudioStreamWAV:
 
 func _synth_rank_up_chime() -> AudioStreamWAV:
 	return _synth_chime(PackedFloat32Array([659.25, 880.0, 1318.5]), 0.055, 0.22)
+
+
+func _make_loop_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
+	var wav: AudioStreamWAV = _make_wav(samples)
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = samples.size()
+	return wav
+
+
+func _synth_ambience_base_loop() -> AudioStreamWAV:
+	# 4.0s exact harmonic cycle: warm Y2K/Technozen D-minor9 low-pass pad + soft crystalline pulse
+	var dur: float = 4.0
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var freqs: PackedFloat32Array = PackedFloat32Array([73.5, 110.25, 147.0, 220.5, 294.0])
+	var lp: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var lfo: float = 0.72 + 0.28 * sin(TAU * 0.25 * t)
+		var pulse: float = 0.5 + 0.5 * sin(TAU * 0.5 * t)
+		var pad: float = 0.0
+		for f: float in freqs:
+			pad += sin(TAU * f * t)
+		pad *= 0.16 * lfo
+		var shimmer: float = sin(TAU * 588.0 * t) * (0.045 * pulse * pulse)
+		lp = lerpf(lp, pad + shimmer, 0.12)
+		out[i] = lp * 0.65
+	return _make_loop_wav(out)
+
+
+func _synth_ambience_combat_loop() -> AudioStreamWAV:
+	# 4.0s exact cycle: subtle rhythmic sub-bass pulse + filtered Technozen 16th-note arpeggio
+	var dur: float = 4.0
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var arp_notes: PackedFloat32Array = PackedFloat32Array([147.0, 174.5, 220.5, 261.5, 220.5, 174.5, 147.0, 130.75])
+	var lp: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var beat_u: float = fmod(t * 2.0, 1.0)
+		var sub_env: float = exp(-beat_u * 4.2)
+		var sub: float = sin(TAU * 55.0 * t) * sub_env * 0.34
+		var step_idx: int = int(floor(t * 4.0)) % arp_notes.size()
+		var step_u: float = fmod(t * 4.0, 1.0)
+		var arp_env: float = minf(1.0, step_u / 0.06) * exp(-step_u * 5.0)
+		var arp_f: float = arp_notes[step_idx]
+		var arp: float = (sin(TAU * arp_f * t) * 0.7 + sin(TAU * arp_f * 2.0 * t) * 0.3) * arp_env * 0.18
+		lp = lerpf(lp, sub + arp, 0.22)
+		out[i] = lp * 0.72
+	return _make_loop_wav(out)
+
+
+func _synth_ambience_uplink_loop() -> AudioStreamWAV:
+	# 4.0s exact cycle: ethereal crystalline harmonic shimmer for Data Hyper-Uplink tension
+	var dur: float = 4.0
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var swell: float = 0.55 + 0.45 * sin(TAU * 0.5 * t)
+		var s: float = sin(TAU * 441.0 * t) * 0.35 + sin(TAU * 661.5 * t) * 0.30 + sin(TAU * 882.0 * t) * 0.20
+		out[i] = s * swell * 0.26
+	return _make_loop_wav(out)
+
+
+func _synth_bark_worker(is_order: bool) -> AudioStreamWAV:
+	# Nimble dual-tone telemetry beep (160ms)
+	var f0: float = 780.0 if is_order else 660.0
+	var f1: float = 1170.0 if is_order else 990.0
+	return _synth_chime(PackedFloat32Array([f0, f1]), 0.055, 0.20)
+
+
+func _synth_bark_swarm(is_order: bool) -> AudioStreamWAV:
+	# Tight high-energy metallic chirp cadence (165ms)
+	var dur: float = 0.165
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var f_start: float = 640.0 if is_order else 520.0
+		var f_end: float = 1080.0 if is_order else 820.0
+		var pulse_u: float = fmod(u * 2.0, 1.0)
+		var freq: float = lerpf(f_start, f_end, pulse_u)
+		phase += TAU * freq / float(SAMPLE_RATE)
+		var env: float = minf(1.0, pulse_u / 0.08) * exp(-pulse_u * 4.8)
+		out[i] = (sin(phase) * 0.68 + sin(phase * 2.5) * 0.32) * env * 0.22
+	return _make_wav(out)
+
+
+func _synth_bark_counter(is_order: bool) -> AudioStreamWAV:
+	# Crisp ionized harmonic lock-on tone (190ms)
+	var dur: float = 0.19
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var freq: float = lerpf(920.0, 1380.0, u) if is_order else lerpf(1240.0, 860.0, u)
+		phase += TAU * (freq + sin(TAU * 55.0 * t) * 45.0) / float(SAMPLE_RATE)
+		var env: float = minf(1.0, t / 0.008) * exp(-u * 3.8)
+		out[i] = (sin(phase) * 0.72 + sin(phase * 1.5) * 0.28) * env * 0.22
+	return _make_wav(out)
+
+
+func _synth_bark_support(is_order: bool) -> AudioStreamWAV:
+	# Warm airy bio-synth chime (210ms)
+	var notes: PackedFloat32Array = PackedFloat32Array([523.25, 659.25, 987.77]) if is_order else PackedFloat32Array([440.0, 659.25])
+	return _synth_chime(notes, 0.055, 0.20)
+
+
+func _synth_bark_heavy(is_order: bool) -> AudioStreamWAV:
+	# Deep resonant sub-bass servo thrum + metallic confirmation ping (230ms)
+	var dur: float = 0.23
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var base_f: float = lerpf(115.0, 82.0, u) if is_order else lerpf(92.0, 128.0, u)
+		phase += TAU * base_f / float(SAMPLE_RATE)
+		var sub_env: float = minf(1.0, t / 0.012) * exp(-u * 3.2)
+		var ping_t: float = maxf(0.0, t - 0.065)
+		var ping_env: float = (minf(1.0, ping_t / 0.004) * exp(-ping_t * 20.0)) if t >= 0.065 else 0.0
+		var ping_f: float = 620.0 if is_order else 490.0
+		var ping: float = sin(TAU * ping_f * ping_t) * ping_env * 0.35
+		out[i] = (sin(phase) * 0.65 + sin(phase * 2.0) * 0.20) * sub_env * 0.32 + ping * 0.28
+	return _make_wav(out)

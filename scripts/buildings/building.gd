@@ -89,6 +89,8 @@ var _entity_visuals: EntityVisuals = null
 func _ready() -> void:
 	add_to_group("buildings")
 	add_to_group("selectable_buildings")
+	if SpatialGrid != null:
+		SpatialGrid.register_building(self)
 	if building_type_id == &"nexus_vat":
 		is_core_hub = true
 	if construction_costs.is_empty():
@@ -134,6 +136,8 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	if SpatialGrid != null:
+		SpatialGrid.unregister_building(self)
 	_disconnect_rally_unit_signal()
 	if SettingsManager != null and SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.disconnect(_on_settings_changed)
@@ -955,6 +959,9 @@ func _request_navmesh_rebake() -> void:
 	var nav_reg: Node = get_tree().get_first_node_in_group("arena_nav_region")
 	if nav_reg != null and nav_reg.has_method("request_rebake"):
 		nav_reg.call("request_rebake")
+	var fog: Node = get_tree().get_first_node_in_group("fog_of_war")
+	if fog != null and fog.has_method("invalidate_building_vision_cache"):
+		fog.call("invalidate_building_vision_cache")
 
 
 func _tick_compute_generation(delta: float) -> void:

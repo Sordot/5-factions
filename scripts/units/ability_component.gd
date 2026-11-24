@@ -2,16 +2,78 @@ class_name AbilityComponent
 extends Node
 
 const ABILITY_EFFECT_SCRIPT: GDScript = preload("res://ui/overlays/ability_effect.gd")
+const AUTOCAST_TICK_INTERVAL: float = 0.35
 
 signal ability_cooldown_updated(ability_id: StringName, remaining: float, duration: float)
 signal ability_executed(ability_id: StringName, target_pos: Vector2)
+signal autocast_changed(ability_id: StringName, enabled: bool)
 
 var cooldowns: Dictionary = {}
 var _durations: Dictionary = {}
+var autocast_enabled: Dictionary = {}
+var _autocast_timer: float = 0.0
 
 var pending_ability: AbilityData = null
 var pending_target_pos: Vector2 = Vector2.ZERO
 var pending_target_unit: Unit = null
+
+
+func init_autocast_defaults(owner_unit: Unit) -> void:
+	if owner_unit == null or owner_unit.data == null:
+		return
+	for ab: AbilityData in owner_unit.data.abilities:
+		if ab != null and ab.allow_autocast and not autocast_enabled.has(ab.ability_id):
+			autocast_enabled[ab.ability_id] = ab.default_autocast
+
+
+func is_autocast_enabled(ability_id: StringName) -> bool:
+	return bool(autocast_enabled.get(ability_id, false))
+
+
+func set_autocast_enabled(ability_id: StringName, enabled: bool) -> void:
+	if is_autocast_enabled(ability_id) == enabled:
+		return
+	autocast_enabled[ability_id] = enabled
+	autocast_changed.emit(ability_id, enabled)
+
+
+func toggle_autocast(ability_id: StringName) -> bool:
+	var next_val: bool = not is_autocast_enabled(ability_id)
+	set_autocast_enabled(ability_id, next_val)
+	return next_val
+
+
+func tick_autocast(owner_unit: Unit, delta: float) -> void:
+	if owner_unit == null or owner_unit.is_dead or owner_unit.is_staffed or owner_unit.data == null:
+		return
+	if autocast_enabled.is_empty():
+		return
+	_autocast_timer += delta
+	if _autocast_timer < AUTOCAST_TICK_INTERVAL:
+		return
+	_autocast_timer = 0.0
+
+	for ab: AbilityData in owner_unit.data.abilities:
+		if ab == null or not ab.allow_autocast:
+			continue
+		if not is_autocast_enabled(ab.ability_id) or not is_ability_ready(ab):
+			continue
+		if _should_trigger_autocast(owner_unit, ab):
+			request_cast(owner_unit, ab, owner_unit.global_position, owner_unit)
+			return
+
+
+func _should_trigger_autocast(owner_unit: Unit, ability: AbilityData) -> bool:
+	if ability.ability_id == &"adrenal_surge":
+		if owner_unit.combat_component == null:
+			return false
+		if owner_unit.current_target != null and is_instance_valid(owner_unit.current_target):
+			if owner_unit.combat_component.is_within_attack_envelope(owner_unit, owner_unit.current_target):
+				return true
+		return false
+	if ability.ability_id == &"nanite_surge":
+		return owner_unit.current_hp < owner_unit.get_max_hp() * 0.72
+	return false
 
 
 func get_remaining_cooldown(ability_id: StringName) -> float:
@@ -146,7 +208,8 @@ func execute_ability(owner_unit: Unit, ability: AbilityData, target_pos: Vector2
 
 func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vector2) -> void:
 	_spawn_aoe_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
-	for node: Node in owner_unit.get_tree().get_nodes_in_group("units"):
+	var unit_list: Array = SpatialGrid.query_units_in_radius(target_pos, ability.aoe_radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+	for node: Variant in unit_list:
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var candidate: Unit = node
@@ -161,7 +224,8 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 				candidate.apply_slow_debuff(ability.effect_duration, absf(ability.move_speed_modifier), absf(ability.attack_speed_modifier))
 
 	if ability.damage_or_value > 0.0:
-		for node: Node in owner_unit.get_tree().get_nodes_in_group("buildings"):
+		var bldg_list: Array = SpatialGrid.query_buildings_in_radius(target_pos, ability.aoe_radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("buildings")
+		for node: Variant in bldg_list:
 			if not is_instance_valid(node) or not (node is Building):
 				continue
 			var b: Building = node
@@ -203,7 +267,8 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 				cam.call("add_camera_shake", 4.2, 0.16, origin)
 		else:
 			_spawn_self_pulse(owner_unit, radius, ability.effect_color)
-		for node: Node in owner_unit.get_tree().get_nodes_in_group("units"):
+		var unit_list2: Array = SpatialGrid.query_units_in_radius(origin, radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		for node: Variant in unit_list2:
 			if not is_instance_valid(node) or not (node is Unit):
 				continue
 			var enemy: Unit = node
@@ -221,7 +286,8 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 						absf(ability.attack_speed_modifier)
 					)
 		if ability.damage_or_value > 0.0:
-			for node: Node in owner_unit.get_tree().get_nodes_in_group("buildings"):
+			var bldg_list2: Array = SpatialGrid.query_buildings_in_radius(origin, radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("buildings")
+			for node: Variant in bldg_list2:
 				if not is_instance_valid(node) or not (node is Building):
 					continue
 				var b: Building = node

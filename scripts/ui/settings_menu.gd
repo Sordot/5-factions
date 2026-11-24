@@ -44,6 +44,8 @@ signal closed
 @onready var val_sfx_vol: Label = %ValSfxVol
 @onready var sld_ui_vol: HSlider = %SldUiVol
 @onready var val_ui_vol: Label = %ValUiVol
+@onready var sld_ambience_vol: HSlider = %SldAmbienceVol
+@onready var val_ambience_vol: Label = %ValAmbienceVol
 @onready var chk_mute_all: CheckButton = %ChkMuteAll
 @onready var chk_mute_unfocused: CheckButton = %ChkMuteUnfocused
 @onready var btn_test_audio: Button = %BtnTestAudio
@@ -419,6 +421,7 @@ func _wire_audio_controls() -> void:
 	sld_master_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings())
 	sld_sfx_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings())
 	sld_ui_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings())
+	sld_ambience_vol.value_changed.connect(func(_v: float) -> void: _push_audio_settings())
 	chk_mute_all.toggled.connect(func(_on: bool) -> void: _push_audio_settings())
 	chk_mute_unfocused.toggled.connect(func(_on: bool) -> void: _push_audio_settings())
 	btn_test_audio.pressed.connect(func() -> void:
@@ -434,7 +437,8 @@ func _push_audio_settings() -> void:
 		sld_sfx_vol.value / 100.0,
 		sld_ui_vol.value / 100.0,
 		chk_mute_all.button_pressed,
-		chk_mute_unfocused.button_pressed
+		chk_mute_unfocused.button_pressed,
+		sld_ambience_vol.value / 100.0
 	)
 	_refresh_audio_labels()
 
@@ -443,6 +447,7 @@ func _refresh_audio_labels() -> void:
 	val_master_vol.text = "%d%%" % int(round(sld_master_vol.value))
 	val_sfx_vol.text = "%d%%" % int(round(sld_sfx_vol.value))
 	val_ui_vol.text = "%d%%" % int(round(sld_ui_vol.value))
+	val_ambience_vol.text = "%d%%" % int(round(sld_ambience_vol.value))
 
 
 func _wire_display_controls() -> void:
@@ -509,6 +514,7 @@ func _sync_all_from_manager() -> void:
 	sld_master_vol.value = SettingsManager.master_volume * 100.0
 	sld_sfx_vol.value = SettingsManager.sfx_volume * 100.0
 	sld_ui_vol.value = SettingsManager.ui_volume * 100.0
+	sld_ambience_vol.value = SettingsManager.ambience_volume * 100.0
 	chk_mute_all.button_pressed = SettingsManager.muted
 	chk_mute_unfocused.button_pressed = SettingsManager.mute_when_unfocused
 	_refresh_audio_labels()

@@ -15,8 +15,9 @@ const COLOR_VISIBLE: Color = Color(0.0, 0.0, 0.0, 0.0)
 
 @export var arena_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 @export var cell_size: float = 64.0
-@export var update_interval: float = 0.15
+@export var update_interval: float = 0.14
 @export var fog_enabled: bool = true
+@export var los_shadowing_enabled: bool = true
 
 var grid_width: int = 1
 var grid_height: int = 1
@@ -25,8 +26,11 @@ var fog_texture: ImageTexture = null
 
 var _grid: PackedByteArray = PackedByteArray()
 var _prev_grid: PackedByteArray = PackedByteArray()
+var _blocker_grid: PackedByteArray = PackedByteArray()
+var _static_building_vision_cells: Dictionary = {}
 var _spotted_buildings: Dictionary = {}
 var _update_timer: float = 0.0
+var _blocker_dirty: bool = true
 
 
 func _ready() -> void:
@@ -34,8 +38,12 @@ func _ready() -> void:
 	if TeamManager != null and TeamManager.is_spectator_mode():
 		fog_enabled = false
 	_initialize_grid()
+	call_deferred("_post_ready_init")
+
+
+func _post_ready_init() -> void:
+	rebuild_blocker_grid()
 	refresh_visibility()
-	call_deferred("refresh_visibility")
 
 
 func _process(delta: float) -> void:
@@ -43,6 +51,8 @@ func _process(delta: float) -> void:
 	if _update_timer < maxf(0.05, update_interval):
 		return
 	_update_timer = 0.0
+	if _blocker_dirty:
+		rebuild_blocker_grid()
 	refresh_visibility()
 
 
@@ -56,10 +66,60 @@ func _initialize_grid() -> void:
 	_grid.fill(VisibilityState.UNEXPLORED)
 	_prev_grid.resize(total)
 	_prev_grid.fill(255) # Force initial texture paint.
+	_blocker_grid.resize(total)
+	_blocker_grid.fill(0)
+	_static_building_vision_cells.clear()
+	_blocker_dirty = true
 
 	fog_image = Image.create(grid_width, grid_height, false, Image.FORMAT_RGBA8)
 	fog_image.fill(COLOR_UNEXPLORED)
 	fog_texture = ImageTexture.create_from_image(fog_image)
+
+
+func invalidate_building_vision_cache() -> void:
+	_static_building_vision_cells.clear()
+
+
+func rebuild_blocker_grid() -> void:
+	_blocker_dirty = false
+	_static_building_vision_cells.clear()
+	var total: int = grid_width * grid_height
+	if _blocker_grid.size() != total:
+		_blocker_grid.resize(total)
+	_blocker_grid.fill(0)
+	if not is_inside_tree():
+		return
+
+	var cell_w: float = arena_bounds.size.x / float(grid_width)
+	var cell_h: float = arena_bounds.size.y / float(grid_height)
+	var probe_r: float = minf(cell_w, cell_h) * 0.28
+
+	var blockers: Array = []
+	for node: Node in get_tree().get_nodes_in_group("terrain_obstacles"):
+		if is_instance_valid(node) and node.has_method("overlaps_circle"):
+			blockers.append(node)
+	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
+		if is_instance_valid(node) and bool(node.get("has_collision")) and node.has_method("overlaps_circle"):
+			var style_val: int = int(node.get("visual_style")) if node.get("visual_style") != null else 0
+			if style_val != 3: # Exclude flat floor plaza beacons
+				blockers.append(node)
+	for node: Node in get_tree().get_nodes_in_group("destructible_barricades"):
+		if is_instance_valid(node) and not bool(node.get("is_destroyed")) and not node.is_queued_for_deletion() and node.has_method("overlaps_circle"):
+			blockers.append(node)
+
+	if blockers.is_empty():
+		return
+
+	for cy: int in range(grid_height):
+		var wy: float = arena_bounds.position.y + (float(cy) + 0.5) * cell_h
+		var row_offset: int = cy * grid_width
+		for cx: int in range(grid_width):
+			var wx: float = arena_bounds.position.x + (float(cx) + 0.5) * cell_w
+			var pt: Vector2 = Vector2(wx, wy)
+			for blk: Variant in blockers:
+				if bool((blk as Node).call("overlaps_circle", pt, probe_r)):
+					_blocker_grid[row_offset + cx] = 1
+					break
 
 
 func set_fog_enabled(enabled: bool) -> void:
@@ -71,8 +131,10 @@ func set_fog_enabled(enabled: bool) -> void:
 
 func reset_fog() -> void:
 	_spotted_buildings.clear()
+	_static_building_vision_cells.clear()
 	_grid.fill(VisibilityState.UNEXPLORED)
 	_prev_grid.fill(255)
+	rebuild_blocker_grid()
 	refresh_visibility()
 
 
@@ -97,7 +159,7 @@ func refresh_visibility() -> void:
 	var spectator: bool = TeamManager != null and TeamManager.is_spectator_mode()
 	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 
-	# Stamp live vision circles for all living allied units (or all active teams in Spectator Mode).
+	# Stamp live LOS vision for all living allied units (or all active teams in Spectator Mode).
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
@@ -107,9 +169,9 @@ func refresh_visibility() -> void:
 		var grants_vision: bool = spectator or (TeamManager.are_allies(viewer_team, int(unit.team)) if TeamManager != null else (unit.team == Unit.Team.PLAYER))
 		if not grants_vision:
 			continue
-		_reveal_circle(unit.global_position, unit.get_vision_range())
+		_reveal_circle_los(unit.global_position, unit.get_vision_range())
 
-	# Stamp live vision circles for all living allied buildings (or all active teams in Spectator Mode).
+	# Stamp cached static LOS vision for all living allied buildings.
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node) or not (node is Building):
 			continue
@@ -119,7 +181,16 @@ func refresh_visibility() -> void:
 		var grants_vision_b: bool = spectator or (TeamManager.are_allies(viewer_team, int(building.team)) if TeamManager != null else (building.team == Unit.Team.PLAYER))
 		if not grants_vision_b:
 			continue
-		_reveal_circle(building.global_position, building.get_vision_range())
+		var b_id: int = building.get_instance_id()
+		var cache_key: int = b_id * 2 + (1 if building.is_constructed else 0)
+		var stamped: PackedInt32Array
+		if _static_building_vision_cells.has(cache_key):
+			stamped = _static_building_vision_cells[cache_key]
+		else:
+			stamped = _compute_los_cells(building.global_position, building.get_vision_range())
+			_static_building_vision_cells[cache_key] = stamped
+		for idx: int in stamped:
+			_grid[idx] = VisibilityState.VISIBLE
 
 	_sync_texture_if_dirty()
 	_apply_enemy_visibility(spectator)
@@ -155,7 +226,7 @@ func is_world_pos_explored(world_pos: Vector2) -> bool:
 	return get_visibility_at_world_pos(world_pos) >= VisibilityState.EXPLORED
 
 
-func _reveal_circle(world_center: Vector2, radius: float) -> void:
+func _reveal_circle_los(world_center: Vector2, radius: float) -> void:
 	if radius <= 0.0:
 		return
 	var cell_w: float = arena_bounds.size.x / float(grid_width)
@@ -163,8 +234,10 @@ func _reveal_circle(world_center: Vector2, radius: float) -> void:
 	var eff_radius: float = radius + maxf(cell_w, cell_h) * 0.35
 	var eff_radius_sq: float = eff_radius * eff_radius
 
+	var origin_cell: Vector2i = world_to_cell(world_center)
 	var min_cell: Vector2i = world_to_cell(world_center - Vector2(eff_radius, eff_radius))
 	var max_cell: Vector2i = world_to_cell(world_center + Vector2(eff_radius, eff_radius))
+	var check_los: bool = los_shadowing_enabled and not _blocker_grid.is_empty()
 
 	for cy: int in range(min_cell.y, max_cell.y + 1):
 		var wy: float = arena_bounds.position.y + (float(cy) + 0.5) * cell_h
@@ -174,8 +247,69 @@ func _reveal_circle(world_center: Vector2, radius: float) -> void:
 		for cx: int in range(min_cell.x, max_cell.x + 1):
 			var wx: float = arena_bounds.position.x + (float(cx) + 0.5) * cell_w
 			var dx: float = wx - world_center.x
-			if dx * dx + dy_sq <= eff_radius_sq:
+			if dx * dx + dy_sq > eff_radius_sq:
+				continue
+			if not check_los or _has_line_of_sight(origin_cell.x, origin_cell.y, cx, cy):
 				_grid[row_offset + cx] = VisibilityState.VISIBLE
+
+
+func _compute_los_cells(world_center: Vector2, radius: float) -> PackedInt32Array:
+	var out: PackedInt32Array = PackedInt32Array()
+	if radius <= 0.0:
+		return out
+	var cell_w: float = arena_bounds.size.x / float(grid_width)
+	var cell_h: float = arena_bounds.size.y / float(grid_height)
+	var eff_radius: float = radius + maxf(cell_w, cell_h) * 0.35
+	var eff_radius_sq: float = eff_radius * eff_radius
+
+	var origin_cell: Vector2i = world_to_cell(world_center)
+	var min_cell: Vector2i = world_to_cell(world_center - Vector2(eff_radius, eff_radius))
+	var max_cell: Vector2i = world_to_cell(world_center + Vector2(eff_radius, eff_radius))
+	var check_los: bool = los_shadowing_enabled and not _blocker_grid.is_empty()
+
+	for cy: int in range(min_cell.y, max_cell.y + 1):
+		var wy: float = arena_bounds.position.y + (float(cy) + 0.5) * cell_h
+		var dy: float = wy - world_center.y
+		var dy_sq: float = dy * dy
+		var row_offset: int = cy * grid_width
+		for cx: int in range(min_cell.x, max_cell.x + 1):
+			var wx: float = arena_bounds.position.x + (float(cx) + 0.5) * cell_w
+			var dx: float = wx - world_center.x
+			if dx * dx + dy_sq > eff_radius_sq:
+				continue
+			if not check_los or _has_line_of_sight(origin_cell.x, origin_cell.y, cx, cy):
+				out.append(row_offset + cx)
+	return out
+
+
+func _has_line_of_sight(x0: int, y0: int, x1: int, y1: int) -> bool:
+	if x0 == x1 and y0 == y1:
+		return true
+	var dx: int = absi(x1 - x0)
+	var dy: int = absi(y1 - y0)
+	var sx: int = 1 if x0 < x1 else -1
+	var sy: int = 1 if y0 < y1 else -1
+	var err: int = dx - dy
+	var cx: int = x0
+	var cy: int = y0
+
+	while true:
+		var e2: int = err * 2
+		if e2 > -dy:
+			err -= dy
+			cx += sx
+		if e2 < dx:
+			err += dx
+			cy += sy
+		# Target cell itself is always revealed (even if it is a wall/barricade edge cell).
+		if cx == x1 and cy == y1:
+			return true
+		if cx < 0 or cx >= grid_width or cy < 0 or cy >= grid_height:
+			return false
+		# An intermediate opaque cell blocks sight to everything behind it.
+		if _blocker_grid[cy * grid_width + cx] != 0:
+			return false
+	return true
 
 
 func _sync_texture_if_dirty() -> void:
@@ -236,3 +370,9 @@ func _apply_enemy_visibility(force_reveal_all: bool) -> void:
 			building.visible = true
 		else:
 			building.visible = false
+
+	for node: Node in get_tree().get_nodes_in_group("salvage_cores"):
+		if not is_instance_valid(node) or not (node is Node2D):
+			continue
+		var sc: Node2D = node as Node2D
+		sc.visible = true if force_reveal_all else is_world_pos_explored(sc.global_position)

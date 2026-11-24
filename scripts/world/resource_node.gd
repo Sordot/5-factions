@@ -27,9 +27,16 @@ var _is_highlighted: bool = false
 
 func _ready() -> void:
 	add_to_group("resource_nodes")
+	if SpatialGrid != null:
+		SpatialGrid.register_resource(self)
 	remaining_amount = clampi(remaining_amount, 0, maxi(1, max_amount))
 	_update_ring_visual()
 	_update_visuals()
+
+
+func _exit_tree() -> void:
+	if SpatialGrid != null:
+		SpatialGrid.unregister_resource(self)
 
 
 func _process(delta: float) -> void:

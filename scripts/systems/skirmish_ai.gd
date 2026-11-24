@@ -73,28 +73,77 @@ var _unit_stall_ticks: Dictionary = {}
 
 func _ready() -> void:
 	add_to_group("skirmish_ai")
-	_condenser_data = load(CONDENSER_DATA_PATH) as BuildingData
-	_pylon_data = load(PYLON_DATA_PATH) as BuildingData
-	_mainframe_data = load(MAINFRAME_DATA_PATH) as BuildingData
-	_cloning_vat_data = load(CLONING_VAT_DATA_PATH) as BuildingData
-	_foundry_data = load(FOUNDRY_DATA_PATH) as BuildingData
-	_fabricator_data = load(FABRICATOR_DATA_PATH) as BuildingData
-	_worker_data = load(WORKER_DATA_PATH) as UnitData
-	_harvester_data = load(HARVESTER_DATA_PATH) as UnitData
-	_engineer_data = load(ENGINEER_DATA_PATH) as UnitData
-	_clone_trooper_data = load(CLONE_TROOPER_DATA_PATH) as UnitData
-	_stinger_data = load(STINGER_DATA_PATH) as UnitData
-	_symbiote_data = load(SYMBIOTE_DATA_PATH) as UnitData
-	_lance_rig_data = load(LANCE_RIG_DATA_PATH) as UnitData
-	_signal_jammer_data = load(SIGNAL_JAMMER_DATA_PATH) as UnitData
-	_goliath_data = load(GOLIATH_DATA_PATH) as UnitData
-	_arc_lancer_data = load(ARC_LANCER_DATA_PATH) as UnitData
-	_mortar_data = load(MORTAR_DATA_PATH) as UnitData
-	_upg_batch_efficiency = load(UPG_BATCH_EFFICIENCY_PATH) as UpgradeData
-	_upg_adrenal_potency = load(UPG_ADRENAL_POTENCY_PATH) as UpgradeData
-	_upg_compute_overdrive = load(UPG_COMPUTE_OVERDRIVE_PATH) as UpgradeData
+	_load_faction_rosters()
 	_apply_lobby_ai_profile()
 	call_deferred("_setup_initial_rallies")
+
+
+func _load_faction_rosters() -> void:
+	var faction_id: StringName = TeamManager.get_team_faction(int(ai_team)) if TeamManager != null else &"genesis_v2"
+	var faction_res: Resource = TeamManager.get_faction_data(faction_id) if (TeamManager != null and TeamManager.has_method("get_faction_data")) else null
+	if faction_res != null:
+		_condenser_data = faction_res.call("get_ai_building_for_role", &"refinery") as BuildingData
+		_pylon_data = faction_res.call("get_ai_building_for_role", &"supply") as BuildingData
+		_mainframe_data = faction_res.call("get_ai_building_for_role", &"compute_hub") as BuildingData
+		_cloning_vat_data = faction_res.call("get_ai_building_for_role", &"barracks_t1") as BuildingData
+		_foundry_data = faction_res.call("get_ai_building_for_role", &"counter_foundry") as BuildingData
+		_fabricator_data = faction_res.call("get_ai_building_for_role", &"heavy_t2") as BuildingData
+		_worker_data = faction_res.call("get_unit_by_id", &"worker") as UnitData
+		_harvester_data = faction_res.call("get_unit_by_id", &"silica_harvester") as UnitData
+		_engineer_data = faction_res.call("get_unit_by_id", &"engineer") as UnitData
+		_clone_trooper_data = faction_res.call("get_unit_by_id", &"clone_trooper") as UnitData
+		_stinger_data = faction_res.call("get_unit_by_id", &"stinger") as UnitData
+		_symbiote_data = faction_res.call("get_unit_by_id", &"symbiote") as UnitData
+		_lance_rig_data = faction_res.call("get_unit_by_id", &"lance_rig") as UnitData
+		_signal_jammer_data = faction_res.call("get_unit_by_id", &"signal_jammer") as UnitData
+		_goliath_data = faction_res.call("get_unit_by_id", &"goliath_frame") as UnitData
+		_arc_lancer_data = faction_res.call("get_unit_by_id", &"arc_lancer") as UnitData
+		_mortar_data = faction_res.call("get_unit_by_id", &"chrysalis_mortar") as UnitData
+		_upg_batch_efficiency = faction_res.call("get_upgrade_by_id", &"batch_efficiency") as UpgradeData
+		_upg_adrenal_potency = faction_res.call("get_upgrade_by_id", &"adrenal_potency") as UpgradeData
+		_upg_compute_overdrive = faction_res.call("get_upgrade_by_id", &"compute_overdrive") as UpgradeData
+
+	# Fallback to direct resource paths if any entry is absent
+	if _condenser_data == null:
+		_condenser_data = load(CONDENSER_DATA_PATH) as BuildingData
+	if _pylon_data == null:
+		_pylon_data = load(PYLON_DATA_PATH) as BuildingData
+	if _mainframe_data == null:
+		_mainframe_data = load(MAINFRAME_DATA_PATH) as BuildingData
+	if _cloning_vat_data == null:
+		_cloning_vat_data = load(CLONING_VAT_DATA_PATH) as BuildingData
+	if _foundry_data == null:
+		_foundry_data = load(FOUNDRY_DATA_PATH) as BuildingData
+	if _fabricator_data == null:
+		_fabricator_data = load(FABRICATOR_DATA_PATH) as BuildingData
+	if _worker_data == null:
+		_worker_data = load(WORKER_DATA_PATH) as UnitData
+	if _harvester_data == null:
+		_harvester_data = load(HARVESTER_DATA_PATH) as UnitData
+	if _engineer_data == null:
+		_engineer_data = load(ENGINEER_DATA_PATH) as UnitData
+	if _clone_trooper_data == null:
+		_clone_trooper_data = load(CLONE_TROOPER_DATA_PATH) as UnitData
+	if _stinger_data == null:
+		_stinger_data = load(STINGER_DATA_PATH) as UnitData
+	if _symbiote_data == null:
+		_symbiote_data = load(SYMBIOTE_DATA_PATH) as UnitData
+	if _lance_rig_data == null:
+		_lance_rig_data = load(LANCE_RIG_DATA_PATH) as UnitData
+	if _signal_jammer_data == null:
+		_signal_jammer_data = load(SIGNAL_JAMMER_DATA_PATH) as UnitData
+	if _goliath_data == null:
+		_goliath_data = load(GOLIATH_DATA_PATH) as UnitData
+	if _arc_lancer_data == null:
+		_arc_lancer_data = load(ARC_LANCER_DATA_PATH) as UnitData
+	if _mortar_data == null:
+		_mortar_data = load(MORTAR_DATA_PATH) as UnitData
+	if _upg_batch_efficiency == null:
+		_upg_batch_efficiency = load(UPG_BATCH_EFFICIENCY_PATH) as UpgradeData
+	if _upg_adrenal_potency == null:
+		_upg_adrenal_potency = load(UPG_ADRENAL_POTENCY_PATH) as UpgradeData
+	if _upg_compute_overdrive == null:
+		_upg_compute_overdrive = load(UPG_COMPUTE_OVERDRIVE_PATH) as UpgradeData
 
 
 func _apply_lobby_ai_profile() -> void:
@@ -163,7 +212,8 @@ func _run_decision_tick() -> void:
 	if core == null:
 		return
 
-	# 1. Assign idle workers & harvesters to gather, staff idle engineers, and resume unfinished sites.
+	# 1. Assign idle workers & harvesters to gather, collect safe nearby salvage, staff idle engineers, and resume unfinished sites.
+	_collect_safe_salvage(core)
 	_assign_idle_workers(core)
 	_assign_idle_harvesters()
 	_assign_idle_engineers()
@@ -187,6 +237,49 @@ func _run_decision_tick() -> void:
 	# 5. Coordinate attack waves when a combat squad is ready.
 	if not under_attack:
 		_manage_attack_waves(core)
+
+
+func _collect_safe_salvage(core: Building) -> void:
+	if core == null or not is_instance_valid(core) or not is_inside_tree():
+		return
+	var cores: Array = SpatialGrid.query_salvage_in_radius(core.global_position, 680.0) if SpatialGrid != null else get_tree().get_nodes_in_group("salvage_cores")
+	if cores.is_empty():
+		return
+	var target_core: Node2D = null
+	var best_d_sq: float = 680.0 * 680.0
+	for item: Variant in cores:
+		if not is_instance_valid(item) or not (item is Node2D):
+			continue
+		var sc: Node2D = item as Node2D
+		if bool(sc.get("is_claimed")) or sc.is_queued_for_deletion():
+			continue
+		var d_sq: float = core.global_position.distance_squared_to(sc.global_position)
+		if d_sq > best_d_sq:
+			continue
+		# Skip contested salvage cores with enemies nearby
+		var contested: bool = false
+		if SpatialGrid != null:
+			for u: Unit in SpatialGrid.query_units_in_radius(sc.global_position, 260.0):
+				if _is_enemy_team(int(u.team)):
+					contested = true
+					break
+		if not contested:
+			best_d_sq = d_sq
+			target_core = sc
+	if target_core == null:
+		return
+
+	# Don't dispatch a second worker if one is already salvaging this core
+	var team_units: Array[Unit] = _get_team_units(ai_team)
+	for u: Unit in team_units:
+		if u.command_state == Unit.CommandState.SALVAGING:
+			return
+	for u: Unit in team_units:
+		if not u.can_salvage_core():
+			continue
+		if u.command_state == Unit.CommandState.IDLE and u.command_queue.is_empty():
+			u.command_salvage(target_core)
+			return
 
 
 func _assign_idle_workers(core: Building) -> void:

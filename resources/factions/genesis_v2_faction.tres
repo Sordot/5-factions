@@ -1,0 +1,53 @@
+[gd_resource type="Resource" script_class="FactionData" load_steps=27 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/faction_data.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/nexus_vat.tscn" id="2_hub"]
+[ext_resource type="PackedScene" path="res://scenes/units/worker_unit.tscn" id="3_worker"]
+[ext_resource type="PackedScene" path="res://scenes/units/silica_harvester.tscn" id="4_harvester"]
+[ext_resource type="PackedScene" path="res://scenes/units/engineer_unit.tscn" id="5_engineer"]
+[ext_resource type="Resource" path="res://resources/buildings/nexus_vat_data.tres" id="6_b_nexus"]
+[ext_resource type="Resource" path="res://resources/buildings/synapse_pylon_data.tres" id="7_b_pylon"]
+[ext_resource type="Resource" path="res://resources/buildings/silica_condenser_data.tres" id="8_b_cond"]
+[ext_resource type="Resource" path="res://resources/buildings/wetware_mainframe_data.tres" id="9_b_main"]
+[ext_resource type="Resource" path="res://resources/buildings/cloning_vat_data.tres" id="10_b_vat"]
+[ext_resource type="Resource" path="res://resources/buildings/calibration_foundry_data.tres" id="11_b_fnd"]
+[ext_resource type="Resource" path="res://resources/buildings/synthetics_fabricator_data.tres" id="12_b_fab"]
+[ext_resource type="Resource" path="res://resources/units/worker_unit_data.tres" id="13_u_wrk"]
+[ext_resource type="Resource" path="res://resources/units/silica_harvester_data.tres" id="14_u_harv"]
+[ext_resource type="Resource" path="res://resources/units/engineer_data.tres" id="15_u_eng"]
+[ext_resource type="Resource" path="res://resources/units/clone_trooper_data.tres" id="16_u_cln"]
+[ext_resource type="Resource" path="res://resources/units/stinger_data.tres" id="17_u_stg"]
+[ext_resource type="Resource" path="res://resources/units/symbiote_data.tres" id="18_u_sym"]
+[ext_resource type="Resource" path="res://resources/units/lance_rig_data.tres" id="19_u_lnc"]
+[ext_resource type="Resource" path="res://resources/units/signal_jammer_data.tres" id="20_u_jam"]
+[ext_resource type="Resource" path="res://resources/units/goliath_frame_data.tres" id="21_u_gol"]
+[ext_resource type="Resource" path="res://resources/units/arc_lancer_data.tres" id="22_u_arc"]
+[ext_resource type="Resource" path="res://resources/units/chrysalis_mortar_data.tres" id="23_u_mrt"]
+[ext_resource type="Resource" path="res://resources/upgrades/batch_efficiency.tres" id="24_upg_be"]
+[ext_resource type="Resource" path="res://resources/upgrades/adrenal_potency.tres" id="25_upg_ap"]
+[ext_resource type="Resource" path="res://resources/upgrades/compute_overdrive.tres" id="26_upg_co"]
+
+[resource]
+script = ExtResource("1_script")
+faction_id = &"genesis_v2"
+display_name = "GENESIS_V2 — The Vat-Born"
+tagline = "High-tempo vat-cloned bio-infantry pivoting into Compute-forged heavy synthetics."
+is_playable = true
+primary_color = Color(0.2, 0.96, 0.86, 1)
+accent_color = Color(0.28, 0.98, 0.62, 1)
+starting_hub_scene = ExtResource("2_hub")
+worker_scene = ExtResource("3_worker")
+harvester_scene = ExtResource("4_harvester")
+engineer_scene = ExtResource("5_engineer")
+building_roster = Array[Resource("res://scripts/data/building_data.gd")]([ExtResource("6_b_nexus"), ExtResource("7_b_pylon"), ExtResource("8_b_cond"), ExtResource("9_b_main"), ExtResource("10_b_vat"), ExtResource("11_b_fnd"), ExtResource("12_b_fab")])
+unit_roster = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("13_u_wrk"), ExtResource("14_u_harv"), ExtResource("15_u_eng"), ExtResource("16_u_cln"), ExtResource("17_u_stg"), ExtResource("18_u_sym"), ExtResource("19_u_lnc"), ExtResource("20_u_jam"), ExtResource("21_u_gol"), ExtResource("22_u_arc"), ExtResource("23_u_mrt")])
+upgrade_roster = Array[Resource("res://scripts/data/upgrade_data.gd")]([ExtResource("24_upg_be"), ExtResource("25_upg_ap"), ExtResource("26_upg_co")])
+ai_build_profile = {
+&"barracks_t1": &"cloning_vat",
+&"compute_hub": &"wetware_mainframe",
+&"counter_foundry": &"calibration_foundry",
+&"heavy_t2": &"synthetics_fabricator",
+&"hub": &"nexus_vat",
+&"refinery": &"silica_condenser",
+&"supply": &"synapse_pylon"
+}
