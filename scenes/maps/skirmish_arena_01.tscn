@@ -1,4 +1,4 @@
-[gd_scene load_steps=32 format=3]
+[gd_scene load_steps=33 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
 [ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
@@ -30,6 +30,7 @@
 [ext_resource type="PackedScene" path="res://ui/hud/match_end_overlay.tscn" id="29_match_end_overlay"]
 [ext_resource type="Script" path="res://ui/overlays/rally_point_overlay.gd" id="30_rally_overlay"]
 [ext_resource type="Script" path="res://ui/overlays/command_queue_overlay.gd" id="31_cmd_queue_overlay"]
+[ext_resource type="PackedScene" path="res://ui/hud/production_ticker.tscn" id="32_prod_ticker"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_skirmish"]
 vertices = PackedVector2Array(-1300, -950, 1300, -950, 1300, 950, -1300, 950)
@@ -423,6 +424,8 @@ economy_manager_path = NodePath("../EconomyManager")
 [node name="SandboxDebugPanel" parent="DebugHUD" instance=ExtResource("7_debug_panel")]
 spawner_path = NodePath("../../SandboxSpawner")
 selection_controller_path = NodePath("../../SelectionController")
+
+[node name="ProductionTicker" parent="DebugHUD" instance=ExtResource("32_prod_ticker")]
 
 [node name="SelectionHUD" parent="DebugHUD" instance=ExtResource("9_selection_hud")]
 selection_controller_path = NodePath("../../SelectionController")

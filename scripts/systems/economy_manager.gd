@@ -4,6 +4,7 @@ extends Node
 const RESOURCE_BIOMASS: StringName = &"biomass"
 const RESOURCE_SILICA: StringName = &"silica"
 const RESOURCE_COMPUTE: StringName = &"compute"
+const INCOME_WINDOW_SEC: float = 30.0
 
 signal resources_changed(team: int, resources: Dictionary)
 signal bandwidth_changed(team: int, used: int, cap: int)
@@ -20,6 +21,9 @@ signal resource_insufficient(team: int, missing_key: StringName)
 var upgrade_manager: UpgradeManager = UpgradeManager.new()
 
 var _resources: Dictionary = {}
+var _total_gathered: Dictionary = {}
+var _income_samples: Dictionary = {}
+var _elapsed_time: float = 0.0
 var _bandwidth_used: Dictionary = {}
 var _bandwidth_reserved: Dictionary = {}
 var _bandwidth_cap: Dictionary = {}
@@ -53,11 +57,25 @@ func _sync_initial_scene_state() -> void:
 	resources_changed.emit(Unit.Team.ENEMY, get_resources(Unit.Team.ENEMY))
 
 
+func _process(delta: float) -> void:
+	_elapsed_time += delta
+
+
 func _init_team_state(team: int, biomass: int, silica: int, compute: int) -> void:
 	_resources[team] = {
 		RESOURCE_BIOMASS: biomass,
 		RESOURCE_SILICA: silica,
 		RESOURCE_COMPUTE: compute,
+	}
+	_total_gathered[team] = {
+		RESOURCE_BIOMASS: 0,
+		RESOURCE_SILICA: 0,
+		RESOURCE_COMPUTE: 0,
+	}
+	_income_samples[team] = {
+		RESOURCE_BIOMASS: [],
+		RESOURCE_SILICA: [],
+		RESOURCE_COMPUTE: [],
 	}
 	if not _bandwidth_used.has(team):
 		_bandwidth_used[team] = 0
@@ -73,16 +91,12 @@ func _ensure_team(team: int) -> void:
 
 
 func reset_economy() -> void:
-	_resources[Unit.Team.PLAYER] = {
-		RESOURCE_BIOMASS: starting_biomass,
-		RESOURCE_SILICA: starting_silica,
-		RESOURCE_COMPUTE: starting_compute,
-	}
-	_resources[Unit.Team.ENEMY] = {
-		RESOURCE_BIOMASS: starting_biomass if enemy_matches_starting_resources else 0,
-		RESOURCE_SILICA: starting_silica if enemy_matches_starting_resources else 0,
-		RESOURCE_COMPUTE: starting_compute if enemy_matches_starting_resources else 0,
-	}
+	_elapsed_time = 0.0
+	_init_team_state(Unit.Team.PLAYER, starting_biomass, starting_silica, starting_compute)
+	if enemy_matches_starting_resources:
+		_init_team_state(Unit.Team.ENEMY, starting_biomass, starting_silica, starting_compute)
+	else:
+		_init_team_state(Unit.Team.ENEMY, 0, 0, 0)
 	_bandwidth_reserved[Unit.Team.PLAYER] = 0
 	_bandwidth_reserved[Unit.Team.ENEMY] = 0
 	upgrade_manager.reset()
@@ -95,13 +109,62 @@ func reset_economy() -> void:
 	tech_changed.emit(Unit.Team.ENEMY)
 
 
-func add_resource(team: int, resource_type: StringName, amount: int) -> void:
+func add_resource(team: int, resource_type: StringName, amount: int, record_as_income: bool = true) -> void:
 	if amount <= 0:
 		return
 	_ensure_team(team)
 	var team_res: Dictionary = _resources[team]
 	team_res[resource_type] = int(team_res.get(resource_type, 0)) + amount
+	if record_as_income:
+		var totals: Dictionary = _total_gathered[team]
+		totals[resource_type] = int(totals.get(resource_type, 0)) + amount
+		var sample_map: Dictionary = _income_samples[team]
+		if not sample_map.has(resource_type):
+			sample_map[resource_type] = []
+		var arr: Array = sample_map[resource_type]
+		arr.append({"time": _elapsed_time, "amount": amount})
+		_prune_income_samples(arr)
 	resources_changed.emit(team, get_resources(team))
+
+
+func _prune_income_samples(samples: Array) -> void:
+	var cutoff: float = _elapsed_time - INCOME_WINDOW_SEC
+	while not samples.is_empty():
+		var first: Dictionary = samples[0]
+		if float(first.get("time", 0.0)) < cutoff:
+			samples.pop_front()
+		else:
+			break
+
+
+func get_income_rate_per_minute(team: int, resource_type: StringName) -> int:
+	if not _income_samples.has(team):
+		return 0
+	var sample_map: Dictionary = _income_samples[team]
+	if not sample_map.has(resource_type):
+		return 0
+	var arr: Array = sample_map[resource_type]
+	_prune_income_samples(arr)
+	if arr.is_empty():
+		return 0
+	var total_in_window: int = 0
+	for item: Variant in arr:
+		if item is Dictionary:
+			total_in_window += int((item as Dictionary).get("amount", 0))
+	var effective_window: float = clampf(_elapsed_time, 12.0, INCOME_WINDOW_SEC)
+	return int(round(float(total_in_window) * (60.0 / effective_window)))
+
+
+func get_total_gathered(team: int, resource_type: StringName) -> int:
+	if not _total_gathered.has(team):
+		return 0
+	var totals: Dictionary = _total_gathered[team]
+	return int(totals.get(resource_type, 0))
+
+
+func get_all_totals_gathered(team: int) -> Dictionary:
+	_ensure_team(team)
+	return (_total_gathered[team] as Dictionary).duplicate()
 
 
 func get_resource(team: int, resource_type: StringName) -> int:

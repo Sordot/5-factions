@@ -5,9 +5,13 @@ extends CanvasLayer
 @export var tracked_team: Unit.Team = Unit.Team.PLAYER
 
 @onready var biomass_value_label: Label = %BiomassValueLabel
+@onready var biomass_rate_label: Label = %BiomassRateLabel
 @onready var silica_value_label: Label = %SilicaValueLabel
+@onready var silica_rate_label: Label = %SilicaRateLabel
 @onready var compute_value_label: Label = %ComputeValueLabel
+@onready var compute_rate_label: Label = %ComputeRateLabel
 @onready var bandwidth_value_label: Label = %BandwidthValueLabel
+@onready var match_timer_label: Label = %MatchTimerLabel
 @onready var btn_audio_mute: Button = %BtnAudioMute
 @onready var btn_idle_workers: Button = %BtnIdleWorkers
 @onready var aggro_paused_badge: Label = %AggroPausedBadge
@@ -19,6 +23,9 @@ var _match_manager: MatchManager = null
 var _selection_controller: SelectionController = null
 var _flash_timers: Dictionary = {}
 var _alert_timer: float = 0.0
+var _hud_poll_timer: float = 0.0
+var _bandwidth_capped: bool = false
+var _bw_pulse_time: float = 0.0
 
 
 func _ready() -> void:
@@ -74,6 +81,16 @@ func _on_hud_toast(message: String) -> void:
 
 
 func _process(delta: float) -> void:
+	_hud_poll_timer += delta
+	if _hud_poll_timer >= 0.30:
+		_hud_poll_timer = 0.0
+		_refresh_income_rates_and_timer()
+
+	if _bandwidth_capped and bandwidth_value_label != null and not _flash_timers.has(&"bandwidth"):
+		_bw_pulse_time += delta
+		var pulse: float = 0.5 + 0.5 * sin(_bw_pulse_time * 5.2)
+		bandwidth_value_label.modulate = Color(1.0, 0.72, 0.28, 1.0).lerp(Color(1.0, 0.34, 0.28, 1.0), pulse)
+
 	if _alert_timer > 0.0:
 		_alert_timer = maxf(0.0, _alert_timer - delta)
 		if resource_alert_label != null:
@@ -97,6 +114,25 @@ func _process(delta: float) -> void:
 					lbl.modulate = Color.WHITE.lerp(Color(1.0, 0.34, 0.24, 1.0), 0.55 + pulse * 0.45)
 		for dk: StringName in done_keys:
 			_flash_timers.erase(dk)
+
+
+func _refresh_income_rates_and_timer() -> void:
+	if _match_manager == null and is_inside_tree():
+		_connect_match_manager()
+	if match_timer_label != null and _match_manager != null and _match_manager.has_method("get_match_elapsed_formatted"):
+		match_timer_label.text = String(_match_manager.call("get_match_elapsed_formatted"))
+
+	if _economy_manager == null:
+		return
+	var b_rate: int = _economy_manager.get_income_rate_per_minute(tracked_team, EconomyManager.RESOURCE_BIOMASS)
+	var s_rate: int = _economy_manager.get_income_rate_per_minute(tracked_team, EconomyManager.RESOURCE_SILICA)
+	var c_rate: int = _economy_manager.get_income_rate_per_minute(tracked_team, EconomyManager.RESOURCE_COMPUTE)
+	if biomass_rate_label != null:
+		biomass_rate_label.text = ("(+%d/m)" % b_rate) if b_rate > 0 else ""
+	if silica_rate_label != null:
+		silica_rate_label.text = ("(+%d/m)" % s_rate) if s_rate > 0 else ""
+	if compute_rate_label != null:
+		compute_rate_label.text = ("(+%d/m)" % c_rate) if c_rate > 0 else ""
 
 
 func _on_audio_mute_changed(_muted: bool) -> void:
@@ -243,11 +279,13 @@ func _on_resources_changed(team: int, resources: Dictionary) -> void:
 func _on_bandwidth_changed(team: int, used: int, cap: int) -> void:
 	if team != int(tracked_team):
 		return
+	_bandwidth_capped = (cap > 0 and used >= cap)
 	if bandwidth_value_label != null:
 		bandwidth_value_label.text = "%d / %d" % [used, cap]
-		if cap > 0 and used >= cap:
-			bandwidth_value_label.modulate = Color(1.0, 0.48, 0.34, 1.0)
+		if _bandwidth_capped:
+			bandwidth_value_label.modulate = Color(1.0, 0.48, 0.30, 1.0)
 		else:
+			_bw_pulse_time = 0.0
 			bandwidth_value_label.modulate = Color(0.74, 0.96, 1.0, 1.0)
 
 

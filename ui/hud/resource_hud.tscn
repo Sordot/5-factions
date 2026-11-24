@@ -22,8 +22,8 @@ layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -460.0
-offset_bottom = 122.0
+offset_left = -540.0
+offset_bottom = 132.0
 grow_horizontal = 0
 mouse_filter = 2
 theme_override_constants/margin_top = 12
@@ -66,12 +66,25 @@ theme_override_colors/font_color = Color(0.46, 0.9, 0.66, 0.92)
 theme_override_font_sizes/font_size = 10
 text = "BIOMASS"
 
-[node name="BiomassValueLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BiomassBox/VBox"]
+[node name="ValueRow" type="HBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BiomassBox/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="BiomassValueLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BiomassBox/VBox/ValueRow"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 1, 0.95, 1)
 theme_override_font_sizes/font_size = 16
 text = "50"
+
+[node name="BiomassRateLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/BiomassBox/VBox/ValueRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 8
+theme_override_colors/font_color = Color(0.42, 0.88, 0.62, 0.78)
+theme_override_font_sizes/font_size = 10
+text = ""
 
 [node name="Sep1" type="VSeparator" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox"]
 layout_mode = 2
@@ -100,12 +113,25 @@ theme_override_colors/font_color = Color(0.96, 0.8, 0.44, 0.92)
 theme_override_font_sizes/font_size = 10
 text = "SILICA"
 
-[node name="SilicaValueLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/SilicaBox/VBox"]
+[node name="ValueRow" type="HBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/SilicaBox/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="SilicaValueLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/SilicaBox/VBox/ValueRow"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.96, 0.88, 1)
 theme_override_font_sizes/font_size = 16
 text = "0"
+
+[node name="SilicaRateLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/SilicaBox/VBox/ValueRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 8
+theme_override_colors/font_color = Color(0.96, 0.78, 0.38, 0.78)
+theme_override_font_sizes/font_size = 10
+text = ""
 
 [node name="Sep2" type="VSeparator" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox"]
 layout_mode = 2
@@ -134,12 +160,25 @@ theme_override_colors/font_color = Color(0.45, 0.9, 1, 0.92)
 theme_override_font_sizes/font_size = 10
 text = "COMPUTE"
 
-[node name="ComputeValueLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/ComputeBox/VBox"]
+[node name="ValueRow" type="HBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/ComputeBox/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="ComputeValueLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/ComputeBox/VBox/ValueRow"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.98, 1, 1)
 theme_override_font_sizes/font_size = 16
 text = "0"
+
+[node name="ComputeRateLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox/ComputeBox/VBox/ValueRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 8
+theme_override_colors/font_color = Color(0.42, 0.88, 1, 0.78)
+theme_override_font_sizes/font_size = 10
+text = ""
 
 [node name="Sep3" type="VSeparator" parent="RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel/HBox"]
 layout_mode = 2
@@ -180,6 +219,14 @@ layout_mode = 2
 mouse_filter = 2
 alignment = 2
 theme_override_constants/separation = 8
+
+[node name="MatchTimerLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.76, 0.92, 0.98, 0.94)
+theme_override_font_sizes/font_size = 12
+text = "00:00"
 
 [node name="BtnAudioMute" type="Button" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
 unique_name_in_owner = true

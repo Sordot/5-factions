@@ -20,9 +20,15 @@ var match_elapsed: float = 0.0
 var player_uplink_time: float = 0.0
 var enemy_uplink_time: float = 0.0
 var player_units_trained: int = 0
+var enemy_units_trained: int = 0
 var player_units_lost: int = 0
 var enemy_units_destroyed: int = 0
+var player_buildings_built: int = 0
+var enemy_buildings_built: int = 0
+var player_buildings_lost: int = 0
 var enemy_structures_destroyed: int = 0
+var player_peak_bandwidth: int = 0
+var enemy_peak_bandwidth: int = 0
 
 var is_match_over: bool = false
 @export var sandbox_mode_active: bool = false
@@ -45,8 +51,38 @@ func _ready() -> void:
 		SettingsManager.set_gameplay_cursor_active(true)
 	call_deferred("_ensure_pause_menu")
 	call_deferred("_hook_initial_entities")
+	call_deferred("_hook_economy_manager")
 	if not get_tree().node_added.is_connected(_on_tree_node_added):
 		get_tree().node_added.connect(_on_tree_node_added)
+
+
+func get_match_elapsed_seconds() -> float:
+	return match_elapsed
+
+
+func get_match_elapsed_formatted() -> String:
+	return _format_duration(match_elapsed)
+
+
+func _hook_economy_manager() -> void:
+	if not is_inside_tree():
+		return
+	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	if econ == null:
+		return
+	if not econ.bandwidth_changed.is_connected(_on_bandwidth_changed):
+		econ.bandwidth_changed.connect(_on_bandwidth_changed)
+	player_peak_bandwidth = maxi(player_peak_bandwidth, econ.get_bandwidth_used(Unit.Team.PLAYER))
+	enemy_peak_bandwidth = maxi(enemy_peak_bandwidth, econ.get_bandwidth_used(Unit.Team.ENEMY))
+
+
+func _on_bandwidth_changed(team: int, used: int, _cap: int) -> void:
+	if is_match_over:
+		return
+	if team == int(Unit.Team.PLAYER):
+		player_peak_bandwidth = maxi(player_peak_bandwidth, used)
+	elif team == int(Unit.Team.ENEMY):
+		enemy_peak_bandwidth = maxi(enemy_peak_bandwidth, used)
 
 
 func _ensure_pause_menu() -> void:
@@ -257,6 +293,10 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 
 	var safe_duration: float = maxf(1.0, match_elapsed)
 	var player_uplink_pct: float = clampf((player_uplink_time / safe_duration) * 100.0, 0.0, 100.0)
+	var enemy_uplink_pct: float = clampf((enemy_uplink_time / safe_duration) * 100.0, 0.0, 100.0)
+	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	var p_totals: Dictionary = econ.get_all_totals_gathered(Unit.Team.PLAYER) if econ != null else {}
+	var e_totals: Dictionary = econ.get_all_totals_gathered(Unit.Team.ENEMY) if econ != null else {}
 	var stats: Dictionary = {
 		"winner_team": int(winner_team),
 		"winner_label": "PLAYER COMMANDER" if winner_team == Unit.Team.PLAYER else "HOSTILE AI",
@@ -269,7 +309,38 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 		"units_lost": player_units_lost,
 		"enemies_destroyed": enemy_units_destroyed,
 		"structures_destroyed": enemy_structures_destroyed,
+		"player": {
+			"biomass_gathered": int(p_totals.get(EconomyManager.RESOURCE_BIOMASS, 0)),
+			"silica_gathered": int(p_totals.get(EconomyManager.RESOURCE_SILICA, 0)),
+			"compute_gathered": int(p_totals.get(EconomyManager.RESOURCE_COMPUTE, 0)),
+			"units_trained": player_units_trained,
+			"units_lost": player_units_lost,
+			"enemies_destroyed": enemy_units_destroyed,
+			"buildings_built": player_buildings_built,
+			"buildings_lost": player_buildings_lost,
+			"peak_bandwidth": player_peak_bandwidth,
+			"uplink_seconds": player_uplink_time,
+			"uplink_formatted": _format_duration(player_uplink_time),
+			"uplink_pct": player_uplink_pct,
+		},
+		"enemy": {
+			"biomass_gathered": int(e_totals.get(EconomyManager.RESOURCE_BIOMASS, 0)),
+			"silica_gathered": int(e_totals.get(EconomyManager.RESOURCE_SILICA, 0)),
+			"compute_gathered": int(e_totals.get(EconomyManager.RESOURCE_COMPUTE, 0)),
+			"units_trained": enemy_units_trained,
+			"units_lost": enemy_units_destroyed,
+			"enemies_destroyed": player_units_lost,
+			"buildings_built": enemy_buildings_built,
+			"buildings_lost": enemy_structures_destroyed,
+			"peak_bandwidth": enemy_peak_bandwidth,
+			"uplink_seconds": enemy_uplink_time,
+			"uplink_formatted": _format_duration(enemy_uplink_time),
+			"uplink_pct": enemy_uplink_pct,
+		},
 	}
+
+	if SettingsManager != null:
+		SettingsManager.set_gameplay_cursor_active(false)
 
 	match_ended.emit(int(winner_team), stats)
 
@@ -304,8 +375,19 @@ func _hook_building(b: Building) -> void:
 		_tracked_buildings[b_id] = true
 		if not b.destroyed.is_connected(_on_building_destroyed):
 			b.destroyed.connect(_on_building_destroyed)
+		if not b.construction_completed.is_connected(_on_building_construction_completed):
+			b.construction_completed.connect(_on_building_construction_completed)
 	if b.production_component != null:
 		_hook_production(b.production_component)
+
+
+func _on_building_construction_completed(building: Building) -> void:
+	if is_match_over or building == null:
+		return
+	if building.team == Unit.Team.PLAYER:
+		player_buildings_built += 1
+	elif building.team == Unit.Team.ENEMY:
+		enemy_buildings_built += 1
 
 
 func _hook_production(prod: ProductionComponent) -> void:
@@ -335,6 +417,8 @@ func _on_unit_produced(unit: Unit) -> void:
 		return
 	if unit.team == Unit.Team.PLAYER:
 		player_units_trained += 1
+	elif unit.team == Unit.Team.ENEMY:
+		enemy_units_trained += 1
 
 
 func _on_unit_died(unit: Unit) -> void:
@@ -347,8 +431,11 @@ func _on_unit_died(unit: Unit) -> void:
 
 
 func _on_building_destroyed(building: Building) -> void:
-	if building != null and building.team == Unit.Team.ENEMY and not is_match_over:
-		enemy_structures_destroyed += 1
+	if building != null and not is_match_over:
+		if building.team == Unit.Team.ENEMY:
+			enemy_structures_destroyed += 1
+		elif building.team == Unit.Team.PLAYER:
+			player_buildings_lost += 1
 	evaluate_match_state()
 
 

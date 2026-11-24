@@ -64,6 +64,8 @@ var _wave_number: int = 0
 var _vat_production_counter: int = 0
 var _foundry_production_counter: int = 0
 var _fab_production_counter: int = 0
+var _ai_difficulty: int = 1
+var _ai_playstyle: int = 0
 var _dispatched_wave_units: Dictionary = {}
 var _unit_last_pos: Dictionary = {}
 var _unit_stall_ticks: Dictionary = {}
@@ -91,7 +93,42 @@ func _ready() -> void:
 	_upg_batch_efficiency = load(UPG_BATCH_EFFICIENCY_PATH) as UpgradeData
 	_upg_adrenal_potency = load(UPG_ADRENAL_POTENCY_PATH) as UpgradeData
 	_upg_compute_overdrive = load(UPG_COMPUTE_OVERDRIVE_PATH) as UpgradeData
+	_apply_lobby_ai_profile()
 	call_deferred("_setup_initial_rallies")
+
+
+func _apply_lobby_ai_profile() -> void:
+	if GameConfig == null:
+		return
+	_ai_difficulty = int(GameConfig.ai_difficulty)
+	_ai_playstyle = int(GameConfig.ai_playstyle)
+
+	match _ai_difficulty:
+		int(GameConfig.AIDifficulty.RELAXED):
+			decision_interval = 1.6
+			target_worker_count = 4
+			wave_squad_size = 4
+			max_wave_interval = 64.0
+			max_cloning_vats = 1
+		int(GameConfig.AIDifficulty.BRUTAL):
+			decision_interval = 0.7
+			target_worker_count = 8
+			wave_squad_size = 8
+			max_wave_interval = 36.0
+			max_cloning_vats = 3
+		_:
+			decision_interval = 1.0
+			target_worker_count = 6
+			wave_squad_size = 6
+			max_wave_interval = 48.0
+			max_cloning_vats = 2
+
+	if _ai_playstyle == int(GameConfig.AIPlaystyle.SWARM_RUSH):
+		wave_squad_size = maxi(4, wave_squad_size - 1)
+		max_wave_interval *= 0.78
+		max_cloning_vats = maxi(max_cloning_vats, 2)
+	elif _ai_playstyle == int(GameConfig.AIPlaystyle.SYNTHETICS_TECH):
+		max_wave_interval *= 1.12
 
 
 func _process(delta: float) -> void:
@@ -384,11 +421,27 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 	var silica: int = econ.get_resource(ai_team, EconomyManager.RESOURCE_SILICA)
 	var compute: int = econ.get_resource(ai_team, EconomyManager.RESOURCE_COMPUTE)
 
-	# Priority 1: Ensure baseline worker core (4 workers early).
-	if total_workers < 4:
+	var is_swarm_rush: bool = (_ai_playstyle == int(GameConfig.AIPlaystyle.SWARM_RUSH)) if GameConfig != null else false
+	var is_synth_tech: bool = (_ai_playstyle == int(GameConfig.AIPlaystyle.SYNTHETICS_TECH)) if GameConfig != null else false
+	var is_brutal: bool = (_ai_difficulty == int(GameConfig.AIDifficulty.BRUTAL)) if GameConfig != null else false
+
+	# Priority 1: Ensure baseline worker core (3 early on Swarm Rush, 4 baseline).
+	var early_workers: int = 3 if is_swarm_rush else 4
+	if total_workers < early_workers:
 		if _worker_data != null and core.get_training_queue_size() < 2 and core.can_train_unit_data(_worker_data):
 			core.queue_unit_data(_worker_data)
 		return
+
+	# Swarm Rush builds its first Cloning Vat before the Silica Condenser for rapid infantry pressure.
+	if is_swarm_rush and cloning_vats.is_empty() and _cloning_vat_data != null:
+		if econ.can_afford(ai_team, _cloning_vat_data.get_cost_dict()):
+			var to_c_rush: Vector2 = (Vector2.ZERO - core.global_position).normalized()
+			var rush_vat: Building = _try_place_and_build(_cloning_vat_data, core.global_position + to_c_rush * 175.0, core.global_position)
+			if rush_vat != null:
+				rush_vat.set_rally_position(core.global_position.lerp(Vector2.ZERO, 0.36))
+			return
+		if biomass < _cloning_vat_data.biomass_cost:
+			return
 
 	# Priority 2: Build Silica Condenser near enemy Silica Vein.
 	if condensers.is_empty():
@@ -407,7 +460,7 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 		return
 
 	# Priority 4: Train automated Silica Harvesters once Condensers are online (scales with expansion).
-	var desired_harvesters: int = 3 if constructed_condensers.size() >= 2 else (2 if constructed_vats.size() >= 1 else 1)
+	var desired_harvesters: int = 3 if (constructed_condensers.size() >= 2 or is_brutal) else (2 if constructed_vats.size() >= 1 else 1)
 	if _harvester_data != null and constructed_condenser != null and total_harvesters < desired_harvesters:
 		var trainer: Building = constructed_condenser if constructed_condenser.can_train_unit_data(_harvester_data) else core
 		if trainer.get_training_queue_size() < 2 and trainer.can_train_unit_data(_harvester_data):
@@ -426,18 +479,19 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 		if biomass < _cloning_vat_data.biomass_cost:
 			return
 
-	# Priority 6: Saturate workers up to target_worker_count (4-6 workers).
+	# Priority 6: Saturate workers up to target_worker_count.
 	if _worker_data != null and total_workers < target_worker_count:
 		if core.get_training_queue_size() < 2 and core.can_train_unit_data(_worker_data):
 			core.queue_unit_data(_worker_data)
 
 	# Priority 7: Wetware Mainframes on natural & contested expansion Compute Vents + Engineers.
-	if not constructed_vats.is_empty() and _mainframe_data != null:
+	var exp_vent_biomass: int = 160 if (is_synth_tech or is_brutal) else 220
+	if (not constructed_vats.is_empty() or is_synth_tech) and _mainframe_data != null:
 		if mainframes.is_empty():
 			var vent: ResourceNode = _find_nearest_unoccupied_vent(core.global_position, 580.0)
 			if vent != null and econ.can_afford(ai_team, _mainframe_data.get_cost_dict()):
 				_try_place_and_build_on_vent(_mainframe_data, vent)
-		elif mainframes.size() == 1 and constructed_mainframes.size() >= 1 and staffed_engineers >= 1 and biomass >= 220:
+		elif mainframes.size() == 1 and constructed_mainframes.size() >= 1 and staffed_engineers >= 1 and biomass >= exp_vent_biomass:
 			var exp_vent: ResourceNode = _find_nearest_unoccupied_vent(core.global_position, 1650.0)
 			if exp_vent != null and econ.can_afford(ai_team, _mainframe_data.get_cost_dict()):
 				_try_place_and_build_on_vent(_mainframe_data, exp_vent)
@@ -448,7 +502,8 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			core.queue_unit_data(_engineer_data)
 
 	# Priority 7.5: Expand Silica economy to NW/SE expansion cluster once Tier-1 is established.
-	if condensers.size() < 2 and not constructed_condensers.is_empty() and not constructed_vats.is_empty() and biomass >= 240 and _condenser_data != null:
+	var exp_cond_biomass: int = 180 if is_brutal else 240
+	if condensers.size() < 2 and not constructed_condensers.is_empty() and not constructed_vats.is_empty() and biomass >= exp_cond_biomass and _condenser_data != null:
 		if econ.can_afford(ai_team, _condenser_data.get_cost_dict()):
 			var exp_vein: ResourceNode = _find_expansion_silica_vein(core.global_position, condensers)
 			if exp_vein != null:
@@ -464,17 +519,7 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			elif _upg_adrenal_potency != null and econ.has_upgrade(ai_team, UpgradeManager.UPGRADE_BATCH_EFFICIENCY) and primary_vat.production_component.can_queue_upgrade(primary_vat, _upg_adrenal_potency):
 				primary_vat.production_component.enqueue_upgrade(primary_vat, _upg_adrenal_potency)
 
-	# Priority 9: Mid-game Calibration Foundry for Lance-Rigs & Signal Jammers.
-	if foundries.is_empty() and constructed_mainframe != null and _foundry_data != null and silica >= _foundry_data.silica_cost:
-		if econ.can_afford(ai_team, _foundry_data.get_cost_dict()):
-			var to_center_cf: Vector2 = (Vector2.ZERO - core.global_position).normalized()
-			var perp_cf: Vector2 = Vector2(-to_center_cf.y, to_center_cf.x)
-			var cf_anchor: Vector2 = core.global_position + to_center_cf * 160.0 + perp_cf * 145.0
-			var built_cf: Building = _try_place_and_build(_foundry_data, cf_anchor, core.global_position)
-			if built_cf != null:
-				built_cf.set_rally_position(core.global_position.lerp(Vector2.ZERO, 0.34))
-
-	# Priority 10: Late-game Tier-2 Synthetics Fabricator once Cloning Vat & Compute are online.
+	# Priority 9: Late-game Tier-2 Synthetics Fabricator (prioritized ahead of Foundry for Synthetics Tech).
 	if fabricators.is_empty() and not constructed_vats.is_empty() and _fabricator_data != null and compute >= _fabricator_data.compute_cost:
 		if econ.can_afford(ai_team, _fabricator_data.get_cost_dict()):
 			var to_center_f: Vector2 = (Vector2.ZERO - core.global_position).normalized()
@@ -483,6 +528,17 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			var built_fab: Building = _try_place_and_build(_fabricator_data, fab_anchor, core.global_position)
 			if built_fab != null:
 				built_fab.set_rally_position(core.global_position.lerp(Vector2.ZERO, 0.34))
+
+	# Priority 10: Mid-game Calibration Foundry for Lance-Rigs & Signal Jammers.
+	var allow_foundry: bool = (not is_synth_tech or not fabricators.is_empty())
+	if allow_foundry and foundries.is_empty() and constructed_mainframe != null and _foundry_data != null and silica >= _foundry_data.silica_cost:
+		if econ.can_afford(ai_team, _foundry_data.get_cost_dict()):
+			var to_center_cf: Vector2 = (Vector2.ZERO - core.global_position).normalized()
+			var perp_cf: Vector2 = Vector2(-to_center_cf.y, to_center_cf.x)
+			var cf_anchor: Vector2 = core.global_position + to_center_cf * 160.0 + perp_cf * 145.0
+			var built_cf: Building = _try_place_and_build(_foundry_data, cf_anchor, core.global_position)
+			if built_cf != null:
+				built_cf.set_rally_position(core.global_position.lerp(Vector2.ZERO, 0.34))
 
 	# Priority 11: Late-game Compute Overdrive upgrade & Synthetics Fabricator heavy mix (Goliath / Arc-Lancer / Mortar).
 	for fab: Building in constructed_fabricators:
@@ -518,24 +574,34 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			foundry.queue_unit_data(foundry_choice)
 			_foundry_production_counter += 1
 
-	# Priority 13: Batch-clone GENESIS_V2 core swarm (~65% Clone Troopers, ~25% Stingers, ~10% Symbiotes).
-	for vat: Building in constructed_vats:
-		if not vat.has_rally():
-			vat.set_rally_position(core.global_position.lerp(Vector2.ZERO, 0.34))
-		if vat.get_training_queue_size() >= 2:
-			continue
-		var slot: int = _vat_production_counter % 10
-		var chosen: UnitData = _clone_trooper_data
-		if slot == 9 and _symbiote_data != null and vat.can_train_unit_data(_symbiote_data):
-			chosen = _symbiote_data
-		elif (slot == 2 or slot == 6) and _stinger_data != null and vat.can_train_unit_data(_stinger_data):
-			chosen = _stinger_data
-		if chosen != null and vat.can_train_unit_data(chosen):
-			vat.queue_unit_data(chosen)
-			_vat_production_counter += 1
+	# Priority 13: Batch-clone GENESIS_V2 core swarm (weighted by AI playstyle).
+	var hold_for_fab: bool = is_synth_tech and fabricators.is_empty() and constructed_mainframe != null and compute >= 15
+	if not hold_for_fab:
+		for vat: Building in constructed_vats:
+			if not vat.has_rally():
+				vat.set_rally_position(core.global_position.lerp(Vector2.ZERO, 0.34))
+			if vat.get_training_queue_size() >= 2:
+				continue
+			var slot: int = _vat_production_counter % 10
+			var chosen: UnitData = _clone_trooper_data
+			if is_swarm_rush:
+				if slot == 9 and _symbiote_data != null and vat.can_train_unit_data(_symbiote_data):
+					chosen = _symbiote_data
+				elif (slot == 1 or slot == 4 or slot == 7) and _stinger_data != null and vat.can_train_unit_data(_stinger_data):
+					chosen = _stinger_data
+			else:
+				if slot == 9 and _symbiote_data != null and vat.can_train_unit_data(_symbiote_data):
+					chosen = _symbiote_data
+				elif (slot == 2 or slot == 6) and _stinger_data != null and vat.can_train_unit_data(_stinger_data):
+					chosen = _stinger_data
+			if chosen != null and vat.can_train_unit_data(chosen):
+				vat.queue_unit_data(chosen)
+				_vat_production_counter += 1
 
-	# Priority 14: Second Cloning Vat when floating surplus Biomass.
-	if _cloning_vat_data != null and cloning_vats.size() < max_cloning_vats and biomass >= 280 and silica >= 60:
+	# Priority 14: Additional Cloning Vat when floating surplus Biomass (earlier for Swarm Rush).
+	var extra_vat_biomass: int = 200 if is_swarm_rush else (230 if is_brutal else 280)
+	var extra_vat_silica: int = 40 if is_swarm_rush else 60
+	if _cloning_vat_data != null and cloning_vats.size() < max_cloning_vats and biomass >= extra_vat_biomass and silica >= extra_vat_silica:
 		if econ.can_afford(ai_team, _cloning_vat_data.get_cost_dict()):
 			var to_center2: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var perp: Vector2 = Vector2(-to_center2.y, to_center2.x)

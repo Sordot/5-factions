@@ -99,7 +99,7 @@ text = "5 FACTIONS // SOVEREIGN KERNEL"
 layout_mode = 2
 theme_override_colors/font_color = Color(0.28, 0.94, 0.88, 0.94)
 theme_override_font_sizes/font_size = 12
-text = "TECHNOZEN REAL-TIME STRATEGY  •  MILESTONE 1.5 VERTICAL SLICE  •  BUILD 0.1.5"
+text = "TECHNOZEN REAL-TIME STRATEGY  •  MILESTONE 1.9 VERTICAL SLICE  •  BUILD 0.1.9"
 
 [node name="HeaderRight" type="HBoxContainer" parent="RootMargin/RootVBox/HeaderPanel/HeaderHBox"]
 layout_mode = 2
@@ -317,20 +317,26 @@ modulate = Color(0.72, 0.86, 0.78, 0.78)
 text = "05 // VERDANT_OS — The Canopy Mesh
 Adaptive Bio-Lattice  •  LOCKED — IN DEVELOPMENT"
 
-[node name="DossierNoticeLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn"]
-unique_name_in_owner = true
+[node name="DossierNoticePanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.56, 0.76, 0.84, 0.85)
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="DossierNoticeLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/DossierNoticePanel"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.68, 0.88, 0.94, 0.95)
 theme_override_font_sizes/font_size = 11
-text = "GENESIS_V2 dossier verified. Factions #2–#5 queued for post-vertical-slice milestones."
+text = "GENESIS_V2 dossier active for deployment. Click Factions #2–#5 above to inspect classified tactical briefings."
+autowrap_mode = 3
 
 [node name="ConfigPanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox"]
-custom_minimum_size = Vector2(360, 0)
+custom_minimum_size = Vector2(372, 0)
 layout_mode = 2
 
 [node name="ConfigVBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel"]
 layout_mode = 2
-theme_override_constants/separation = 9
+theme_override_constants/separation = 7
 
 [node name="ConfigHeader" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
@@ -344,62 +350,104 @@ layout_mode = 2
 [node name="MapLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 11
 text = "BATTLEFIELD MAP"
 
 [node name="MapOption" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 32)
+custom_minimum_size = Vector2(0, 29)
 layout_mode = 2
 focus_mode = 0
 
 [node name="AILabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 11
 text = "AI OPPONENT MODE"
 
-[node name="AIRow" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="AIRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
 [node name="BtnAIStandard" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AIRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 32)
+custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
+size_flags_horizontal = 3
 focus_mode = 0
-text = "Standard Skirmish AI  (Aggro AI: ON)"
+theme_override_font_sizes/font_size = 11
+text = "Skirmish AI (ON)"
 
 [node name="BtnAIPassive" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AIRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 32)
+custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
+size_flags_horizontal = 3
 focus_mode = 0
-text = "Passive / Sandbox AI  (Aggro AI: OFF)"
+theme_override_font_sizes/font_size = 11
+text = "Passive / Sandbox"
+
+[node name="AITuningGrid" type="GridContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 4
+columns = 2
+
+[node name="DiffLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AITuningGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
+theme_override_font_sizes/font_size = 11
+text = "AI DIFFICULTY"
+
+[node name="StyleLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AITuningGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
+theme_override_font_sizes/font_size = 11
+text = "AI PLAYSTYLE"
+
+[node name="OptAIDifficulty" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AITuningGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+
+[node name="OptAIPlaystyle" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AITuningGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
 
 [node name="ResLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 11
 text = "STARTING RESOURCE PRESET"
 
-[node name="ResRow" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="ResRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
 [node name="BtnResStandard" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/ResRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 32)
+custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
+size_flags_horizontal = 3
 focus_mode = 0
-text = "Standard  (200 B / 50 S)"
+theme_override_font_sizes/font_size = 11
+text = "Standard (200B/50S)"
 
 [node name="BtnResFast" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/ResRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 32)
+custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
+size_flags_horizontal = 3
 focus_mode = 0
-text = "Fast-Tech Test  (1000 B / 500 S / 200 C)"
+theme_override_font_sizes/font_size = 11
+text = "Fast-Tech (1000B)"
 
 [node name="Sep2" type="HSeparator" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
@@ -421,7 +469,7 @@ size_flags_vertical = 3
 
 [node name="BtnLaunch" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 40)
+custom_minimum_size = Vector2(0, 38)
 layout_mode = 2
 focus_mode = 0
 theme_override_colors/font_color = Color(0.96, 1, 1, 1)
@@ -431,14 +479,14 @@ text = "LAUNCH SKIRMISH"
 
 [node name="BtnSettings" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 32)
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 focus_mode = 0
 text = "SETTINGS & KEYBINDS"
 
 [node name="BtnQuit" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 30)
+custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
 focus_mode = 0
 text = "EXIT TO DESKTOP"

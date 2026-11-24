@@ -298,6 +298,42 @@ func select_at_world_point(world_point: Vector2) -> void:
 	_select_at_point(world_point, false)
 
 
+func select_single_entity(entity: Node, focus_camera: bool = false) -> void:
+	if entity == null or not is_instance_valid(entity):
+		return
+	cancel_ability_targeting()
+	cancel_patrol_targeting()
+	if entity is Building:
+		var b: Building = entity
+		if b.is_destroyed or b.is_queued_for_deletion():
+			return
+		_set_selected_units([])
+		if b.team == Unit.Team.PLAYER:
+			_set_selected_buildings([b])
+		else:
+			_set_selected_buildings([])
+			_set_inspected_entity(b)
+		if focus_camera:
+			var cam_b: RTSCamera = _get_rts_camera()
+			if cam_b != null:
+				cam_b.center_on(b.global_position)
+	elif entity is Unit:
+		var u: Unit = entity
+		if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
+			return
+		_set_selected_buildings([])
+		_set_inspected_entity(null)
+		if u.team == Unit.Team.PLAYER:
+			_set_selected_units([u])
+		else:
+			_set_selected_units([])
+			_set_inspected_entity(u)
+		if focus_camera:
+			var cam_u: RTSCamera = _get_rts_camera()
+			if cam_u != null:
+				cam_u.center_on(u.global_position)
+
+
 func cycle_subgroup() -> void:
 	if subgroups.size() <= 1:
 		return
@@ -547,27 +583,40 @@ func assign_control_group(group_num: int) -> void:
 	if group_num < 1 or group_num > 9:
 		return
 	_prune_invalid_units()
-	if selected_units.is_empty():
+	if not selected_units.is_empty():
+		control_groups[group_num] = selected_units.duplicate()
+		_watch_control_group_units(selected_units)
+		_emit_control_groups_changed()
 		return
-	control_groups[group_num] = selected_units.duplicate()
-	_watch_control_group_units(selected_units)
-	_emit_control_groups_changed()
+	if not selected_buildings.is_empty():
+		control_groups[group_num] = selected_buildings.duplicate()
+		_watch_control_group_buildings(selected_buildings)
+		_emit_control_groups_changed()
 
 
 func append_control_group(group_num: int) -> void:
 	if group_num < 1 or group_num > 9:
 		return
 	_prune_invalid_units()
-	if selected_units.is_empty():
+	if not selected_units.is_empty():
+		var group_units: Array[Unit] = _get_pruned_group(group_num)
+		for unit: Unit in selected_units:
+			if not group_units.has(unit):
+				group_units.append(unit)
+		if not group_units.is_empty():
+			control_groups[group_num] = group_units
+			_watch_control_group_units(group_units)
+		_emit_control_groups_changed()
 		return
-	var group_units: Array[Unit] = _get_pruned_group(group_num)
-	for unit: Unit in selected_units:
-		if not group_units.has(unit):
-			group_units.append(unit)
-	if not group_units.is_empty():
-		control_groups[group_num] = group_units
-		_watch_control_group_units(group_units)
-	_emit_control_groups_changed()
+	if not selected_buildings.is_empty():
+		var group_buildings: Array[Building] = _get_pruned_building_group(group_num)
+		for b: Building in selected_buildings:
+			if not group_buildings.has(b):
+				group_buildings.append(b)
+		if not group_buildings.is_empty():
+			control_groups[group_num] = group_buildings
+			_watch_control_group_buildings(group_buildings)
+		_emit_control_groups_changed()
 
 
 func _watch_control_group_units(units: Array[Unit]) -> void:
@@ -577,7 +626,18 @@ func _watch_control_group_units(units: Array[Unit]) -> void:
 				u.died.connect(_on_control_group_unit_removed)
 
 
+func _watch_control_group_buildings(buildings: Array[Building]) -> void:
+	for b: Building in buildings:
+		if is_instance_valid(b) and not b.is_destroyed:
+			if not b.destroyed.is_connected(_on_control_group_building_removed):
+				b.destroyed.connect(_on_control_group_building_removed)
+
+
 func _on_control_group_unit_removed(_unit: Unit) -> void:
+	_emit_control_groups_changed()
+
+
+func _on_control_group_building_removed(_building: Building) -> void:
 	_emit_control_groups_changed()
 
 
@@ -586,43 +646,74 @@ func remove_from_control_group(group_num: int) -> void:
 		return
 	_prune_invalid_units()
 	var group_units: Array[Unit] = _get_pruned_group(group_num)
-	var remaining: Array[Unit] = []
-	for unit: Unit in group_units:
-		if not selected_units.has(unit):
-			remaining.append(unit)
-	if remaining.is_empty():
-		control_groups.erase(group_num)
-	else:
-		control_groups[group_num] = remaining
-	_emit_control_groups_changed()
+	if not group_units.is_empty():
+		var remaining: Array[Unit] = []
+		for unit: Unit in group_units:
+			if not selected_units.has(unit):
+				remaining.append(unit)
+		if remaining.is_empty():
+			control_groups.erase(group_num)
+		else:
+			control_groups[group_num] = remaining
+		_emit_control_groups_changed()
+		return
+	var group_buildings: Array[Building] = _get_pruned_building_group(group_num)
+	if not group_buildings.is_empty():
+		var rem_b: Array[Building] = []
+		for b: Building in group_buildings:
+			if not selected_buildings.has(b):
+				rem_b.append(b)
+		if rem_b.is_empty():
+			control_groups.erase(group_num)
+		else:
+			control_groups[group_num] = rem_b
+		_emit_control_groups_changed()
 
 
 func recall_control_group(group_num: int, allow_double_tap_center: bool = true) -> void:
 	if group_num < 1 or group_num > 9:
 		return
 	var group_units: Array[Unit] = _get_pruned_group(group_num)
-	if group_units.is_empty():
-		control_groups.erase(group_num)
+	if not group_units.is_empty():
+		control_groups[group_num] = group_units
+		cancel_ability_targeting()
+		cancel_patrol_targeting()
+		_set_selected_buildings([])
+		_set_inspected_entity(null)
+		_set_selected_units(group_units)
 		_emit_control_groups_changed()
+		if allow_double_tap_center:
+			var now_ms: int = Time.get_ticks_msec()
+			if _last_recall_group == group_num and (now_ms - _last_recall_time_ms) <= DOUBLE_TAP_WINDOW_MS:
+				_center_camera_on_units(group_units)
+				_last_recall_group = -1
+				_last_recall_time_ms = 0
+			else:
+				_last_recall_group = group_num
+				_last_recall_time_ms = now_ms
 		return
 
-	control_groups[group_num] = group_units
-	cancel_ability_targeting()
-	cancel_patrol_targeting()
-	_set_selected_buildings([])
-	_set_inspected_entity(null)
-	_set_selected_units(group_units)
-	_emit_control_groups_changed()
+	var group_buildings: Array[Building] = _get_pruned_building_group(group_num)
+	if not group_buildings.is_empty():
+		control_groups[group_num] = group_buildings
+		cancel_ability_targeting()
+		cancel_patrol_targeting()
+		_set_selected_units([])
+		_set_selected_buildings(group_buildings)
+		_emit_control_groups_changed()
+		if allow_double_tap_center:
+			var now_b_ms: int = Time.get_ticks_msec()
+			if _last_recall_group == group_num and (now_b_ms - _last_recall_time_ms) <= DOUBLE_TAP_WINDOW_MS:
+				_center_camera_on_nodes(group_buildings)
+				_last_recall_group = -1
+				_last_recall_time_ms = 0
+			else:
+				_last_recall_group = group_num
+				_last_recall_time_ms = now_b_ms
+		return
 
-	if allow_double_tap_center:
-		var now_ms: int = Time.get_ticks_msec()
-		if _last_recall_group == group_num and (now_ms - _last_recall_time_ms) <= DOUBLE_TAP_WINDOW_MS:
-			_center_camera_on_units(group_units)
-			_last_recall_group = -1
-			_last_recall_time_ms = 0
-		else:
-			_last_recall_group = group_num
-			_last_recall_time_ms = now_ms
+	control_groups.erase(group_num)
+	_emit_control_groups_changed()
 
 
 func get_control_group_units(group_num: int) -> Array[Unit]:
@@ -635,12 +726,59 @@ func get_control_groups_summary() -> Dictionary:
 		if not control_groups.has(num):
 			continue
 		var group_units: Array[Unit] = _get_pruned_group(num)
-		if group_units.is_empty():
-			control_groups.erase(num)
-		else:
+		if not group_units.is_empty():
 			control_groups[num] = group_units
 			summary[num] = group_units.size()
+			continue
+		var group_buildings: Array[Building] = _get_pruned_building_group(num)
+		if not group_buildings.is_empty():
+			control_groups[num] = group_buildings
+			summary[num] = group_buildings.size()
+		else:
+			control_groups.erase(num)
 	return summary
+
+
+func get_control_group_summaries() -> Dictionary:
+	var out: Dictionary = {}
+	for num: int in range(1, 10):
+		if not control_groups.has(num):
+			continue
+		var group_units: Array[Unit] = _get_pruned_group(num)
+		if not group_units.is_empty():
+			control_groups[num] = group_units
+			var lead_name: String = group_units[0].data.display_name if group_units[0].data != null else "Units"
+			var active_u: bool = (selected_units.size() == group_units.size() and not selected_units.is_empty())
+			if active_u:
+				for gu: Unit in group_units:
+					if not selected_units.has(gu):
+						active_u = false
+						break
+			out[num] = {
+				"count": group_units.size(),
+				"label": lead_name,
+				"is_active": active_u,
+				"is_building": false,
+			}
+			continue
+		var group_buildings: Array[Building] = _get_pruned_building_group(num)
+		if not group_buildings.is_empty():
+			control_groups[num] = group_buildings
+			var active_b: bool = (selected_buildings.size() == group_buildings.size() and not selected_buildings.is_empty())
+			if active_b:
+				for gb: Building in group_buildings:
+					if not selected_buildings.has(gb):
+						active_b = false
+						break
+			out[num] = {
+				"count": group_buildings.size(),
+				"label": group_buildings[0].display_name,
+				"is_active": active_b,
+				"is_building": true,
+			}
+		else:
+			control_groups.erase(num)
+	return out
 
 
 func clear_control_groups() -> void:
@@ -682,20 +820,43 @@ func _get_pruned_group(group_num: int) -> Array[Unit]:
 	return valid
 
 
+func _get_pruned_building_group(group_num: int) -> Array[Building]:
+	var valid: Array[Building] = []
+	if not control_groups.has(group_num):
+		return valid
+	var raw: Variant = control_groups[group_num]
+	if raw is Array:
+		for item: Variant in raw:
+			if is_instance_valid(item) and item is Building:
+				var b: Building = item
+				if not b.is_destroyed and not b.is_queued_for_deletion() and b.team == Unit.Team.PLAYER:
+					valid.append(b)
+	return valid
+
+
 func _emit_control_groups_changed() -> void:
 	control_groups_changed.emit(get_control_groups_summary())
 
 
 func _center_camera_on_units(units: Array[Unit]) -> void:
-	if units.is_empty():
+	_center_camera_on_nodes(units)
+
+
+func _center_camera_on_nodes(nodes: Array) -> void:
+	if nodes.is_empty():
 		return
 	var cam: RTSCamera = _get_rts_camera()
 	if cam == null:
 		return
 	var centroid: Vector2 = Vector2.ZERO
-	for unit: Unit in units:
-		centroid += unit.global_position
-	centroid /= float(units.size())
+	var valid_count: int = 0
+	for item: Variant in nodes:
+		if is_instance_valid(item) and item is Node2D:
+			centroid += (item as Node2D).global_position
+			valid_count += 1
+	if valid_count <= 0:
+		return
+	centroid /= float(valid_count)
 	cam.center_on(centroid)
 
 

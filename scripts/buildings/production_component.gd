@@ -203,7 +203,7 @@ func cancel_queue_item(owner_building: Building, index: int) -> bool:
 	if econ != null and owner_building != null:
 		var costs: Dictionary = entry.get("costs", {})
 		for res_key: Variant in costs.keys():
-			econ.add_resource(owner_building.team, res_key, int(costs[res_key]))
+			econ.add_resource(owner_building.team, res_key, int(costs[res_key]), false)
 		econ.release_bandwidth(owner_building.team, int(entry.get("bandwidth_cost", 0)))
 		if entry.get("kind", KIND_UNIT) == KIND_UPGRADE:
 			var upg: UpgradeData = entry.get("data", null) as UpgradeData
@@ -222,7 +222,7 @@ func cancel_all_and_refund(owner_building: Building) -> void:
 		if econ != null and owner_building != null:
 			var costs: Dictionary = entry.get("costs", {})
 			for res_key: Variant in costs.keys():
-				econ.add_resource(owner_building.team, res_key, int(costs[res_key]))
+				econ.add_resource(owner_building.team, res_key, int(costs[res_key]), false)
 			econ.release_bandwidth(owner_building.team, int(entry.get("bandwidth_cost", 0)))
 			if entry.get("kind", KIND_UNIT) == KIND_UPGRADE:
 				var upg: UpgradeData = entry.get("data", null) as UpgradeData

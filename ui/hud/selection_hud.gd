@@ -236,6 +236,8 @@ func _on_buildings_selection_changed(buildings: Array[Building]) -> void:
 	if not _selected_buildings.is_empty() and is_instance_valid(_selected_buildings[0]):
 		_inspected_entity = _selected_buildings[0]
 		_render_inspected_entity(_inspected_entity, true)
+	if _selection_controller != null:
+		_on_control_groups_changed(_selection_controller.get_control_groups_summary())
 
 
 func _disconnect_multi_building_signals() -> void:
@@ -304,30 +306,40 @@ func _on_control_groups_changed(summary: Dictionary) -> void:
 	for child: Node in control_group_row.get_children():
 		child.queue_free()
 
-	if summary.is_empty():
+	var rich: Dictionary = _selection_controller.get_control_group_summaries() if (_selection_controller != null and _selection_controller.has_method("get_control_group_summaries")) else {}
+	if summary.is_empty() and rich.is_empty():
 		control_group_row.visible = false
 		return
 
 	control_group_row.visible = true
 	for num: int in range(1, 10):
-		if not summary.has(num):
+		if not rich.has(num) and not summary.has(num):
 			continue
-		var count: int = int(summary[num])
+		var info: Dictionary = rich.get(num, {}) as Dictionary
+		var count: int = int(info.get("count", summary.get(num, 0)))
+		if count <= 0:
+			continue
+		var label_str: String = String(info.get("label", "Group"))
+		var is_active: bool = bool(info.get("is_active", false))
+		var is_building: bool = bool(info.get("is_building", false))
 		var pill: Button = Button.new()
 		pill.focus_mode = Control.FOCUS_NONE
+		pill.add_to_group("blocks_edge_pan")
 		pill.add_theme_font_size_override("font_size", 11)
-		pill.text = "[%d] x%d" % [num, count]
+		pill.text = ("[%d] %s ×%d" % [num, _shorten_unit_name(label_str), count]) if is_building else ("[%d] ×%d" % [num, count])
+		pill.modulate = Color(0.36, 1.0, 0.90, 1.0) if is_active else (Color(0.96, 0.84, 0.44, 0.92) if is_building else Color(0.76, 0.88, 0.94, 0.90))
 		var captured_num: int = num
 		pill.pressed.connect(func() -> void:
 			if _selection_controller != null:
 				_selection_controller.recall_control_group(captured_num, true)
 		)
+		var kind_label: String = "Structure(s)" if is_building else "Unit(s)"
 		_attach_tooltip(
 			pill,
-			"Control Group %d" % num,
+			"Control Group %d — %s" % [num, label_str],
 			str(num),
-			"%d Unit(s) Assigned" % count,
-			"Click or press %d to select. Double-tap to center camera. Ctrl+%d to reassign." % [num, num]
+			"%d %s Assigned" % [count, kind_label],
+			"Click or press %d to select. Double-click or double-tap to center camera. Ctrl+%d to reassign." % [num, num]
 		)
 		control_group_row.add_child(pill)
 
@@ -379,6 +391,8 @@ func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Diction
 	_rebuild_ability_buttons(active_group)
 	_refresh_all_ability_states()
 	_refresh_stance_button()
+	if _selection_controller != null:
+		_on_control_groups_changed(_selection_controller.get_control_groups_summary())
 
 
 func _on_inspection_changed(entity: Node) -> void:

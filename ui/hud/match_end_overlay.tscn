@@ -26,7 +26,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.02, 0.04, 0.06, 0.72)
+color = Color(0.02, 0.04, 0.06, 0.78)
 
 [node name="CenterContainer" type="CenterContainer" parent="RootControl"]
 layout_mode = 1
@@ -37,12 +37,12 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="ModalPanel" type="PanelContainer" parent="RootControl/CenterContainer"]
-custom_minimum_size = Vector2(440, 0)
+custom_minimum_size = Vector2(560, 0)
 layout_mode = 2
 
 [node name="VBox" type="VBoxContainer" parent="RootControl/CenterContainer/ModalPanel"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 
 [node name="TitleLabel" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox"]
 unique_name_in_owner = true
@@ -57,95 +57,37 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.86, 0.92, 0.92)
 theme_override_font_sizes/font_size = 13
-text = "Hostile Command Core Neutralized"
+text = "Hostile Nexus Vat Neutralized"
 horizontal_alignment = 1
+
+[node name="MetaStrip" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 18
+alignment = 1
+
+[node name="DurationValue" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/MetaStrip"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.94, 1, 0.95)
+theme_override_font_sizes/font_size = 12
+text = "DURATION: 00:00"
+
+[node name="WinnerValue" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/MetaStrip"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.32, 0.98, 0.88, 0.96)
+theme_override_font_sizes/font_size = 12
+text = "WINNER: PLAYER COMMANDER"
 
 [node name="SepTop" type="HSeparator" parent="RootControl/CenterContainer/ModalPanel/VBox"]
 layout_mode = 2
 
-[node name="StatsGrid" type="GridContainer" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+[node name="ScoreboardGrid" type="GridContainer" parent="RootControl/CenterContainer/ModalPanel/VBox"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/h_separation = 16
-theme_override_constants/v_separation = 6
-columns = 2
-
-[node name="DurationKey" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.56, 0.74, 0.82, 0.92)
-text = "Match Duration"
-
-[node name="DurationValue" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_colors/font_color = Color(0.94, 0.99, 1, 1)
-text = "00:00"
-horizontal_alignment = 2
-
-[node name="WinnerKey" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.56, 0.74, 0.82, 0.92)
-text = "Winner"
-
-[node name="WinnerValue" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_colors/font_color = Color(0.94, 0.99, 1, 1)
-text = "PLAYER COMMANDER"
-horizontal_alignment = 2
-
-[node name="UplinkKey" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.56, 0.74, 0.82, 0.92)
-text = "Hyper-Uplink Control"
-
-[node name="UplinkValue" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_colors/font_color = Color(0.24, 0.96, 0.9, 1)
-text = "0%"
-horizontal_alignment = 2
-
-[node name="TrainedKey" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.56, 0.74, 0.82, 0.92)
-text = "Units Trained"
-
-[node name="TrainedValue" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_colors/font_color = Color(0.94, 0.99, 1, 1)
-text = "0"
-horizontal_alignment = 2
-
-[node name="LostKey" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.56, 0.74, 0.82, 0.92)
-text = "Units Lost"
-
-[node name="LostValue" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_colors/font_color = Color(0.94, 0.99, 1, 1)
-text = "0"
-horizontal_alignment = 2
-
-[node name="DestroyedKey" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.56, 0.74, 0.82, 0.92)
-text = "Hostiles Eliminated"
-
-[node name="DestroyedValue" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/StatsGrid"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_colors/font_color = Color(0.94, 0.99, 1, 1)
-text = "0"
-horizontal_alignment = 2
+theme_override_constants/v_separation = 5
+columns = 3
 
 [node name="SepBottom" type="HSeparator" parent="RootControl/CenterContainer/ModalPanel/VBox"]
 layout_mode = 2
@@ -157,21 +99,21 @@ alignment = 1
 
 [node name="BtnPlayAgain" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(130, 34)
+custom_minimum_size = Vector2(140, 34)
 layout_mode = 2
 focus_mode = 0
 text = "Play Again"
 
 [node name="BtnMainMenu" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(130, 34)
+custom_minimum_size = Vector2(140, 34)
 layout_mode = 2
 focus_mode = 0
 text = "Main Menu"
 
 [node name="BtnSandboxMode" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(130, 34)
+custom_minimum_size = Vector2(140, 34)
 layout_mode = 2
 focus_mode = 0
 text = "Sandbox Mode"
