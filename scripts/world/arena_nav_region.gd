@@ -2,6 +2,7 @@ class_name ArenaNavRegion
 extends NavigationRegion2D
 
 const NAV_BAKE_GROUP: StringName = &"nav_bake_obstacles"
+const MapLandmarkScript = preload("res://scripts/world/map_landmark.gd")
 
 @export var arena_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 @export var agent_radius: float = 24.0
@@ -46,6 +47,16 @@ func rebake_navmesh() -> void:
 		if is_instance_valid(node) and not node.is_queued_for_deletion():
 			if not node.is_in_group(NAV_BAKE_GROUP):
 				node.add_to_group(NAV_BAKE_GROUP)
+
+	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
+		if not is_instance_valid(node) or node.is_queued_for_deletion():
+			continue
+		if node is MapLandmarkScript:
+			var lm: MapLandmarkScript = node
+			var col_body: StaticBody2D = lm.get_collider_node()
+			if lm.has_collision and col_body != null and is_instance_valid(col_body):
+				if not col_body.is_in_group(NAV_BAKE_GROUP):
+					col_body.add_to_group(NAV_BAKE_GROUP)
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node) or not (node is Building):

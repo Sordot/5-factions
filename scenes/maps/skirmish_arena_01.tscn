@@ -19,7 +19,7 @@
 [ext_resource type="Script" path="res://ui/overlays/build_ghost_preview.gd" id="17_build_ghost"]
 [ext_resource type="Script" path="res://scripts/controllers/command_router.gd" id="18_cmd_router"]
 [ext_resource type="PackedScene" path="res://scenes/world/hyper_uplink.tscn" id="19_hyper_uplink"]
-[ext_resource type="Script" path="res://scripts/systems/encroaching_zone.gd" id="20_enc_zone"]
+[ext_resource type="PackedScene" path="res://scenes/world/map_landmark.tscn" id="20_map_landmark"]
 [ext_resource type="Script" path="res://scripts/world/arena_nav_region.gd" id="22_arena_nav"]
 [ext_resource type="Script" path="res://scripts/world/terrain_obstacle.gd" id="23_terrain_obstacle"]
 [ext_resource type="Script" path="res://scripts/systems/fog_of_war.gd" id="24_fog_of_war"]
@@ -72,62 +72,158 @@ default_color = Color(0.22, 0.58, 0.66, 0.78)
 [node name="WallPlayerNorth" type="StaticBody2D" parent="TerrainObstacles"]
 position = Vector2(-540, 210)
 script = ExtResource("23_terrain_obstacle")
-obstacle_size = Vector2(70, 220)
+obstacle_size = Vector2(64, 190)
 
 [node name="WallPlayerSouth" type="StaticBody2D" parent="TerrainObstacles"]
-position = Vector2(-470, 710)
+position = Vector2(-450, 680)
 script = ExtResource("23_terrain_obstacle")
-obstacle_size = Vector2(70, 280)
+obstacle_size = Vector2(64, 200)
 
 [node name="WallEnemySouth" type="StaticBody2D" parent="TerrainObstacles"]
 position = Vector2(540, -210)
 script = ExtResource("23_terrain_obstacle")
-obstacle_size = Vector2(70, 220)
+obstacle_size = Vector2(64, 190)
 
 [node name="WallEnemyNorth" type="StaticBody2D" parent="TerrainObstacles"]
-position = Vector2(470, -710)
+position = Vector2(450, -680)
 script = ExtResource("23_terrain_obstacle")
-obstacle_size = Vector2(70, 280)
-
-[node name="MonolithCenterNW" type="StaticBody2D" parent="TerrainObstacles"]
-position = Vector2(-230, -240)
-script = ExtResource("23_terrain_obstacle")
-obstacle_size = Vector2(190, 68)
-
-[node name="MonolithCenterSE" type="StaticBody2D" parent="TerrainObstacles"]
-position = Vector2(230, 240)
-script = ExtResource("23_terrain_obstacle")
-obstacle_size = Vector2(190, 68)
+obstacle_size = Vector2(64, 200)
 
 [node name="MonolithFlankNorth" type="StaticBody2D" parent="TerrainObstacles"]
-position = Vector2(-140, -640)
+position = Vector2(-80, -580)
 script = ExtResource("23_terrain_obstacle")
-obstacle_size = Vector2(220, 72)
+obstacle_size = Vector2(200, 64)
 
 [node name="MonolithFlankSouth" type="StaticBody2D" parent="TerrainObstacles"]
-position = Vector2(140, 640)
+position = Vector2(80, 580)
 script = ExtResource("23_terrain_obstacle")
-obstacle_size = Vector2(220, 72)
+obstacle_size = Vector2(200, 64)
 
 [node name="MonolithWestCover" type="StaticBody2D" parent="TerrainObstacles"]
-position = Vector2(-980, -300)
+position = Vector2(-1020, -240)
 script = ExtResource("23_terrain_obstacle")
-obstacle_size = Vector2(170, 68)
+obstacle_size = Vector2(170, 64)
 
 [node name="MonolithEastCover" type="StaticBody2D" parent="TerrainObstacles"]
-position = Vector2(980, 300)
+position = Vector2(1020, 240)
 script = ExtResource("23_terrain_obstacle")
-obstacle_size = Vector2(170, 68)
+obstacle_size = Vector2(170, 64)
+
+[node name="Landmarks" type="Node2D" parent="."]
+
+[node name="AlphaVatBasin" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(-880, 530)
+landmark_name = "Alpha Vat Basin"
+visual_style = 3
+accent_color = Color(0.22, 0.96, 0.88, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, 102)
+
+[node name="OmegaVatBasin" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(880, -530)
+landmark_name = "Omega Vat Basin"
+visual_style = 3
+accent_color = Color(1, 0.36, 0.28, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, -102)
+
+[node name="CryoSilicaTerrace" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(-820, -610)
+landmark_name = "Cryo-Silica Terrace"
+visual_style = 0
+accent_color = Color(0.32, 0.92, 1, 1)
+has_collision = true
+show_on_minimap = true
+collider_radius = 28.0
+label_offset = Vector2(0, 52)
+
+[node name="SynapseRelayYard" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(820, 610)
+landmark_name = "Synapse Relay Yard"
+visual_style = 0
+accent_color = Color(0.98, 0.78, 0.28, 1)
+has_collision = true
+show_on_minimap = true
+collider_radius = 28.0
+label_offset = Vector2(0, 52)
+
+[node name="HyperUplinkPlaza" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(0, 0)
+landmark_name = "Hyper-Uplink Plaza"
+visual_style = 3
+accent_color = Color(0.38, 0.92, 1, 1)
+has_collision = false
+show_on_minimap = false
+label_offset = Vector2(0, 132)
+
+[node name="PlazaPylonNW" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(-215, -185)
+rotation = 0.785398
+landmark_name = "Plaza Pylon NW"
+visual_style = 2
+accent_color = Color(0.32, 0.94, 0.96, 1)
+has_collision = true
+show_on_minimap = true
+collider_radius = 26.0
+show_region_label = false
+
+[node name="PlazaPylonNE" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(215, -185)
+rotation = -0.785398
+landmark_name = "Plaza Pylon NE"
+visual_style = 2
+accent_color = Color(0.32, 0.94, 0.96, 1)
+has_collision = true
+show_on_minimap = true
+collider_radius = 26.0
+show_region_label = false
+
+[node name="PlazaPylonSW" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(-215, 185)
+rotation = -0.785398
+landmark_name = "Plaza Pylon SW"
+visual_style = 2
+accent_color = Color(0.32, 0.94, 0.96, 1)
+has_collision = true
+show_on_minimap = true
+collider_radius = 26.0
+show_region_label = false
+
+[node name="PlazaPylonSE" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(215, 185)
+rotation = 0.785398
+landmark_name = "Plaza Pylon SE"
+visual_style = 2
+accent_color = Color(0.32, 0.94, 0.96, 1)
+has_collision = true
+show_on_minimap = true
+collider_radius = 26.0
+show_region_label = false
+
+[node name="NorthConduit" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(-80, -810)
+landmark_name = "North Conduit"
+visual_style = 1
+accent_color = Color(0.32, 0.94, 0.96, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, 38)
+
+[node name="SouthRelayTrench" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(80, 810)
+landmark_name = "South Relay Trench"
+visual_style = 1
+accent_color = Color(0.98, 0.78, 0.28, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, -38)
 
 [node name="Objectives" type="Node2D" parent="."]
 
 [node name="HyperUplink" parent="Objectives" instance=ExtResource("19_hyper_uplink")]
 position = Vector2(0, 0)
-
-[node name="EncroachingZone" type="Node2D" parent="Objectives"]
-script = ExtResource("20_enc_zone")
-initial_radius = 1520.0
-phase_target_radii = PackedFloat32Array(1050, 640, 240)
 
 [node name="ResourceNodes" type="Node2D" parent="."]
 
@@ -144,13 +240,13 @@ position = Vector2(-1090, 645)
 position = Vector2(-1000, 740)
 
 [node name="PlayerSilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
-position = Vector2(-860, 180)
+position = Vector2(-860, 210)
 
 [node name="PlayerSilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
-position = Vector2(-945, 115)
+position = Vector2(-950, 145)
 
 [node name="PlayerVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
-position = Vector2(-620, 720)
+position = Vector2(-640, 740)
 
 [node name="EnemyBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
 position = Vector2(1120, -420)
@@ -165,25 +261,43 @@ position = Vector2(1090, -645)
 position = Vector2(1000, -740)
 
 [node name="EnemySilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
-position = Vector2(860, -180)
+position = Vector2(860, -210)
 
 [node name="EnemySilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
-position = Vector2(945, -115)
+position = Vector2(950, -145)
 
 [node name="EnemyVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
-position = Vector2(620, -720)
+position = Vector2(640, -740)
 
-[node name="FlankNWBiomass" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
-position = Vector2(-760, -640)
+[node name="FlankNWBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-1030, -700)
 
-[node name="FlankNWSilica" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
-position = Vector2(-660, -720)
+[node name="FlankNWBiomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-950, -785)
 
-[node name="FlankSEBiomass" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
-position = Vector2(760, 640)
+[node name="FlankNWSilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-690, -760)
 
-[node name="FlankSESilica" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
-position = Vector2(660, 720)
+[node name="FlankNWSilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-595, -695)
+
+[node name="FlankNWVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(-1030, -520)
+
+[node name="FlankSEBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(1030, 700)
+
+[node name="FlankSEBiomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(950, 785)
+
+[node name="FlankSESilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(690, 760)
+
+[node name="FlankSESilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(595, 695)
+
+[node name="FlankSEVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(1030, 520)
 
 [node name="Buildings" type="Node2D" parent="."]
 

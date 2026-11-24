@@ -347,11 +347,17 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 		result["reason"] = "Out of buildable bounds"
 		return result
 
-	# Block placement inside or overlapping static terrain obstacles.
+	# Block placement inside or overlapping static terrain obstacles or solid map landmarks.
 	for node: Node in get_tree().get_nodes_in_group("terrain_obstacles"):
 		if is_instance_valid(node) and node.has_method("overlaps_circle"):
 			if node.overlaps_circle(place_pos, new_radius + 8.0):
 				result["reason"] = "Blocked by terrain"
+				return result
+
+	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
+		if is_instance_valid(node) and node.has_method("overlaps_circle"):
+			if node.overlaps_circle(place_pos, new_radius + 8.0):
+				result["reason"] = "Blocked by landmark"
 				return result
 
 	# Keep central Hyper-Uplink clear of structures.

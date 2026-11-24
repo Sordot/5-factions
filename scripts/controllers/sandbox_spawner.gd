@@ -127,12 +127,6 @@ func grant_debug_resources() -> void:
 		econ.add_resource(Unit.Team.PLAYER, EconomyManager.RESOURCE_COMPUTE, 100)
 
 
-func trigger_zone_phase() -> void:
-	var zone: EncroachingZone = get_tree().get_first_node_in_group("encroaching_zone") as EncroachingZone
-	if zone != null:
-		zone.trigger_next_phase_now()
-
-
 func spawn_target_dummies(count: int, origin: Vector2 = Vector2.INF) -> Array[Unit]:
 	var base_pos: Vector2 = _resolve_origin(origin, dummy_spawn_origin)
 	return _spawn_batch(target_dummy_scene, count, base_pos, 52.0)
@@ -178,10 +172,6 @@ func reset_sandbox() -> void:
 	for node: Node in get_tree().get_nodes_in_group("hyper_uplinks"):
 		if node is HyperUplink:
 			(node as HyperUplink).reset_uplink()
-
-	var zone: EncroachingZone = get_tree().get_first_node_in_group("encroaching_zone") as EncroachingZone
-	if zone != null:
-		zone.reset_zone()
 
 	entities_changed.emit()
 

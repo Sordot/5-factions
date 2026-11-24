@@ -12,11 +12,9 @@ extends CanvasLayer
 @onready var btn_idle_workers: Button = %BtnIdleWorkers
 @onready var aggro_paused_badge: Label = %AggroPausedBadge
 @onready var uplink_bonus_label: Label = %UplinkBonusLabel
-@onready var zone_status_label: Label = %ZoneStatusLabel
 @onready var resource_alert_label: Label = %ResourceAlertLabel
 
 var _economy_manager: EconomyManager = null
-var _encroaching_zone: EncroachingZone = null
 var _match_manager: MatchManager = null
 var _selection_controller: SelectionController = null
 var _flash_timers: Dictionary = {}
@@ -42,7 +40,6 @@ func _ready() -> void:
 		btn_idle_workers.add_to_group("blocks_edge_pan")
 		btn_idle_workers.pressed.connect(_on_idle_workers_pressed)
 	_connect_economy_manager()
-	_connect_encroaching_zone()
 	_connect_match_manager()
 	call_deferred("_connect_camera_toasts")
 	call_deferred("_connect_selection_controller")
@@ -216,18 +213,6 @@ func _connect_economy_manager() -> void:
 		_economy_manager.resource_insufficient.connect(_on_resource_insufficient)
 
 
-func _connect_encroaching_zone() -> void:
-	if not is_inside_tree():
-		return
-	_encroaching_zone = get_tree().get_first_node_in_group("encroaching_zone") as EncroachingZone
-	if _encroaching_zone == null:
-		if zone_status_label != null:
-			zone_status_label.visible = false
-		return
-	if not _encroaching_zone.zone_updated.is_connected(_on_zone_updated):
-		_encroaching_zone.zone_updated.connect(_on_zone_updated)
-
-
 func _refresh_from_economy() -> void:
 	if _economy_manager == null:
 		return
@@ -268,24 +253,3 @@ func _on_production_bonus_changed(team: int, multiplier: float) -> void:
 	var pct: int = int(round((multiplier - 1.0) * 100.0))
 	uplink_bonus_label.visible = pct > 0
 	uplink_bonus_label.text = "UPLINK: +%d%% SPEED" % pct
-
-
-func _on_zone_updated(_phase_index: int, state_label: String, time_remaining: float, _current_radius: float) -> void:
-	if zone_status_label == null:
-		return
-	zone_status_label.visible = true
-	if state_label == "ZONE OFF":
-		zone_status_label.text = "ZONE: OFF"
-		zone_status_label.modulate = Color(0.56, 0.64, 0.70, 0.78)
-		return
-	var mins: int = int(time_remaining) / 60
-	var secs: int = int(time_remaining) % 60
-	if state_label.begins_with("SHRINK"):
-		zone_status_label.text = "%s (%02d:%02d)" % [state_label, mins, secs]
-		zone_status_label.modulate = Color(1.0, 0.38, 0.44, 1.0)
-	elif state_label.begins_with("ZONE FINAL"):
-		zone_status_label.text = "ZONE LOCKED"
-		zone_status_label.modulate = Color(1.0, 0.32, 0.36, 1.0)
-	else:
-		zone_status_label.text = "%s: %02d:%02d" % [state_label, mins, secs]
-		zone_status_label.modulate = Color(0.84, 0.72, 0.78, 0.92)

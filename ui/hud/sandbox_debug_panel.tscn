@@ -82,13 +82,6 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Aggro AI: ON (F10)"
 
-[node name="BtnToggleZone" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRow"]
-unique_name_in_owner = true
-layout_mode = 2
-focus_mode = 0
-theme_override_font_sizes/font_size = 11
-text = "Zone: ON"
-
 [node name="ButtonRowEcon" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBox"]
 layout_mode = 2
 theme_override_constants/separation = 5
@@ -113,13 +106,6 @@ layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "+300B/200S/100C"
-
-[node name="BtnTriggerZone" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
-unique_name_in_owner = true
-layout_mode = 2
-focus_mode = 0
-theme_override_font_sizes/font_size = 11
-text = "Next Zone"
 
 [node name="BtnToggleEdgePan" type="Button" parent="MarginContainer/PanelContainer/VBox/ButtonRowEcon"]
 unique_name_in_owner = true

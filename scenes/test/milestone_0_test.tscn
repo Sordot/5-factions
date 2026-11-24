@@ -1,4 +1,4 @@
-[gd_scene load_steps=26 format=3]
+[gd_scene load_steps=25 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
 [ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
@@ -19,7 +19,6 @@
 [ext_resource type="Script" path="res://ui/overlays/build_ghost_preview.gd" id="17_build_ghost"]
 [ext_resource type="Script" path="res://scripts/controllers/command_router.gd" id="18_cmd_router"]
 [ext_resource type="PackedScene" path="res://scenes/world/hyper_uplink.tscn" id="19_hyper_uplink"]
-[ext_resource type="Script" path="res://scripts/systems/encroaching_zone.gd" id="20_enc_zone"]
 [ext_resource type="Script" path="res://scripts/systems/match_manager.gd" id="21_match_manager"]
 [ext_resource type="Script" path="res://ui/overlays/rally_point_overlay.gd" id="22_rally_overlay"]
 [ext_resource type="Script" path="res://ui/overlays/command_queue_overlay.gd" id="23_cmd_queue_overlay"]
@@ -65,10 +64,6 @@ default_color = Color(0.24, 0.56, 0.62, 0.7)
 
 [node name="HyperUplink" parent="Objectives" instance=ExtResource("19_hyper_uplink")]
 position = Vector2(0, 0)
-
-[node name="EncroachingZone" type="Node2D" parent="Objectives"]
-script = ExtResource("20_enc_zone")
-initial_radius = 760.0
 
 [node name="ResourceNodes" type="Node2D" parent="."]
 

@@ -1,6 +1,8 @@
 class_name SkirmishAICommander
 extends Node
 
+const MapLandmarkScript = preload("res://scripts/world/map_landmark.gd")
+
 const CONDENSER_DATA_PATH: String = "res://resources/buildings/silica_condenser_data.tres"
 const PYLON_DATA_PATH: String = "res://resources/buildings/synapse_pylon_data.tres"
 const MAINFRAME_DATA_PATH: String = "res://resources/buildings/wetware_mainframe_data.tres"
@@ -167,6 +169,12 @@ func _assign_idle_workers(core: Building) -> void:
 
 
 func _assign_idle_harvesters() -> void:
+	var silica_nodes: Array[ResourceNode] = []
+	for b: Building in _get_team_buildings(ai_team):
+		if b.building_type_id == &"silica_condenser" and b.is_constructed:
+			for rn: ResourceNode in _get_resources_near(b.global_position, &"silica", 520.0):
+				if not silica_nodes.has(rn):
+					silica_nodes.append(rn)
 	for unit: Unit in _get_team_units(ai_team):
 		if unit.get_unit_type_id() != &"silica_harvester":
 			continue
@@ -175,7 +183,7 @@ func _assign_idle_harvesters() -> void:
 		if unit.is_carrying_cargo():
 			if unit.command_return_cargo():
 				continue
-		var vein: ResourceNode = _find_nearest_resource(unit.global_position, &"silica")
+		var vein: ResourceNode = _pick_least_crowded_resource(unit.global_position, silica_nodes) if not silica_nodes.is_empty() else _find_nearest_resource(unit.global_position, &"silica")
 		if vein != null:
 			unit.command_gather(vein)
 
@@ -319,8 +327,10 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			engineer_count += 1
 
 	var condensers: Array[Building] = []
+	var constructed_condensers: Array[Building] = []
 	var constructed_condenser: Building = null
 	var mainframes: Array[Building] = []
+	var constructed_mainframes: Array[Building] = []
 	var constructed_mainframe: Building = null
 	var cloning_vats: Array[Building] = []
 	var constructed_vats: Array[Building] = []
@@ -330,17 +340,21 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 	var constructed_fabricators: Array[Building] = []
 	var unfinished_pylons: int = 0
 	var staffed_engineers: int = 0
+	var total_mainframe_slots: int = 0
 
 	for b: Building in buildings:
 		if b.building_type_id == &"silica_condenser":
 			condensers.append(b)
 			if b.is_constructed:
+				constructed_condensers.append(b)
 				constructed_condenser = b
 		elif b.building_type_id == &"wetware_mainframe":
 			mainframes.append(b)
 			if b.is_constructed:
+				constructed_mainframes.append(b)
 				constructed_mainframe = b
 				staffed_engineers += b.get_assigned_engineer_count()
+				total_mainframe_slots += b.max_staff_slots
 		elif b.building_type_id == &"cloning_vat":
 			cloning_vats.append(b)
 			if b.is_constructed:
@@ -392,8 +406,8 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			_try_place_and_build(_pylon_data, pylon_anchor, core.global_position)
 		return
 
-	# Priority 4: Train automated Silica Harvester once Condenser is online.
-	var desired_harvesters: int = 2 if constructed_vats.size() >= 1 else 1
+	# Priority 4: Train automated Silica Harvesters once Condensers are online (scales with expansion).
+	var desired_harvesters: int = 3 if constructed_condensers.size() >= 2 else (2 if constructed_vats.size() >= 1 else 1)
 	if _harvester_data != null and constructed_condenser != null and total_harvesters < desired_harvesters:
 		var trainer: Building = constructed_condenser if constructed_condenser.can_train_unit_data(_harvester_data) else core
 		if trainer.get_training_queue_size() < 2 and trainer.can_train_unit_data(_harvester_data):
@@ -417,15 +431,29 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 		if core.get_training_queue_size() < 2 and core.can_train_unit_data(_worker_data):
 			core.queue_unit_data(_worker_data)
 
-	# Priority 7: Mid-game Wetware Mainframe on nearby Compute Vent + 1-2 Engineers for Compute.
-	if mainframes.is_empty() and not constructed_vats.is_empty() and _mainframe_data != null:
-		var vent: ResourceNode = _find_nearest_unoccupied_vent(core.global_position, 560.0)
-		if vent != null and econ.can_afford(ai_team, _mainframe_data.get_cost_dict()):
-			_try_place_and_build_on_vent(_mainframe_data, vent)
+	# Priority 7: Wetware Mainframes on natural & contested expansion Compute Vents + Engineers.
+	if not constructed_vats.is_empty() and _mainframe_data != null:
+		if mainframes.is_empty():
+			var vent: ResourceNode = _find_nearest_unoccupied_vent(core.global_position, 580.0)
+			if vent != null and econ.can_afford(ai_team, _mainframe_data.get_cost_dict()):
+				_try_place_and_build_on_vent(_mainframe_data, vent)
+		elif mainframes.size() == 1 and constructed_mainframes.size() >= 1 and staffed_engineers >= 1 and biomass >= 220:
+			var exp_vent: ResourceNode = _find_nearest_unoccupied_vent(core.global_position, 1650.0)
+			if exp_vent != null and econ.can_afford(ai_team, _mainframe_data.get_cost_dict()):
+				_try_place_and_build_on_vent(_mainframe_data, exp_vent)
 
-	if constructed_mainframe != null and _engineer_data != null and total_engineers < constructed_mainframe.max_staff_slots:
+	var desired_engineers: int = mini(4, total_mainframe_slots)
+	if constructed_mainframe != null and _engineer_data != null and total_engineers < desired_engineers:
 		if core.get_training_queue_size() < 2 and core.can_train_unit_data(_engineer_data):
 			core.queue_unit_data(_engineer_data)
+
+	# Priority 7.5: Expand Silica economy to NW/SE expansion cluster once Tier-1 is established.
+	if condensers.size() < 2 and not constructed_condensers.is_empty() and not constructed_vats.is_empty() and biomass >= 240 and _condenser_data != null:
+		if econ.can_afford(ai_team, _condenser_data.get_cost_dict()):
+			var exp_vein: ResourceNode = _find_expansion_silica_vein(core.global_position, condensers)
+			if exp_vein != null:
+				var exp_anchor: Vector2 = exp_vein.global_position.lerp(core.global_position, 0.16)
+				_try_place_and_build(_condenser_data, exp_anchor, exp_vein.global_position)
 
 	# Priority 8: Mid-game Upgrades at Cloning Vat (Batch Efficiency -> Adrenal Potency).
 	if not constructed_vats.is_empty():
@@ -566,12 +594,12 @@ func _manage_attack_waves(core: Building) -> void:
 	if router != null:
 		destinations = router.assign_group_destinations(staging_units, target_pos)
 
-	# Alternate direct objective pushes with northern/southern flanking routes using Shift-queued legs.
+	# Alternate direct Hyper-Uplink Plaza / base pushes with North Conduit & South Relay Trench flanks.
 	var use_flank: bool = (_wave_number >= 2 and (_wave_number % 2) == 0)
 	var flank_wp: Vector2 = Vector2.ZERO
 	if use_flank:
 		var north_lane: bool = ((_wave_number / 2) % 2) == 1
-		flank_wp = Vector2(-220.0, -560.0) if north_lane else Vector2(220.0, 560.0)
+		flank_wp = _get_flank_corridor_waypoint(north_lane)
 
 	var flank_slots: Array[Vector2] = []
 	if use_flank and router != null:
@@ -714,6 +742,10 @@ func _is_build_spot_valid(data: BuildingData, world_pos: Vector2) -> bool:
 		if is_instance_valid(node) and node.has_method("overlaps_circle"):
 			if node.overlaps_circle(world_pos, new_radius + 8.0):
 				return false
+	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
+		if is_instance_valid(node) and node.has_method("overlaps_circle"):
+			if node.overlaps_circle(world_pos, new_radius + 8.0):
+				return false
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if node is Building and is_instance_valid(node) and not (node as Building).is_destroyed:
 			var min_d: float = (node as Building).footprint_radius + new_radius + 10.0
@@ -743,6 +775,45 @@ func _find_nearest_unoccupied_vent(origin: Vector2, max_radius: float) -> Resour
 				best_d_sq = d_sq
 				best = rn
 	return best
+
+
+func _find_expansion_silica_vein(core_pos: Vector2, existing_condensers: Array[Building]) -> ResourceNode:
+	var best: ResourceNode = null
+	var best_d_sq: float = INF
+	var min_sep_sq: float = 420.0 * 420.0
+	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+		if not (node is ResourceNode) or not is_instance_valid(node):
+			continue
+		var rn: ResourceNode = node
+		if rn.is_depleted() or rn.is_vent or rn.resource_type != &"silica":
+			continue
+		var too_close: bool = false
+		for cond: Building in existing_condensers:
+			if is_instance_valid(cond) and cond.global_position.distance_squared_to(rn.global_position) < min_sep_sq:
+				too_close = true
+				break
+		if too_close:
+			continue
+		var d_sq: float = core_pos.distance_squared_to(rn.global_position)
+		if d_sq < best_d_sq:
+			best_d_sq = d_sq
+			best = rn
+	return best
+
+
+func _get_flank_corridor_waypoint(north_lane: bool) -> Vector2:
+	var best_pos: Vector2 = Vector2(-80.0, -810.0) if north_lane else Vector2(80.0, 810.0)
+	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
+		if not (node is MapLandmarkScript) or not is_instance_valid(node):
+			continue
+		var lm: MapLandmarkScript = node
+		if lm.visual_style != MapLandmarkScript.VisualStyle.RELAY_ARCH:
+			continue
+		if north_lane and lm.global_position.y < -200.0:
+			return lm.global_position
+		if not north_lane and lm.global_position.y > 200.0:
+			return lm.global_position
+	return best_pos
 
 
 func _find_available_worker(near_pos: Vector2) -> Unit:

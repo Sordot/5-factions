@@ -1,6 +1,8 @@
 class_name TacticalMinimap
 extends Control
 
+const MapLandmarkScript = preload("res://scripts/world/map_landmark.gd")
+
 @export var arena_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 @export var camera_path: NodePath
 @export var selection_controller_path: NodePath
@@ -157,7 +159,35 @@ func _on_map_viewport_draw() -> void:
 		map_viewport.draw_colored_polygon(mini_poly, Color(0.24, 0.32, 0.40, 0.96))
 		map_viewport.draw_polyline(mini_poly + PackedVector2Array([mini_poly[0]]), Color(0.36, 0.62, 0.72, 0.65), 1.0)
 
-	# 3. Resource nodes (Biomass, Silica, Compute Vents).
+	# 2.5. Map landmarks (subtle Technozen geometric pips).
+	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
+		if not (node is MapLandmarkScript) or not is_instance_valid(node):
+			continue
+		var lm: MapLandmarkScript = node
+		if not lm.show_on_minimap:
+			continue
+		var lp: Vector2 = _world_to_minimap(lm.global_position)
+		var lcol: Color = lm.accent_color
+		match lm.visual_style:
+			MapLandmarkScript.VisualStyle.MONOLITH_SPIRE:
+				var d_pts: PackedVector2Array = PackedVector2Array([
+					lp + Vector2(0.0, -3.6),
+					lp + Vector2(3.6, 0.0),
+					lp + Vector2(0.0, 3.6),
+					lp + Vector2(-3.6, 0.0),
+				])
+				map_viewport.draw_colored_polygon(d_pts, Color(lcol.r, lcol.g, lcol.b, 0.85))
+				map_viewport.draw_polyline(d_pts + PackedVector2Array([d_pts[0]]), Color(0.92, 0.98, 1.0, 0.85), 1.0)
+			MapLandmarkScript.VisualStyle.RELAY_ARCH:
+				var arch_col: Color = Color(lcol.r, lcol.g, lcol.b, 0.82)
+				map_viewport.draw_line(lp + Vector2(-5.0, -1.6), lp + Vector2(5.0, -1.6), arch_col, 1.2)
+				map_viewport.draw_line(lp + Vector2(-5.0, 1.6), lp + Vector2(5.0, 1.6), arch_col, 1.2)
+			MapLandmarkScript.VisualStyle.CAPACITOR_PYLON:
+				map_viewport.draw_rect(Rect2(lp - Vector2(1.8, 1.8), Vector2(3.6, 3.6)), Color(lcol.r, lcol.g, lcol.b, 0.82), true)
+			MapLandmarkScript.VisualStyle.PLAZA_BEACON:
+				map_viewport.draw_arc(lp, 5.4, 0.0, TAU, 14, Color(lcol.r, lcol.g, lcol.b, 0.42), 1.1)
+
+	# 3. Resource nodes (Biomass green, Silica gold, Compute Vents violet/cyan).
 	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
 		if not (node is ResourceNode) or not is_instance_valid(node):
 			continue
@@ -166,20 +196,22 @@ func _on_map_viewport_draw() -> void:
 			continue
 		var p: Vector2 = _world_to_minimap(rn.global_position)
 		if rn.is_vent:
-			map_viewport.draw_arc(p, 3.2, 0.0, TAU, 10, Color(0.28, 0.88, 1.0, 0.9), 1.2)
+			map_viewport.draw_arc(p, 3.4, 0.0, TAU, 12, Color(0.58, 0.64, 1.0, 0.96), 1.3)
+			map_viewport.draw_circle(p, 1.5, Color(0.32, 0.94, 1.0, 0.92))
 		elif rn.resource_type == &"silica":
 			map_viewport.draw_circle(p, 2.3, Color(0.98, 0.78, 0.28, 0.95))
 		else:
 			map_viewport.draw_circle(p, 2.2, Color(0.24, 0.94, 0.56, 0.92))
 
-	# 4. Central Data Hyper-Uplink.
+	# 4. Central Data Hyper-Uplink (pulsing Technozen diamond).
+	var pulse: float = 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.0045)
 	for node: Node in get_tree().get_nodes_in_group("hyper_uplinks"):
 		if not (node is HyperUplink) or not is_instance_valid(node):
 			continue
 		var uplink: HyperUplink = node
 		var up: Vector2 = _world_to_minimap(uplink.global_position)
 		var live_vis: bool = _fog_system == null or not _fog_system.fog_enabled or _fog_system.is_world_pos_visible(uplink.global_position)
-		var u_col: Color = Color(0.64, 0.74, 0.84, 0.85)
+		var u_col: Color = Color(0.66, 0.78, 0.88, 0.90)
 		if live_vis:
 			if uplink.is_contested:
 				u_col = Color(1.0, 0.80, 0.24, 1.0)
@@ -188,21 +220,23 @@ func _on_map_viewport_draw() -> void:
 			elif uplink.controlling_team == int(Unit.Team.ENEMY):
 				u_col = Color(1.0, 0.34, 0.28, 1.0)
 		var scale_x: float = rect.size.x / maxf(1.0, arena_bounds.size.x)
-		map_viewport.draw_arc(up, maxf(6.0, uplink.capture_radius * scale_x), 0.0, TAU, 24, Color(u_col.r, u_col.g, u_col.b, 0.65), 1.2)
-		map_viewport.draw_circle(up, 3.0, u_col)
+		map_viewport.draw_arc(up, maxf(6.5, uplink.capture_radius * scale_x), 0.0, TAU, 24, Color(u_col.r, u_col.g, u_col.b, 0.55 + pulse * 0.25), 1.2)
+		map_viewport.draw_arc(up, lerpf(4.2, 8.2, pulse), 0.0, TAU, 16, Color(u_col.r, u_col.g, u_col.b, (1.0 - pulse) * 0.72), 1.1)
+		var dr: float = 4.0 + pulse * 0.8
+		var diamond: PackedVector2Array = PackedVector2Array([
+			up + Vector2(0.0, -dr),
+			up + Vector2(dr, 0.0),
+			up + Vector2(0.0, dr),
+			up + Vector2(-dr, 0.0),
+		])
+		map_viewport.draw_colored_polygon(diamond, u_col)
+		map_viewport.draw_polyline(diamond + PackedVector2Array([diamond[0]]), Color(0.95, 1.0, 1.0, 0.94), 1.1)
 
-	# 5. Fog of War shroud overlay over terrain/resources/uplink.
+	# 5. Fog of War shroud overlay over terrain/landmarks/resources/uplink.
 	if _fog_system != null and _fog_system.fog_enabled and _fog_system.fog_texture != null:
 		map_viewport.draw_texture_rect(_fog_system.fog_texture, rect, false)
 
-	# 6. Encroaching Zone perimeter ring.
-	var zone: EncroachingZone = get_tree().get_first_node_in_group("encroaching_zone") as EncroachingZone
-	if zone != null and zone.active:
-		var zc: Vector2 = _world_to_minimap(zone.global_position + zone.zone_center)
-		var zr: float = zone.current_radius * (rect.size.x / maxf(1.0, arena_bounds.size.x))
-		map_viewport.draw_arc(zc, zr, 0.0, TAU, 48, Color(1.0, 0.30, 0.40, 0.55), 1.1)
-
-	# 7. Buildings (Friendly cyan/green; Enemy red if spotted/visible).
+	# 6. Buildings (Friendly cyan/green; Enemy red if spotted/visible).
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not (node is Building) or not is_instance_valid(node):
 			continue

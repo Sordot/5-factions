@@ -239,10 +239,6 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 	if ai != null:
 		ai.enabled = false
 
-	var zone: EncroachingZone = get_tree().get_first_node_in_group("encroaching_zone") as EncroachingZone
-	if zone != null:
-		zone.active = false
-
 	var safe_duration: float = maxf(1.0, match_elapsed)
 	var player_uplink_pct: float = clampf((player_uplink_time / safe_duration) * 100.0, 0.0, 100.0)
 	var stats: Dictionary = {

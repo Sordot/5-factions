@@ -11,11 +11,9 @@ extends Control
 @onready var btn_scout_1: Button = %BtnScout1
 @onready var btn_worker_1: Button = %BtnWorker1
 @onready var btn_toggle_aggro_ai: Button = %BtnToggleAggroAI
-@onready var btn_toggle_zone: Button = %BtnToggleZone
 @onready var btn_harvester_1: Button = %BtnHarvester1
 @onready var btn_engineer_1: Button = %BtnEngineer1
 @onready var btn_grant_res: Button = %BtnGrantRes
-@onready var btn_trigger_zone: Button = %BtnTriggerZone
 @onready var btn_toggle_edge_pan: Button = %BtnToggleEdgePan
 @onready var btn_toggle_fullscreen: Button = %BtnToggleFullscreen
 @onready var btn_dummy_1: Button = %BtnDummy1
@@ -34,7 +32,6 @@ var _spawner: SandboxSpawner = null
 var _selection_controller: SelectionController = null
 var _camera: RTSCamera = null
 var _match_manager: MatchManager = null
-var _zone: EncroachingZone = null
 var _catalog_team: Unit.Team = Unit.Team.PLAYER
 
 
@@ -50,7 +47,6 @@ func _ready() -> void:
 	if _camera != null and not _camera.fullscreen_toggled.is_connected(_on_camera_fullscreen_toggled):
 		_camera.fullscreen_toggled.connect(_on_camera_fullscreen_toggled)
 	_connect_match_manager()
-	_connect_zone()
 
 	btn_unit_1.pressed.connect(func() -> void:
 		if _spawner != null:
@@ -76,12 +72,6 @@ func _ready() -> void:
 			MatchManager._global_aggro_ai_enabled = not MatchManager._global_aggro_ai_enabled
 		_refresh_aggro_ai_button()
 	)
-	btn_toggle_zone.pressed.connect(func() -> void:
-		_connect_zone()
-		if _zone != null:
-			_zone.toggle_zone()
-		_refresh_zone_button()
-	)
 	btn_harvester_1.pressed.connect(func() -> void:
 		if _spawner != null:
 			_spawner.spawn_harvester_units(1)
@@ -93,10 +83,6 @@ func _ready() -> void:
 	btn_grant_res.pressed.connect(func() -> void:
 		if _spawner != null:
 			_spawner.grant_debug_resources()
-	)
-	btn_trigger_zone.pressed.connect(func() -> void:
-		if _spawner != null:
-			_spawner.trigger_zone_phase()
 	)
 	btn_toggle_edge_pan.pressed.connect(func() -> void:
 		if _camera == null and is_inside_tree():
@@ -146,7 +132,6 @@ func _ready() -> void:
 	_refresh_edge_pan_button()
 	_refresh_fullscreen_button()
 	_refresh_aggro_ai_button()
-	_refresh_zone_button()
 	_refresh_status()
 
 
@@ -190,29 +175,6 @@ func _refresh_catalog_team_button() -> void:
 	var is_player: bool = (_catalog_team == Unit.Team.PLAYER)
 	btn_spawn_team.text = "Team: PLAYER" if is_player else "Team: ENEMY"
 	btn_spawn_team.modulate = Color(0.42, 0.98, 0.88, 1.0) if is_player else Color(1.0, 0.44, 0.34, 1.0)
-
-
-func _connect_zone() -> void:
-	if _zone != null and is_instance_valid(_zone):
-		return
-	if is_inside_tree():
-		_zone = get_tree().get_first_node_in_group("encroaching_zone") as EncroachingZone
-		if _zone != null and not _zone.zone_toggled.is_connected(_on_zone_toggled):
-			_zone.zone_toggled.connect(_on_zone_toggled)
-
-
-func _on_zone_toggled(_enabled: bool) -> void:
-	_refresh_zone_button()
-
-
-func _refresh_zone_button() -> void:
-	if btn_toggle_zone == null:
-		return
-	var zone_on: bool = _zone.active if (_zone != null and is_instance_valid(_zone)) else false
-	btn_toggle_zone.text = "Zone: ON" if zone_on else "Zone: OFF"
-	btn_toggle_zone.modulate = Color(1.0, 0.48, 0.54, 1.0) if zone_on else Color(0.68, 0.74, 0.80, 0.85)
-	if btn_trigger_zone != null:
-		btn_trigger_zone.disabled = not zone_on
 
 
 func _connect_match_manager() -> void:
@@ -270,11 +232,9 @@ func _refresh_fullscreen_button() -> void:
 
 func _process(_delta: float) -> void:
 	_connect_match_manager()
-	_connect_zone()
 	_refresh_status()
 	_refresh_fullscreen_button()
 	_refresh_aggro_ai_button()
-	_refresh_zone_button()
 
 
 func _refresh_status() -> void:
