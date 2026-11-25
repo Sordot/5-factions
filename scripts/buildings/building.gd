@@ -88,6 +88,7 @@ var turret_component: TurretComponent = null
 var _has_rally: bool = false
 var _rally_position: Vector2 = Vector2.ZERO
 var _rally_target: Node2D = null
+var _rally_resource_type: StringName = &""
 var rally_target_unit: Unit = null
 var construction_costs: Dictionary = {}
 var is_salvaging: bool = false
@@ -474,6 +475,7 @@ func set_rally_position(world_pos: Vector2) -> void:
 	_has_rally = true
 	_rally_position = world_pos
 	_rally_target = null
+	_rally_resource_type = &""
 	rally_target_unit = null
 	queue_redraw()
 	rally_changed.emit(self)
@@ -489,6 +491,7 @@ func set_rally_target(target: Node2D) -> void:
 	_disconnect_rally_unit_signal()
 	_has_rally = true
 	_rally_target = target
+	_rally_resource_type = (target as ResourceNode).resource_type if (target is ResourceNode and not (target as ResourceNode).is_vent) else &""
 	rally_target_unit = null
 	_rally_position = target.global_position
 	queue_redraw()
@@ -505,6 +508,7 @@ func set_rally_target_unit(target_unit: Unit) -> void:
 	_has_rally = true
 	rally_target_unit = target_unit
 	_rally_target = target_unit
+	_rally_resource_type = &""
 	_rally_position = target_unit.global_position
 	if not target_unit.died.is_connected(_on_rally_target_unit_died):
 		target_unit.died.connect(_on_rally_target_unit_died)
@@ -570,6 +574,43 @@ func get_rally_target() -> Node2D:
 	return null
 
 
+func get_cluster_saturation() -> Dictionary:
+	if not is_inside_tree() or not is_constructed or is_destroyed:
+		return {"assigned": 0, "capacity": 0, "has_nodes": false}
+	var res_type: StringName = &""
+	var search_radius: float = 0.0
+	if is_core_hub or building_type_id == &"nexus_vat":
+		res_type = &"biomass"
+		search_radius = 520.0
+	elif building_type_id == &"silica_condenser":
+		res_type = &"silica"
+		search_radius = 420.0
+	else:
+		return {"assigned": 0, "capacity": 0, "has_nodes": false}
+
+	var r_sq: float = search_radius * search_radius
+	var total_assigned: int = 0
+	var total_cap: int = 0
+	var node_count: int = 0
+	var tid: int = int(team)
+	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+		if not (node is ResourceNode) or not is_instance_valid(node):
+			continue
+		var rn: ResourceNode = node as ResourceNode
+		if rn.is_depleted() or rn.is_vent or rn.resource_type != res_type:
+			continue
+		if global_position.distance_squared_to(rn.global_position) <= r_sq:
+			total_assigned += rn.get_assigned_count(tid)
+			total_cap += maxi(1, rn.max_harvesters)
+			node_count += 1
+	return {
+		"assigned": total_assigned,
+		"capacity": total_cap,
+		"has_nodes": node_count > 0,
+		"resource_type": res_type,
+	}
+
+
 func _has_rally_overlay() -> bool:
 	return is_inside_tree() and get_tree().get_first_node_in_group("rally_point_overlay") != null
 
@@ -592,13 +633,33 @@ func apply_rally_to_unit(unit: Unit) -> void:
 		if _rally_target is ResourceNode:
 			var res_node: ResourceNode = _rally_target
 			if not res_node.is_depleted() and unit.can_gather_resource(res_node.resource_type):
-				unit.command_gather(res_node)
+				var chosen: ResourceNode = ResourceNode.pick_best_cluster_node(res_node, unit, int(team))
+				if chosen == null:
+					chosen = res_node
+				chosen.assign_worker(unit)
+				unit.command_gather(chosen, false)
 				return
 		elif _rally_target is Building:
 			var target_b: Building = _rally_target
 			if not target_b.is_destroyed and target_b.max_staff_slots > 0 and unit.can_staff_compute():
 				if unit.command_staff_building(target_b):
 					return
+	elif _rally_resource_type != &"" and unit.can_gather_resource(_rally_resource_type):
+		# Original rallied resource node depleted; spill cleanly into surviving cluster near rally point
+		var search_pos: Vector2 = _rally_position if _rally_position != Vector2.ZERO else global_position
+		var fallback_rn: ResourceNode = ResourceNode.pick_best_cluster_node_from_pos(
+			get_tree(),
+			search_pos,
+			_rally_resource_type,
+			unit,
+			int(team),
+			480.0,
+			1100.0
+		)
+		if fallback_rn != null:
+			fallback_rn.assign_worker(unit)
+			unit.command_gather(fallback_rn, false)
+			return
 
 	unit.command_move(get_rally_world_position())
 

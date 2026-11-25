@@ -289,6 +289,14 @@ func _assign_idle_workers(core: Building) -> void:
 	if biomass_nodes.is_empty():
 		return
 
+	var anchor_bio: ResourceNode = biomass_nodes[0]
+	var anchor_d_sq: float = core.global_position.distance_squared_to(anchor_bio.global_position)
+	for rn: ResourceNode in biomass_nodes:
+		var d_sq: float = core.global_position.distance_squared_to(rn.global_position)
+		if d_sq < anchor_d_sq:
+			anchor_d_sq = d_sq
+			anchor_bio = rn
+
 	for unit: Unit in _get_team_units(ai_team):
 		if unit.get_unit_type_id() != &"worker":
 			continue
@@ -297,8 +305,11 @@ func _assign_idle_workers(core: Building) -> void:
 		if unit.is_carrying_cargo():
 			if unit.command_return_cargo(core):
 				continue
-		var best_node: ResourceNode = _pick_least_crowded_resource(unit.global_position, biomass_nodes)
+		var best_node: ResourceNode = ResourceNode.pick_best_cluster_node(anchor_bio, unit, int(ai_team), 520.0, 1200.0)
+		if best_node == null:
+			best_node = _pick_least_crowded_resource(unit.global_position, biomass_nodes)
 		if best_node != null:
+			best_node.assign_worker(unit)
 			unit.command_gather(best_node)
 
 
@@ -317,8 +328,12 @@ func _assign_idle_harvesters() -> void:
 		if unit.is_carrying_cargo():
 			if unit.command_return_cargo():
 				continue
-		var vein: ResourceNode = _pick_least_crowded_resource(unit.global_position, silica_nodes) if not silica_nodes.is_empty() else _find_nearest_resource(unit.global_position, &"silica")
+		var anchor_vein: ResourceNode = silica_nodes[0] if not silica_nodes.is_empty() else _find_nearest_resource(unit.global_position, &"silica")
+		var vein: ResourceNode = ResourceNode.pick_best_cluster_node(anchor_vein, unit, int(ai_team), 480.0, 1400.0) if anchor_vein != null else null
+		if vein == null:
+			vein = anchor_vein
 		if vein != null:
+			vein.assign_worker(unit)
 			unit.command_gather(vein)
 
 

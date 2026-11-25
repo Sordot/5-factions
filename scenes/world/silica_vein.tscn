@@ -15,6 +15,7 @@ max_amount = 2500
 remaining_amount = 2500
 collision_radius = 24.0
 interaction_radius = 30.0
+max_harvesters = 2
 is_vent = false
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]

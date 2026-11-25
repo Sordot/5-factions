@@ -154,11 +154,38 @@ func issue_gather_order(selected_units: Array[Unit], resource_node: ResourceNode
 	var gatherers: Array[Unit] = []
 	var non_gatherers: Array[Unit] = []
 	for unit: Unit in selected_units:
+		if not is_instance_valid(unit) or unit.is_dead:
+			continue
 		if unit.can_gather_resource(resource_node.resource_type):
-			unit.command_gather(resource_node, shift_queued)
 			gatherers.append(unit)
 		else:
 			non_gatherers.append(unit)
+
+	# Release selected workers' previous node reservations before re-spreading when not Shift-queuing
+	if not shift_queued:
+		for w: Unit in gatherers:
+			if w.gather_component != null:
+				w.gather_component.release_assigned_node(w)
+
+	# Sort by proximity to clicked node so closest workers claim front slots first
+	var anchor_pos: Vector2 = resource_node.global_position
+	gatherers.sort_custom(func(a: Unit, b: Unit) -> bool:
+		return a.global_position.distance_squared_to(anchor_pos) < b.global_position.distance_squared_to(anchor_pos)
+	)
+
+	for i: int in range(gatherers.size()):
+		var worker: Unit = gatherers[i]
+		var w_team: int = int(worker.team)
+		var target: ResourceNode = null
+		if gatherers.size() == 1 and resource_node.has_free_slot(w_team):
+			target = resource_node
+		else:
+			target = ResourceNode.pick_best_cluster_node(resource_node, worker, w_team)
+		if target == null:
+			target = resource_node
+		target.assign_worker(worker)
+		worker.command_gather(target, shift_queued)
+
 	if not non_gatherers.is_empty():
 		var escort_targets: Array[Vector2] = assign_group_destinations(non_gatherers, resource_node.global_position)
 		for i: int in range(non_gatherers.size()):

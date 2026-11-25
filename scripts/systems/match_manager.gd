@@ -194,23 +194,13 @@ func _dispatch_starting_workers_to_biomass() -> void:
 		if idle_workers.is_empty():
 			continue
 
-		var assigned_counts: Dictionary = {}
-		for rn: ResourceNode in local_nodes:
-			assigned_counts[rn.get_instance_id()] = 0
-
+		var anchor_node: ResourceNode = local_nodes[0]
 		for worker: Unit in idle_workers:
-			var best_node: ResourceNode = null
-			var best_score: float = INF
-			for rn: ResourceNode in local_nodes:
-				var nid: int = rn.get_instance_id()
-				var score: float = float(assigned_counts.get(nid, 0)) * 10000.0 + worker.global_position.distance_to(rn.global_position)
-				if score < best_score:
-					best_score = score
-					best_node = rn
-			if best_node != null:
-				var chosen_id: int = best_node.get_instance_id()
-				assigned_counts[chosen_id] = int(assigned_counts.get(chosen_id, 0)) + 1
-				worker.command_gather(best_node, false)
+			var best_node: ResourceNode = ResourceNode.pick_best_cluster_node(anchor_node, worker, tid, 560.0, 950.0)
+			if best_node == null:
+				best_node = anchor_node
+			best_node.assign_worker(worker)
+			worker.command_gather(best_node, false)
 
 
 func _prune_inactive_team_spawns() -> void:

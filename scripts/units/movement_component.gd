@@ -194,7 +194,7 @@ func apply_stationary_separation(owner_unit: Unit, delta: float) -> void:
 	if not owner_unit.can_unit_move():
 		return
 	if owner_unit.command_state == Unit.CommandState.GATHERING and owner_unit.gather_component != null and owner_unit.gather_component.is_harvesting_in_place():
-		owner_unit.velocity = Vector2.ZERO
+		_apply_harvester_perimeter_separation(owner_unit, delta)
 		return
 	if owner_unit.command_state == Unit.CommandState.REPAIRING and owner_unit.repair_component != null and bool(owner_unit.repair_component.get("is_repairing_in_place")):
 		owner_unit.velocity = Vector2.ZERO
@@ -222,6 +222,56 @@ func apply_stationary_separation(owner_unit: Unit, delta: float) -> void:
 			SpatialGrid.update_unit(owner_unit)
 	else:
 		owner_unit.velocity = Vector2.ZERO
+
+
+func _apply_harvester_perimeter_separation(owner_unit: Unit, _delta: float) -> void:
+	var target_rn: ResourceNode = owner_unit.gather_component.target_node if owner_unit.gather_component != null else null
+	if target_rn == null or not is_instance_valid(target_rn):
+		owner_unit.velocity = Vector2.ZERO
+		return
+	var my_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 13.0
+	var min_sep: float = my_r * 1.95
+	var query_r: float = my_r * 2.35
+	var candidates: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, query_r, int(owner_unit.team)) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+
+	var radial: Vector2 = owner_unit.global_position - target_rn.global_position
+	var radial_len: float = radial.length()
+	var radial_dir: Vector2 = (radial / radial_len) if radial_len > 0.1 else Vector2.RIGHT
+	var tangent: Vector2 = Vector2(-radial_dir.y, radial_dir.x)
+	var tangent_push: float = 0.0
+
+	for node: Variant in candidates:
+		if not is_instance_valid(node) or not (node is Unit) or node == owner_unit:
+			continue
+		var other: Unit = node as Unit
+		if other.is_dead or other.is_staffed or other.team != owner_unit.team:
+			continue
+		if other.command_state != Unit.CommandState.GATHERING or other.gather_component == null:
+			continue
+		# Only separate against peers actively HARVESTING the same node (immune to passing transit workers)
+		if not other.gather_component.is_harvesting_in_place() or other.gather_component.target_node != target_rn:
+			continue
+		var diff: Vector2 = owner_unit.global_position - other.global_position
+		var dist: float = diff.length()
+		if dist >= min_sep:
+			continue
+		var strength: float = clampf((min_sep - dist) / maxf(1.0, min_sep), 0.15, 1.0)
+		var side: float = diff.dot(tangent)
+		if absf(side) < 0.05:
+			side = 1.0 if owner_unit.get_instance_id() > other.get_instance_id() else -1.0
+		tangent_push += (1.0 if side >= 0.0 else -1.0) * strength
+
+	if absf(tangent_push) < 0.01:
+		owner_unit.velocity = Vector2.ZERO
+		return
+
+	var desired_r: float = target_rn.collision_radius + my_r + 6.0
+	var radial_corr: Vector2 = radial_dir * clampf((desired_r - radial_len) * 3.0, -45.0, 45.0)
+	var nudge_speed: float = clampf(absf(tangent_push), 0.2, 1.0) * 95.0
+	owner_unit.velocity = tangent * (1.0 if tangent_push >= 0.0 else -1.0) * nudge_speed + radial_corr
+	owner_unit.move_and_slide()
+	if SpatialGrid != null:
+		SpatialGrid.update_unit(owner_unit)
 
 
 func update_worker_collision_passing(owner_unit: Unit) -> void:
@@ -350,6 +400,9 @@ func compute_overlap_separation(owner_unit: Unit, extra_margin: float) -> Vector
 		var overlap_ratio: float = clampf((min_dist - dist) / maxf(1.0, min_dist), 0.15, 1.0)
 		var push_scale: float = 1.0
 		if self_is_worker and other.team == owner_unit.team and other.data != null and (other.data.can_gather or other.data.can_staff_compute or other.can_construct()):
+			# True transit ghosting: workers moving to resources or returning cargo pass smoothly through other workers
+			if owner_unit.command_state == Unit.CommandState.GATHERING and owner_unit.gather_component != null and not owner_unit.gather_component.is_harvesting_in_place():
+				continue
 			var other_stationary_working: bool = (
 				(other.command_state == Unit.CommandState.GATHERING and other.gather_component != null and other.gather_component.is_harvesting_in_place())
 				or (other.command_state == Unit.CommandState.CONSTRUCTING and not other.is_nav_movement_active())

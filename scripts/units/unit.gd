@@ -510,6 +510,19 @@ func issue_command(cmd: Dictionary, append_to_queue: bool = false) -> bool:
 			return true
 	else:
 		clear_command_queue()
+		if gather_component != null:
+			var cmd_type: StringName = cmd.get("type", &"")
+			if (
+				cmd_type == &"move"
+				or cmd_type == &"attack_move"
+				or cmd_type == &"attack_target"
+				or cmd_type == &"patrol"
+				or cmd_type == &"build"
+				or cmd_type == &"repair"
+				or cmd_type == &"salvage"
+				or cmd_type == &"staff"
+			):
+				gather_component.cancel(self, true)
 	return _execute_command(cmd) != CMD_EXEC_FAILED
 
 
@@ -1182,6 +1195,8 @@ func _die() -> void:
 		return
 	is_dead = true
 	clear_command_queue()
+	if gather_component != null:
+		gather_component.cancel(self, true)
 	_cancel_active_tasks(false)
 	command_state = CommandState.IDLE
 	current_target = null
@@ -1633,7 +1648,7 @@ func _cancel_active_tasks(keep_gather: bool) -> void:
 	if ability_component != null:
 		ability_component.cancel_pending_cast()
 	if not keep_gather and gather_component != null:
-		gather_component.cancel()
+		gather_component.cancel(self, false)
 	if staff_component != null:
 		staff_component.cancel()
 	if repair_component != null:
@@ -1657,19 +1672,17 @@ func _try_start_auto_gather() -> void:
 	if command_state != CommandState.IDLE:
 		return
 	var target_type: StringName = data.allowed_resource if data.allowed_resource != &"" else &"silica"
-	var best: ResourceNode = null
-	var best_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
-		if not (node is ResourceNode) or not is_instance_valid(node):
-			continue
-		var res_node: ResourceNode = node
-		if res_node.is_depleted() or res_node.is_vent or res_node.resource_type != target_type:
-			continue
-		var d_sq: float = global_position.distance_squared_to(res_node.global_position)
-		if d_sq < best_dist_sq:
-			best_dist_sq = d_sq
-			best = res_node
+	var best: ResourceNode = ResourceNode.pick_best_cluster_node_from_pos(
+		get_tree(),
+		global_position,
+		target_type,
+		self,
+		int(team),
+		520.0,
+		2400.0
+	)
 	if best != null:
+		best.assign_worker(self)
 		command_gather(best)
 
 

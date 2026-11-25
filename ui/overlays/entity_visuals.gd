@@ -633,6 +633,55 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 	if _owner_building.has_turret:
 		_draw_building_turret_overlay(p)
 
+	_draw_hub_saturation_badge()
+
+
+func _draw_hub_saturation_badge() -> void:
+	if _owner_building == null or not is_instance_valid(_owner_building) or not _owner_building.is_constructed or _owner_building.is_destroyed:
+		return
+	var is_hub: bool = _owner_building.is_core_hub or entity_type_id == &"nexus_vat" or entity_type_id == &"silica_condenser"
+	if not is_hub:
+		return
+	var is_local: bool = TeamManager.is_team_controlled_by_local_human(int(_owner_building.team)) if TeamManager != null else (_owner_building.team == Unit.Team.PLAYER)
+	if not is_local:
+		return
+
+	var should_show: bool = _owner_building.is_selected
+	if not should_show and _owner_building.is_inside_tree():
+		var mouse_world: Vector2 = _owner_building.get_global_mouse_position()
+		var hover_r: float = _owner_building.selection_radius + 8.0
+		if _owner_building.global_position.distance_squared_to(mouse_world) <= hover_r * hover_r:
+			should_show = true
+	if not should_show and _owner_building.is_inside_tree():
+		var want_res: StringName = &"silica" if entity_type_id == &"silica_condenser" else &"biomass"
+		var sel: Node = _owner_building.get_tree().get_first_node_in_group("selection_controller")
+		if sel != null:
+			var sel_units: Variant = sel.get("selected_units")
+			if sel_units is Array:
+				for item: Variant in (sel_units as Array):
+					if is_instance_valid(item) and item is Unit and (item as Unit).can_gather_resource(want_res):
+						should_show = true
+						break
+	if not should_show:
+		return
+
+	var sat: Dictionary = _owner_building.get_cluster_saturation()
+	if not bool(sat.get("has_nodes", false)):
+		return
+	var assigned: int = int(sat.get("assigned", 0))
+	var cap: int = maxi(1, int(sat.get("capacity", 0)))
+	var text_str: String = "%d/%d" % [assigned, cap]
+	var col: Color = ResourceNode.get_saturation_color(assigned, cap)
+	var font: Font = ThemeDB.fallback_font
+	var font_size: int = 11
+	var txt_sz: Vector2 = font.get_string_size(text_str, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
+	var pill_w: float = txt_sz.x + 14.0
+	var pill_h: float = 17.0
+	var pill_pos: Vector2 = Vector2(-pill_w * 0.5, -_owner_building.footprint_radius - pill_h - 14.0)
+	draw_rect(Rect2(pill_pos, Vector2(pill_w, pill_h)), Color(0.03, 0.06, 0.10, 0.88), true)
+	draw_rect(Rect2(pill_pos, Vector2(pill_w, pill_h)), Color(col.r, col.g, col.b, 0.90), false, 1.3)
+	draw_string(font, pill_pos + Vector2(7.0, pill_h - 4.0), text_str, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, col)
+
 
 func _draw_building_turret_overlay(p: Dictionary) -> void:
 	if _owner_building == null or not _owner_building.is_constructed:
