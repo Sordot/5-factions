@@ -1,6 +1,8 @@
 class_name SelectionHUD
 extends Control
 
+const COMMAND_ICON_BUTTON_SCRIPT: GDScript = preload("res://ui/hud/command_icon_button.gd")
+
 @export var selection_controller_path: NodePath
 
 @onready var control_group_row: HBoxContainer = %ControlGroupRow
@@ -22,15 +24,8 @@ extends Control
 @onready var production_label: Label = %ProductionLabel
 @onready var production_bar: ProgressBar = %ProductionBar
 @onready var queue_slots_row: HBoxContainer = %QueueSlotsRow
-@onready var standard_commands_row: HBoxContainer = %StandardCommandsRow
-@onready var ability_row: GridContainer = %AbilityRow
+@onready var command_grid: GridContainer = %CommandGrid
 @onready var read_only_label: Label = %ReadOnlyLabel
-@onready var btn_cmd_move: Button = %BtnCmdMove
-@onready var btn_cmd_stop: Button = %BtnCmdStop
-@onready var btn_cmd_hold: Button = %BtnCmdHold
-@onready var btn_cmd_defensive: Button = %BtnCmdDefensive
-@onready var btn_cmd_patrol: Button = %BtnCmdPatrol
-@onready var btn_cmd_amove: Button = %BtnCmdAMove
 
 var _selection_controller: SelectionController = null
 var _economy_manager: EconomyManager = null
@@ -40,6 +35,7 @@ var _selected_buildings: Array[Building] = []
 var _connected_buildings: Array[Building] = []
 var _active_subgroup_units: Array[Unit] = []
 var _active_abilities: Array[AbilityData] = []
+var _unit_cmd_tiles: Dictionary = {}
 var _ability_buttons: Dictionary = {}
 var _building_action_buttons: Array[Dictionary] = []
 var _targeting_ability: AbilityData = null
@@ -53,9 +49,15 @@ var _prod_fill_style: StyleBoxFlat = null
 var _shield_label: Label = null
 var _shield_bar: ProgressBar = null
 
+var _active_hud_faction_id: StringName = &""
+var _active_hud_accent: Color = Color(0.20, 0.96, 0.86, 1.0)
+var _active_hud_primary: Color = Color(0.90, 0.96, 0.98, 1.0)
+var _faction_frame_overlay: Control = null
+
 
 func _ready() -> void:
 	_setup_dynamic_bar_styles()
+	_setup_faction_frame_overlay()
 	_selection_controller = get_node_or_null(selection_controller_path) as SelectionController
 	if _selection_controller != null:
 		_selection_controller.selection_changed.connect(_on_selection_changed)
@@ -74,62 +76,34 @@ func _ready() -> void:
 		SettingsManager.keybind_changed.connect(_on_keybind_changed)
 	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_display_settings_changed):
 		SettingsManager.settings_changed.connect(_on_display_settings_changed)
+	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and not TeamManager.teams_reconfigured.is_connected(_on_teams_reconfigured):
+		TeamManager.teams_reconfigured.connect(_on_teams_reconfigured)
 
 	_connect_economy_manager()
-
-	btn_cmd_stop.pressed.connect(func() -> void:
-		if AudioManager != null:
-			AudioManager.play_ui_click()
-		if _selection_controller != null:
-			_selection_controller.issue_stop_command()
-	)
-	btn_cmd_hold.pressed.connect(func() -> void:
-		if AudioManager != null:
-			AudioManager.play_ui_click()
-		if _selection_controller != null:
-			_selection_controller.issue_hold_command()
-	)
-	if btn_cmd_defensive != null:
-		btn_cmd_defensive.pressed.connect(func() -> void:
-			if AudioManager != null:
-				AudioManager.play_ui_click()
-			if _selection_controller != null:
-				_selection_controller.issue_defensive_command()
-		)
-	if btn_cmd_patrol != null:
-		btn_cmd_patrol.pressed.connect(func() -> void:
-			if _selection_controller != null:
-				_selection_controller.begin_patrol_targeting()
-		)
-	if btn_cmd_amove != null:
-		btn_cmd_amove.disabled = false
-		btn_cmd_amove.pressed.connect(func() -> void:
-			if _selection_controller != null:
-				_selection_controller.begin_attack_move_targeting()
-		)
-	btn_cmd_move.disabled = true
-
-	_bind_static_command_tooltips()
-	_refresh_dynamic_command_labels()
+	_apply_faction_hud_theme(true)
 	bottom_panel.visible = false
 	call_deferred("_adjust_layout_for_minimap")
 	if get_viewport() != null and not get_viewport().size_changed.is_connected(_adjust_layout_for_minimap):
 		get_viewport().size_changed.connect(_adjust_layout_for_minimap)
 
 
+func _on_teams_reconfigured() -> void:
+	_apply_faction_hud_theme(true)
+
+
 func _adjust_layout_for_minimap() -> void:
 	if not is_inside_tree():
 		return
-	var minimap_node: Node = get_tree().get_first_node_in_group("tactical_minimap")
 	var bottom_stack: Control = get_node_or_null("BottomStack") as Control
-	if minimap_node == null or bottom_stack == null:
+	if bottom_stack == null:
 		return
 	var vp_width: float = get_viewport_rect().size.x
-	var minimap_clearance: float = 244.0
-	var desired_half_w: float = 460.0
+	var minimap_node: Node = get_tree().get_first_node_in_group("tactical_minimap")
+	var minimap_clearance: float = 248.0 if minimap_node != null else 12.0
+	var desired_half_w: float = 370.0
 	var center_x: float = vp_width * 0.5
 	if center_x - desired_half_w < minimap_clearance:
-		var avail_w: float = maxf(680.0, vp_width - minimap_clearance - 12.0)
+		var avail_w: float = clampf(vp_width - minimap_clearance - 12.0, 680.0, 748.0)
 		var shift_center: float = minimap_clearance + avail_w * 0.5
 		bottom_stack.offset_left = (shift_center - avail_w * 0.5) - center_x
 		bottom_stack.offset_right = (shift_center + avail_w * 0.5) - center_x
@@ -149,7 +123,7 @@ func _setup_dynamic_bar_styles() -> void:
 	if hp_box != null and unit_hp_label != null and unit_hp_bar != null and _shield_bar == null:
 		var header_row: HBoxContainer = HBoxContainer.new()
 		header_row.name = "HPShieldHeaderRow"
-		header_row.add_theme_constant_override("separation", 6)
+		header_row.add_theme_constant_override("separation", 4)
 		hp_box.add_child(header_row)
 		hp_box.move_child(header_row, 0)
 		unit_hp_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -157,7 +131,7 @@ func _setup_dynamic_bar_styles() -> void:
 
 		_shield_label = Label.new()
 		_shield_label.name = "UnitShieldLabel"
-		_shield_label.add_theme_font_size_override("font_size", 10)
+		_shield_label.add_theme_font_size_override("font_size", 9)
 		_shield_label.add_theme_color_override("font_color", Color(0.220, 0.741, 0.973, 1.0))
 		_shield_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		_shield_label.visible = false
@@ -169,7 +143,7 @@ func _setup_dynamic_bar_styles() -> void:
 		_shield_bar.show_percentage = false
 		_shield_bar.visible = false
 		_shield_fill_style = StyleBoxFlat.new()
-		_shield_fill_style.bg_color = Color(0.220, 0.741, 0.973, 1.0) # #38BDF8
+		_shield_fill_style.bg_color = Color(0.220, 0.741, 0.973, 1.0)
 		_shield_fill_style.set_corner_radius_all(2)
 		_shield_bar.add_theme_stylebox_override("fill", _shield_fill_style)
 		hp_box.add_child(_shield_bar)
@@ -186,40 +160,95 @@ func _setup_dynamic_bar_styles() -> void:
 		production_bar.add_theme_stylebox_override("fill", _prod_fill_style)
 
 
-func _bind_static_command_tooltips() -> void:
-	_attach_tooltip(btn_cmd_move, "Move", "RMB", "Right-Click Ground", "Orders selected units to navigate to the target location.")
-	_attach_dynamic_action_tooltip(btn_cmd_stop, "Stop", &"cmd_stop", "Immediate", "Cancels current movement, patrol, gathering, construction, or target and flushes command queue.")
-	_attach_dynamic_action_tooltip(btn_cmd_hold, "Hold Position", &"cmd_hold", "Immediate", "Locks unit position while engaging enemies inside attack range.")
-	_attach_dynamic_action_tooltip(btn_cmd_defensive, "Defensive Stance", &"cmd_defensive_stance", "Immediate (260px Leash)", "Auto-acquires nearby enemies and chases up to 260px from anchor before smoothly returning.")
-	_attach_dynamic_action_tooltip(btn_cmd_patrol, "Patrol", &"cmd_patrol", "Click Waypoint (Shift Chains Loop)", "Loops units continuously between waypoints while engaging enemies encountered along the path.")
-	if btn_cmd_amove != null:
-		btn_cmd_amove.tooltip_text = ""
-		btn_cmd_amove.mouse_entered.connect(func() -> void:
-			if command_tooltip != null:
-				var hk: String = SettingsManager.get_action_display_label(&"cmd_attack_move", false) if SettingsManager != null else "A"
-				var click_confirm: bool = SettingsManager != null and SettingsManager.attack_move_mode == SettingsManager.AttackMoveMode.CLICK_TO_CONFIRM
-				var meta_txt: String = "Click Target (Shift Chains)" if click_confirm else "Quick-Cast at Cursor (Shift Chains)"
-				command_tooltip.show_tooltip("Attack-Move", hk, meta_txt, "Moves toward target point and automatically engages hostile targets along the way.")
-		)
-		btn_cmd_amove.mouse_exited.connect(func() -> void:
-			if command_tooltip != null:
-				command_tooltip.hide_tooltip()
-		)
-
-
-func _attach_dynamic_action_tooltip(btn: Button, title: String, action_name: StringName, meta: String, desc: String) -> void:
-	if btn == null:
+func _setup_faction_frame_overlay() -> void:
+	if bottom_panel == null or _faction_frame_overlay != null:
 		return
-	btn.tooltip_text = ""
-	btn.mouse_entered.connect(func() -> void:
-		if command_tooltip != null:
-			var hk: String = SettingsManager.get_action_display_label(action_name, false) if SettingsManager != null else ""
-			command_tooltip.show_tooltip(title, hk, meta, desc)
-	)
-	btn.mouse_exited.connect(func() -> void:
-		if command_tooltip != null:
-			command_tooltip.hide_tooltip()
-	)
+	_faction_frame_overlay = _FactionHudFrameOverlay.new()
+	_faction_frame_overlay.name = "FactionHudFrameOverlay"
+	_faction_frame_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_faction_frame_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_faction_frame_overlay.z_index = 4
+	bottom_panel.add_child(_faction_frame_overlay)
+
+
+func _resolve_active_hud_faction_id() -> StringName:
+	if TeamManager == null:
+		return &"genesis_v2"
+	var is_spec: bool = TeamManager.has_method("is_spectator_mode") and TeamManager.is_spectator_mode()
+	if not is_spec:
+		var local_t: int = TeamManager.get_local_human_team()
+		if local_t >= 0 and TeamManager.has_method("get_team_faction"):
+			var fid: StringName = TeamManager.get_team_faction(local_t)
+			if fid != &"":
+				return fid
+	else:
+		var inspect_team: int = -1
+		if not _active_subgroup_units.is_empty() and is_instance_valid(_active_subgroup_units[0]):
+			inspect_team = int(_active_subgroup_units[0].team)
+		elif _inspected_entity != null and is_instance_valid(_inspected_entity):
+			if _inspected_entity is Building:
+				inspect_team = int((_inspected_entity as Building).team)
+			elif _inspected_entity is Unit:
+				inspect_team = int((_inspected_entity as Unit).team)
+		if inspect_team >= 0 and TeamManager.has_method("get_team_faction"):
+			var sfid: StringName = TeamManager.get_team_faction(inspect_team)
+			if sfid != &"":
+				return sfid
+	return &"genesis_v2"
+
+
+func _apply_faction_hud_theme(force: bool = false) -> void:
+	var fid: StringName = _resolve_active_hud_faction_id()
+	if not force and fid == _active_hud_faction_id:
+		return
+	_active_hud_faction_id = fid
+
+	var fdata: FactionData = null
+	if TeamManager != null and TeamManager.has_method("get_faction_data"):
+		fdata = TeamManager.get_faction_data(fid) as FactionData
+
+	var is_mono: bool = (fid == &"monolith_os")
+	if is_mono:
+		_active_hud_accent = Color(1.0, 0.624, 0.110, 1.0) # #FF9F1C Hazard Amber
+		_active_hud_primary = Color(0.949, 0.937, 0.914, 1.0) # #F2EFE9 Off-White
+	elif fdata != null:
+		_active_hud_accent = fdata.hud_accent_color
+		_active_hud_primary = fdata.primary_color
+	else:
+		_active_hud_accent = Color(0.125, 0.961, 0.863, 1.0) # #20F5DC
+		_active_hud_primary = Color(0.90, 0.96, 0.98, 1.0)
+
+	if bottom_panel != null:
+		var sb: StyleBoxFlat = StyleBoxFlat.new()
+		sb.content_margin_left = 10.0
+		sb.content_margin_top = 8.0
+		sb.content_margin_right = 10.0
+		sb.content_margin_bottom = 8.0
+		if is_mono:
+			sb.bg_color = Color(0.150, 0.165, 0.185, 0.96)
+			sb.set_corner_radius_all(0)
+			sb.set_border_width_all(3)
+			sb.border_color = Color(0.039, 0.051, 0.071, 1.0) # #0A0D12
+			sb.shadow_color = Color(0.03, 0.04, 0.06, 0.78)
+			sb.shadow_size = 1
+			sb.shadow_offset = Vector2(3.0, 3.0)
+		else:
+			sb.bg_color = Color(0.040, 0.080, 0.120, 0.92)
+			sb.set_corner_radius_all(6)
+			sb.set_border_width_all(2)
+			sb.border_color = Color(_active_hud_accent.r, _active_hud_accent.g, _active_hud_accent.b, 0.86)
+			sb.shadow_color = Color(0.0, 0.03, 0.06, 0.55)
+			sb.shadow_size = 6
+			sb.shadow_offset = Vector2(0.0, 2.0)
+		bottom_panel.add_theme_stylebox_override("panel", sb)
+
+	if _faction_frame_overlay != null and _faction_frame_overlay.has_method("configure"):
+		_faction_frame_overlay.call("configure", fid, _active_hud_accent, _active_hud_primary)
+
+	if command_grid != null:
+		for child: Node in command_grid.get_children():
+			if child is CommandIconButton:
+				(child as CommandIconButton).apply_faction_theme(_active_hud_faction_id, _active_hud_accent, _active_hud_primary)
 
 
 func _get_compact_action_badge(action_name: StringName, fallback: String) -> String:
@@ -277,16 +306,18 @@ func _refresh_dynamic_command_labels() -> void:
 	var k_stop: String = _get_compact_action_badge(&"cmd_stop", "S")
 	var k_patrol: String = _get_compact_action_badge(&"cmd_patrol", "P")
 	var k_amove: String = _get_compact_action_badge(&"cmd_attack_move", "A")
-	if btn_cmd_stop != null:
-		btn_cmd_stop.text = ("Stop (%s)" % k_stop) if not k_stop.is_empty() else "Stop"
-	if btn_cmd_patrol != null:
-		var p_prefix: String = "Patrol*" if _patrol_targeting else "Patrol"
-		btn_cmd_patrol.text = ("%s (%s)" % [p_prefix, k_patrol]) if not k_patrol.is_empty() else p_prefix
-		btn_cmd_patrol.modulate = Color(1.0, 0.86, 0.30, 1.0) if _patrol_targeting else Color.WHITE
-	if btn_cmd_amove != null:
-		var a_prefix: String = "Atk-Mv*" if _amove_targeting else "Atk-Mv"
-		btn_cmd_amove.text = ("%s (%s)" % [a_prefix, k_amove]) if not k_amove.is_empty() else a_prefix
-		btn_cmd_amove.modulate = Color(1.0, 0.36, 0.44, 1.0) if _amove_targeting else Color.WHITE
+	var btn_stop: CommandIconButton = _unit_cmd_tiles.get(&"stop", null) as CommandIconButton
+	if btn_stop != null and is_instance_valid(btn_stop):
+		btn_stop.hotkey_text = k_stop
+		btn_stop.queue_redraw()
+	var btn_patrol: CommandIconButton = _unit_cmd_tiles.get(&"patrol", null) as CommandIconButton
+	if btn_patrol != null and is_instance_valid(btn_patrol):
+		btn_patrol.hotkey_text = k_patrol
+		btn_patrol.set_tile_state("TGT" if _patrol_targeting else "", Color(1.0, 0.86, 0.30, 1.0), _patrol_targeting)
+	var btn_amove: CommandIconButton = _unit_cmd_tiles.get(&"amove", null) as CommandIconButton
+	if btn_amove != null and is_instance_valid(btn_amove):
+		btn_amove.hotkey_text = k_amove
+		btn_amove.set_tile_state("TGT" if _amove_targeting else "", Color(1.0, 0.36, 0.44, 1.0), _amove_targeting)
 
 
 func _on_patrol_targeting_changed(active: bool) -> void:
@@ -341,6 +372,21 @@ func _attach_tooltip(btn: Button, title: String, hotkey: String, meta: String, d
 	)
 
 
+func _attach_dynamic_action_tooltip(btn: Button, title: String, action_name: StringName, meta: String, desc: String) -> void:
+	if btn == null:
+		return
+	btn.tooltip_text = ""
+	btn.mouse_entered.connect(func() -> void:
+		if command_tooltip != null:
+			var hk: String = SettingsManager.get_action_display_label(action_name, false) if SettingsManager != null else ""
+			command_tooltip.show_tooltip(title, hk, meta, desc)
+	)
+	btn.mouse_exited.connect(func() -> void:
+		if command_tooltip != null:
+			command_tooltip.hide_tooltip()
+	)
+
+
 func _connect_economy_manager() -> void:
 	if not is_inside_tree():
 		return
@@ -355,8 +401,15 @@ func _connect_economy_manager() -> void:
 		_economy_manager.tech_changed.connect(_on_tech_updated)
 
 
+func _is_local_human_team(team: int) -> bool:
+	if TeamManager != null:
+		var local_t: int = TeamManager.get_local_human_team()
+		return local_t >= 0 and team == local_t
+	return team == int(Unit.Team.PLAYER)
+
+
 func _on_economy_updated(team: int, _resources: Dictionary) -> void:
-	if team != int(Unit.Team.PLAYER):
+	if not _is_local_human_team(team):
 		return
 	if not _active_abilities.is_empty():
 		_refresh_all_ability_states()
@@ -365,14 +418,14 @@ func _on_economy_updated(team: int, _resources: Dictionary) -> void:
 
 
 func _on_bandwidth_updated(team: int, _used: int, _cap: int) -> void:
-	if team != int(Unit.Team.PLAYER):
+	if not _is_local_human_team(team):
 		return
 	if _inspected_entity is Building and is_instance_valid(_inspected_entity):
 		_render_inspected_entity(_inspected_entity, false)
 
 
 func _on_tech_updated(team: int) -> void:
-	if team != int(Unit.Team.PLAYER):
+	if not _is_local_human_team(team):
 		return
 	if not _active_abilities.is_empty():
 		_refresh_all_ability_states()
@@ -405,9 +458,9 @@ func _on_control_groups_changed(summary: Dictionary) -> void:
 		var pill: Button = Button.new()
 		pill.focus_mode = Control.FOCUS_NONE
 		pill.add_to_group("blocks_edge_pan")
-		pill.add_theme_font_size_override("font_size", 11)
+		pill.add_theme_font_size_override("font_size", 10)
 		pill.text = ("[%d] %s ×%d" % [num, _shorten_unit_name(label_str), count]) if is_building else ("[%d] ×%d" % [num, count])
-		pill.modulate = Color(0.36, 1.0, 0.90, 1.0) if is_active else (Color(0.96, 0.84, 0.44, 0.92) if is_building else Color(0.76, 0.88, 0.94, 0.90))
+		pill.modulate = _active_hud_accent if is_active else (Color(0.96, 0.84, 0.44, 0.92) if is_building else Color(0.76, 0.88, 0.94, 0.90))
 		var captured_num: int = num
 		pill.pressed.connect(func() -> void:
 			if _selection_controller != null:
@@ -447,6 +500,7 @@ func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Diction
 	var active_group: Dictionary = subgroups[safe_idx]
 	_active_subgroup_units = active_group["units"]
 
+	_apply_faction_hud_theme(false)
 	_connect_unit_signals(_active_subgroup_units)
 
 	var is_single_unit: bool = (selected_units.size() == 1 and is_instance_valid(selected_units[0]))
@@ -455,8 +509,7 @@ func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Diction
 	telemetry_grid.visible = is_single_unit
 	production_queue_box.visible = false
 
-	standard_commands_row.visible = true
-	ability_row.visible = true
+	command_grid.visible = true
 	read_only_label.visible = false
 
 	if is_single_unit:
@@ -468,8 +521,9 @@ func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Diction
 		_rebuild_subgroup_tabs(subgroups, safe_idx)
 		_rebuild_unit_badges(_active_subgroup_units)
 
-	_rebuild_ability_buttons(active_group)
+	_rebuild_unit_command_card(active_group)
 	_refresh_all_ability_states()
+	_refresh_dynamic_command_labels()
 	_refresh_stance_button()
 	_refresh_deploy_button()
 	if _selection_controller != null:
@@ -497,6 +551,8 @@ func _render_inspected_entity(entity: Node, rebuild_actions: bool) -> void:
 		bottom_panel.visible = false
 		return
 
+	_apply_faction_hud_theme(false)
+
 	var info: Dictionary = InspectionHelper.get_inspection_data(entity)
 	if entity is Building and _selected_buildings.size() > 1:
 		var lead_b: Building = entity as Building
@@ -511,13 +567,13 @@ func _render_inspected_entity(entity: Node, rebuild_actions: bool) -> void:
 			info["title"] = "%s  x%d" % [lead_b.display_name, _selected_buildings.size()]
 		else:
 			info["title"] = "%s (+%d)" % [lead_b.display_name, _selected_buildings.size() - 1]
-		info["subtitle"] = "MULTI-PRODUCTION GROUP (%d QUEUED)" % total_queued
+		info["subtitle"] = "MULTI-PRODUCTION (%d QUEUED)" % total_queued
 	bottom_panel.visible = true
 	subgroup_tabs_row.visible = false
 	unit_badges_grid.visible = false
 	telemetry_grid.visible = true
-	standard_commands_row.visible = false
 
+	_unit_cmd_tiles.clear()
 	_ability_buttons.clear()
 	_active_abilities.clear()
 
@@ -528,18 +584,19 @@ func _render_inspected_entity(entity: Node, rebuild_actions: bool) -> void:
 	var post_match_inspect: bool = _is_post_match_inspection()
 	var is_commandable: bool = bool(info.get("is_commandable", false)) and not post_match_inspect
 	if is_commandable and entity is Building:
-		var building: Building = entity
+		var building: Building = entity as Building
 		read_only_label.visible = false
+		command_grid.visible = true
 		if rebuild_actions:
 			_rebuild_building_action_buttons(building)
 		else:
 			_refresh_building_action_buttons(building)
 	else:
 		if rebuild_actions:
-			_clear_ability_row()
-		ability_row.visible = false
+			_clear_command_grid()
+		command_grid.visible = false
 		read_only_label.visible = true
-		read_only_label.text = "POST-MATCH INSPECTION  —  READ-ONLY TELEMETRY" if post_match_inspect else String(info.get("readonly_label", "READ-ONLY TELEMETRY"))
+		read_only_label.text = "POST-MATCH INSPECTION — READ-ONLY" if post_match_inspect else String(info.get("readonly_label", "READ-ONLY TELEMETRY"))
 
 
 func _is_post_match_inspection() -> bool:
@@ -555,7 +612,7 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 	if not (entity is Building) or not is_instance_valid(entity):
 		production_queue_box.visible = false
 		return
-	var building: Building = entity
+	var building: Building = entity as Building
 	if not building.is_constructed or building.production_component == null or building.production_component.get_queue_size() == 0:
 		production_queue_box.visible = false
 		return
@@ -567,17 +624,17 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 	var active_name: String = String(status.get("display_name", "Unit"))
 	var batch_cnt: int = int(status.get("batch_count", 1))
 	if kind == ProductionComponent.KIND_UPGRADE:
-		production_label.text = "Researching %s  (%d%%)" % [active_name, pct]
+		production_label.text = "Research %s (%d%%)" % [_shorten_unit_name(active_name), pct]
 	elif batch_cnt > 1:
-		production_label.text = "Cloning %s x%d  (%d%%)" % [active_name, batch_cnt, pct]
+		production_label.text = "Cloning %s x%d (%d%%)" % [_shorten_unit_name(active_name), batch_cnt, pct]
 	else:
-		production_label.text = "Training %s  (%d%%)" % [active_name, pct]
+		production_label.text = "Training %s (%d%%)" % [_shorten_unit_name(active_name), pct]
 	if building.is_overclocked():
-		production_label.text += "  [%.1fx]" % building.overclock_speed_mult
+		production_label.text += " [%.1fx]" % building.overclock_speed_mult
 		if _prod_fill_style != null:
 			_prod_fill_style.bg_color = Color(1.0, 0.624, 0.110, 1.0)
 	elif _prod_fill_style != null:
-		_prod_fill_style.bg_color = Color(0.24, 0.96, 0.86, 1.0)
+		_prod_fill_style.bg_color = _active_hud_accent
 	production_bar.max_value = 100.0
 	production_bar.value = float(pct)
 
@@ -590,7 +647,7 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 		var entry_kind: StringName = entry.get("kind", ProductionComponent.KIND_UNIT)
 		var slot_btn: Button = Button.new()
 		slot_btn.focus_mode = Control.FOCUS_NONE
-		slot_btn.add_theme_font_size_override("font_size", 10)
+		slot_btn.add_theme_font_size_override("font_size", 9)
 		var captured_b: Building = building
 		var captured_idx: int = i
 		slot_btn.pressed.connect(func() -> void:
@@ -634,7 +691,7 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 
 
 func _shorten_unit_name(full_name: String) -> String:
-	return full_name.replace("Worker Drone", "Worker").replace("Systems Engineer", "Engineer").replace("Silica Harvester", "Harvester").replace("Recon Scout", "Scout").replace("Test Unit", "Infantry").replace("Clone Trooper", "Clone").replace("Signal Jammer", "Jammer").replace("Goliath Frame", "Goliath").replace("Chrysalis Mortar", "Mortar").replace("Batch Efficiency", "Batch Eff.").replace("Adrenal Potency", "Adrenal Pot.").replace("Compute Overdrive", "Overdrive").replace("Anvil Siege-Walker", "Anvil").replace("Monolith Dreadnought", "Dreadnought").replace("Null-Grid Projector", "Null-Grid").replace("Hardened Plating", "Plating").replace("Rapid Capacitors", "Capacitors").replace("Hyper-Velocity Rails", "HV Rails")
+	return full_name.replace("Worker Drone", "Worker").replace("Systems Engineer", "Engineer").replace("Silica Harvester", "Harvester").replace("Recon Scout", "Scout").replace("Test Unit", "Infantry").replace("Clone Trooper", "Clone").replace("Signal Jammer", "Jammer").replace("Goliath Frame", "Goliath").replace("Chrysalis Mortar", "Mortar").replace("Batch Efficiency", "Batch Eff.").replace("Adrenal Potency", "Adrenal Pot.").replace("Compute Overdrive", "Overdrive").replace("Anvil Siege-Walker", "Anvil").replace("Monolith Dreadnought", "Dreadnought").replace("Null-Grid Projector", "Null-Grid").replace("Hardened Plating", "Plating").replace("Rapid Capacitors", "Capacitors").replace("Hyper-Velocity Rails", "HV Rails").replace("Bulwark Automaton", "Bulwark").replace("Picket Drone", "Picket").replace("Rail-Sentinel", "Rail-Snt").replace("Aegis Relay", "Aegis").replace("Servo-Drone", "Servo").replace("Ore Crawler", "Crawler")
 
 
 func _build_unit_class_traits_label(u_data: UnitData) -> String:
@@ -668,7 +725,7 @@ func _build_unit_class_traits_label(u_data: UnitData) -> String:
 
 
 func _apply_left_column(info: Dictionary) -> void:
-	var accent: Color = info.get("accent_color", Color(0.24, 0.92, 0.88, 1.0))
+	var accent: Color = info.get("accent_color", _active_hud_accent) as Color
 	portrait_swatch.color = accent
 	unit_name_label.text = String(info.get("title", "Entity"))
 	entity_subtitle_label.text = String(info.get("subtitle", "TELEMETRY"))
@@ -679,7 +736,7 @@ func _apply_left_column(info: Dictionary) -> void:
 	if show_hp:
 		var cur_hp: float = float(info.get("hp_current", 0.0))
 		var max_hp: float = maxf(1.0, float(info.get("hp_max", 1.0)))
-		unit_hp_label.text = "HP: %s / %s" % [
+		unit_hp_label.text = "HP %s/%s" % [
 			InspectionHelper.format_number(int(round(cur_hp))),
 			InspectionHelper.format_number(int(round(max_hp))),
 		]
@@ -696,7 +753,7 @@ func _apply_left_column(info: Dictionary) -> void:
 			if show_shd:
 				var cur_shd: float = float(info.get("shield_current", 0.0))
 				var max_shd: float = maxf(1.0, float(info.get("shield_max", 1.0)))
-				_shield_label.text = "SHD: %s / %s" % [
+				_shield_label.text = "SH %s/%s" % [
 					InspectionHelper.format_number(int(round(cur_shd))),
 					InspectionHelper.format_number(int(round(max_shd))),
 				]
@@ -713,7 +770,7 @@ func _apply_left_column(info: Dictionary) -> void:
 		primary_gauge_bar.max_value = maxf(1.0, float(info.get("primary_bar_max", 100.0)))
 		primary_gauge_bar.value = clampf(float(info.get("primary_bar_value", 0.0)), 0.0, primary_gauge_bar.max_value)
 		if _gauge_fill_style != null:
-			_gauge_fill_style.bg_color = info.get("primary_bar_color", accent)
+			_gauge_fill_style.bg_color = info.get("primary_bar_color", accent) as Color
 
 
 func _refresh_squad_left_column(active_group: Dictionary) -> void:
@@ -721,7 +778,7 @@ func _refresh_squad_left_column(active_group: Dictionary) -> void:
 	if units.is_empty() or not is_instance_valid(units[0]):
 		return
 	var lead_info: Dictionary = InspectionHelper.get_inspection_data(units[0])
-	lead_info["title"] = "%s  x%d" % [String(active_group.get("display_name", "Unit")), units.size()]
+	lead_info["title"] = "%s x%d" % [String(active_group.get("display_name", "Unit")), units.size()]
 	_apply_left_column(lead_info)
 
 
@@ -734,152 +791,140 @@ func _rebuild_telemetry_grid(stats: Variant) -> void:
 	for item: Variant in stats:
 		if not (item is Dictionary):
 			continue
-		var entry: Dictionary = item
+		var entry: Dictionary = item as Dictionary
 		var cell: HBoxContainer = HBoxContainer.new()
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cell.add_theme_constant_override("separation", 6)
+		cell.add_theme_constant_override("separation", 4)
 
 		var k_label: Label = Label.new()
 		k_label.text = "%s:" % String(entry.get("label", ""))
-		k_label.add_theme_font_size_override("font_size", 11)
-		k_label.add_theme_color_override("font_color", Color(0.56, 0.74, 0.82, 0.9))
+		k_label.add_theme_font_size_override("font_size", 10)
+		k_label.add_theme_color_override("font_color", Color(0.58, 0.72, 0.80, 0.90) if _active_hud_faction_id != &"monolith_os" else Color(0.76, 0.75, 0.72, 0.90))
 		cell.add_child(k_label)
 
 		var v_label: Label = Label.new()
 		v_label.text = String(entry.get("value", ""))
-		v_label.add_theme_font_size_override("font_size", 12)
-		var val_col: Color = entry.get("color", Color(0.92, 0.98, 1.0, 1.0)) as Color
+		v_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		v_label.clip_text = true
+		v_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		v_label.add_theme_font_size_override("font_size", 11)
+		var val_col: Color = entry.get("color", Color(0.94, 0.98, 1.0, 1.0)) as Color
 		v_label.add_theme_color_override("font_color", val_col)
 		cell.add_child(v_label)
 
 		telemetry_grid.add_child(cell)
 
 
-func _clear_ability_row() -> void:
-	for child: Node in ability_row.get_children():
+# =============================================================================
+# COMPACT 4x3 ICON COMMAND CARD HELPERS
+# =============================================================================
+
+func _clear_command_grid() -> void:
+	for child: Node in command_grid.get_children():
 		child.queue_free()
 	_building_action_buttons.clear()
+	_unit_cmd_tiles.clear()
+	_ability_buttons.clear()
+	_active_abilities.clear()
 
+
+func _new_icon_tile() -> CommandIconButton:
+	var tile: CommandIconButton = COMMAND_ICON_BUTTON_SCRIPT.new() as CommandIconButton
+	tile.apply_faction_theme(_active_hud_faction_id, _active_hud_accent, _active_hud_primary)
+	return tile
+
+
+func _populate_12_slot_grid(slots: Array) -> void:
+	command_grid.columns = 4
+	for i: int in range(12):
+		var item: Variant = slots[i] if i < slots.size() else null
+		if item is CommandIconButton:
+			command_grid.add_child(item as CommandIconButton)
+		else:
+			var empty_tile: CommandIconButton = _new_icon_tile()
+			empty_tile.setup_empty_socket()
+			command_grid.add_child(empty_tile)
+
+
+func _get_unit_icon_accent(u_data: UnitData) -> Color:
+	if u_data == null:
+		return _active_hud_accent
+	if u_data.can_staff_compute:
+		return Color(0.28, 0.86, 1.0, 1.0)
+	if u_data.can_gather and u_data.auto_gather_on_spawn:
+		return Color(1.0, 0.76, 0.24, 1.0)
+	if u_data.has_tag(&"support") or u_data.heal_aura_rate > 0.0:
+		return Color(0.24, 0.96, 0.72, 1.0) if _active_hud_faction_id != &"monolith_os" else Color(0.220, 0.741, 0.973, 1.0)
+	if u_data.has_tag(&"heavy") or u_data.has_tag(&"siege"):
+		return Color(1.0, 0.64, 0.16, 1.0)
+	return _active_hud_accent
+
+
+func _get_building_icon_accent(b_data: BuildingData) -> Color:
+	if b_data == null:
+		return _active_hud_accent
+	var bid: StringName = b_data.building_id
+	if bid == &"silica_condenser" or bid == &"silica_smelter":
+		return Color(1.0, 0.76, 0.26, 1.0)
+	if bid == &"wetware_mainframe" or bid == &"logic_monolith" or bid == &"capacitor_pylon":
+		return Color(0.28, 0.84, 1.0, 1.0)
+	if bid == &"synapse_pylon":
+		return Color(0.76, 0.58, 1.0, 1.0)
+	if bid == &"defense_turret" or bid == &"bastion_emplacement":
+		return Color(1.0, 0.46, 0.26, 1.0)
+	return _active_hud_accent
+
+
+# =============================================================================
+# BUILDING 4x3 ICON COMMAND CARD
+# =============================================================================
 
 func _rebuild_building_action_buttons(building: Building) -> void:
-	_clear_ability_row()
+	_clear_command_grid()
+	var slots: Array = []
+	slots.resize(12)
 
 	if not building.is_constructed:
-		ability_row.columns = 2
-		var cancel_btn: Button = Button.new()
-		cancel_btn.focus_mode = Control.FOCUS_NONE
-		cancel_btn.custom_minimum_size = Vector2(214.0, 32.0)
-		cancel_btn.add_theme_font_size_override("font_size", 11)
-		cancel_btn.text = "× Cancel Build (75% Refund)"
-		cancel_btn.modulate = Color(1.0, 0.52, 0.34, 1.0)
+		var cancel_tile: CommandIconButton = _new_icon_tile()
+		cancel_tile.setup_tile(&"cancel_build", &"danger", "", Color(1.0, 0.42, 0.30, 1.0))
+		cancel_tile.set_tile_state("75%", Color(1.0, 0.74, 0.36, 1.0))
 		var captured_b_cancel: Building = building
-		cancel_btn.pressed.connect(func() -> void:
+		cancel_tile.pressed.connect(func() -> void:
 			if is_instance_valid(captured_b_cancel):
 				captured_b_cancel.cancel_construction()
 		)
 		_attach_tooltip(
-			cancel_btn,
+			cancel_tile,
 			"Cancel %s" % building.display_name,
 			"LMB",
 			"75%% Refund: %s" % building.get_refund_label(0.75),
 			"Immediately cancels this unfinished scaffold, refunds 75% of construction resources, releases workers, and updates pathing."
 		)
-		ability_row.add_child(cancel_btn)
+		slots[11] = cancel_tile
 		_building_action_buttons.append({
 			"kind": "cancel_build",
-			"button": cancel_btn,
+			"button": cancel_tile,
 		})
-		ability_row.visible = true
+		_populate_12_slot_grid(slots)
+		command_grid.visible = true
 		return
 
-	var has_overclock: bool = building.has_overclock_ability()
-	var total_actions: int = (1 if building.max_staff_slots > 0 else 0) + (1 if has_overclock else 0) + building.trainable_unit_data.size() + building.researchable_upgrades.size() + 1
-	var use_compact: bool = total_actions > 4
-	ability_row.columns = 3 if use_compact else 2
-	var btn_min_size: Vector2 = Vector2(146.0, 28.0) if use_compact else Vector2(214.0, 29.0)
-	var btn_font_size: int = 10 if use_compact else 11
-
-	var has_buttons: bool = false
-
-	if has_overclock:
-		has_buttons = true
-		var oc_btn: Button = Button.new()
-		oc_btn.focus_mode = Control.FOCUS_NONE
-		oc_btn.custom_minimum_size = btn_min_size
-		oc_btn.add_theme_font_size_override("font_size", btn_font_size)
-		var captured_b_oc: Building = building
-		oc_btn.pressed.connect(func() -> void:
-			if _selection_controller != null:
-				if _selection_controller.is_overclock_targeting:
-					_selection_controller.cancel_overclock_targeting()
-				elif not _selection_controller.begin_overclock_targeting() and AudioManager != null:
-					AudioManager.play_error()
-		)
-		oc_btn.tooltip_text = ""
-		oc_btn.mouse_entered.connect(func() -> void:
-			if command_tooltip != null and is_instance_valid(captured_b_oc):
-				var hk_oc: String = SettingsManager.get_action_display_label(&"cmd_ability_e", false) if SettingsManager != null else "E"
-				var spd_m: float = captured_b_oc.get_overclock_config_speed_mult()
-				var dur_s: float = captured_b_oc.get_overclock_config_duration()
-				var cd_s: float = captured_b_oc.get_overclock_config_cooldown()
-				command_tooltip.show_tooltip(
-					"Core Overclock",
-					hk_oc,
-					"%.1fx Speed  •  %.0fs Duration  •  %.0fs Cooldown" % [spd_m, dur_s, cd_s],
-					"Target any friendly production or research structure to boost its unit training and upgrade speed by %.1fx." % spd_m
-				)
-		)
-		oc_btn.mouse_exited.connect(func() -> void:
-			if command_tooltip != null:
-				command_tooltip.hide_tooltip()
-		)
-		ability_row.add_child(oc_btn)
-		_building_action_buttons.append({
-			"kind": "overclock",
-			"button": oc_btn,
-		})
-
-	if building.max_staff_slots > 0:
-		has_buttons = true
-		var eject_btn: Button = Button.new()
-		eject_btn.focus_mode = Control.FOCUS_NONE
-		eject_btn.custom_minimum_size = Vector2(168.0, 34.0)
-		eject_btn.add_theme_font_size_override("font_size", 12)
-		var captured_building: Building = building
-		eject_btn.pressed.connect(func() -> void:
-			if AudioManager != null:
-				AudioManager.play_ui_click()
-			if _selection_controller != null and _selected_buildings.size() > 1:
-				_selection_controller.eject_engineers_from_selected_buildings()
-			elif is_instance_valid(captured_building):
-				captured_building.eject_engineers()
-		)
-		_attach_dynamic_action_tooltip(
-			eject_btn,
-			"Eject Engineers",
-			&"cmd_ability_e",
-			"Instant Release",
-			"Releases all Engineers currently staffed inside this Wetware Mainframe back onto the battlefield."
-		)
-		ability_row.add_child(eject_btn)
-		_building_action_buttons.append({
-			"kind": "eject",
-			"button": eject_btn,
-		})
-
-	for i: int in range(building.trainable_unit_data.size()):
+	# Row 1 (Slots 0..2): Trainable units Q / W / E
+	var train_actions: Array[StringName] = [&"cmd_ability_q", &"cmd_ability_w", &"cmd_ability_e"]
+	var train_fallbacks: PackedStringArray = PackedStringArray(["Q", "W", "E"])
+	for i: int in range(mini(3, building.trainable_unit_data.size())):
 		var u_data: UnitData = building.trainable_unit_data[i]
 		if u_data == null:
 			continue
-		has_buttons = true
-		var train_btn: Button = Button.new()
-		train_btn.focus_mode = Control.FOCUS_NONE
-		train_btn.custom_minimum_size = btn_min_size
-		train_btn.add_theme_font_size_override("font_size", btn_font_size)
+		var t_act: StringName = train_actions[i]
+		var t_fb: String = train_fallbacks[i]
+		var hk_short: String = _get_compact_action_badge(t_act, t_fb)
+		var train_tile: CommandIconButton = _new_icon_tile()
+		train_tile.setup_tile(u_data.unit_type_id, &"unit", hk_short, _get_unit_icon_accent(u_data))
 		var captured_b: Building = building
 		var captured_slot: int = i
 		var captured_u: UnitData = u_data
-		train_btn.pressed.connect(func() -> void:
+		train_tile.pressed.connect(func() -> void:
 			var shift_batch: bool = Input.is_key_pressed(KEY_SHIFT)
 			if shift_batch:
 				if _selection_controller != null:
@@ -900,10 +945,11 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 			elif is_instance_valid(captured_b):
 				captured_b.queue_unit_training(captured_slot)
 		)
-		train_btn.tooltip_text = ""
-		train_btn.mouse_entered.connect(func() -> void:
+		train_tile.tooltip_text = ""
+		train_tile.mouse_entered.connect(func() -> void:
 			if command_tooltip == null or not is_instance_valid(captured_b):
 				return
+			var hk_full: String = SettingsManager.get_action_display_label(t_act, false) if SettingsManager != null else t_fb
 			var b_info: Dictionary = captured_b.get_unit_batch_info(captured_u)
 			var b_cnt: int = int(b_info["batch_count"])
 			var traits_line: String = _build_unit_class_traits_label(captured_u)
@@ -915,95 +961,182 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 				var mult_val: float = float(b_info["cost_multiplier"])
 				var eff_note: String = " (Batch Efficiency Active)" if mult_val <= 1.55 else " (1.75x Batch Cost)"
 				desc = "Parallel Batch Cloning: spawns %d %ss simultaneously for %.2fx single-unit cost%s." % [b_cnt, captured_u.display_name, mult_val, eff_note]
-			desc += "\n[Shift+Click: Queue x5]"
+			desc += "\n[Shift+%s / Shift+Click: Queue x5]" % hk_full
 			command_tooltip.show_tooltip(
 				("Clone %s (x%d)" % [captured_u.display_name, b_cnt]) if b_cnt > 1 else ("Train %s" % captured_u.display_name),
-				"",
+				hk_full,
 				meta_line,
 				desc
 			)
 		)
-		train_btn.mouse_exited.connect(func() -> void:
+		train_tile.mouse_exited.connect(func() -> void:
 			if command_tooltip != null:
 				command_tooltip.hide_tooltip()
 		)
-		ability_row.add_child(train_btn)
+		slots[i] = train_tile
 		_building_action_buttons.append({
 			"kind": "train",
 			"slot": i,
+			"action": t_act,
+			"fallback": t_fb,
 			"data": u_data,
-			"button": train_btn,
+			"button": train_tile,
 		})
 
-	for j: int in range(building.researchable_upgrades.size()):
+	# Row 2 (Slots 4..5): Researchable upgrades R / T
+	var upg_actions: Array[StringName] = [&"cmd_ability_r", &"cmd_ability_t"]
+	var upg_fallbacks: PackedStringArray = PackedStringArray(["R", "T"])
+	for j: int in range(mini(2, building.researchable_upgrades.size())):
 		var upg: UpgradeData = building.researchable_upgrades[j]
 		if upg == null:
 			continue
-		has_buttons = true
-		var upg_btn: Button = Button.new()
-		upg_btn.focus_mode = Control.FOCUS_NONE
-		upg_btn.custom_minimum_size = btn_min_size
-		upg_btn.add_theme_font_size_override("font_size", btn_font_size)
+		var u_act: StringName = upg_actions[j]
+		var u_fb: String = upg_fallbacks[j]
+		var hk_u: String = _get_compact_action_badge(u_act, u_fb)
+		var upg_tile: CommandIconButton = _new_icon_tile()
+		upg_tile.setup_tile(upg.upgrade_id, &"upgrade", hk_u, Color(1.0, 0.84, 0.34, 1.0))
 		var captured_b_u: Building = building
 		var captured_upg_idx: int = j
-		upg_btn.pressed.connect(func() -> void:
+		var captured_upg: UpgradeData = upg
+		upg_tile.pressed.connect(func() -> void:
 			if is_instance_valid(captured_b_u):
 				captured_b_u.queue_upgrade_research(captured_upg_idx)
 		)
-		var upg_meta: String = "Upgrade  •  Cost: %s  •  %.1fs" % [upg.get_cost_label(), upg.research_time]
-		_attach_tooltip(
-			upg_btn,
-			"Research: %s" % upg.display_name,
-			upg.hotkey_label,
-			upg_meta,
-			upg.description
+		upg_tile.tooltip_text = ""
+		upg_tile.mouse_entered.connect(func() -> void:
+			if command_tooltip == null:
+				return
+			var hk_uf: String = SettingsManager.get_action_display_label(u_act, false) if SettingsManager != null else u_fb
+			var upg_meta: String = "Upgrade  •  Cost: %s  •  %.1fs" % [captured_upg.get_cost_label(), captured_upg.research_time]
+			command_tooltip.show_tooltip("Research: %s" % captured_upg.display_name, hk_uf, upg_meta, captured_upg.description)
 		)
-		ability_row.add_child(upg_btn)
+		upg_tile.mouse_exited.connect(func() -> void:
+			if command_tooltip != null:
+				command_tooltip.hide_tooltip()
+		)
+		slots[4 + j] = upg_tile
 		_building_action_buttons.append({
 			"kind": "upgrade",
 			"slot": j,
+			"action": u_act,
+			"fallback": u_fb,
 			"data": upg,
-			"button": upg_btn,
+			"button": upg_tile,
 		})
 
-	# Salvage / Decommission button for completed friendly structures
-	has_buttons = true
-	var salvage_btn: Button = Button.new()
-	salvage_btn.focus_mode = Control.FOCUS_NONE
-	salvage_btn.custom_minimum_size = btn_min_size
-	salvage_btn.add_theme_font_size_override("font_size", btn_font_size)
+	# Row 3 Slot 8: Facility Special (F) — Core Overclock or Eject Engineers
+	if building.has_overclock_ability():
+		var hk_oc: String = _get_compact_action_badge(&"cmd_ability_f", "F")
+		var oc_tile: CommandIconButton = _new_icon_tile()
+		oc_tile.setup_tile(&"overclock", &"special", hk_oc, Color(1.0, 0.624, 0.110, 1.0))
+		var captured_b_oc: Building = building
+		oc_tile.pressed.connect(func() -> void:
+			if _selection_controller != null:
+				if _selection_controller.is_overclock_targeting:
+					_selection_controller.cancel_overclock_targeting()
+				elif not _selection_controller.begin_overclock_targeting() and AudioManager != null:
+					AudioManager.play_error()
+		)
+		oc_tile.tooltip_text = ""
+		oc_tile.mouse_entered.connect(func() -> void:
+			if command_tooltip != null and is_instance_valid(captured_b_oc):
+				var hk_oc_full: String = SettingsManager.get_action_display_label(&"cmd_ability_f", false) if SettingsManager != null else "F"
+				var spd_m: float = captured_b_oc.get_overclock_config_speed_mult()
+				var dur_s: float = captured_b_oc.get_overclock_config_duration()
+				var cd_s: float = captured_b_oc.get_overclock_config_cooldown()
+				command_tooltip.show_tooltip(
+					"Core Overclock",
+					hk_oc_full,
+					"%.1fx Speed  •  %.0fs Duration  •  %.0fs Cooldown" % [spd_m, dur_s, cd_s],
+					"Target any friendly production or research structure to boost its unit training and upgrade speed by %.1fx." % spd_m
+				)
+		)
+		oc_tile.mouse_exited.connect(func() -> void:
+			if command_tooltip != null:
+				command_tooltip.hide_tooltip()
+		)
+		slots[8] = oc_tile
+		_building_action_buttons.append({
+			"kind": "overclock",
+			"button": oc_tile,
+		})
+	elif building.max_staff_slots > 0:
+		var hk_ej: String = _get_compact_action_badge(&"cmd_ability_f", "F")
+		var eject_tile: CommandIconButton = _new_icon_tile()
+		eject_tile.setup_tile(&"eject_engineers", &"special", hk_ej, Color(0.32, 0.88, 1.0, 1.0))
+		var captured_building: Building = building
+		eject_tile.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			if _selection_controller != null and _selected_buildings.size() > 1:
+				_selection_controller.eject_engineers_from_selected_buildings()
+			elif is_instance_valid(captured_building):
+				captured_building.eject_engineers()
+		)
+		_attach_dynamic_action_tooltip(
+			eject_tile,
+			"Eject Engineers",
+			&"cmd_ability_f",
+			"Instant Release (F or E)",
+			"Releases all Engineers / Grid-Techs currently staffed inside this facility back onto the battlefield."
+		)
+		slots[8] = eject_tile
+		_building_action_buttons.append({
+			"kind": "eject",
+			"button": eject_tile,
+		})
+
+	# Row 3 Slot 11 (bottom-right): Salvage (click-only)
+	var salv_tile: CommandIconButton = _new_icon_tile()
+	salv_tile.setup_tile(&"salvage", &"danger", "", Color(1.0, 0.54, 0.34, 1.0))
 	var captured_b_salv: Building = building
-	salvage_btn.pressed.connect(func() -> void:
-		if is_instance_valid(captured_b_salv):
-			captured_b_salv.toggle_salvage()
+	salv_tile.pressed.connect(func() -> void:
+		if not is_instance_valid(captured_b_salv):
+			return
+		if captured_b_salv.is_salvaging:
+			captured_b_salv.cancel_salvage()
+		else:
+			captured_b_salv.begin_salvage()
 	)
-	salvage_btn.tooltip_text = ""
-	salvage_btn.mouse_entered.connect(func() -> void:
+	salv_tile.tooltip_text = ""
+	salv_tile.mouse_entered.connect(func() -> void:
 		if command_tooltip == null or not is_instance_valid(captured_b_salv):
 			return
-		if not captured_b_salv.can_salvage():
-			command_tooltip.show_tooltip("Salvage Unavailable", "", "Protected Core", "Cannot salvage last Command Hub.")
-		elif captured_b_salv.is_salvaging:
-			command_tooltip.show_tooltip("Cancel Salvage", "LMB", "Stops Decommission", "Halts the active 4.0s decommission countdown and keeps this structure online.")
+		if captured_b_salv.is_salvaging:
+			var rem_s: float = maxf(0.0, Building.SALVAGE_DURATION - captured_b_salv.salvage_elapsed)
+			command_tooltip.show_tooltip(
+				"Cancel Salvage",
+				"LMB",
+				"%.1fs Remaining" % rem_s,
+				"Aborts the salvage timer and restores this building to active service."
+			)
+		elif not captured_b_salv.can_salvage():
+			command_tooltip.show_tooltip(
+				"Salvage Locked",
+				"",
+				"Last Command Hub",
+				"Cannot salvage your final Command Hub."
+			)
 		else:
 			command_tooltip.show_tooltip(
 				"Salvage %s" % captured_b_salv.display_name,
 				"LMB",
-				"4.0s Countdown  •  50%% Refund: %s" % captured_b_salv.get_refund_label(0.50),
-				"Decommissions this structure after 4.0s (click again to cancel), refunding 50% of resources, ejecting Engineers, and freeing Bandwidth."
+				"4.0s Timer  •  50%% Refund: %s" % captured_b_salv.get_refund_label(0.50),
+				"Deconstructs this structure over 4.0 seconds (click-only for safety), refunding 50% of its cost and clearing pathing."
 			)
 	)
-	salvage_btn.mouse_exited.connect(func() -> void:
+	salv_tile.mouse_exited.connect(func() -> void:
 		if command_tooltip != null:
 			command_tooltip.hide_tooltip()
 	)
-	ability_row.add_child(salvage_btn)
+	slots[11] = salv_tile
 	_building_action_buttons.append({
 		"kind": "salvage",
-		"button": salvage_btn,
+		"button": salv_tile,
 	})
 
-	ability_row.visible = has_buttons
+	_populate_12_slot_grid(slots)
+	command_grid.visible = true
 	_refresh_building_action_buttons(building)
 
 
@@ -1012,95 +1145,327 @@ func _refresh_building_action_buttons(building: Building) -> void:
 		return
 	if _economy_manager == null:
 		_connect_economy_manager()
+
 	for entry: Dictionary in _building_action_buttons:
-		var btn: Button = entry["button"] as Button
+		var kind: String = String(entry["kind"])
+		var btn: CommandIconButton = entry["button"] as CommandIconButton
 		if btn == null or not is_instance_valid(btn):
 			continue
-		var kind: String = String(entry["kind"])
 		if kind == "overclock":
-			var k_oc: String = _get_compact_action_badge(&"cmd_ability_e", "E")
-			var oc_prefix: String = ("[%s] " % k_oc) if not k_oc.is_empty() else ""
+			var k_oc: String = _get_compact_action_badge(&"cmd_ability_f", "F")
+			btn.hotkey_text = k_oc
 			var any_ready: bool = false
 			var min_cd: float = INF
+			var max_cd: float = maxf(1.0, building.get_overclock_config_cooldown())
 			var hub_list: Array[Building] = []
-			if not _selected_buildings.is_empty():
-				for sb: Variant in _selected_buildings:
-					if sb is Building and is_instance_valid(sb):
-						hub_list.append(sb as Building)
+			if _selected_buildings.size() > 1:
+				hub_list = _selected_buildings
 			else:
 				hub_list.append(building)
-			for hb: Building in hub_list:
-				if is_instance_valid(hb) and not hb.is_destroyed and hb.has_overclock_ability():
-					if hb.can_cast_overclock():
+			for sb: Building in hub_list:
+				if is_instance_valid(sb) and not sb.is_destroyed and sb.has_overclock_ability():
+					if sb.can_cast_overclock():
 						any_ready = true
 						min_cd = 0.0
-						break
-					min_cd = minf(min_cd, hb.overclock_ability_cooldown)
+					else:
+						min_cd = minf(min_cd, sb.get_overclock_cooldown_remaining())
 			if any_ready:
 				btn.disabled = false
-				if _overclock_targeting:
-					btn.text = "%sOverclock (TARGET)" % oc_prefix
-					btn.modulate = Color(1.0, 0.72, 0.16, 1.0)
-				else:
-					btn.text = "%sCore Overclock" % oc_prefix
-					btn.modulate = Color(1.0, 0.624, 0.110, 1.0)
+				btn.set_tile_state("TGT" if _overclock_targeting else "", Color(1.0, 0.84, 0.28, 1.0), _overclock_targeting, false, false, 0.0, 0.0)
 			else:
-				var cd_sec: int = maxi(1, int(ceil(0.0 if min_cd == INF else min_cd)))
 				btn.disabled = true
-				btn.text = "%sOverclock (CD: %ds)" % [oc_prefix, cd_sec]
-				btn.modulate = Color(0.62, 0.56, 0.48, 0.68)
+				var cd_rem: float = 0.0 if min_cd == INF else min_cd
+				btn.set_tile_state("", Color(1.0, 0.72, 0.24, 1.0), false, false, false, cd_rem, max_cd)
 		elif kind == "eject":
 			var count: int = building.get_assigned_engineer_count()
-			var k_eject: String = _get_compact_action_badge(&"cmd_ability_e", "E")
-			btn.text = ("[%s] Eject Engineers (%d)" % [k_eject, count]) if not k_eject.is_empty() else ("Eject Engineers (%d)" % count)
+			btn.hotkey_text = _get_compact_action_badge(&"cmd_ability_f", "F")
 			btn.disabled = count <= 0
-			btn.modulate = Color(0.55, 0.92, 1.0, 1.0) if count > 0 else Color(0.6, 0.64, 0.7, 0.7)
+			btn.set_tile_state(str(count) if count > 0 else "", Color(0.45, 0.96, 1.0, 1.0), false, count <= 0)
 		elif kind == "train":
 			var slot: int = int(entry["slot"])
 			var u_data: UnitData = entry["data"] as UnitData
+			btn.hotkey_text = _get_compact_action_badge(entry["action"] as StringName, String(entry["fallback"]))
 			var b_info: Dictionary = building.get_unit_batch_info(u_data)
 			var b_cnt: int = int(b_info["batch_count"])
-			var short_name: String = _shorten_unit_name(u_data.display_name)
-			var batch_tag: String = " x%d" % b_cnt if b_cnt > 1 else ""
-			btn.text = "%s%s (%s | %dBW)" % [short_name, batch_tag, String(b_info["cost_label"]), int(b_info["bandwidth_cost"])]
 			var can_train: bool = building.can_train_unit(slot)
 			btn.disabled = false
-			btn.modulate = Color(0.55, 1.0, 0.95, 1.0) if can_train else Color(0.56, 0.6, 0.66, 0.68)
+			var b_tag: String = "×%d" % b_cnt if b_cnt > 1 else ""
+			btn.set_tile_state(b_tag, Color(0.32, 0.98, 0.84, 1.0), false, not can_train)
 		elif kind == "upgrade":
 			var u_slot: int = int(entry["slot"])
 			var upg: UpgradeData = entry["data"] as UpgradeData
-			var short_upg: String = _shorten_unit_name(upg.display_name)
+			btn.hotkey_text = _get_compact_action_badge(entry["action"] as StringName, String(entry["fallback"]))
 			var is_done: bool = _economy_manager != null and _economy_manager.has_upgrade(building.team, upg.upgrade_id)
 			var is_prog: bool = _economy_manager != null and _economy_manager.is_upgrade_in_progress(building.team, upg.upgrade_id)
 			if is_done:
-				btn.text = "%s [DONE]" % short_upg
 				btn.disabled = true
-				btn.modulate = Color(0.36, 0.98, 0.64, 0.85)
+				btn.set_tile_state("DONE", Color(0.36, 0.98, 0.64, 1.0), false, false)
 			elif is_prog:
-				btn.text = "%s [ACTIVE]" % short_upg
 				btn.disabled = true
-				btn.modulate = Color(1.0, 0.86, 0.42, 0.85)
+				btn.set_tile_state("ACT", Color(1.0, 0.86, 0.36, 1.0), true, false)
 			else:
 				var can_res: bool = building.can_research_upgrade(u_slot)
-				btn.text = "%s (%s)" % [short_upg, upg.get_cost_label()]
 				btn.disabled = false
-				btn.modulate = Color(1.0, 0.86, 0.42, 1.0) if can_res else Color(0.62, 0.60, 0.54, 0.68)
+				btn.set_tile_state("", Color(1.0, 0.86, 0.42, 1.0), false, not can_res)
 		elif kind == "salvage":
 			var can_s: bool = building.can_salvage()
 			if building.is_salvaging:
 				var rem_s: float = maxf(0.0, Building.SALVAGE_DURATION - building.salvage_elapsed)
-				btn.text = "× Cancel Salvage (%.1fs)" % rem_s
 				btn.disabled = false
-				btn.modulate = Color(1.0, 0.78, 0.24, 1.0)
+				btn.set_tile_state("CXL", Color(1.0, 0.78, 0.24, 1.0), true, false, false, rem_s, Building.SALVAGE_DURATION)
 			elif not can_s:
-				btn.text = "× Salvage (Locked)"
 				btn.disabled = true
-				btn.modulate = Color(0.56, 0.58, 0.62, 0.58)
+				btn.set_tile_state("LOCK", Color(0.76, 0.44, 0.44, 0.90), false, false, true)
 			else:
-				btn.text = "× Salvage (50%)"
 				btn.disabled = false
-				btn.modulate = Color(1.0, 0.58, 0.36, 0.94)
+				btn.set_tile_state("50%", Color(1.0, 0.62, 0.38, 0.96), false, false)
 
+
+# =============================================================================
+# UNIT 4x3 ICON COMMAND CARD
+# =============================================================================
+
+func _make_std_cmd_tile(key_id: StringName) -> CommandIconButton:
+	var tile: CommandIconButton = _new_icon_tile()
+	match key_id:
+		&"move":
+			tile.setup_tile(&"cmd_move", &"command", "RMB", Color(0.42, 0.96, 0.88, 1.0))
+			tile.disabled = true
+			_attach_tooltip(tile, "Move", "RMB", "Right-Click Ground", "Orders selected units to navigate to the target location.")
+		&"stop":
+			tile.setup_tile(&"cmd_stop", &"command", _get_compact_action_badge(&"cmd_stop", "S"), Color(0.84, 0.90, 0.96, 1.0))
+			tile.pressed.connect(func() -> void:
+				if AudioManager != null:
+					AudioManager.play_ui_click()
+				if _selection_controller != null:
+					_selection_controller.issue_stop_command()
+			)
+			_attach_dynamic_action_tooltip(tile, "Stop", &"cmd_stop", "Immediate", "Cancels current movement, patrol, gathering, construction, or target and flushes command queue.")
+		&"hold":
+			tile.setup_tile(&"cmd_hold", &"command", _get_compact_action_badge(&"cmd_hold", "H"), Color(1.0, 0.84, 0.32, 1.0))
+			tile.pressed.connect(func() -> void:
+				if AudioManager != null:
+					AudioManager.play_ui_click()
+				if _selection_controller != null:
+					_selection_controller.issue_hold_command()
+			)
+			_attach_dynamic_action_tooltip(tile, "Hold Position", &"cmd_hold", "Immediate", "Locks unit position while engaging enemies inside attack range.")
+		&"defensive":
+			tile.setup_tile(&"cmd_defensive", &"command", _get_compact_action_badge(&"cmd_defensive_stance", "D"), Color(0.28, 0.98, 0.80, 1.0))
+			tile.pressed.connect(func() -> void:
+				if AudioManager != null:
+					AudioManager.play_ui_click()
+				if _selection_controller != null:
+					_selection_controller.issue_defensive_command()
+			)
+			_attach_dynamic_action_tooltip(tile, "Defensive Stance", &"cmd_defensive_stance", "Immediate (260px Leash)", "Auto-acquires nearby enemies and chases up to 260px from anchor before smoothly returning.")
+		&"patrol":
+			tile.setup_tile(&"cmd_patrol", &"command", _get_compact_action_badge(&"cmd_patrol", "P"), Color(0.46, 0.90, 1.0, 1.0))
+			tile.pressed.connect(func() -> void:
+				if _selection_controller != null:
+					_selection_controller.begin_patrol_targeting()
+			)
+			_attach_dynamic_action_tooltip(tile, "Patrol", &"cmd_patrol", "Click Waypoint (Shift Chains Loop)", "Loops units continuously between waypoints while engaging enemies encountered along the path.")
+		&"amove":
+			tile.setup_tile(&"cmd_amove", &"command", _get_compact_action_badge(&"cmd_attack_move", "A"), Color(1.0, 0.38, 0.44, 1.0))
+			tile.pressed.connect(func() -> void:
+				if _selection_controller != null:
+					_selection_controller.begin_attack_move_targeting()
+			)
+			tile.tooltip_text = ""
+			tile.mouse_entered.connect(func() -> void:
+				if command_tooltip != null:
+					var hk: String = SettingsManager.get_action_display_label(&"cmd_attack_move", false) if SettingsManager != null else "A"
+					var click_confirm: bool = SettingsManager != null and SettingsManager.attack_move_mode == SettingsManager.AttackMoveMode.CLICK_TO_CONFIRM
+					var meta_txt: String = "Click Target (Shift Chains)" if click_confirm else "Quick-Cast at Cursor (Shift Chains)"
+					command_tooltip.show_tooltip("Attack-Move", hk, meta_txt, "Moves toward target point and automatically engages hostile targets along the way.")
+			)
+			tile.mouse_exited.connect(func() -> void:
+				if command_tooltip != null:
+					command_tooltip.hide_tooltip()
+			)
+	_unit_cmd_tiles[key_id] = tile
+	return tile
+
+
+func _make_ability_tile(ability: AbilityData) -> CommandIconButton:
+	var tile: CommandIconButton = _new_icon_tile()
+	var hk_compact: String = _get_ability_hotkey_display(ability.hotkey_label, true)
+	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT and ability.building_to_build != null:
+		tile.setup_tile(ability.building_to_build.building_id, &"building", hk_compact, _get_building_icon_accent(ability.building_to_build))
+	else:
+		tile.setup_tile(ability.ability_id, &"ability", hk_compact, ability.effect_color)
+
+	var captured_ability: AbilityData = ability
+	tile.pressed.connect(func() -> void:
+		if _selection_controller != null:
+			_selection_controller.request_ability_slot(captured_ability, Input.is_key_pressed(KEY_SHIFT))
+	)
+	if ability.allow_autocast:
+		tile.gui_input.connect(func(ev: InputEvent) -> void:
+			if ev is InputEventMouseButton:
+				var mb: InputEventMouseButton = ev as InputEventMouseButton
+				if mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT:
+					_toggle_subgroup_autocast(captured_ability.ability_id)
+					tile.accept_event()
+		)
+	tile.tooltip_text = ""
+	tile.mouse_entered.connect(func() -> void:
+		if command_tooltip != null:
+			var dynamic_meta: String = _build_ability_tooltip_meta(captured_ability)
+			var hk_full: String = _get_ability_hotkey_display(captured_ability.hotkey_label, false)
+			command_tooltip.show_tooltip(captured_ability.display_name, hk_full, dynamic_meta, captured_ability.description)
+	)
+	tile.mouse_exited.connect(func() -> void:
+		if command_tooltip != null:
+			command_tooltip.hide_tooltip()
+	)
+	_ability_buttons[ability.ability_id] = {
+		"button": tile,
+		"ability": ability,
+	}
+	return tile
+
+
+func _make_auto_repair_tile(data: UnitData) -> CommandIconButton:
+	var rep_tile: CommandIconButton = _new_icon_tile()
+	rep_tile.setup_tile(&"auto_repair", &"special", "", Color(0.38, 1.0, 0.84, 1.0))
+	rep_tile.pressed.connect(func() -> void:
+		_toggle_subgroup_auto_repair()
+	)
+	rep_tile.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton:
+			var mb: InputEventMouseButton = ev as InputEventMouseButton
+			if mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT:
+				_toggle_subgroup_auto_repair()
+				rep_tile.accept_event()
+	)
+	rep_tile.tooltip_text = ""
+	rep_tile.mouse_entered.connect(func() -> void:
+		if command_tooltip != null:
+			var is_on: bool = _is_subgroup_auto_repair_enabled()
+			var state_str: String = "Auto-Cast ON" if is_on else "Auto-Cast OFF"
+			var scope_str: String = "damaged friendly buildings & heavy synthetic units within 220px" if data.can_staff_compute else "damaged friendly buildings within 220px"
+			command_tooltip.show_tooltip(
+				"Auto-Repair",
+				"RMB / LMB",
+				"Radius: 220 px  •  [Right-Click: %s]" % state_str,
+				"When IDLE, automatically repairs %s (~2B/1S per sec)." % scope_str
+			)
+	)
+	rep_tile.mouse_exited.connect(func() -> void:
+		if command_tooltip != null:
+			command_tooltip.hide_tooltip()
+	)
+	_ability_buttons[&"__auto_repair__"] = {
+		"button": rep_tile,
+		"ability": null,
+	}
+	return rep_tile
+
+
+func _make_deploy_tile(data: UnitData) -> CommandIconButton:
+	var dep_tile: CommandIconButton = _new_icon_tile()
+	dep_tile.setup_tile(&"deploy", &"special", _get_compact_action_badge(&"cmd_ability_e", "E"), Color(1.0, 0.624, 0.110, 1.0))
+	var captured_u_data: UnitData = data
+	dep_tile.pressed.connect(func() -> void:
+		if _selection_controller != null:
+			_selection_controller.toggle_deploy_active_subgroup()
+	)
+	dep_tile.tooltip_text = ""
+	dep_tile.mouse_entered.connect(func() -> void:
+		if command_tooltip != null and captured_u_data != null:
+			var hk_dep: String = SettingsManager.get_action_display_label(&"cmd_ability_e", false) if SettingsManager != null else "E"
+			var meta_parts: PackedStringArray = PackedStringArray(["Transition: %.1fs" % captured_u_data.deploy_duration])
+			if captured_u_data.deployed_attack_range > 0.0:
+				meta_parts.append("Range: %dpx" % int(round(captured_u_data.deployed_attack_range)))
+			if captured_u_data.deployed_attack_damage > 0.0:
+				meta_parts.append("Dmg: %d" % int(round(captured_u_data.deployed_attack_damage)))
+			if captured_u_data.deployed_damage_reduction_bonus > 0.0:
+				meta_parts.append("+%d%% Armor" % int(round(captured_u_data.deployed_damage_reduction_bonus * 100.0)))
+			command_tooltip.show_tooltip(
+				"Deploy / Anchor Stance",
+				hk_dep,
+				"  •  ".join(meta_parts),
+				"Anchors the chassis in place to engage heavy deployed weaponry. Move orders will not accidentally undeploy anchored units."
+			)
+	)
+	dep_tile.mouse_exited.connect(func() -> void:
+		if command_tooltip != null:
+			command_tooltip.hide_tooltip()
+	)
+	_ability_buttons[&"__deploy__"] = {
+		"button": dep_tile,
+		"ability": null,
+	}
+	return dep_tile
+
+
+func _rebuild_unit_command_card(active_group: Dictionary) -> void:
+	_clear_command_grid()
+	var data: UnitData = active_group.get("data", null) as UnitData
+	var slots: Array = []
+	slots.resize(12)
+
+	var valid_abilities: Array[AbilityData] = []
+	var build_ability_count: int = 0
+	if data != null:
+		for ab: AbilityData in data.abilities:
+			if ab != null:
+				valid_abilities.append(ab)
+				_active_abilities.append(ab)
+				if ab.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
+					build_ability_count += 1
+
+	var supports_auto_repair: bool = data != null and (data.can_gather or data.can_staff_compute or data.unit_type_id == &"worker" or data.unit_type_id == &"engineer")
+	var supports_deploy: bool = data != null and data.can_deploy
+
+	if build_ability_count >= 5:
+		# Builder layout (Worker Drone / Servo-Drone): 12 exact slots in 4x3 grid!
+		# Row 1: Move, Stop, Hold, Auto-Repair
+		# Row 2..3: All 7-8 build abilities neatly aligned
+		slots[0] = _make_std_cmd_tile(&"move")
+		slots[1] = _make_std_cmd_tile(&"stop")
+		slots[2] = _make_std_cmd_tile(&"hold")
+		if supports_auto_repair:
+			slots[3] = _make_auto_repair_tile(data)
+		var cursor_b: int = 4
+		for ab: AbilityData in valid_abilities:
+			if cursor_b >= 12:
+				break
+			slots[cursor_b] = _make_ability_tile(ab)
+			cursor_b += 1
+	else:
+		# Standard / Combat / Specialist layout
+		# Row 1: Move, Stop, Hold, Defend
+		# Row 2: Patrol, Atk-Move, Abilities...
+		# Row 3: Remaining Abilities, Deploy, Auto-Repair
+		slots[0] = _make_std_cmd_tile(&"move")
+		slots[1] = _make_std_cmd_tile(&"stop")
+		slots[2] = _make_std_cmd_tile(&"hold")
+		slots[3] = _make_std_cmd_tile(&"defensive")
+		slots[4] = _make_std_cmd_tile(&"patrol")
+		slots[5] = _make_std_cmd_tile(&"amove")
+		var cursor_u: int = 6
+		for ab: AbilityData in valid_abilities:
+			if cursor_u >= 12:
+				break
+			slots[cursor_u] = _make_ability_tile(ab)
+			cursor_u += 1
+		if supports_deploy and cursor_u < 12:
+			slots[cursor_u] = _make_deploy_tile(data)
+			cursor_u += 1
+		if supports_auto_repair and cursor_u < 12:
+			slots[cursor_u] = _make_auto_repair_tile(data)
+			cursor_u += 1
+
+	_populate_12_slot_grid(slots)
+	command_grid.visible = true
+
+
+# =============================================================================
+# SIGNALS, SUBGROUPS & REFRESH HELPERS
+# =============================================================================
 
 func _on_inspected_entity_updated(_arg1: Variant = null, _arg2: Variant = null, _arg3: Variant = null) -> void:
 	if _inspected_entity == null or not is_instance_valid(_inspected_entity):
@@ -1126,7 +1491,7 @@ func _connect_inspected_signals(entity: Node) -> void:
 	if entity == null or not is_instance_valid(entity):
 		return
 	if entity is ResourceNode:
-		var res_node: ResourceNode = entity
+		var res_node: ResourceNode = entity as ResourceNode
 		if not res_node.amount_changed.is_connected(_on_inspected_entity_updated):
 			res_node.amount_changed.connect(_on_inspected_entity_updated)
 		if not res_node.status_changed.is_connected(_on_inspected_entity_updated):
@@ -1134,7 +1499,7 @@ func _connect_inspected_signals(entity: Node) -> void:
 		if not res_node.depleted.is_connected(_on_inspected_entity_removed):
 			res_node.depleted.connect(_on_inspected_entity_removed)
 	elif entity is Building:
-		var b: Building = entity
+		var b: Building = entity as Building
 		if not b.status_changed.is_connected(_on_inspected_entity_updated):
 			b.status_changed.connect(_on_inspected_entity_updated)
 		if not b.construction_progress_changed.is_connected(_on_inspected_building_construction_changed):
@@ -1142,7 +1507,7 @@ func _connect_inspected_signals(entity: Node) -> void:
 		if not b.destroyed.is_connected(_on_inspected_entity_removed):
 			b.destroyed.connect(_on_inspected_entity_removed)
 	elif entity is Unit:
-		var u: Unit = entity
+		var u: Unit = entity as Unit
 		if not u.health_changed.is_connected(_on_inspected_entity_updated):
 			u.health_changed.connect(_on_inspected_entity_updated)
 		if not u.status_changed.is_connected(_on_inspected_entity_updated):
@@ -1172,7 +1537,7 @@ func _disconnect_inspected_signals() -> void:
 	if _inspected_entity == null or not is_instance_valid(_inspected_entity):
 		return
 	if _inspected_entity is ResourceNode:
-		var res_node: ResourceNode = _inspected_entity
+		var res_node: ResourceNode = _inspected_entity as ResourceNode
 		if res_node.amount_changed.is_connected(_on_inspected_entity_updated):
 			res_node.amount_changed.disconnect(_on_inspected_entity_updated)
 		if res_node.status_changed.is_connected(_on_inspected_entity_updated):
@@ -1180,7 +1545,7 @@ func _disconnect_inspected_signals() -> void:
 		if res_node.depleted.is_connected(_on_inspected_entity_removed):
 			res_node.depleted.disconnect(_on_inspected_entity_removed)
 	elif _inspected_entity is Building:
-		var b: Building = _inspected_entity
+		var b: Building = _inspected_entity as Building
 		if b.status_changed.is_connected(_on_inspected_entity_updated):
 			b.status_changed.disconnect(_on_inspected_entity_updated)
 		if b.construction_progress_changed.is_connected(_on_inspected_building_construction_changed):
@@ -1188,7 +1553,7 @@ func _disconnect_inspected_signals() -> void:
 		if b.destroyed.is_connected(_on_inspected_entity_removed):
 			b.destroyed.disconnect(_on_inspected_entity_removed)
 	elif _inspected_entity is Unit:
-		var u: Unit = _inspected_entity
+		var u: Unit = _inspected_entity as Unit
 		if u.health_changed.is_connected(_on_inspected_entity_updated):
 			u.health_changed.disconnect(_on_inspected_entity_updated)
 		if u.status_changed.is_connected(_on_inspected_entity_updated):
@@ -1241,7 +1606,11 @@ func _on_unit_stance_changed(_unit: Unit, _new_stance: Unit.Stance) -> void:
 
 
 func _refresh_stance_button() -> void:
-	if btn_cmd_hold == null or _selection_controller == null:
+	if _selection_controller == null:
+		return
+	var btn_hold: CommandIconButton = _unit_cmd_tiles.get(&"hold", null) as CommandIconButton
+	var btn_def: CommandIconButton = _unit_cmd_tiles.get(&"defensive", null) as CommandIconButton
+	if btn_hold == null and btn_def == null:
 		return
 	var living_count: int = 0
 	var hold_count: int = 0
@@ -1249,7 +1618,7 @@ func _refresh_stance_button() -> void:
 	for item: Variant in _selection_controller.selected_units:
 		if not is_instance_valid(item) or not (item is Unit):
 			continue
-		var u: Unit = item
+		var u: Unit = item as Unit
 		if u.is_dead or u.is_staffed:
 			continue
 		living_count += 1
@@ -1257,30 +1626,24 @@ func _refresh_stance_button() -> void:
 			hold_count += 1
 		elif u.stance == Unit.Stance.DEFENSIVE:
 			defensive_count += 1
-	var k_hold: String = _get_compact_action_badge(&"cmd_hold", "H")
-	var hold_suffix: String = (" (%s)" % k_hold) if not k_hold.is_empty() else ""
-	if living_count > 0 and hold_count == living_count:
-		btn_cmd_hold.text = "Hold: ON%s" % hold_suffix
-		btn_cmd_hold.modulate = Color(1.0, 0.84, 0.32, 1.0)
-	elif hold_count > 0:
-		btn_cmd_hold.text = "Hold*%s" % hold_suffix
-		btn_cmd_hold.modulate = Color(1.0, 0.90, 0.56, 1.0)
-	else:
-		btn_cmd_hold.text = "Hold%s" % hold_suffix
-		btn_cmd_hold.modulate = Color.WHITE
 
-	if btn_cmd_defensive != null:
-		var k_def: String = _get_compact_action_badge(&"cmd_defensive_stance", "D")
-		var def_suffix: String = (" (%s)" % k_def) if not k_def.is_empty() else ""
-		if living_count > 0 and defensive_count == living_count:
-			btn_cmd_defensive.text = "Def: ON%s" % def_suffix
-			btn_cmd_defensive.modulate = Color(0.28, 0.98, 0.80, 1.0)
-		elif defensive_count > 0:
-			btn_cmd_defensive.text = "Defend*%s" % def_suffix
-			btn_cmd_defensive.modulate = Color(0.56, 0.98, 0.88, 1.0)
+	if btn_hold != null and is_instance_valid(btn_hold):
+		btn_hold.hotkey_text = _get_compact_action_badge(&"cmd_hold", "H")
+		if living_count > 0 and hold_count == living_count:
+			btn_hold.set_tile_state("ON", Color(1.0, 0.84, 0.32, 1.0), true)
+		elif hold_count > 0:
+			btn_hold.set_tile_state("*", Color(1.0, 0.90, 0.56, 1.0), true)
 		else:
-			btn_cmd_defensive.text = "Defend%s" % def_suffix
-			btn_cmd_defensive.modulate = Color.WHITE
+			btn_hold.set_tile_state("", Color(1.0, 0.84, 0.32, 1.0), false)
+
+	if btn_def != null and is_instance_valid(btn_def):
+		btn_def.hotkey_text = _get_compact_action_badge(&"cmd_defensive_stance", "D")
+		if living_count > 0 and defensive_count == living_count:
+			btn_def.set_tile_state("ON", Color(0.28, 0.98, 0.80, 1.0), true)
+		elif defensive_count > 0:
+			btn_def.set_tile_state("*", Color(0.56, 0.98, 0.88, 1.0), true)
+		else:
+			btn_def.set_tile_state("", Color(0.28, 0.98, 0.80, 1.0), false)
 
 
 func _refresh_selected_units_display() -> void:
@@ -1304,7 +1667,7 @@ func _connect_unit_signals(units: Array[Unit]) -> void:
 	for item: Variant in units:
 		if not is_instance_valid(item) or not (item is Unit):
 			continue
-		var unit: Unit = item
+		var unit: Unit = item as Unit
 		if not unit.health_changed.is_connected(_on_unit_health_changed):
 			unit.health_changed.connect(_on_unit_health_changed)
 		if not unit.ability_cooldown_updated.is_connected(_on_unit_ability_cooldown_updated):
@@ -1321,7 +1684,7 @@ func _connect_unit_signals(units: Array[Unit]) -> void:
 func _disconnect_unit_signals() -> void:
 	for item: Variant in _connected_units:
 		if is_instance_valid(item) and item is Unit:
-			var unit: Unit = item
+			var unit: Unit = item as Unit
 			if unit.health_changed.is_connected(_on_unit_health_changed):
 				unit.health_changed.disconnect(_on_unit_health_changed)
 			if unit.ability_cooldown_updated.is_connected(_on_unit_ability_cooldown_updated):
@@ -1339,18 +1702,16 @@ func _rebuild_subgroup_tabs(subgroups: Array[Dictionary], active_index: int) -> 
 	for child: Node in subgroup_tabs_row.get_children():
 		child.queue_free()
 
-	for i: int in range(subgroups.size()):
+	var max_tabs: int = mini(subgroups.size(), 4)
+	for i: int in range(max_tabs):
 		var group: Dictionary = subgroups[i]
 		var group_units: Array[Unit] = group["units"]
 		var btn: Button = Button.new()
 		btn.focus_mode = Control.FOCUS_NONE
-		btn.add_theme_font_size_override("font_size", 11)
-		var prefix: String = "> " if i == active_index else ""
-		btn.text = "%s%s (x%d)" % [prefix, String(group["display_name"]), group_units.size()]
-		if i == active_index:
-			btn.modulate = Color(0.55, 1.0, 0.96, 1.0)
-		else:
-			btn.modulate = Color(0.72, 0.78, 0.84, 0.85)
+		btn.add_theme_font_size_override("font_size", 10)
+		var prefix: String = ">" if i == active_index else ""
+		btn.text = "%s%s (%d)" % [prefix, _shorten_unit_name(String(group["display_name"])), group_units.size()]
+		btn.modulate = _active_hud_accent if i == active_index else Color(0.72, 0.78, 0.84, 0.85)
 		var captured_idx: int = i
 		btn.pressed.connect(func() -> void:
 			if _selection_controller != null:
@@ -1358,13 +1719,20 @@ func _rebuild_subgroup_tabs(subgroups: Array[Dictionary], active_index: int) -> 
 		)
 		subgroup_tabs_row.add_child(btn)
 
+	if subgroups.size() > max_tabs:
+		var more_tabs: Label = Label.new()
+		more_tabs.text = "+%d" % (subgroups.size() - max_tabs)
+		more_tabs.add_theme_font_size_override("font_size", 10)
+		more_tabs.modulate = Color(0.75, 0.85, 0.90, 0.85)
+		subgroup_tabs_row.add_child(more_tabs)
+
 	if subgroups.size() > 1:
 		var k_tab: String = _get_compact_action_badge(&"ui_cycle_subgroup", "Tab")
 		if not k_tab.is_empty():
 			var hint: Label = Label.new()
-			hint.text = " [%s]" % k_tab
-			hint.add_theme_font_size_override("font_size", 11)
-			hint.modulate = Color(0.55, 0.9, 0.92, 0.85)
+			hint.text = "[%s]" % k_tab
+			hint.add_theme_font_size_override("font_size", 10)
+			hint.modulate = _active_hud_accent
 			subgroup_tabs_row.add_child(hint)
 
 
@@ -1392,7 +1760,7 @@ func _rebuild_unit_badges(units: Array[Unit]) -> void:
 			var shd_fill: ColorRect = ColorRect.new()
 			shd_fill.position = Vector2.ZERO
 			shd_fill.size = Vector2(36.0 * shd_ratio, 2.0)
-			shd_fill.color = Color(0.220, 0.741, 0.973, 1.0) # #38BDF8
+			shd_fill.color = Color(0.220, 0.741, 0.973, 1.0)
 			shd_bg.add_child(shd_fill)
 			tile.add_child(shd_bg)
 
@@ -1409,179 +1777,22 @@ func _rebuild_unit_badges(units: Array[Unit]) -> void:
 			var badge: Label = Label.new()
 			badge.text = "[%d%%]" % pct
 			badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			badge.add_theme_font_size_override("font_size", 10)
+			badge.add_theme_font_size_override("font_size", 9)
 			badge.modulate = Color(0.32, 0.96, 0.76, 1.0) if pct > 50 else Color(1.0, 0.56, 0.28, 1.0)
 			tile.add_child(badge)
 			unit_badges_grid.add_child(tile)
 		else:
 			var badge: Label = Label.new()
 			badge.text = "[%d%%]" % pct
-			badge.add_theme_font_size_override("font_size", 11)
+			badge.add_theme_font_size_override("font_size", 10)
 			badge.modulate = Color(0.32, 0.96, 0.76, 1.0) if pct > 50 else Color(1.0, 0.56, 0.28, 1.0)
 			unit_badges_grid.add_child(badge)
 
 	if units.size() > max_badges:
 		var more: Label = Label.new()
 		more.text = "+%d" % (units.size() - max_badges)
-		more.add_theme_font_size_override("font_size", 11)
+		more.add_theme_font_size_override("font_size", 10)
 		unit_badges_grid.add_child(more)
-
-
-func _rebuild_ability_buttons(active_group: Dictionary) -> void:
-	for child: Node in ability_row.get_children():
-		child.queue_free()
-	_ability_buttons.clear()
-	_active_abilities.clear()
-
-	var data: UnitData = active_group.get("data", null) as UnitData
-	if data == null:
-		return
-
-	var valid_count: int = 0
-	for ab: AbilityData in data.abilities:
-		if ab != null:
-			valid_count += 1
-	var supports_auto_repair: bool = data.can_gather or data.can_staff_compute or data.unit_type_id == &"worker" or data.unit_type_id == &"engineer"
-	var supports_deploy: bool = data.can_deploy
-	var total_slots: int = valid_count + (1 if supports_auto_repair else 0) + (1 if supports_deploy else 0)
-	var use_grid_5x2: bool = total_slots > 8
-	var use_grid_4x2: bool = total_slots > 4 and not use_grid_5x2
-	ability_row.columns = 5 if use_grid_5x2 else (4 if use_grid_4x2 else 2)
-	var ab_min_size: Vector2 = Vector2(92.0, 26.0) if use_grid_5x2 else (Vector2(114.0, 27.0) if use_grid_4x2 else Vector2(214.0, 29.0))
-	var ab_font_size: int = 9 if use_grid_5x2 else (10 if use_grid_4x2 else 11)
-
-	for ability: AbilityData in data.abilities:
-		if ability == null:
-			continue
-		_active_abilities.append(ability)
-		var btn: Button = Button.new()
-		btn.focus_mode = Control.FOCUS_NONE
-		btn.custom_minimum_size = ab_min_size
-		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.add_theme_font_size_override("font_size", ab_font_size)
-		var captured_ability: AbilityData = ability
-		btn.pressed.connect(func() -> void:
-			if _selection_controller != null:
-				_selection_controller.request_ability_slot(captured_ability, Input.is_key_pressed(KEY_SHIFT))
-		)
-		var border_fx: Control = null
-		if ability.allow_autocast:
-			border_fx = _AutoCastBorderOverlay.new()
-			border_fx.name = "AutoCastBorder"
-			border_fx.set_anchors_preset(Control.PRESET_FULL_RECT)
-			border_fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			border_fx.visible = false
-			btn.add_child(border_fx)
-			btn.gui_input.connect(func(ev: InputEvent) -> void:
-				if ev is InputEventMouseButton:
-					var mb: InputEventMouseButton = ev as InputEventMouseButton
-					if mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT:
-						_toggle_subgroup_autocast(captured_ability.ability_id)
-						btn.accept_event()
-			)
-		btn.tooltip_text = ""
-		btn.mouse_entered.connect(func() -> void:
-			if command_tooltip != null:
-				var dynamic_meta: String = _build_ability_tooltip_meta(captured_ability)
-				var hk_full: String = _get_ability_hotkey_display(captured_ability.hotkey_label, false)
-				command_tooltip.show_tooltip(captured_ability.display_name, hk_full, dynamic_meta, captured_ability.description)
-		)
-		btn.mouse_exited.connect(func() -> void:
-			if command_tooltip != null:
-				command_tooltip.hide_tooltip()
-		)
-		ability_row.add_child(btn)
-		_ability_buttons[ability.ability_id] = {
-			"button": btn,
-			"ability": ability,
-			"autocast_fx": border_fx,
-		}
-
-	if supports_auto_repair:
-		var rep_btn: Button = Button.new()
-		rep_btn.focus_mode = Control.FOCUS_NONE
-		rep_btn.custom_minimum_size = ab_min_size
-		rep_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		rep_btn.add_theme_font_size_override("font_size", ab_font_size)
-		var rep_fx: Control = _AutoCastBorderOverlay.new()
-		rep_fx.name = "AutoCastBorder"
-		rep_fx.set_anchors_preset(Control.PRESET_FULL_RECT)
-		rep_fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		rep_fx.visible = false
-		rep_btn.add_child(rep_fx)
-		rep_btn.pressed.connect(func() -> void:
-			_toggle_subgroup_auto_repair()
-		)
-		rep_btn.gui_input.connect(func(ev: InputEvent) -> void:
-			if ev is InputEventMouseButton:
-				var mb: InputEventMouseButton = ev as InputEventMouseButton
-				if mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT:
-					_toggle_subgroup_auto_repair()
-					rep_btn.accept_event()
-		)
-		rep_btn.tooltip_text = ""
-		rep_btn.mouse_entered.connect(func() -> void:
-			if command_tooltip != null:
-				var is_on: bool = _is_subgroup_auto_repair_enabled()
-				var state_str: String = "Auto-Cast ON" if is_on else "Auto-Cast OFF"
-				var scope_str: String = "damaged friendly buildings & heavy synthetic units within 220px" if data.can_staff_compute else "damaged friendly buildings within 220px"
-				command_tooltip.show_tooltip(
-					"Auto-Repair",
-					"RMB / LMB",
-					"Radius: 220 px  •  [Right-Click: %s]" % state_str,
-					"When IDLE, automatically repairs %s (~2B/1S per sec)." % scope_str
-				)
-		)
-		rep_btn.mouse_exited.connect(func() -> void:
-			if command_tooltip != null:
-				command_tooltip.hide_tooltip()
-		)
-		ability_row.add_child(rep_btn)
-		_ability_buttons[&"__auto_repair__"] = {
-			"button": rep_btn,
-			"ability": null,
-			"autocast_fx": rep_fx,
-		}
-
-	if supports_deploy:
-		var dep_btn: Button = Button.new()
-		dep_btn.focus_mode = Control.FOCUS_NONE
-		dep_btn.custom_minimum_size = ab_min_size
-		dep_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		dep_btn.add_theme_font_size_override("font_size", ab_font_size)
-		var captured_u_data: UnitData = data
-		dep_btn.pressed.connect(func() -> void:
-			if _selection_controller != null:
-				_selection_controller.toggle_deploy_active_subgroup()
-		)
-		dep_btn.tooltip_text = ""
-		dep_btn.mouse_entered.connect(func() -> void:
-			if command_tooltip != null and captured_u_data != null:
-				var hk_dep: String = SettingsManager.get_action_display_label(&"cmd_ability_e", false) if SettingsManager != null else "E"
-				var meta_parts: PackedStringArray = PackedStringArray(["Transition: %.1fs" % captured_u_data.deploy_duration])
-				if captured_u_data.deployed_attack_range > 0.0:
-					meta_parts.append("Range: %dpx" % int(round(captured_u_data.deployed_attack_range)))
-				if captured_u_data.deployed_attack_damage > 0.0:
-					meta_parts.append("Dmg: %d" % int(round(captured_u_data.deployed_attack_damage)))
-				if captured_u_data.deployed_damage_reduction_bonus > 0.0:
-					meta_parts.append("+%d%% Armor" % int(round(captured_u_data.deployed_damage_reduction_bonus * 100.0)))
-				command_tooltip.show_tooltip(
-					"Deploy / Anchor Stance",
-					hk_dep,
-					"  •  ".join(meta_parts),
-					"Anchors the chassis in place to engage heavy deployed weaponry. Move orders will not accidentally undeploy anchored units."
-				)
-		)
-		dep_btn.mouse_exited.connect(func() -> void:
-			if command_tooltip != null:
-				command_tooltip.hide_tooltip()
-		)
-		ability_row.add_child(dep_btn)
-		_ability_buttons[&"__deploy__"] = {
-			"button": dep_btn,
-			"ability": null,
-			"autocast_fx": null,
-		}
 
 
 func _toggle_subgroup_autocast(ability_id: StringName) -> void:
@@ -1631,14 +1842,12 @@ func _refresh_auto_repair_button() -> void:
 	if not _ability_buttons.has(&"__auto_repair__"):
 		return
 	var entry: Dictionary = _ability_buttons[&"__auto_repair__"]
-	var btn: Button = entry["button"] as Button
-	var fx: Control = entry.get("autocast_fx", null) as Control
+	var btn: CommandIconButton = entry["button"] as CommandIconButton
+	if btn == null or not is_instance_valid(btn):
+		return
 	var is_on: bool = _is_subgroup_auto_repair_enabled()
-	if btn != null:
-		btn.text = "Auto-Repair: ON" if is_on else "Auto-Repair: OFF"
-		btn.modulate = Color(0.42, 1.0, 0.88, 1.0) if is_on else Color(0.76, 0.84, 0.90, 0.88)
-	if fx != null:
-		fx.visible = is_on
+	btn.set_autocast_active(is_on)
+	btn.set_tile_state("ON" if is_on else "OFF", Color(0.38, 1.0, 0.84, 1.0) if is_on else Color(0.68, 0.74, 0.80, 0.85), is_on)
 
 
 func _build_ability_tooltip_meta(ability: AbilityData) -> String:
@@ -1678,11 +1887,10 @@ func _refresh_deploy_button() -> void:
 	if not _ability_buttons.has(&"__deploy__"):
 		return
 	var entry: Dictionary = _ability_buttons[&"__deploy__"]
-	var btn: Button = entry["button"] as Button
+	var btn: CommandIconButton = entry["button"] as CommandIconButton
 	if btn == null or not is_instance_valid(btn):
 		return
-	var k_dep: String = _get_compact_action_badge(&"cmd_ability_e", "E")
-	var prefix: String = ("[%s] " % k_dep) if not k_dep.is_empty() else ""
+	btn.hotkey_text = _get_compact_action_badge(&"cmd_ability_e", "E")
 	var has_mobile: bool = false
 	var has_deploying: bool = false
 	var has_undeploying: bool = false
@@ -1701,18 +1909,14 @@ func _refresh_deploy_button() -> void:
 					has_undeploying = true
 				Unit.DeployState.DEPLOYED:
 					has_deployed = true
-	if has_mobile:
-		btn.text = "%sDeploy / Anchor" % prefix
-		btn.modulate = Color(0.55, 1.0, 0.95, 1.0)
-	elif has_undeploying:
-		btn.text = "%sRe-Deploy" % prefix
-		btn.modulate = Color(1.0, 0.78, 0.28, 1.0)
-	elif has_deploying and not has_deployed:
-		btn.text = "%sDeploying... (Cancel)" % prefix
-		btn.modulate = Color(1.0, 0.78, 0.28, 1.0)
+	if has_deployed:
+		btn.set_tile_state("ON", Color(1.0, 0.624, 0.110, 1.0), true)
+	elif has_deploying or has_undeploying:
+		btn.set_tile_state("...", Color(1.0, 0.80, 0.30, 1.0), true)
+	elif has_mobile:
+		btn.set_tile_state("", Color(0.55, 1.0, 0.95, 1.0), false)
 	else:
-		btn.text = "%sUndeploy" % prefix
-		btn.modulate = Color(1.0, 0.624, 0.110, 1.0)
+		btn.set_tile_state("", Color(0.55, 1.0, 0.95, 1.0), false)
 
 
 func _refresh_all_ability_states() -> void:
@@ -1726,23 +1930,19 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 	if not _ability_buttons.has(ability_id):
 		return
 	var entry: Dictionary = _ability_buttons[ability_id]
-	var btn: Button = entry["button"]
-	var ability: AbilityData = entry["ability"]
-	if ability == null:
+	var btn: CommandIconButton = entry["button"] as CommandIconButton
+	var ability: AbilityData = entry["ability"] as AbilityData
+	if btn == null or not is_instance_valid(btn) or ability == null:
 		return
-	var ac_fx: Control = entry.get("autocast_fx", null) as Control
+
 	var ac_on: bool = ability.allow_autocast and _is_subgroup_autocast_enabled(ability_id)
-	if ac_fx != null:
-		ac_fx.visible = ac_on
+	btn.set_autocast_active(ac_on)
+	btn.hotkey_text = _get_ability_hotkey_display(ability.hotkey_label, true)
 
 	var is_targeting: bool = (_targeting_ability != null and _targeting_ability.ability_id == ability_id)
-	var hk_compact: String = _get_ability_hotkey_display(ability.hotkey_label, true)
-	var hk_prefix: String = ("[%s] " % hk_compact) if not hk_compact.is_empty() else ""
 
 	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT and ability.building_to_build != null:
 		var b_data: BuildingData = ability.building_to_build
-		var cost_text: String = b_data.get_cost_label()
-		var short_b: String = ability.display_name.replace("Silica Condenser", "Condenser").replace("Wetware Mainframe", "Mainframe").replace("Synapse Pylon", "Pylon").replace("Calibration Foundry", "Foundry").replace("Synthetics Fabricator", "Fabricator").replace("Silica Smelter", "Smelter").replace("Logic Monolith", "Monolith").replace("Capacitor Pylon", "Cap Pylon").replace("Bastion Emplacement", "Bastion").replace("Ballistics Lab", "Ballistics").replace("Siege Gantry", "Gantry").replace("Foundry Core", "Core").replace("Assembly Bay", "Assembly")
 		var can_afford: bool = true
 		var has_prereq: bool = true
 		if _economy_manager == null:
@@ -1754,22 +1954,15 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 			if b_data.required_building_id != &"":
 				has_prereq = _economy_manager.has_constructed_building(check_t_b, b_data.required_building_id)
 
+		btn.disabled = false
 		if not has_prereq:
-			btn.disabled = false
-			btn.text = "%s%s (LOCK)" % [hk_prefix, short_b]
-			btn.modulate = Color(0.64, 0.44, 0.44, 0.68)
+			btn.set_tile_state("LOCK", Color(0.95, 0.42, 0.42, 0.96), false, false, true)
 		elif is_targeting:
-			btn.disabled = false
-			btn.text = "%s%s*" % [hk_prefix, short_b]
-			btn.modulate = Color(1.0, 0.85, 0.32, 1.0)
+			btn.set_tile_state("PLC", Color(1.0, 0.85, 0.32, 1.0), true, false, false)
 		elif can_afford:
-			btn.disabled = false
-			btn.text = "%s%s (%s)" % [hk_prefix, short_b, cost_text]
-			btn.modulate = Color(0.55, 1.0, 0.95, 1.0)
+			btn.set_tile_state("", _active_hud_accent, false, false, false)
 		else:
-			btn.disabled = false
-			btn.text = "%s%s (%s)" % [hk_prefix, short_b, cost_text]
-			btn.modulate = Color(0.56, 0.6, 0.66, 0.68)
+			btn.set_tile_state("", Color(0.56, 0.60, 0.66, 0.80), false, true, false)
 		return
 
 	var min_cd: float = INF
@@ -1777,7 +1970,7 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 	for item: Variant in _active_subgroup_units:
 		if not is_instance_valid(item) or not (item is Unit):
 			continue
-		var unit: Unit = item
+		var unit: Unit = item as Unit
 		if unit.is_dead:
 			continue
 		var rem: float = unit.get_ability_remaining_cooldown(ability_id)
@@ -1787,60 +1980,96 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 		else:
 			min_cd = minf(min_cd, rem)
 
-	var ac_tag: String = " [AUTO]" if ac_on else ""
 	if ready_count > 0:
 		btn.disabled = false
-		if is_targeting:
-			btn.text = "%s%s (TARGET)" % [hk_prefix, ability.display_name]
-			btn.modulate = Color(1.0, 0.85, 0.32, 1.0)
-		else:
-			btn.text = "%s%s%s" % [hk_prefix, ability.display_name, ac_tag]
-			btn.modulate = Color(0.58, 1.0, 0.92, 1.0) if ac_on else Color(0.55, 1.0, 0.95, 1.0)
+		var badge: String = "TGT" if is_targeting else ("A" if ac_on else "")
+		btn.set_tile_state(badge, Color(1.0, 0.85, 0.32, 1.0) if is_targeting else _active_hud_accent, is_targeting, false, false, 0.0, 0.0)
 	else:
 		var display_cd: float = 0.0 if min_cd == INF else min_cd
 		btn.disabled = false if ability.allow_autocast else true
-		btn.text = "%s%s (%.1fs)%s" % [hk_prefix, ability.display_name, display_cd, ac_tag]
-		btn.modulate = Color(0.68, 0.74, 0.80, 0.85) if ac_on else Color(0.6, 0.64, 0.7, 0.75)
+		btn.set_tile_state("A" if ac_on else "", _active_hud_accent, false, false, false, display_cd, maxf(0.1, ability.cooldown_duration))
 
 
-class _AutoCastBorderOverlay extends Control:
-	var _t: float = 0.0
+# =============================================================================
+# PROCEDURAL FACTION HUD BORDER & FLAIR OVERLAY
+# =============================================================================
 
-	func _process(delta: float) -> void:
-		if not visible:
-			return
-		_t += delta * 1.4
+class _FactionHudFrameOverlay extends Control:
+	var _faction_id: StringName = &"genesis_v2"
+	var _accent: Color = Color(0.125, 0.961, 0.863, 1.0)
+	var _primary: Color = Color(0.90, 0.96, 0.98, 1.0)
+
+	func configure(faction_id: StringName, accent_col: Color, primary_col: Color) -> void:
+		_faction_id = faction_id
+		_accent = accent_col
+		_primary = primary_col
 		queue_redraw()
 
 	func _draw() -> void:
 		var w: float = size.x
 		var h: float = size.y
-		if w <= 6.0 or h <= 6.0:
+		if w < 40.0 or h < 40.0:
 			return
-		var rect: Rect2 = Rect2(Vector2(1.0, 1.0), Vector2(w - 2.0, h - 2.0))
-		draw_rect(rect, Color(0.28, 0.96, 1.0, 0.65), false, 1.4)
-		# Animated chasing gold/cyan corner runners around the perimeter
-		var perim: float = (w + h) * 2.0
-		for k: int in range(2):
-			var d0: float = fmod((_t + float(k) * 0.5) * perim, perim)
-			var seg_len: float = minf(26.0, perim * 0.14)
-			var p_start: Vector2 = _point_on_rect(rect, d0)
-			var p_end: Vector2 = _point_on_rect(rect, fmod(d0 + seg_len, perim))
-			var col: Color = Color(1.0, 0.86, 0.32, 0.98) if (k == 0) else Color(0.32, 1.0, 0.90, 0.98)
-			if absf(p_start.x - p_end.x) < 1.0 or absf(p_start.y - p_end.y) < 1.0:
-				draw_line(p_start, p_end, col, 2.4, true)
-			draw_circle(p_start, 2.2, col)
 
-	func _point_on_rect(r: Rect2, dist: float) -> Vector2:
-		var w: float = r.size.x
-		var h: float = r.size.y
-		if dist <= w:
-			return Vector2(r.position.x + dist, r.position.y)
-		dist -= w
-		if dist <= h:
-			return Vector2(r.end.x, r.position.y + dist)
-		dist -= h
-		if dist <= w:
-			return Vector2(r.end.x - dist, r.end.y)
-		dist -= w
-		return Vector2(r.position.x, r.end.y - clampf(dist, 0.0, h))
+		if _faction_id == &"monolith_os":
+			var amber: Color = Color(1.0, 0.624, 0.110, 1.0) # #FF9F1C
+			var offwhite: Color = Color(0.949, 0.937, 0.914, 0.86) # #F2EFE9
+			var ink: Color = Color(0.039, 0.051, 0.071, 0.92)
+
+			# Crisp inner off-white frame inside the thick ink outer border
+			draw_rect(Rect2(4.0, 4.0, w - 8.0, h - 8.0), offwhite, false, 1.4)
+
+			# Subtle diagonal hazard-stripe bar along the top edge above the right Command Card (last 204px)
+			var bar_x: float = maxf(8.0, w - 208.0)
+			var bar_w: float = w - bar_x - 6.0
+			draw_rect(Rect2(bar_x, 5.0, bar_w, 4.5), ink, true)
+			var sx: float = bar_x + 2.0
+			while sx < bar_x + bar_w - 6.0:
+				draw_line(Vector2(sx, 9.2), Vector2(sx + 5.0, 5.2), Color(amber.r, amber.g, amber.b, 0.72), 2.0)
+				sx += 11.0
+
+			# Bold Hazard Amber L-brackets on Top-Left & Bottom-Right corners
+			var arm: float = 16.0
+			draw_line(Vector2(1.5, 1.5), Vector2(1.5 + arm, 1.5), amber, 3.0)
+			draw_line(Vector2(1.5, 1.5), Vector2(1.5, 1.5 + arm), amber, 3.0)
+			draw_line(Vector2(w - 1.5, h - 1.5), Vector2(w - 1.5 - arm, h - 1.5), amber, 3.0)
+			draw_line(Vector2(w - 1.5, h - 1.5), Vector2(w - 1.5, h - 1.5 - arm), amber, 3.0)
+			# Subtle off-white secondary opposite corners
+			draw_line(Vector2(w - 1.5, 1.5), Vector2(w - 1.5 - 10.0, 1.5), offwhite, 2.0)
+			draw_line(Vector2(w - 1.5, 1.5), Vector2(w - 1.5, 1.5 + 10.0), offwhite, 2.0)
+			draw_line(Vector2(1.5, h - 1.5), Vector2(1.5 + 10.0, h - 1.5), offwhite, 2.0)
+			draw_line(Vector2(1.5, h - 1.5), Vector2(1.5, h - 1.5 - 10.0), offwhite, 2.0)
+
+			# Procedural halftone dot-matrix band along lower-right corner
+			var ht_x0: float = maxf(12.0, w - 76.0)
+			var ht_y0: float = maxf(12.0, h - 22.0)
+			var row: int = 0
+			var y: float = ht_y0
+			while y < h - 6.0:
+				var x: float = ht_x0 + (3.5 if (row % 2 == 1) else 0.0)
+				while x < w - 7.0:
+					draw_circle(Vector2(x, y), 1.1, Color(amber.r, amber.g, amber.b, 0.24))
+					x += 7.0
+				y += 6.0
+				row += 1
+		else:
+			# GENESIS_V2 (Technozen / Y2K Bio-Synth) & future faction fallback tinted by _accent
+			var glow_line: Color = Color(_accent.r, _accent.g, _accent.b, 0.62)
+			var soft_line: Color = Color(_accent.r, _accent.g, _accent.b, 0.24)
+			# Thin top & bottom glowing telemetry scanline accents
+			draw_line(Vector2(18.0, 2.5), Vector2(w - 18.0, 2.5), glow_line, 1.4, true)
+			draw_line(Vector2(28.0, h - 2.5), Vector2(w - 28.0, h - 2.5), soft_line, 1.2, true)
+			# Bioluminescent corner nodes (3px dot + soft outer halo ring)
+			var corners: PackedVector2Array = PackedVector2Array([
+				Vector2(8.0, 8.0),
+				Vector2(w - 8.0, 8.0),
+				Vector2(w - 8.0, h - 8.0),
+				Vector2(8.0, h - 8.0),
+			])
+			for pt: Vector2 in corners:
+				draw_circle(pt, 5.2, Color(_accent.r, _accent.g, _accent.b, 0.14))
+				draw_arc(pt, 4.4, 0.0, TAU, 14, Color(_accent.r, _accent.g, _accent.b, 0.55), 1.1, true)
+				draw_circle(pt, 2.2, _accent)
+			# Subtle vertical circuit accent ticks along the panel left/right inner edges
+			draw_line(Vector2(3.5, 22.0), Vector2(3.5, h - 22.0), soft_line, 1.1)
+			draw_line(Vector2(w - 3.5, 22.0), Vector2(w - 3.5, h - 22.0), soft_line, 1.1)

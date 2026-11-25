@@ -36,9 +36,9 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -520.0
-offset_top = -236.0
-offset_right = 520.0
+offset_left = -370.0
+offset_top = -232.0
+offset_right = 370.0
 offset_bottom = -8.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -58,7 +58,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 8
 mouse_filter = 2
-theme_override_constants/separation = 5
+theme_override_constants/separation = 4
 
 [node name="CommandTooltip" parent="BottomStack/TopUtilityRow" instance=ExtResource("3_tooltip")]
 unique_name_in_owner = true
@@ -69,21 +69,21 @@ size_flags_vertical = 8
 [node name="BottomPanel" type="PanelContainer" parent="BottomStack"]
 unique_name_in_owner = true
 visible = false
-custom_minimum_size = Vector2(0, 128)
+custom_minimum_size = Vector2(740, 160)
 layout_mode = 2
 
 [node name="HBox" type="HBoxContainer" parent="BottomStack/BottomPanel"]
 layout_mode = 2
-theme_override_constants/separation = 14
+theme_override_constants/separation = 10
 
 [node name="LeftPanel" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox"]
-custom_minimum_size = Vector2(250, 0)
+custom_minimum_size = Vector2(184, 0)
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 
 [node name="PortraitSwatch" type="ColorRect" parent="BottomStack/BottomPanel/HBox/LeftPanel"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(46, 46)
+custom_minimum_size = Vector2(30, 38)
 layout_mode = 2
 size_flags_vertical = 4
 mouse_filter = 2
@@ -93,21 +93,25 @@ color = Color(0.24, 0.92, 0.88, 1)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
-theme_override_constants/separation = 3
+theme_override_constants/separation = 2
 
 [node name="UnitNameLabel" type="Label" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.94, 0.99, 1, 1)
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 13
 text = "Test Unit  x1"
+clip_text = true
+text_overrun_behavior = 3
 
 [node name="EntitySubtitleLabel" type="Label" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.45, 0.86, 0.92, 0.9)
-theme_override_font_sizes/font_size = 10
+theme_override_font_sizes/font_size = 9
 text = "FRIENDLY UNIT"
+clip_text = true
+text_overrun_behavior = 3
 
 [node name="HPBox" type="VBoxContainer" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox"]
 unique_name_in_owner = true
@@ -117,12 +121,12 @@ theme_override_constants/separation = 2
 [node name="UnitHPLabel" type="Label" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox/HPBox"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "HP: 100 / 100"
 
 [node name="UnitHPBar" type="ProgressBar" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox/HPBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 7)
+custom_minimum_size = Vector2(0, 6)
 layout_mode = 2
 theme_override_styles/fill = SubResource("StyleBoxFlat_hp_fill")
 value = 100.0
@@ -138,12 +142,14 @@ theme_override_constants/separation = 2
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.74, 0.94, 1, 0.95)
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "Remaining: 1,500 / 1,500"
+clip_text = true
+text_overrun_behavior = 3
 
 [node name="PrimaryGaugeBar" type="ProgressBar" parent="BottomStack/BottomPanel/HBox/LeftPanel/StatsVBox/PrimaryGaugeBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 7)
+custom_minimum_size = Vector2(0, 6)
 layout_mode = 2
 theme_override_styles/fill = SubResource("StyleBoxFlat_gauge_fill")
 value = 100.0
@@ -156,17 +162,17 @@ layout_mode = 2
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
-theme_override_constants/separation = 5
+theme_override_constants/separation = 4
 
 [node name="SubgroupTabsRow" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox/CenterPanel"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 5
+theme_override_constants/separation = 4
 
 [node name="UnitBadgesGrid" type="GridContainer" parent="BottomStack/BottomPanel/HBox/CenterPanel"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/h_separation = 6
+theme_override_constants/h_separation = 5
 theme_override_constants/v_separation = 3
 columns = 6
 
@@ -174,26 +180,28 @@ columns = 6
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
-theme_override_constants/h_separation = 12
-theme_override_constants/v_separation = 4
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 3
 columns = 2
 
 [node name="ProductionQueueBox" type="VBoxContainer" parent="BottomStack/BottomPanel/HBox/CenterPanel"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
-theme_override_constants/separation = 3
+theme_override_constants/separation = 2
 
 [node name="ProductionLabel" type="Label" parent="BottomStack/BottomPanel/HBox/CenterPanel/ProductionQueueBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.54, 0.96, 0.92, 0.96)
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "Training Worker (0%)"
+clip_text = true
+text_overrun_behavior = 3
 
 [node name="ProductionBar" type="ProgressBar" parent="BottomStack/BottomPanel/HBox/CenterPanel/ProductionQueueBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 7)
+custom_minimum_size = Vector2(0, 6)
 layout_mode = 2
 value = 0.0
 show_percentage = false
@@ -201,76 +209,32 @@ show_percentage = false
 [node name="QueueSlotsRow" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox/CenterPanel/ProductionQueueBox"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 3
 
 [node name="Sep2" type="VSeparator" parent="BottomStack/BottomPanel/HBox"]
 layout_mode = 2
 
 [node name="RightPanel" type="VBoxContainer" parent="BottomStack/BottomPanel/HBox"]
-custom_minimum_size = Vector2(486, 0)
+custom_minimum_size = Vector2(192, 0)
 layout_mode = 2
 size_flags_vertical = 4
-theme_override_constants/separation = 5
-
-[node name="StandardCommandsRow" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox/RightPanel"]
-unique_name_in_owner = true
-layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="BtnCmdMove" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
+[node name="CommandGrid" type="GridContainer" parent="BottomStack/BottomPanel/HBox/RightPanel"]
 unique_name_in_owner = true
 layout_mode = 2
-focus_mode = 0
-theme_override_font_sizes/font_size = 10
-text = "Move (RMB)"
-
-[node name="BtnCmdStop" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
-unique_name_in_owner = true
-layout_mode = 2
-focus_mode = 0
-theme_override_font_sizes/font_size = 10
-text = "Stop (S)"
-
-[node name="BtnCmdHold" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
-unique_name_in_owner = true
-layout_mode = 2
-focus_mode = 0
-theme_override_font_sizes/font_size = 10
-text = "Hold (H)"
-
-[node name="BtnCmdDefensive" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
-unique_name_in_owner = true
-layout_mode = 2
-focus_mode = 0
-theme_override_font_sizes/font_size = 10
-text = "Defend (D)"
-
-[node name="BtnCmdPatrol" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
-unique_name_in_owner = true
-layout_mode = 2
-focus_mode = 0
-theme_override_font_sizes/font_size = 10
-text = "Patrol (P)"
-
-[node name="BtnCmdAMove" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
-unique_name_in_owner = true
-layout_mode = 2
-focus_mode = 0
-theme_override_font_sizes/font_size = 10
-text = "Atk-Mv (A)"
-
-[node name="AbilityRow" type="GridContainer" parent="BottomStack/BottomPanel/HBox/RightPanel"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_constants/h_separation = 5
+size_flags_horizontal = 4
+theme_override_constants/h_separation = 4
 theme_override_constants/v_separation = 4
-columns = 2
+columns = 4
 
 [node name="ReadOnlyLabel" type="Label" parent="BottomStack/BottomPanel/HBox/RightPanel"]
 unique_name_in_owner = true
 visible = false
+custom_minimum_size = Vector2(188, 0)
 layout_mode = 2
 theme_override_colors/font_color = Color(0.56, 0.68, 0.76, 0.78)
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 11
 text = "READ-ONLY TELEMETRY"
 horizontal_alignment = 1
+autowrap_mode = 2

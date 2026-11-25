@@ -346,9 +346,15 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_q", "Q"):
 		return
+	if _try_handle_building_hotkey_event(event, &"cmd_ability_q", &"train", 0):
+		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_w", "W"):
 		return
+	if _try_handle_building_hotkey_event(event, &"cmd_ability_w", &"train", 1):
+		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_e", "E"):
+		return
+	if _try_handle_building_hotkey_event(event, &"cmd_ability_e", &"train", 2):
 		return
 	if event.is_action_pressed("cmd_ability_e") and not event.is_echo():
 		var allow_e_key: bool = true
@@ -356,25 +362,23 @@ func _unhandled_input(event: InputEvent) -> void:
 			var e_key: InputEventKey = event
 			if e_key.ctrl_pressed or e_key.alt_pressed:
 				allow_e_key = false
-		if allow_e_key:
-			if not selected_units.is_empty():
-				if toggle_deploy_active_subgroup():
-					get_viewport().set_input_as_handled()
-					return
-			elif has_selected_overclock_hub():
-				if is_overclock_targeting:
-					cancel_overclock_targeting()
-				elif not begin_overclock_targeting() and AudioManager != null:
-					AudioManager.play_error()
+		if allow_e_key and not selected_units.is_empty():
+			if toggle_deploy_active_subgroup():
 				get_viewport().set_input_as_handled()
 				return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_r", "R"):
 		return
+	if _try_handle_building_hotkey_event(event, &"cmd_ability_r", &"upgrade", 0):
+		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_t", "T"):
+		return
+	if _try_handle_building_hotkey_event(event, &"cmd_ability_t", &"upgrade", 1):
 		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_y", "Y"):
 		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_f", "F"):
+		return
+	if _try_handle_building_hotkey_event(event, &"cmd_ability_f", &"facility_special", 0):
 		return
 	if event is InputEventKey:
 		var g_key: InputEventKey = event as InputEventKey
@@ -383,11 +387,17 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 
-	if event.is_action_pressed("cmd_ability_e") and selected_units.is_empty() and inspected_entity is Building:
-		var b_node: Building = inspected_entity
+	# Convenience fallback: E still ejects engineers on pure compute facilities (0 trainable units).
+	if event.is_action_pressed("cmd_ability_e") and not event.is_echo() and selected_units.is_empty() and inspected_entity is Building:
+		var allow_e_eject: bool = true
+		if event is InputEventKey:
+			var e_ej_key: InputEventKey = event as InputEventKey
+			if e_ej_key.ctrl_pressed or e_ej_key.alt_pressed:
+				allow_e_eject = false
+		var b_node: Building = inspected_entity as Building
 		var b_local: bool = TeamManager.is_team_controlled_by_local_human(int(b_node.team)) if TeamManager != null else (b_node.team == Unit.Team.PLAYER)
-		if is_instance_valid(b_node) and b_local and b_node.max_staff_slots > 0 and b_node.get_assigned_engineer_count() > 0:
-			b_node.eject_engineers()
+		if allow_e_eject and is_instance_valid(b_node) and b_local and b_node.is_constructed and b_node.trainable_unit_data.is_empty() and b_node.max_staff_slots > 0 and b_node.get_assigned_engineer_count() > 0:
+			eject_engineers_from_selected_buildings()
 			get_viewport().set_input_as_handled()
 			return
 
@@ -2221,6 +2231,100 @@ func _try_handle_ability_hotkey_event(event: InputEvent, action_name: StringName
 	if request_ability_by_hotkey(hotkey_label, shift_queued):
 		get_viewport().set_input_as_handled()
 		return true
+	return false
+
+
+func _get_selected_friendly_constructed_buildings() -> Array[Building]:
+	var out: Array[Building] = []
+	var local_t: Unit.Team = _get_local_human_team_enum()
+	for b: Building in selected_buildings:
+		if is_instance_valid(b) and not b.is_destroyed and b.is_constructed and not b.is_salvaging and b.team == local_t:
+			out.append(b)
+	if out.is_empty() and selected_building != null and is_instance_valid(selected_building):
+		if not selected_building.is_destroyed and selected_building.is_constructed and not selected_building.is_salvaging and selected_building.team == local_t:
+			out.append(selected_building)
+	return out
+
+
+func _try_handle_building_hotkey_event(event: InputEvent, action_name: StringName, slot_kind: StringName, slot_index: int) -> bool:
+	if not selected_units.is_empty() or not event.is_action_pressed(action_name):
+		return false
+	var shift_queued: bool = Input.is_key_pressed(KEY_SHIFT)
+	if event is InputEventKey:
+		var key_ev: InputEventKey = event as InputEventKey
+		if key_ev.ctrl_pressed or key_ev.alt_pressed or key_ev.echo:
+			return false
+		shift_queued = key_ev.shift_pressed or shift_queued
+	elif event.is_echo():
+		return false
+
+	_prune_invalid_units()
+	var friendly_bldgs: Array[Building] = _get_selected_friendly_constructed_buildings()
+	if friendly_bldgs.is_empty():
+		return false
+	var lead: Building = friendly_bldgs[0]
+
+	if slot_kind == &"train":
+		if slot_index < 0 or slot_index >= lead.trainable_unit_data.size():
+			return false
+		var u_data: UnitData = lead.trainable_unit_data[slot_index]
+		if u_data == null:
+			return false
+		if shift_queued:
+			queue_unit_distributed_batch(u_data, 5, lead)
+		elif friendly_bldgs.size() > 1:
+			queue_unit_distributed(u_data, true)
+		else:
+			lead.queue_unit_training(slot_index, true)
+		get_viewport().set_input_as_handled()
+		return true
+
+	if slot_kind == &"upgrade":
+		if slot_index < 0 or slot_index >= lead.researchable_upgrades.size():
+			return false
+		var upg: UpgradeData = lead.researchable_upgrades[slot_index]
+		if upg == null:
+			return false
+		var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+		if econ != null and (econ.has_upgrade(int(lead.team), upg.upgrade_id) or econ.is_upgrade_in_progress(int(lead.team), upg.upgrade_id)):
+			get_viewport().set_input_as_handled()
+			return true
+		var started: bool = false
+		for cand: Building in friendly_bldgs:
+			var idx: int = cand.researchable_upgrades.find(upg)
+			if idx >= 0 and cand.can_research_upgrade(idx):
+				if cand.queue_upgrade_research(idx):
+					started = true
+					break
+		if not started:
+			lead.queue_upgrade_research(slot_index)
+		get_viewport().set_input_as_handled()
+		return true
+
+	if slot_kind == &"facility_special":
+		if has_selected_overclock_hub():
+			if is_overclock_targeting:
+				cancel_overclock_targeting()
+			elif not begin_overclock_targeting() and AudioManager != null:
+				AudioManager.play_error()
+			get_viewport().set_input_as_handled()
+			return true
+		var any_staffable: bool = false
+		var any_staffed: bool = false
+		for b: Building in friendly_bldgs:
+			if b.max_staff_slots > 0:
+				any_staffable = true
+				if b.get_assigned_engineer_count() > 0:
+					any_staffed = true
+		if any_staffable:
+			if any_staffed:
+				if AudioManager != null:
+					AudioManager.play_ui_click()
+				eject_engineers_from_selected_buildings()
+			elif AudioManager != null:
+				AudioManager.play_error()
+			get_viewport().set_input_as_handled()
+			return true
 	return false
 
 
