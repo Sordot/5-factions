@@ -190,7 +190,7 @@ func _attach_dynamic_action_tooltip(btn: Button, title: String, action_name: Str
 func _get_compact_action_badge(action_name: StringName, fallback: String) -> String:
 	if SettingsManager == null:
 		return fallback
-	return SettingsManager.get_action_display_label(action_name, true)
+	return SettingsManager.get_action_short_label(action_name)
 
 
 func _get_ability_action_name(hotkey_label: String) -> StringName:
@@ -215,7 +215,7 @@ func _get_ability_action_name(hotkey_label: String) -> StringName:
 func _get_ability_hotkey_display(hotkey_label: String, compact: bool = true) -> String:
 	var act: StringName = _get_ability_action_name(hotkey_label)
 	if act != &"" and SettingsManager != null:
-		return SettingsManager.get_action_display_label(act, compact)
+		return SettingsManager.get_action_short_label(act) if compact else SettingsManager.get_action_display_label(act, false)
 	return hotkey_label
 
 
@@ -233,6 +233,8 @@ func _on_keybind_changed(_action_name: StringName) -> void:
 func _on_display_settings_changed(category: StringName) -> void:
 	if category == &"display" or category == &"all":
 		call_deferred("_adjust_layout_for_minimap")
+	if category == &"controls" or category == &"gameplay" or category == &"all":
+		_on_keybind_changed(&"")
 
 
 func _refresh_dynamic_command_labels() -> void:
@@ -480,7 +482,8 @@ func _render_inspected_entity(entity: Node, rebuild_actions: bool) -> void:
 	_rebuild_telemetry_grid(info["stats"])
 	_refresh_production_queue_ui(entity)
 
-	var is_commandable: bool = bool(info.get("is_commandable", false))
+	var post_match_inspect: bool = _is_post_match_inspection()
+	var is_commandable: bool = bool(info.get("is_commandable", false)) and not post_match_inspect
 	if is_commandable and entity is Building:
 		var building: Building = entity
 		read_only_label.visible = false
@@ -493,7 +496,14 @@ func _render_inspected_entity(entity: Node, rebuild_actions: bool) -> void:
 			_clear_ability_row()
 		ability_row.visible = false
 		read_only_label.visible = true
-		read_only_label.text = String(info.get("readonly_label", "READ-ONLY TELEMETRY"))
+		read_only_label.text = "POST-MATCH INSPECTION  —  READ-ONLY TELEMETRY" if post_match_inspect else String(info.get("readonly_label", "READ-ONLY TELEMETRY"))
+
+
+func _is_post_match_inspection() -> bool:
+	if not is_inside_tree():
+		return false
+	var mm: Node = get_tree().get_first_node_in_group("match_manager")
+	return mm != null and is_instance_valid(mm) and bool(mm.get("is_inspecting_post_match"))
 
 
 func _refresh_production_queue_ui(entity: Node) -> void:
@@ -535,6 +545,8 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 		var captured_b: Building = building
 		var captured_idx: int = i
 		slot_btn.pressed.connect(func() -> void:
+			if _is_post_match_inspection():
+				return
 			if AudioManager != null:
 				AudioManager.play_ui_click()
 			if is_instance_valid(captured_b):
@@ -688,7 +700,7 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 		cancel_btn.focus_mode = Control.FOCUS_NONE
 		cancel_btn.custom_minimum_size = Vector2(214.0, 32.0)
 		cancel_btn.add_theme_font_size_override("font_size", 11)
-		cancel_btn.text = "[X] Cancel Build (75% Refund)"
+		cancel_btn.text = "× Cancel Build (75% Refund)"
 		cancel_btn.modulate = Color(1.0, 0.52, 0.34, 1.0)
 		var captured_b_cancel: Building = building
 		cancel_btn.pressed.connect(func() -> void:
@@ -936,15 +948,15 @@ func _refresh_building_action_buttons(building: Building) -> void:
 			var can_s: bool = building.can_salvage()
 			if building.is_salvaging:
 				var rem_s: float = maxf(0.0, Building.SALVAGE_DURATION - building.salvage_elapsed)
-				btn.text = "[X] Cancel Salvage (%.1fs)" % rem_s
+				btn.text = "× Cancel Salvage (%.1fs)" % rem_s
 				btn.disabled = false
 				btn.modulate = Color(1.0, 0.78, 0.24, 1.0)
 			elif not can_s:
-				btn.text = "[X] Salvage (Locked)"
+				btn.text = "× Salvage (Locked)"
 				btn.disabled = true
 				btn.modulate = Color(0.56, 0.58, 0.62, 0.58)
 			else:
-				btn.text = "[X] Salvage (50%)"
+				btn.text = "× Salvage (50%)"
 				btn.disabled = false
 				btn.modulate = Color(1.0, 0.58, 0.36, 0.94)
 

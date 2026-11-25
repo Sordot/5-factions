@@ -134,10 +134,12 @@ func _destroy() -> void:
 	set_selected(false)
 
 	if get_parent() != null:
-		var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-		fx.z_index = 54
-		get_parent().add_child(fx)
-		fx.call("setup_death_burst", global_position, maxf(30.0, get_footprint_radius() * 0.9), Color(1.0, 0.72, 0.28, 1.0), true)
+		var fx: CombatVFX = VFXPool.acquire_combat_vfx(54) if VFXPool != null else null
+		if fx == null:
+			fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+			fx.z_index = 54
+			get_parent().add_child(fx)
+		fx.setup_death_burst(global_position, maxf(30.0, get_footprint_radius() * 0.9), Color(1.0, 0.72, 0.28, 1.0), true)
 
 	if AudioManager != null:
 		AudioManager.play_explosion_sfx(global_position, -2.5, false)

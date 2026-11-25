@@ -3,17 +3,20 @@ extends CanvasLayer
 
 const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.tscn")
 const TECH_TREE_SCENE_PATH: String = "res://scenes/ui/tech_tree_overlay.tscn"
+const CONTROLS_REF_SCENE_PATH: String = "res://scenes/ui/controls_reference_overlay.tscn"
 
 @onready var root_control: Control = %RootControl
 @onready var btn_resume: Button = %BtnResume
 @onready var btn_settings: Button = %BtnSettings
 @onready var btn_tech_tree: Button = %BtnTechTree
+@onready var btn_controls_ref: Button = %BtnControlsRef
 @onready var btn_toggle_debug_hud: Button = %BtnToggleDebugHud
 @onready var btn_restart: Button = %BtnRestart
 @onready var btn_main_menu: Button = %BtnMainMenu
 
 var _settings_instance: SettingsMenu = null
 var _tech_tree_instance: CanvasLayer = null
+var _controls_ref_instance: CanvasLayer = null
 
 
 func _ready() -> void:
@@ -28,12 +31,20 @@ func _ready() -> void:
 		btn_settings.pressed.connect(_open_settings)
 	if btn_tech_tree != null:
 		btn_tech_tree.pressed.connect(_open_tech_tree)
+	if btn_controls_ref != null:
+		btn_controls_ref.pressed.connect(_open_controls_ref)
 	if btn_toggle_debug_hud != null:
 		btn_toggle_debug_hud.pressed.connect(_on_toggle_debug_hud_pressed)
 	if btn_restart != null:
 		btn_restart.pressed.connect(_restart_skirmish)
 	if btn_main_menu != null:
 		btn_main_menu.pressed.connect(_quit_to_main_menu)
+	if SettingsManager != null:
+		if not SettingsManager.settings_changed.is_connected(_on_settings_changed):
+			SettingsManager.settings_changed.connect(_on_settings_changed)
+		if not SettingsManager.keybind_changed.is_connected(_on_keybind_changed):
+			SettingsManager.keybind_changed.connect(_on_keybind_changed)
+	_refresh_dynamic_hotkey_labels()
 	call_deferred("_refresh_debug_hud_button")
 
 
@@ -47,6 +58,28 @@ func is_settings_open() -> bool:
 
 func is_tech_tree_open() -> bool:
 	return _tech_tree_instance != null and is_instance_valid(_tech_tree_instance)
+
+
+func is_controls_help_open() -> bool:
+	return _controls_ref_instance != null and is_instance_valid(_controls_ref_instance)
+
+
+func _on_settings_changed(category: StringName) -> void:
+	if category == &"controls" or category == &"all":
+		_refresh_dynamic_hotkey_labels()
+
+
+func _on_keybind_changed(_action_name: StringName) -> void:
+	_refresh_dynamic_hotkey_labels()
+
+
+func _refresh_dynamic_hotkey_labels() -> void:
+	if btn_tech_tree != null:
+		var hk_u: String = SettingsManager.get_action_short_label(&"ui_toggle_tech_tree") if SettingsManager != null else "U"
+		btn_tech_tree.text = ("Tech Tree  (%s)" % hk_u) if not hk_u.is_empty() else "Tech Tree"
+	if btn_controls_ref != null:
+		var hk_h: String = SettingsManager.get_action_short_label(&"ui_toggle_controls_help") if SettingsManager != null else "?"
+		btn_controls_ref.text = ("Controls Reference  (%s)" % hk_h) if not hk_h.is_empty() else "Controls Reference"
 
 
 func toggle_pause() -> void:
@@ -76,6 +109,7 @@ func open_pause() -> void:
 	Engine.time_scale = 1.0
 	if root_control != null:
 		root_control.visible = true
+	_refresh_dynamic_hotkey_labels()
 	_refresh_debug_hud_button()
 	if is_inside_tree():
 		get_tree().paused = true
@@ -119,6 +153,9 @@ func close_pause() -> void:
 	if _tech_tree_instance != null and is_instance_valid(_tech_tree_instance):
 		_tech_tree_instance.queue_free()
 		_tech_tree_instance = null
+	if _controls_ref_instance != null and is_instance_valid(_controls_ref_instance):
+		_controls_ref_instance.queue_free()
+		_controls_ref_instance = null
 	if AudioManager != null:
 		AudioManager.play_ui_click()
 	if root_control != null:
@@ -135,6 +172,9 @@ func close_pause() -> void:
 func _open_tech_tree() -> void:
 	if _tech_tree_instance != null and is_instance_valid(_tech_tree_instance):
 		return
+	if _controls_ref_instance != null and is_instance_valid(_controls_ref_instance):
+		_controls_ref_instance.queue_free()
+		_controls_ref_instance = null
 	_reset_gameplay_cursors()
 	if AudioManager != null:
 		AudioManager.play_ui_click()
@@ -150,10 +190,36 @@ func _open_tech_tree() -> void:
 		get_tree().root.add_child(_tech_tree_instance)
 
 
+func _open_controls_ref() -> void:
+	if _controls_ref_instance != null and is_instance_valid(_controls_ref_instance):
+		return
+	if _tech_tree_instance != null and is_instance_valid(_tech_tree_instance):
+		_tech_tree_instance.queue_free()
+		_tech_tree_instance = null
+	_reset_gameplay_cursors()
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	var ref_scene: PackedScene = load(CONTROLS_REF_SCENE_PATH) as PackedScene
+	if ref_scene == null:
+		return
+	_controls_ref_instance = ref_scene.instantiate() as CanvasLayer
+	if _controls_ref_instance != null:
+		if _controls_ref_instance.has_signal("closed"):
+			_controls_ref_instance.connect("closed", func() -> void:
+				_controls_ref_instance = null
+			)
+		get_tree().root.add_child(_controls_ref_instance)
+
+
+func open_settings_from_overlay() -> void:
+	_controls_ref_instance = null
+	_open_settings()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_pause_open():
 		return
-	if is_settings_open() or is_tech_tree_open():
+	if is_settings_open() or is_tech_tree_open() or is_controls_help_open():
 		return
 	if event.is_action_pressed("cmd_cancel"):
 		close_pause()
@@ -176,6 +242,14 @@ func _open_settings() -> void:
 func _restart_skirmish() -> void:
 	if AudioManager != null:
 		AudioManager.play_ui_click()
+	if is_inside_tree():
+		var mm: Node = get_tree().get_first_node_in_group("match_manager")
+		if mm != null and is_instance_valid(mm) and mm.has_method("request_rematch"):
+			mm.call("request_rematch")
+			return
+	_reset_gameplay_cursors()
+	if VFXPool != null:
+		VFXPool.clear_pool()
 	Engine.time_scale = 1.0
 	if is_inside_tree():
 		get_tree().paused = false
@@ -185,6 +259,14 @@ func _restart_skirmish() -> void:
 func _quit_to_main_menu() -> void:
 	if AudioManager != null:
 		AudioManager.play_ui_click()
+	if is_inside_tree():
+		var mm: Node = get_tree().get_first_node_in_group("match_manager")
+		if mm != null and is_instance_valid(mm) and mm.has_method("return_to_main_menu"):
+			mm.call("return_to_main_menu")
+			return
+	_reset_gameplay_cursors()
+	if VFXPool != null:
+		VFXPool.clear_pool()
 	Engine.time_scale = 1.0
 	if is_inside_tree():
 		get_tree().paused = false

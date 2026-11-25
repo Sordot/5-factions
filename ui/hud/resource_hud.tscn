@@ -313,6 +313,15 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Tech [U]"
 
+[node name="BtnControlsHelp" type="Button" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(30, 0)
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Controls Quick-Reference (?)"
+theme_override_font_sizes/font_size = 11
+text = "?"
+
 [node name="SpeedStrip" type="HBoxContainer" parent="RootControl/TopRightAnchor/TopRightVBox"]
 layout_mode = 2
 mouse_filter = 2

@@ -2,6 +2,7 @@ class_name ResourceHUD
 extends CanvasLayer
 
 const TECH_TREE_SCENE_PATH: String = "res://scenes/ui/tech_tree_overlay.tscn"
+const CONTROLS_REF_SCENE_PATH: String = "res://scenes/ui/controls_reference_overlay.tscn"
 
 @export var economy_manager_path: NodePath
 @export var tracked_team: Unit.Team = Unit.Team.PLAYER
@@ -24,6 +25,7 @@ const TECH_TREE_SCENE_PATH: String = "res://scenes/ui/tech_tree_overlay.tscn"
 @onready var btn_idle_production: Button = %BtnIdleProduction
 @onready var btn_select_army: Button = %BtnSelectArmy
 @onready var btn_tech_tree: Button = %BtnTechTree
+@onready var btn_controls_help: Button = %BtnControlsHelp
 @onready var btn_speed_05: Button = %BtnSpeed05
 @onready var btn_speed_10: Button = %BtnSpeed10
 @onready var btn_speed_15: Button = %BtnSpeed15
@@ -36,6 +38,7 @@ var _economy_manager: EconomyManager = null
 var _match_manager: MatchManager = null
 var _selection_controller: SelectionController = null
 var _tech_tree_instance: CanvasLayer = null
+var _controls_ref_instance: CanvasLayer = null
 var _flash_timers: Dictionary = {}
 var _alert_timer: float = 0.0
 var _hud_poll_timer: float = 0.0
@@ -63,6 +66,8 @@ func _ready() -> void:
 		AudioManager.mute_changed.connect(_on_audio_mute_changed)
 	if SettingsManager != null and not SettingsManager.keybind_changed.is_connected(_on_keybind_changed):
 		SettingsManager.keybind_changed.connect(_on_keybind_changed)
+	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
+		SettingsManager.settings_changed.connect(_on_settings_changed)
 	if btn_idle_workers != null:
 		btn_idle_workers.add_to_group("blocks_edge_pan")
 		btn_idle_workers.pressed.connect(_on_idle_workers_pressed)
@@ -77,6 +82,10 @@ func _ready() -> void:
 		btn_tech_tree.add_to_group("blocks_edge_pan")
 		btn_tech_tree.pressed.connect(toggle_tech_tree)
 		_apply_faction_hud_accent()
+	if btn_controls_help != null:
+		btn_controls_help.add_to_group("blocks_edge_pan")
+		btn_controls_help.pressed.connect(toggle_controls_help)
+		_refresh_controls_help_button_label()
 	if spectator_panel != null:
 		spectator_panel.add_to_group("blocks_edge_pan")
 	if btn_spectator_fog != null:
@@ -105,8 +114,15 @@ func _ready() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_echo():
 		return
+	var settings_node: Node = get_tree().get_first_node_in_group("settings_menu") if is_inside_tree() else null
+	if settings_node != null and is_instance_valid(settings_node) and settings_node.has_method("is_capturing_key"):
+		if bool(settings_node.call("is_capturing_key")):
+			return
 	if event.is_action_pressed("ui_toggle_tech_tree"):
 		toggle_tech_tree()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("ui_toggle_controls_help"):
+		toggle_controls_help()
 		get_viewport().set_input_as_handled()
 
 
@@ -149,6 +165,12 @@ func toggle_tech_tree() -> void:
 			_tech_tree_instance.queue_free()
 		_tech_tree_instance = null
 		return
+	if _controls_ref_instance != null and is_instance_valid(_controls_ref_instance):
+		if _controls_ref_instance.has_method("close_overlay"):
+			_controls_ref_instance.call("close_overlay")
+		else:
+			_controls_ref_instance.queue_free()
+		_controls_ref_instance = null
 	if AudioManager != null:
 		AudioManager.play_ui_click()
 	var tech_scene: PackedScene = load(TECH_TREE_SCENE_PATH) as PackedScene
@@ -161,6 +183,34 @@ func toggle_tech_tree() -> void:
 				_tech_tree_instance = null
 			)
 		get_tree().root.add_child(_tech_tree_instance)
+
+
+func toggle_controls_help() -> void:
+	if _controls_ref_instance != null and is_instance_valid(_controls_ref_instance):
+		if _controls_ref_instance.has_method("close_overlay"):
+			_controls_ref_instance.call("close_overlay")
+		else:
+			_controls_ref_instance.queue_free()
+		_controls_ref_instance = null
+		return
+	if _tech_tree_instance != null and is_instance_valid(_tech_tree_instance):
+		if _tech_tree_instance.has_method("close_overlay"):
+			_tech_tree_instance.call("close_overlay")
+		else:
+			_tech_tree_instance.queue_free()
+		_tech_tree_instance = null
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	var ref_scene: PackedScene = load(CONTROLS_REF_SCENE_PATH) as PackedScene
+	if ref_scene == null:
+		return
+	_controls_ref_instance = ref_scene.instantiate() as CanvasLayer
+	if _controls_ref_instance != null:
+		if _controls_ref_instance.has_signal("closed"):
+			_controls_ref_instance.connect("closed", func() -> void:
+				_controls_ref_instance = null
+			)
+		get_tree().root.add_child(_controls_ref_instance)
 
 
 func _apply_spectator_layout() -> void:
@@ -207,6 +257,11 @@ func _connect_camera_toasts() -> void:
 		cam.camera_toast.connect(_on_hud_toast)
 
 
+func _on_settings_changed(category: StringName) -> void:
+	if category == &"controls" or category == &"all":
+		_on_keybind_changed(&"")
+
+
 func _on_keybind_changed(_action_name: StringName) -> void:
 	var count: int = _selection_controller.idle_worker_count if _selection_controller != null else 0
 	var prod_c: int = _selection_controller.idle_production_count if _selection_controller != null else 0
@@ -215,6 +270,7 @@ func _on_keybind_changed(_action_name: StringName) -> void:
 	_on_idle_production_updated(prod_c)
 	_on_army_count_updated(army_c)
 	_refresh_tech_button_label()
+	_refresh_controls_help_button_label()
 	_refresh_aggro_badge()
 
 
@@ -230,8 +286,16 @@ func _apply_faction_hud_accent() -> void:
 func _refresh_tech_button_label() -> void:
 	if btn_tech_tree == null:
 		return
-	var hk: String = SettingsManager.get_action_display_label(&"ui_toggle_tech_tree", true) if SettingsManager != null else "U"
+	var hk: String = SettingsManager.get_action_short_label(&"ui_toggle_tech_tree") if SettingsManager != null else "U"
 	btn_tech_tree.text = ("Tech [%s]" % hk) if not hk.is_empty() else "Tech"
+
+
+func _refresh_controls_help_button_label() -> void:
+	if btn_controls_help == null:
+		return
+	var hk: String = SettingsManager.get_action_short_label(&"ui_toggle_controls_help") if SettingsManager != null else "?"
+	btn_controls_help.text = hk if not hk.is_empty() else "?"
+	btn_controls_help.tooltip_text = ("Controls Quick-Reference (%s)" % hk) if not hk.is_empty() else "Controls Quick-Reference"
 
 
 func _on_hud_toast(message: String) -> void:
@@ -409,7 +473,7 @@ func _on_select_army_pressed() -> void:
 func _on_army_count_updated(count: int) -> void:
 	if btn_select_army == null:
 		return
-	var hk: String = SettingsManager.get_action_display_label(&"cmd_select_all_army", true) if SettingsManager != null else "F9"
+	var hk: String = SettingsManager.get_action_short_label(&"cmd_select_all_army") if SettingsManager != null else "F9"
 	btn_select_army.text = ("Army: %d [%s]" % [count, hk]) if not hk.is_empty() else ("Army: %d" % count)
 	btn_select_army.disabled = count <= 0
 	btn_select_army.modulate = Color(0.32, 0.98, 0.92, 1.0) if count > 0 else Color(0.56, 0.64, 0.72, 0.72)
@@ -436,7 +500,7 @@ func _on_idle_production_updated(count: int) -> void:
 	btn_idle_production.visible = (count > 0 and not is_spec)
 	if count <= 0:
 		return
-	var hk: String = SettingsManager.get_action_display_label(&"cmd_select_idle_production", true) if SettingsManager != null else ";"
+	var hk: String = SettingsManager.get_action_short_label(&"cmd_select_idle_production") if SettingsManager != null else ";"
 	btn_idle_production.text = ("IDLE PROD: %d [%s]" % [count, hk]) if not hk.is_empty() else ("IDLE PROD: %d" % count)
 	btn_idle_production.modulate = Color(0.98, 0.78, 0.30, 1.0)
 
@@ -444,7 +508,7 @@ func _on_idle_production_updated(count: int) -> void:
 func _on_idle_workers_updated(count: int) -> void:
 	if btn_idle_workers == null:
 		return
-	var hk: String = SettingsManager.get_action_display_label(&"cmd_select_idle_worker", true) if SettingsManager != null else "`"
+	var hk: String = SettingsManager.get_action_short_label(&"cmd_select_idle_worker") if SettingsManager != null else "`"
 	btn_idle_workers.text = ("Idle Workers: %d [%s]" % [count, hk]) if not hk.is_empty() else ("Idle Workers: %d" % count)
 	btn_idle_workers.disabled = count <= 0
 	if count > 0:
@@ -473,7 +537,7 @@ func _on_game_speed_changed(_speed_scale: float) -> void:
 func _on_tactical_alert_recorded(_world_pos: Vector2, message: String) -> void:
 	if SettingsManager != null and not SettingsManager.show_alert_toasts:
 		return
-	var hk: String = SettingsManager.get_action_display_label(&"jump_last_alert", true) if SettingsManager != null else "SPC"
+	var hk: String = SettingsManager.get_action_short_label(&"jump_last_alert") if SettingsManager != null else "SPC"
 	_alert_timer = 2.2
 	if resource_alert_label != null:
 		resource_alert_label.text = ("%s  [%s]" % [message.to_upper(), hk]) if not hk.is_empty() else message.to_upper()
@@ -488,6 +552,8 @@ func _on_aggro_ai_toggled(_enabled: bool) -> void:
 func _refresh_aggro_badge() -> void:
 	if aggro_paused_badge == null:
 		return
+	var hk: String = SettingsManager.get_action_short_label(&"debug_toggle_aggro_ai") if SettingsManager != null else "F10"
+	aggro_paused_badge.text = ("AGGRO AI: PAUSED (%s)" % hk) if not hk.is_empty() else "AGGRO AI: PAUSED"
 	aggro_paused_badge.visible = not MatchManager.is_aggro_ai_enabled(get_tree() if is_inside_tree() else null)
 
 

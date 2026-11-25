@@ -16,8 +16,9 @@ func show_tooltip(title: String, hotkey: String, meta_line: String, description:
 	if title_label != null:
 		title_label.text = title
 	if hotkey_label != null:
-		hotkey_label.visible = not hotkey.is_empty()
-		hotkey_label.text = "[%s]" % hotkey
+		var hk_clean: String = hotkey.strip_edges()
+		hotkey_label.visible = not hk_clean.is_empty()
+		hotkey_label.text = "[%s]" % hk_clean
 	if meta_label != null:
 		meta_label.visible = not meta_line.is_empty()
 		meta_label.text = meta_line

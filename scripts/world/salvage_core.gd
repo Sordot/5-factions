@@ -132,15 +132,19 @@ func _complete_extraction(extractor: Node) -> void:
 				econ.add_resource(claim_team, EconomyManager.RESOURCE_COMPUTE, salvage_compute, false)
 
 	if get_parent() != null:
-		var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-		fx.z_index = 62
-		get_parent().add_child(fx)
-		fx.call("setup_floating_text", global_position + Vector2(0.0, -14.0), get_payload_label(), Color(1.0, 0.84, 0.34, 1.0))
+		var fx: CombatVFX = VFXPool.acquire_combat_vfx(62) if VFXPool != null else null
+		if fx == null:
+			fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+			fx.z_index = 62
+			get_parent().add_child(fx)
+		fx.setup_floating_text(global_position + Vector2(0.0, -14.0), get_payload_label(), Color(1.0, 0.84, 0.34, 1.0))
 
-		var burst: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-		burst.z_index = 55
-		get_parent().add_child(burst)
-		burst.call("setup_death_burst", global_position, 22.0, Color(0.32, 0.96, 1.0, 1.0), false)
+		var burst: CombatVFX = VFXPool.acquire_combat_vfx(55) if VFXPool != null else null
+		if burst == null:
+			burst = COMBAT_VFX_SCRIPT.new() as CombatVFX
+			burst.z_index = 55
+			get_parent().add_child(burst)
+		burst.setup_death_burst(global_position, 22.0, Color(0.32, 0.96, 1.0, 1.0), false)
 
 	var is_local: bool = TeamManager.is_team_controlled_by_local_human(claim_team) if TeamManager != null else (claim_team == 0)
 	if AudioManager != null and (is_local or visible):

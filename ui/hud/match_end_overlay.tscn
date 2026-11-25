@@ -166,26 +166,91 @@ layout_mode = 2
 
 [node name="ButtonRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 10
 alignment = 1
+
+[node name="BtnViewBattlefield" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(142, 32)
+layout_mode = 2
+focus_mode = 0
+text = "View Battlefield"
 
 [node name="BtnPlayAgain" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(140, 32)
+custom_minimum_size = Vector2(124, 32)
 layout_mode = 2
 focus_mode = 0
-text = "Play Again"
+text = "Rematch"
 
 [node name="BtnMainMenu" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(140, 32)
+custom_minimum_size = Vector2(124, 32)
 layout_mode = 2
 focus_mode = 0
 text = "Main Menu"
 
 [node name="BtnSandboxMode" type="Button" parent="RootControl/CenterContainer/ModalPanel/VBox/ButtonRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(140, 32)
+custom_minimum_size = Vector2(130, 32)
 layout_mode = 2
 focus_mode = 0
 text = "Sandbox Mode"
+
+[node name="InspectionBanner" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 3
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -290.0
+offset_top = 12.0
+offset_right = 290.0
+offset_bottom = 58.0
+grow_horizontal = 2
+mouse_filter = 2
+theme = ExtResource("2_theme")
+
+[node name="BannerPanel" type="PanelContainer" parent="InspectionBanner"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="BannerHBox" type="HBoxContainer" parent="InspectionBanner/BannerPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="InspectTag" type="Label" parent="InspectionBanner/BannerPanel/BannerHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.28, 0.98, 0.88, 1)
+theme_override_font_sizes/font_size = 11
+text = "POST-MATCH INSPECTION"
+
+[node name="BtnReturnScoreboard" type="Button" parent="InspectionBanner/BannerPanel/BannerHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(136, 26)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Scoreboard (Esc)"
+
+[node name="BtnBannerRematch" type="Button" parent="InspectionBanner/BannerPanel/BannerHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(96, 26)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Rematch"
+
+[node name="BtnBannerMainMenu" type="Button" parent="InspectionBanner/BannerPanel/BannerHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(96, 26)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Main Menu"

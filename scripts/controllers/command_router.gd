@@ -365,10 +365,12 @@ func _spawn_rally_ripple(target_pos: Vector2, col: Color) -> void:
 		host = get_parent()
 	if host == null:
 		return
-	var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-	fx.z_index = 59
-	host.add_child(fx)
-	fx.call("setup_rally_ripple", target_pos, col)
+	var fx: CombatVFX = VFXPool.acquire_combat_vfx(59) if VFXPool != null else null
+	if fx == null:
+		fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+		fx.z_index = 59
+		host.add_child(fx)
+	fx.setup_rally_ripple(target_pos, col)
 
 
 func _handle_building_rally_right_click(building: Building, world_pos: Vector2) -> void:
@@ -926,15 +928,17 @@ func assign_group_destinations(units: Array[Unit], center_pos: Vector2) -> Array
 
 
 func spawn_move_marker(target_pos: Vector2, marker_style: MoveMarker.MarkerStyle) -> void:
-	var host: Node = get_tree().current_scene
-	if host == null:
-		host = get_parent()
-	if host == null:
-		return
-	var marker: MoveMarker = MOVE_MARKER_SCRIPT.new()
+	var marker: MoveMarker = VFXPool.acquire_move_marker(60) if VFXPool != null else null
+	if marker == null:
+		var host: Node = get_tree().current_scene
+		if host == null:
+			host = get_parent()
+		if host == null:
+			return
+		marker = MOVE_MARKER_SCRIPT.new()
+		marker.z_index = 60
+		host.add_child(marker)
 	marker.global_position = target_pos
-	marker.z_index = 60
-	host.add_child(marker)
 	marker.configure(marker_style)
 
 

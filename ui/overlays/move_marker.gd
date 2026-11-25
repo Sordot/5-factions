@@ -15,10 +15,28 @@ enum MarkerStyle {
 @export var max_radius: float = 22.0
 
 var _elapsed: float = 0.0
+var is_pooled: bool = false
+
+
+func reset_for_pool() -> void:
+	style = MarkerStyle.MOVE
+	color = Color(0.24, 0.94, 1.0, 0.95)
+	duration = 0.36
+	max_radius = 22.0
+	_elapsed = 0.0
+	global_position = Vector2.ZERO
+
+
+func recycle() -> void:
+	if is_pooled and VFXPool != null:
+		VFXPool.recycle_node(self)
+	else:
+		queue_free()
 
 
 func configure(marker_style: MarkerStyle) -> void:
 	style = marker_style
+	_elapsed = 0.0
 	match style:
 		MarkerStyle.ATTACK:
 			color = Color(1.0, 0.34, 0.24, 0.96)
@@ -36,7 +54,7 @@ func configure(marker_style: MarkerStyle) -> void:
 func _process(delta: float) -> void:
 	_elapsed += delta
 	if _elapsed >= duration:
-		queue_free()
+		recycle()
 		return
 	queue_redraw()
 

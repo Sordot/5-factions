@@ -573,9 +573,11 @@ func _spawn_attack_tracer(
 		return
 	if not _is_vfx_visible(owner_unit, from_pos, to_pos):
 		return
-	var tracer: AttackTracer = ATTACK_TRACER_SCRIPT.new()
-	tracer.z_index = 50
-	owner_unit.get_parent().add_child(tracer)
+	var tracer: AttackTracer = VFXPool.acquire_attack_tracer(50) if VFXPool != null else null
+	if tracer == null:
+		tracer = ATTACK_TRACER_SCRIPT.new()
+		tracer.z_index = 50
+		owner_unit.get_parent().add_child(tracer)
 	tracer.setup(from_pos, to_pos, tracer_color, width, tracer_duration, arc_height, style)
 
 
@@ -594,36 +596,44 @@ func _spawn_mortar_shell_vfx(
 			on_impact.call()
 		return
 	# Always spawn mortar node so delayed splash damage always fires reliably even through Fog of War
-	var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-	fx.z_index = 52
-	owner_unit.get_parent().add_child(fx)
-	fx.call("setup_mortar_shell", from_pos, target_pos, splash_radius, flight_time, arc_height, vfx_color, on_impact)
+	var fx: CombatVFX = VFXPool.acquire_combat_vfx(52) if VFXPool != null else null
+	if fx == null:
+		fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+		fx.z_index = 52
+		owner_unit.get_parent().add_child(fx)
+	fx.setup_mortar_shell(from_pos, target_pos, splash_radius, flight_time, arc_height, vfx_color, on_impact)
 
 
 func _spawn_melee_cleave_vfx(owner_unit: Unit, origin_pos: Vector2, target_pos: Vector2, vfx_color: Color) -> void:
 	if owner_unit.get_parent() == null or not _is_vfx_visible(owner_unit, origin_pos, target_pos):
 		return
-	var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-	fx.z_index = 51
-	owner_unit.get_parent().add_child(fx)
-	fx.call("setup_melee_cleave", origin_pos, target_pos, vfx_color)
+	var fx: CombatVFX = VFXPool.acquire_combat_vfx(51) if VFXPool != null else null
+	if fx == null:
+		fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+		fx.z_index = 51
+		owner_unit.get_parent().add_child(fx)
+	fx.setup_melee_cleave(origin_pos, target_pos, vfx_color)
 
 
 func _spawn_armor_pierce_spark_vfx(owner_unit: Unit, world_pos: Vector2, dir: Vector2, vfx_color: Color) -> void:
 	if owner_unit.get_parent() == null or not _is_vfx_visible(owner_unit, world_pos, world_pos):
 		return
-	var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-	fx.z_index = 52
-	owner_unit.get_parent().add_child(fx)
-	fx.call("setup_armor_pierce_spark", world_pos, dir, vfx_color)
+	var fx: CombatVFX = VFXPool.acquire_combat_vfx(52) if VFXPool != null else null
+	if fx == null:
+		fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+		fx.z_index = 52
+		owner_unit.get_parent().add_child(fx)
+	fx.setup_armor_pierce_spark(world_pos, dir, vfx_color)
 
 
 func _spawn_aoe_blast(owner_unit: Unit, center: Vector2, radius: float, blast_color: Color) -> void:
 	if owner_unit.get_parent() == null or not _is_vfx_visible(owner_unit, center, center):
 		return
-	var fx: AbilityEffect = ABILITY_EFFECT_SCRIPT.new()
-	fx.z_index = 52
-	owner_unit.get_parent().add_child(fx)
+	var fx: AbilityEffect = VFXPool.acquire_ability_effect(52) if VFXPool != null else null
+	if fx == null:
+		fx = ABILITY_EFFECT_SCRIPT.new()
+		fx.z_index = 52
+		owner_unit.get_parent().add_child(fx)
 	fx.setup_self_pulse(center, radius, blast_color)
 
 

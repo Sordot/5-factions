@@ -241,8 +241,10 @@ func _apply_repair_step(owner_unit: Unit, delta: float) -> void:
 func _spawn_repair_beam_vfx(owner_unit: Unit, target_pos: Vector2) -> void:
 	if owner_unit.get_parent() == null or not owner_unit.visible:
 		return
-	var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-	fx.z_index = 53
-	owner_unit.get_parent().add_child(fx)
+	var fx: CombatVFX = VFXPool.acquire_combat_vfx(53) if VFXPool != null else null
+	if fx == null:
+		fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+		fx.z_index = 53
+		owner_unit.get_parent().add_child(fx)
 	var beam_col: Color = Color(0.24, 0.98, 0.88, 0.95) if (owner_unit.data != null and owner_unit.data.can_staff_compute) else Color(0.32, 1.0, 0.64, 0.95)
-	fx.call("setup_repair_beam", owner_unit.global_position, target_pos, beam_col)
+	fx.setup_repair_beam(owner_unit.global_position, target_pos, beam_col)

@@ -307,10 +307,12 @@ func register_kill(_victim: Node = null) -> void:
 		veterancy_rank = target_rank
 		var is_local_owned: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Team.PLAYER)
 		if get_parent() != null and (is_local_owned or visible):
-			var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-			fx.z_index = 56
-			get_parent().add_child(fx)
-			fx.call("setup_rank_up_pulse", global_position, veterancy_rank)
+			var fx: CombatVFX = VFXPool.acquire_combat_vfx(56) if VFXPool != null else null
+			if fx == null:
+				fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+				fx.z_index = 56
+				get_parent().add_child(fx)
+			fx.setup_rank_up_pulse(global_position, veterancy_rank)
 		if is_local_owned and AudioManager != null:
 			AudioManager.play_sfx(&"veterancy_rank_up", -3.0, 0.03)
 		queue_redraw()
@@ -1337,10 +1339,12 @@ func _die() -> void:
 	var viewer_t: int = TeamManager.get_local_human_team() if TeamManager != null else int(Team.PLAYER)
 	var is_friendly_view: bool = viewer_t < 0 or (TeamManager.are_allies(viewer_t, int(team)) if TeamManager != null else (team == Team.PLAYER))
 	if get_parent() != null and (is_friendly_view or visible):
-		var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-		fx.z_index = 53
-		get_parent().add_child(fx)
-		fx.call("setup_death_burst", global_position, burst_r, burst_col, is_heavy)
+		var fx: CombatVFX = VFXPool.acquire_combat_vfx(53) if VFXPool != null else null
+		if fx == null:
+			fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+			fx.z_index = 53
+			get_parent().add_child(fx)
+		fx.setup_death_burst(global_position, burst_r, burst_col, is_heavy)
 	if AudioManager != null and (is_friendly_view or visible):
 		AudioManager.play_explosion_sfx(global_position, -6.0, false)
 	died.emit(self)
@@ -1755,10 +1759,12 @@ func _process_salvaging(delta: float) -> void:
 		_salvage_vfx_timer -= delta
 		if _salvage_vfx_timer <= 0.0 and get_parent() != null and visible and is_instance_valid(_salvage_target):
 			_salvage_vfx_timer = 0.18
-			var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-			fx.z_index = 53
-			get_parent().add_child(fx)
-			fx.call("setup_repair_beam", global_position, _salvage_target.global_position, Color(1.0, 0.80, 0.30, 0.96))
+			var fx: CombatVFX = VFXPool.acquire_combat_vfx(53) if VFXPool != null else null
+			if fx == null:
+				fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+				fx.z_index = 53
+				get_parent().add_child(fx)
+			fx.setup_repair_beam(global_position, _salvage_target.global_position, Color(1.0, 0.80, 0.30, 0.96))
 		if completed:
 			_salvage_target = null
 			_is_salvaging_in_place = false

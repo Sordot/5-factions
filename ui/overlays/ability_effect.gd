@@ -15,6 +15,25 @@ var _to_world: Vector2 = Vector2.ZERO
 var _radius: float = 64.0
 var _color: Color = Color(0.32, 0.95, 1.0, 0.95)
 var _elapsed: float = 0.0
+var is_pooled: bool = false
+
+
+func reset_for_pool() -> void:
+	duration = 0.35
+	_style = EffectStyle.OFFENSIVE_AOE
+	_from_world = Vector2.ZERO
+	_to_world = Vector2.ZERO
+	_radius = 64.0
+	_color = Color(0.32, 0.95, 1.0, 0.95)
+	_elapsed = 0.0
+	global_position = Vector2.ZERO
+
+
+func recycle() -> void:
+	if is_pooled and VFXPool != null:
+		VFXPool.recycle_node(self)
+	else:
+		queue_free()
 
 
 func setup_aoe(from_world: Vector2, target_world: Vector2, radius: float, effect_color: Color = Color(0.42, 0.88, 1.0, 0.95)) -> void:
@@ -23,6 +42,8 @@ func setup_aoe(from_world: Vector2, target_world: Vector2, radius: float, effect
 	_to_world = target_world
 	_radius = maxf(12.0, radius)
 	_color = effect_color
+	duration = 0.35
+	_elapsed = 0.0
 	queue_redraw()
 
 
@@ -32,6 +53,8 @@ func setup_self_pulse(center_world: Vector2, radius: float, effect_color: Color 
 	_to_world = center_world
 	_radius = maxf(16.0, radius)
 	_color = effect_color
+	duration = 0.35
+	_elapsed = 0.0
 	queue_redraw()
 
 
@@ -42,13 +65,14 @@ func setup_seismic_slam(center_world: Vector2, radius: float, effect_color: Colo
 	_radius = maxf(24.0, radius)
 	_color = effect_color
 	duration = 0.44
+	_elapsed = 0.0
 	queue_redraw()
 
 
 func _process(delta: float) -> void:
 	_elapsed += delta
 	if _elapsed >= duration:
-		queue_free()
+		recycle()
 		return
 	queue_redraw()
 

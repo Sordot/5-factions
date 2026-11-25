@@ -71,10 +71,12 @@ func _apply_heal_tick(owner_unit: Unit) -> void:
 func _spawn_heal_tick_vfx(owner_unit: Unit, world_pos: Vector2, vfx_color: Color) -> void:
 	if owner_unit.get_parent() == null:
 		return
-	var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-	fx.z_index = 54
-	owner_unit.get_parent().add_child(fx)
-	fx.call("setup_heal_tick", world_pos, vfx_color)
+	var fx: CombatVFX = VFXPool.acquire_combat_vfx(54) if VFXPool != null else null
+	if fx == null:
+		fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+		fx.z_index = 54
+		owner_unit.get_parent().add_child(fx)
+	fx.setup_heal_tick(world_pos, vfx_color)
 
 
 func _draw() -> void:

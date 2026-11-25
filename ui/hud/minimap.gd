@@ -117,7 +117,19 @@ func _process(delta: float) -> void:
 		if map_viewport != null:
 			map_viewport.queue_redraw()
 		if status_badge != null and _fog_system != null:
-			status_badge.text = "FOG: ON" if _fog_system.fog_enabled else "FOG: OFF"
+			if _is_post_match_inspection():
+				status_badge.text = "INSPECT"
+			else:
+				status_badge.text = "FOG: ON" if _fog_system.fog_enabled else "FOG: OFF"
+
+
+func _is_post_match_inspection() -> bool:
+	if _match_manager != null and is_instance_valid(_match_manager):
+		return bool(_match_manager.get("is_inspecting_post_match"))
+	if is_inside_tree():
+		var mm: Node = get_tree().get_first_node_in_group("match_manager")
+		return mm != null and is_instance_valid(mm) and bool(mm.get("is_inspecting_post_match"))
+	return false
 
 
 func _on_fog_updated() -> void:
@@ -144,7 +156,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if map_viewport == null or not is_visible_in_tree() or event.is_echo():
+	if map_viewport == null or not is_visible_in_tree() or event.is_echo() or _is_post_match_inspection():
 		return
 	if not event.is_action_pressed("cmd_attack_move"):
 		return
@@ -181,6 +193,11 @@ func _on_map_viewport_gui_input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
+				if _is_post_match_inspection():
+					_is_left_dragging = true
+					_move_camera_to_minimap_point(mb.position)
+					map_viewport.accept_event()
+					return
 				if _selection_controller == null:
 					_resolve_references()
 				if _selection_controller != null and _selection_controller.is_attack_move_targeting:
@@ -249,6 +266,8 @@ func _move_camera_to_minimap_point(local_pos: Vector2) -> void:
 
 
 func _issue_order_at_minimap_point(local_pos: Vector2) -> void:
+	if _is_post_match_inspection():
+		return
 	if _selection_controller == null:
 		_resolve_references()
 	if _selection_controller == null:

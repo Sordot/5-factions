@@ -53,6 +53,7 @@ const KEYBIND_DEFS: Array = [
 	{"action": &"camera_toggle_edge_pan", "label": "Toggle Edge-Pan", "default_key": KEY_F12, "category": "Camera & Navigation"},
 	{"action": &"camera_toggle_fullscreen", "label": "Toggle Fullscreen", "default_key": KEY_F11, "category": "System"},
 	{"action": &"ui_toggle_tech_tree", "label": "Toggle Tech Tree", "default_key": KEY_U, "category": "System"},
+	{"action": &"ui_toggle_controls_help", "label": "Toggle Controls Reference", "default_key": KEY_SLASH, "category": "System"},
 	{"action": &"game_speed_down", "label": "Game Speed Slower", "default_key": KEY_BRACKETLEFT, "category": "System"},
 	{"action": &"game_speed_up", "label": "Game Speed Faster", "default_key": KEY_BRACKETRIGHT, "category": "System"},
 	{"action": &"debug_toggle_aggro_ai", "label": "Toggle Aggro AI (Debug)", "default_key": KEY_F10, "category": "System"},
@@ -417,6 +418,10 @@ func refresh_mouse_mode() -> void:
 		if tech_node != null and is_instance_valid(tech_node) and not tech_node.is_queued_for_deletion():
 			should_confine = false
 	if should_confine and is_inside_tree():
+		var help_node: Node = get_tree().get_first_node_in_group("controls_reference_overlay")
+		if help_node != null and is_instance_valid(help_node) and not help_node.is_queued_for_deletion():
+			should_confine = false
+	if should_confine and is_inside_tree():
 		var end_node: Node = get_tree().get_first_node_in_group("match_end_overlay")
 		if end_node != null and is_instance_valid(end_node) and end_node.has_method("is_summary_visible"):
 			if bool(end_node.call("is_summary_visible")):
@@ -582,6 +587,25 @@ func get_action_display_label(action_name: StringName, compact: bool = false) ->
 	return format_binding(get_action_binding(action_name), compact)
 
 
+func get_action_short_label(action_name: StringName) -> String:
+	if InputMap.has_action(action_name):
+		var events: Array[InputEvent] = InputMap.action_get_events(action_name)
+		if events.is_empty():
+			return ""
+		for ev: InputEvent in events:
+			if ev is InputEventKey:
+				var kev: InputEventKey = ev as InputEventKey
+				var code: int = int(kev.keycode) if kev.keycode != KEY_NONE else int(kev.physical_keycode)
+				if code != KEY_NONE:
+					return format_keycode(code, true)
+			elif ev is InputEventMouseButton:
+				var mev: InputEventMouseButton = ev as InputEventMouseButton
+				if mev.button_index > 0:
+					return format_mouse_button(int(mev.button_index), true)
+		return ""
+	return get_action_display_label(action_name, true)
+
+
 func get_action_key_label(action_name: StringName) -> String:
 	return get_action_display_label(action_name, false)
 
@@ -639,6 +663,8 @@ func format_keycode(keycode: int, compact: bool = false) -> String:
 			return "]"
 		KEY_SEMICOLON:
 			return ";"
+		KEY_SLASH:
+			return "?"
 		KEY_PERIOD:
 			return "."
 		KEY_NONE:

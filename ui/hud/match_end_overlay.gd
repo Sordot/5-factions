@@ -15,19 +15,29 @@ extends CanvasLayer
 @onready var btn_metric_income: Button = %BtnMetricIncome
 @onready var btn_metric_units: Button = %BtnMetricUnits
 @onready var timeline_graph: TimelineGraph = %TimelineGraph
+@onready var btn_view_battlefield: Button = %BtnViewBattlefield
 @onready var btn_play_again: Button = %BtnPlayAgain
 @onready var btn_main_menu: Button = %BtnMainMenu
 @onready var btn_sandbox_mode: Button = %BtnSandboxMode
+@onready var inspection_banner: Control = %InspectionBanner
+@onready var btn_return_scoreboard: Button = %BtnReturnScoreboard
+@onready var btn_banner_rematch: Button = %BtnBannerRematch
+@onready var btn_banner_main_menu: Button = %BtnBannerMainMenu
 
 var _active_tab: StringName = &"summary"
 var _active_metric: StringName = TimelineGraph.METRIC_ARMY_VALUE
+var _is_inspecting_battlefield: bool = false
 
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_to_group("match_end_overlay")
 	layer = 10
 	if root_control != null:
 		root_control.visible = false
+	if inspection_banner != null:
+		inspection_banner.visible = false
+		inspection_banner.add_to_group("blocks_edge_pan")
 	if btn_tab_summary != null:
 		btn_tab_summary.pressed.connect(func() -> void:
 			if AudioManager != null:
@@ -58,14 +68,30 @@ func _ready() -> void:
 				AudioManager.play_ui_click()
 			_set_active_metric(TimelineGraph.METRIC_UNIT_COUNT)
 		)
+	if btn_view_battlefield != null:
+		btn_view_battlefield.pressed.connect(_on_view_battlefield_pressed)
 	if btn_play_again != null:
 		btn_play_again.pressed.connect(_on_play_again_pressed)
 	if btn_main_menu != null:
 		btn_main_menu.pressed.connect(_on_main_menu_pressed)
 	if btn_sandbox_mode != null:
 		btn_sandbox_mode.pressed.connect(_on_sandbox_mode_pressed)
+	if btn_return_scoreboard != null:
+		btn_return_scoreboard.pressed.connect(return_to_scoreboard)
+	if btn_banner_rematch != null:
+		btn_banner_rematch.pressed.connect(_on_play_again_pressed)
+	if btn_banner_main_menu != null:
+		btn_banner_main_menu.pressed.connect(_on_main_menu_pressed)
 	_set_active_tab(&"summary")
 	_set_active_metric(TimelineGraph.METRIC_ARMY_VALUE)
+
+
+func _input(event: InputEvent) -> void:
+	if not _is_inspecting_battlefield or event.is_echo():
+		return
+	if event.is_action_pressed("cmd_cancel"):
+		get_viewport().set_input_as_handled()
+		return_to_scoreboard()
 
 
 func _set_active_tab(tab: StringName) -> void:
@@ -95,6 +121,28 @@ func _set_active_metric(metric_key: StringName) -> void:
 
 func is_summary_visible() -> bool:
 	return root_control != null and root_control.visible
+
+
+func is_inspecting_battlefield() -> bool:
+	return _is_inspecting_battlefield
+
+
+func return_to_scoreboard() -> void:
+	if not _is_inspecting_battlefield:
+		return
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	_is_inspecting_battlefield = false
+	if inspection_banner != null:
+		inspection_banner.visible = false
+	if is_inside_tree():
+		var match_mgr: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+		if match_mgr != null:
+			match_mgr.exit_post_match_inspection()
+	if root_control != null:
+		root_control.visible = true
+	if SettingsManager != null:
+		SettingsManager.refresh_mouse_mode()
 
 
 func show_summary(stats: Dictionary) -> void:
@@ -291,25 +339,56 @@ func _add_multi_custom_row(metric: String, entries: Array[Dictionary], texts: Ar
 
 
 func hide_summary() -> void:
+	_is_inspecting_battlefield = false
 	if root_control != null:
 		root_control.visible = false
+	if inspection_banner != null:
+		inspection_banner.visible = false
 	if SettingsManager != null:
 		SettingsManager.refresh_mouse_mode()
+
+
+func _on_view_battlefield_pressed() -> void:
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	_is_inspecting_battlefield = true
+	if root_control != null:
+		root_control.visible = false
+	if inspection_banner != null:
+		inspection_banner.visible = true
+	if is_inside_tree():
+		var match_mgr: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+		if match_mgr != null:
+			match_mgr.enter_post_match_inspection()
 
 
 func _on_play_again_pressed() -> void:
 	if AudioManager != null:
 		AudioManager.play_ui_click()
-	Engine.time_scale = 1.0
 	if is_inside_tree():
+		var match_mgr: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+		if match_mgr != null:
+			match_mgr.request_rematch()
+			return
+		Engine.time_scale = 1.0
+		get_tree().paused = false
+		if VFXPool != null:
+			VFXPool.clear_pool()
 		get_tree().reload_current_scene()
 
 
 func _on_main_menu_pressed() -> void:
 	if AudioManager != null:
 		AudioManager.play_ui_click()
-	Engine.time_scale = 1.0
 	if is_inside_tree():
+		var match_mgr: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+		if match_mgr != null:
+			match_mgr.return_to_main_menu()
+			return
+		Engine.time_scale = 1.0
+		get_tree().paused = false
+		if VFXPool != null:
+			VFXPool.clear_pool()
 		get_tree().change_scene_to_file(GameConfig.MAIN_MENU_SCENE)
 
 

@@ -18,6 +18,26 @@ var end_world: Vector2 = Vector2.ZERO
 var _arc_height: float = 0.0
 var _style: int = TracerStyle.PULSE_BOLT
 var _elapsed: float = 0.0
+var is_pooled: bool = false
+
+
+func reset_for_pool() -> void:
+	start_world = Vector2.ZERO
+	end_world = Vector2.ZERO
+	color = Color(0.35, 0.98, 0.92, 0.95)
+	duration = 0.12
+	line_width = 2.5
+	_arc_height = 0.0
+	_style = TracerStyle.PULSE_BOLT
+	_elapsed = 0.0
+	global_position = Vector2.ZERO
+
+
+func recycle() -> void:
+	if is_pooled and VFXPool != null:
+		VFXPool.recycle_node(self)
+	else:
+		queue_free()
 
 
 func setup(
@@ -36,13 +56,14 @@ func setup(
 	duration = maxf(0.05, tracer_duration)
 	_arc_height = arc_height
 	_style = TracerStyle.ARC_SHELL if arc_height > 1.0 else style
+	_elapsed = 0.0
 	queue_redraw()
 
 
 func _process(delta: float) -> void:
 	_elapsed += delta
 	if _elapsed >= duration:
-		queue_free()
+		recycle()
 		return
 	queue_redraw()
 

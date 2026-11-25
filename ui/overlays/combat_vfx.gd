@@ -36,6 +36,40 @@ var _rank_level: int = 1
 var _seed: int = 1337
 var _draw_visuals: bool = true
 var _label_text: String = ""
+var is_pooled: bool = false
+
+
+func is_critical_flight() -> bool:
+	return _mode == VFXMode.MORTAR_SHELL and not _impacted
+
+
+func reset_for_pool() -> void:
+	_mode = VFXMode.DEATH_BURST
+	_elapsed = 0.0
+	_duration = 0.30
+	_color = Color(0.32, 0.98, 0.90, 1.0)
+	_from_world = Vector2.ZERO
+	_target_world = Vector2.ZERO
+	_radius = 64.0
+	_flight_time = 0.48
+	_blast_duration = 0.28
+	_arc_height = 72.0
+	_impacted = false
+	_on_impact = Callable()
+	_dir = Vector2.RIGHT
+	_is_heavy = false
+	_rank_level = 1
+	_draw_visuals = true
+	_label_text = ""
+	global_position = Vector2.ZERO
+
+
+func recycle() -> void:
+	_on_impact = Callable()
+	if is_pooled and VFXPool != null:
+		VFXPool.recycle_node(self)
+	else:
+		queue_free()
 
 
 func setup_mortar_shell(
@@ -177,7 +211,7 @@ func _process(delta: float) -> void:
 			_impacted = true
 			if _on_impact.is_valid():
 				_on_impact.call()
-		queue_free()
+		recycle()
 		return
 	queue_redraw()
 

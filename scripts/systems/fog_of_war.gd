@@ -19,6 +19,7 @@ const COLOR_VISIBLE: Color = Color(0.0, 0.0, 0.0, 0.0)
 @export var fog_enabled: bool = true
 @export var los_shadowing_enabled: bool = true
 
+var post_match_reveal: bool = false
 var grid_width: int = 1
 var grid_height: int = 1
 var fog_image: Image = null
@@ -129,6 +130,14 @@ func set_fog_enabled(enabled: bool) -> void:
 	refresh_visibility()
 
 
+func set_post_match_reveal(enabled: bool) -> void:
+	if post_match_reveal == enabled:
+		return
+	post_match_reveal = enabled
+	_prev_grid.fill(255)
+	refresh_visibility()
+
+
 func reset_fog() -> void:
 	_spotted_buildings.clear()
 	_static_building_vision_cells.clear()
@@ -143,7 +152,7 @@ func refresh_visibility() -> void:
 		return
 
 	var total: int = grid_width * grid_height
-	if not fog_enabled or (GameConfig != null and GameConfig.mutator_no_fog):
+	if post_match_reveal or not fog_enabled or (GameConfig != null and GameConfig.mutator_no_fog):
 		for i: int in range(total):
 			_grid[i] = VisibilityState.VISIBLE
 		_sync_texture_if_dirty()
@@ -231,7 +240,7 @@ func get_visibility_at_cell(cell: Vector2i) -> int:
 
 
 func get_visibility_at_world_pos(world_pos: Vector2) -> int:
-	if not fog_enabled:
+	if post_match_reveal or not fog_enabled:
 		return VisibilityState.VISIBLE
 	var cell: Vector2i = world_to_cell(world_pos)
 	return get_visibility_at_cell(cell)

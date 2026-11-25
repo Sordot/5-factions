@@ -37,6 +37,7 @@ var player_peak_bandwidth: int = 0
 var enemy_peak_bandwidth: int = 0
 
 var is_match_over: bool = false
+var is_inspecting_post_match: bool = false
 @export var sandbox_mode_active: bool = false
 
 var _eval_timer: float = 0.0
@@ -797,13 +798,110 @@ func _record_timeline_sample(force_append: bool = false) -> void:
 
 
 func enter_sandbox_mode() -> void:
+	if is_inspecting_post_match:
+		_set_inspection_nodes_process_mode(Node.PROCESS_MODE_INHERIT)
+		is_inspecting_post_match = false
 	sandbox_mode_active = true
 	is_match_over = false
+	if is_inside_tree():
+		get_tree().paused = false
+		var fog: FogOfWarSystem = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+		if fog != null:
+			fog.set_post_match_reveal(false)
 	var overlay: Node = _get_end_overlay()
 	if overlay != null and overlay.has_method("hide_summary"):
 		overlay.hide_summary()
 	if SettingsManager != null:
 		SettingsManager.set_gameplay_cursor_active(true)
+
+
+func enter_post_match_inspection() -> void:
+	if not is_inside_tree():
+		return
+	is_inspecting_post_match = true
+	Engine.time_scale = 1.0
+	get_tree().paused = true
+
+	var sel: SelectionController = get_tree().get_first_node_in_group("selection_controller") as SelectionController
+	if sel != null:
+		sel.clear_selection()
+		sel.reset_command_cursors()
+	else:
+		Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
+		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+
+	_set_inspection_nodes_process_mode(Node.PROCESS_MODE_ALWAYS)
+
+	var fog: FogOfWarSystem = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	if fog != null:
+		fog.set_post_match_reveal(true)
+	if SettingsManager != null:
+		SettingsManager.set_gameplay_cursor_active(true)
+
+
+func exit_post_match_inspection() -> void:
+	if not is_inside_tree():
+		return
+	is_inspecting_post_match = false
+	_set_inspection_nodes_process_mode(Node.PROCESS_MODE_INHERIT)
+	var sel: SelectionController = get_tree().get_first_node_in_group("selection_controller") as SelectionController
+	if sel != null:
+		sel.clear_selection()
+		sel.reset_command_cursors()
+	if SettingsManager != null:
+		SettingsManager.set_gameplay_cursor_active(false)
+
+
+func request_rematch() -> void:
+	_prepare_clean_scene_transition()
+	if is_inside_tree():
+		get_tree().reload_current_scene()
+
+
+func return_to_main_menu() -> void:
+	_prepare_clean_scene_transition()
+	if is_inside_tree():
+		get_tree().change_scene_to_file(GameConfig.MAIN_MENU_SCENE)
+
+
+func _prepare_clean_scene_transition() -> void:
+	is_inspecting_post_match = false
+	_set_inspection_nodes_process_mode(Node.PROCESS_MODE_INHERIT)
+	Engine.time_scale = 1.0
+	if is_inside_tree():
+		get_tree().paused = false
+		var sel: Node = get_tree().get_first_node_in_group("selection_controller")
+		if sel != null and is_instance_valid(sel) and sel.has_method("reset_command_cursors"):
+			sel.call("reset_command_cursors")
+	Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	if VFXPool != null:
+		VFXPool.clear_pool()
+	if SpatialGrid != null and SpatialGrid.has_method("clear_all"):
+		SpatialGrid.call("clear_all")
+
+
+func _set_inspection_nodes_process_mode(mode: Node.ProcessMode) -> void:
+	if not is_inside_tree():
+		return
+	var cam: Node = get_tree().get_first_node_in_group("rts_camera")
+	if cam != null and is_instance_valid(cam):
+		cam.process_mode = mode
+	var minimap: Node = get_tree().get_first_node_in_group("tactical_minimap")
+	if minimap != null and is_instance_valid(minimap):
+		minimap.process_mode = mode
+	var sel: Node = get_tree().get_first_node_in_group("selection_controller")
+	if sel != null and is_instance_valid(sel):
+		sel.process_mode = mode
+	var root: Node = get_tree().current_scene
+	if root != null:
+		var sel_hud: Node = root.get_node_or_null("SelectionHUD")
+		if sel_hud == null:
+			sel_hud = root.find_child("SelectionHUD", true, false)
+		if sel_hud != null and is_instance_valid(sel_hud):
+			sel_hud.process_mode = mode
+			if sel_hud.get_parent() is CanvasLayer:
+				sel_hud.get_parent().process_mode = mode
 
 
 func evaluate_match_state() -> void:
@@ -977,6 +1075,12 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 
 	if SettingsManager != null:
 		SettingsManager.set_gameplay_cursor_active(false)
+	var sel_end: Node = get_tree().get_first_node_in_group("selection_controller") if is_inside_tree() else null
+	if sel_end != null and is_instance_valid(sel_end) and sel_end.has_method("reset_command_cursors"):
+		sel_end.call("reset_command_cursors")
+	else:
+		Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
+		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 
 	match_ended.emit(int(winner_team), stats)
 

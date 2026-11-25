@@ -21,6 +21,13 @@ func _ready() -> void:
 	layer = 22
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_to_group("tech_tree_overlay")
+	if is_inside_tree():
+		for help_node: Node in get_tree().get_nodes_in_group("controls_reference_overlay"):
+			if is_instance_valid(help_node) and not help_node.is_queued_for_deletion():
+				if help_node.has_method("close_overlay"):
+					help_node.call("close_overlay")
+				else:
+					help_node.queue_free()
 	if TeamManager != null:
 		var human_team: int = TeamManager.get_local_human_team()
 		_tracked_team = human_team if human_team >= 0 else 0
@@ -29,8 +36,15 @@ func _ready() -> void:
 		btn_close.pressed.connect(close_overlay)
 	if SettingsManager != null:
 		SettingsManager.refresh_mouse_mode()
+		if not SettingsManager.settings_changed.is_connected(_on_settings_changed):
+			SettingsManager.settings_changed.connect(_on_settings_changed)
 	_rebuild_faction_tabs()
 	_rebuild_tree()
+
+
+func _on_settings_changed(category: StringName) -> void:
+	if category == &"controls" or category == &"all":
+		_rebuild_tree()
 
 
 func _exit_tree() -> void:
@@ -118,7 +132,7 @@ func _rebuild_tree() -> void:
 
 	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 	var faction: FactionData = _resolve_active_faction()
-	var hk: String = SettingsManager.get_action_display_label(&"ui_toggle_tech_tree", true) if SettingsManager != null else "U"
+	var hk: String = SettingsManager.get_action_short_label(&"ui_toggle_tech_tree") if SettingsManager != null else "U"
 	if btn_close != null:
 		btn_close.text = ("Close (%s)" % hk) if not hk.is_empty() else "Close"
 

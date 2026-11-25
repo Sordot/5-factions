@@ -231,7 +231,24 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
+func _is_post_match_inspection() -> bool:
+	if not is_inside_tree():
+		return false
+	var mm: Node = get_tree().get_first_node_in_group("match_manager")
+	return mm != null and is_instance_valid(mm) and bool(mm.get("is_inspecting_post_match"))
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if _is_post_match_inspection():
+		if event is InputEventMouseButton:
+			var pm_mb: InputEventMouseButton = event
+			if pm_mb.button_index == MOUSE_BUTTON_LEFT and pm_mb.pressed:
+				_select_at_point(get_global_mouse_position(), false, false, false)
+				get_viewport().set_input_as_handled()
+			elif pm_mb.button_index == MOUSE_BUTTON_RIGHT and pm_mb.pressed:
+				get_viewport().set_input_as_handled()
+		return
+
 	if event.is_action_pressed("cmd_cancel"):
 		if _is_dragging:
 			_cancel_drag_box()
@@ -250,7 +267,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		var pause_menu: PauseMenu = get_tree().get_first_node_in_group("pause_menu") as PauseMenu
-		if pause_menu != null and not pause_menu.is_settings_open() and not pause_menu.is_tech_tree_open():
+		var help_open: bool = get_tree().get_first_node_in_group("controls_reference_overlay") != null
+		if pause_menu != null and not pause_menu.is_settings_open() and not pause_menu.is_tech_tree_open() and not pause_menu.is_controls_help_open() and not help_open:
 			pause_menu.toggle_pause()
 			get_viewport().set_input_as_handled()
 		return
@@ -1513,7 +1531,7 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 	if command_router == null:
 		return
 
-	if TeamManager != null and TeamManager.is_spectator_mode():
+	if (TeamManager != null and TeamManager.is_spectator_mode()) or _is_post_match_inspection():
 		_set_selected_units([])
 		_set_selected_buildings([])
 		var any_u: Unit = command_router.find_any_unit_at_point(world_point)
@@ -2227,7 +2245,7 @@ func _apply_command_cursor(state: StringName) -> void:
 func _is_any_modal_open() -> bool:
 	if not is_inside_tree():
 		return true
-	if get_tree().paused:
+	if get_tree().paused and not _is_post_match_inspection():
 		return true
 	var pause_node: Node = get_tree().get_first_node_in_group("pause_menu")
 	if pause_node != null and is_instance_valid(pause_node):
@@ -2237,11 +2255,16 @@ func _is_any_modal_open() -> bool:
 			return true
 		if pause_node.has_method("is_tech_tree_open") and bool(pause_node.call("is_tech_tree_open")):
 			return true
+		if pause_node.has_method("is_controls_help_open") and bool(pause_node.call("is_controls_help_open")):
+			return true
 	var settings_node: Node = get_tree().get_first_node_in_group("settings_menu")
 	if settings_node != null and is_instance_valid(settings_node) and not settings_node.is_queued_for_deletion():
 		return true
 	var tech_node: Node = get_tree().get_first_node_in_group("tech_tree_overlay")
 	if tech_node != null and is_instance_valid(tech_node) and not tech_node.is_queued_for_deletion():
+		return true
+	var help_node: Node = get_tree().get_first_node_in_group("controls_reference_overlay")
+	if help_node != null and is_instance_valid(help_node) and not help_node.is_queued_for_deletion():
 		return true
 	var end_node: Node = get_tree().get_first_node_in_group("match_end_overlay")
 	if end_node != null and is_instance_valid(end_node) and end_node.has_method("is_summary_visible"):
@@ -2305,7 +2328,7 @@ func _set_hovered_entity(next_entity: Node) -> void:
 func _find_top_hover_entity(world_point: Vector2) -> Node:
 	if command_router == null:
 		return null
-	var is_spec: bool = TeamManager != null and TeamManager.is_spectator_mode()
+	var is_spec: bool = (TeamManager != null and TeamManager.is_spectator_mode()) or _is_post_match_inspection()
 	if is_spec:
 		var su: Unit = command_router.find_any_unit_at_point(world_point)
 		if su != null:
@@ -2345,7 +2368,7 @@ func _find_top_hover_entity(world_point: Vector2) -> Node:
 
 
 func _update_command_cursor() -> void:
-	if _is_any_modal_open():
+	if _is_any_modal_open() or _is_post_match_inspection():
 		_clear_custom_cursor()
 		return
 	if active_targeting_ability != null:

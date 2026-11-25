@@ -445,10 +445,12 @@ func _complete_construction() -> void:
 	completion_flash_timer = COMPLETION_FLASH_DURATION
 	if get_parent() != null:
 		var vfx_col: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else Color(0.24, 0.96, 0.88, 1.0)
-		var cfx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-		cfx.z_index = 54
-		get_parent().add_child(cfx)
-		cfx.call("setup_building_complete", global_position, footprint_radius, vfx_col)
+		var cfx: CombatVFX = VFXPool.acquire_combat_vfx(54) if VFXPool != null else null
+		if cfx == null:
+			cfx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+			cfx.z_index = 54
+			get_parent().add_child(cfx)
+		cfx.setup_building_complete(global_position, footprint_radius, vfx_col)
 	_register_with_economy()
 	var econ_done: EconomyManager = _get_economy_manager()
 	if econ_done != null:
@@ -1229,10 +1231,12 @@ func _destroy() -> void:
 	var viewer_b: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 	var is_friendly_b_view: bool = viewer_b < 0 or (TeamManager.are_allies(viewer_b, int(team)) if TeamManager != null else (team == Unit.Team.PLAYER))
 	if get_parent() != null and (is_friendly_b_view or visible):
-		var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-		fx.z_index = 54
-		get_parent().add_child(fx)
-		fx.call("setup_death_burst", global_position, maxf(28.0, footprint_radius * 0.95), burst_col, true)
+		var fx: CombatVFX = VFXPool.acquire_combat_vfx(54) if VFXPool != null else null
+		if fx == null:
+			fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+			fx.z_index = 54
+			get_parent().add_child(fx)
+		fx.setup_death_burst(global_position, maxf(28.0, footprint_radius * 0.95), burst_col, true)
 	if (is_core_hub or building_type_id == &"nexus_vat") and is_inside_tree():
 		var cam: Node = get_tree().get_first_node_in_group("rts_camera")
 		if cam != null and cam.has_method("add_camera_shake"):

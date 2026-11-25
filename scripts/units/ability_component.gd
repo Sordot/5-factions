@@ -310,25 +310,31 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 func _spawn_self_pulse(owner_unit: Unit, radius: float, effect_color: Color) -> void:
 	if owner_unit.get_parent() == null:
 		return
-	var fx: AbilityEffect = ABILITY_EFFECT_SCRIPT.new()
-	fx.z_index = 55
-	owner_unit.get_parent().add_child(fx)
+	var fx: AbilityEffect = VFXPool.acquire_ability_effect(55) if VFXPool != null else null
+	if fx == null:
+		fx = ABILITY_EFFECT_SCRIPT.new()
+		fx.z_index = 55
+		owner_unit.get_parent().add_child(fx)
 	fx.setup_self_pulse(owner_unit.global_position, radius, effect_color)
 
 
 func _spawn_seismic_slam(owner_unit: Unit, radius: float, effect_color: Color) -> void:
 	if owner_unit.get_parent() == null:
 		return
-	var fx: AbilityEffect = ABILITY_EFFECT_SCRIPT.new()
-	fx.z_index = 55
-	owner_unit.get_parent().add_child(fx)
+	var fx: AbilityEffect = VFXPool.acquire_ability_effect(55) if VFXPool != null else null
+	if fx == null:
+		fx = ABILITY_EFFECT_SCRIPT.new()
+		fx.z_index = 55
+		owner_unit.get_parent().add_child(fx)
 	fx.setup_seismic_slam(owner_unit.global_position, radius, effect_color)
 
 
 func _spawn_aoe_effect(owner_unit: Unit, target_pos: Vector2, radius: float, effect_color: Color = Color(0.42, 0.88, 1.0, 0.95)) -> void:
 	if owner_unit.get_parent() == null:
 		return
-	var fx: AbilityEffect = ABILITY_EFFECT_SCRIPT.new()
-	fx.z_index = 55
-	owner_unit.get_parent().add_child(fx)
+	var fx: AbilityEffect = VFXPool.acquire_ability_effect(55) if VFXPool != null else null
+	if fx == null:
+		fx = ABILITY_EFFECT_SCRIPT.new()
+		fx.z_index = 55
+		owner_unit.get_parent().add_child(fx)
 	fx.setup_aoe(owner_unit.global_position, target_pos, radius, effect_color)

@@ -391,10 +391,12 @@ func _spawn_tracer(origin: Vector2, end_pos: Vector2, col: Color, width: float, 
 	if fog != null and fog.has_method("is_world_pos_visible") and fog.get("fog_enabled"):
 		if not bool(fog.call("is_world_pos_visible", origin)) and not bool(fog.call("is_world_pos_visible", end_pos)):
 			return
-	var tracer: Node2D = ATTACK_TRACER_SCRIPT.new() as Node2D
-	tracer.z_index = 45
-	host.add_child(tracer)
-	tracer.call("setup", origin, end_pos, col, width, duration, 0.0, style)
+	var tracer: AttackTracer = VFXPool.acquire_attack_tracer(45) if VFXPool != null else null
+	if tracer == null:
+		tracer = ATTACK_TRACER_SCRIPT.new() as AttackTracer
+		tracer.z_index = 45
+		host.add_child(tracer)
+	tracer.setup(origin, end_pos, col, width, duration, 0.0, style)
 
 
 func _spawn_armor_spark(world_pos: Vector2, shot_dir: Vector2, col: Color) -> void:
@@ -403,10 +405,12 @@ func _spawn_armor_spark(world_pos: Vector2, shot_dir: Vector2, col: Color) -> vo
 	var host: Node = owner_building.get_parent()
 	if host == null:
 		return
-	var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-	fx.z_index = 48
-	host.add_child(fx)
-	fx.call("setup_armor_pierce_spark", world_pos, shot_dir, col)
+	var fx: CombatVFX = VFXPool.acquire_combat_vfx(48) if VFXPool != null else null
+	if fx == null:
+		fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+		fx.z_index = 48
+		host.add_child(fx)
+	fx.setup_armor_pierce_spark(world_pos, shot_dir, col)
 
 
 func _spawn_mortar_vfx(
@@ -427,7 +431,9 @@ func _spawn_mortar_vfx(
 		if on_impact.is_valid():
 			on_impact.call()
 		return
-	var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
-	fx.z_index = 50
-	host.add_child(fx)
-	fx.call("setup_mortar_shell", origin, impact_pos, splash_r, flight_time, arc_h, col, on_impact)
+	var fx: CombatVFX = VFXPool.acquire_combat_vfx(50) if VFXPool != null else null
+	if fx == null:
+		fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+		fx.z_index = 50
+		host.add_child(fx)
+	fx.setup_mortar_shell(origin, impact_pos, splash_r, flight_time, arc_h, col, on_impact)
