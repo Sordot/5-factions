@@ -222,10 +222,10 @@ func _build_slot_roster_widgets() -> void:
 
 	for i: int in range(4):
 		var row: HBoxContainer = HBoxContainer.new()
-		row.add_theme_constant_override("separation", 4)
+		row.add_theme_constant_override("separation", 3)
 
 		var pip: ColorRect = ColorRect.new()
-		pip.custom_minimum_size = Vector2(7.0, 22.0)
+		pip.custom_minimum_size = Vector2(6.0, 22.0)
 		pip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		var pal: Dictionary = TeamManager.DEFAULT_TEAM_PALETTES[i % TeamManager.DEFAULT_TEAM_PALETTES.size()] if TeamManager != null else {"primary": Color(0.24, 0.96, 0.88, 1.0)}
 		pip.color = pal["primary"] as Color
@@ -233,13 +233,13 @@ func _build_slot_roster_widgets() -> void:
 
 		var slot_lbl: Label = Label.new()
 		slot_lbl.text = "P%d" % (i + 1)
-		slot_lbl.custom_minimum_size = Vector2(22.0, 0.0)
+		slot_lbl.custom_minimum_size = Vector2(20.0, 0.0)
 		slot_lbl.add_theme_font_size_override("font_size", 11)
 		slot_lbl.add_theme_color_override("font_color", pal["primary"] as Color)
 		row.add_child(slot_lbl)
 
 		var ctrl_btn: Button = Button.new()
-		ctrl_btn.custom_minimum_size = Vector2(54.0, 24.0)
+		ctrl_btn.custom_minimum_size = Vector2(48.0, 24.0)
 		ctrl_btn.focus_mode = Control.FOCUS_NONE
 		ctrl_btn.add_theme_font_size_override("font_size", 10)
 		ctrl_btn.tooltip_text = "Click to switch between Human and AI (all AI = Spectator Mode)"
@@ -250,7 +250,9 @@ func _build_slot_roster_widgets() -> void:
 		row.add_child(ctrl_btn)
 
 		var ally_opt: OptionButton = OptionButton.new()
-		ally_opt.custom_minimum_size = Vector2(52.0, 24.0)
+		ally_opt.custom_minimum_size = Vector2(46.0, 24.0)
+		ally_opt.clip_text = true
+		ally_opt.fit_to_longest_item = false
 		ally_opt.focus_mode = Control.FOCUS_NONE
 		ally_opt.add_theme_font_size_override("font_size", 10)
 		ally_opt.add_item("T-A", 0)
@@ -263,7 +265,9 @@ func _build_slot_roster_widgets() -> void:
 		row.add_child(ally_opt)
 
 		var fac_opt: OptionButton = OptionButton.new()
-		fac_opt.custom_minimum_size = Vector2(78.0, 24.0)
+		fac_opt.custom_minimum_size = Vector2(66.0, 24.0)
+		fac_opt.clip_text = true
+		fac_opt.fit_to_longest_item = false
 		fac_opt.focus_mode = Control.FOCUS_NONE
 		fac_opt.add_theme_font_size_override("font_size", 10)
 		if _playable_factions.is_empty():
@@ -283,8 +287,10 @@ func _build_slot_roster_widgets() -> void:
 		row.add_child(fac_opt)
 
 		var diff_opt: OptionButton = OptionButton.new()
-		diff_opt.custom_minimum_size = Vector2(78.0, 24.0)
+		diff_opt.custom_minimum_size = Vector2(68.0, 24.0)
 		diff_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		diff_opt.clip_text = true
+		diff_opt.fit_to_longest_item = false
 		diff_opt.focus_mode = Control.FOCUS_NONE
 		diff_opt.add_theme_font_size_override("font_size", 10)
 		diff_opt.add_item("Relaxed", int(GameConfig.AIDifficulty.RELAXED))
@@ -296,8 +302,10 @@ func _build_slot_roster_widgets() -> void:
 		row.add_child(diff_opt)
 
 		var style_opt: OptionButton = OptionButton.new()
-		style_opt.custom_minimum_size = Vector2(78.0, 24.0)
+		style_opt.custom_minimum_size = Vector2(66.0, 24.0)
 		style_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		style_opt.clip_text = true
+		style_opt.fit_to_longest_item = false
 		style_opt.focus_mode = Control.FOCUS_NONE
 		style_opt.add_theme_font_size_override("font_size", 10)
 		style_opt.add_item("Balanced", int(GameConfig.AIPlaystyle.BALANCED))
@@ -527,7 +535,12 @@ func _wire_locked_card(btn: Button, dossier_name: String, briefing: String, acce
 		_inspected_locked_btn = btn
 		_refresh_locked_card_highlights()
 		if dossier_notice_label != null:
-			dossier_notice_label.text = "[CLASSIFIED PREVIEW] %s — %s (Locked; GENESIS_V2 remains selected for launch.)" % [dossier_name, briefing]
+			var active_name: String = "GENESIS_V2"
+			if TeamManager != null and TeamManager.has_method("get_faction_data"):
+				var active_fac: FactionData = TeamManager.get_faction_data(GameConfig.selected_faction_id)
+				if active_fac != null:
+					active_name = active_fac.short_code if not active_fac.short_code.is_empty() else active_fac.display_name
+			dossier_notice_label.text = "[CLASSIFIED PREVIEW] %s — %s (Locked; %s remains selected for launch.)" % [dossier_name, briefing, active_name]
 			dossier_notice_label.modulate = accent
 	)
 

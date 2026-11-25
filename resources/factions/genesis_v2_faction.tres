@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="FactionData" load_steps=29 format=3]
+[gd_resource type="Resource" script_class="FactionData" load_steps=30 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/faction_data.gd" id="1_script"]
 [ext_resource type="PackedScene" path="res://scenes/buildings/nexus_vat.tscn" id="2_hub"]
@@ -28,6 +28,7 @@
 [ext_resource type="Resource" path="res://resources/upgrades/compute_overdrive.tres" id="26_upg_co"]
 [ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="27_clone"]
 [ext_resource type="PackedScene" path="res://scenes/units/stinger.tscn" id="28_stinger"]
+[ext_resource type="Resource" path="res://resources/buildings/defense_turret_data.tres" id="29_b_turret"]
 
 [resource]
 script = ExtResource("1_script")
@@ -51,7 +52,7 @@ worker_scene = ExtResource("3_worker")
 harvester_scene = ExtResource("4_harvester")
 engineer_scene = ExtResource("5_engineer")
 extra_starting_units = Array[PackedScene]([ExtResource("27_clone"), ExtResource("27_clone"), ExtResource("28_stinger")])
-building_roster = Array[Resource("res://scripts/data/building_data.gd")]([ExtResource("6_b_nexus"), ExtResource("7_b_pylon"), ExtResource("8_b_cond"), ExtResource("9_b_main"), ExtResource("10_b_vat"), ExtResource("11_b_fnd"), ExtResource("12_b_fab")])
+building_roster = Array[Resource("res://scripts/data/building_data.gd")]([ExtResource("6_b_nexus"), ExtResource("7_b_pylon"), ExtResource("8_b_cond"), ExtResource("9_b_main"), ExtResource("10_b_vat"), ExtResource("11_b_fnd"), ExtResource("12_b_fab"), ExtResource("29_b_turret")])
 unit_roster = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("13_u_wrk"), ExtResource("14_u_harv"), ExtResource("15_u_eng"), ExtResource("16_u_cln"), ExtResource("17_u_stg"), ExtResource("18_u_sym"), ExtResource("19_u_lnc"), ExtResource("20_u_jam"), ExtResource("21_u_gol"), ExtResource("22_u_arc"), ExtResource("23_u_mrt")])
 upgrade_roster = Array[Resource("res://scripts/data/upgrade_data.gd")]([ExtResource("24_upg_be"), ExtResource("25_upg_ap"), ExtResource("26_upg_co")])
 ai_build_profile = {

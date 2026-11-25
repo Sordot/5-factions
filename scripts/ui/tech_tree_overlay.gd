@@ -13,6 +13,8 @@ signal closed
 var _tracked_team: int = 0
 var _selected_faction_id: StringName = &""
 var _refresh_timer: float = 0.0
+var _card_refs: Array[Dictionary] = []
+var _upgrade_refs: Array[Dictionary] = []
 
 
 func _ready() -> void:
@@ -40,7 +42,7 @@ func _process(delta: float) -> void:
 	_refresh_timer += delta
 	if _refresh_timer >= 0.5:
 		_refresh_timer = 0.0
-		_rebuild_tree()
+		_refresh_live_states()
 
 
 func _input(event: InputEvent) -> void:
@@ -111,6 +113,8 @@ func _rebuild_tree() -> void:
 		return
 	for child: Node in columns_row.get_children():
 		child.queue_free()
+	_card_refs.clear()
+	_upgrade_refs.clear()
 
 	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 	var faction: FactionData = _resolve_active_faction()
@@ -252,12 +256,23 @@ func _build_tech_card(bdata: BuildingData, faction: FactionData, econ: EconomyMa
 		prereq_lines.append("Requires: %s" % ", ".join(req_names))
 	elif bdata.requires_vent:
 		prereq_lines.append("Build on Compute Vent")
+	var pr_lbl: Label = null
 	if not prereq_lines.is_empty():
-		var pr_lbl: Label = Label.new()
+		pr_lbl = Label.new()
 		pr_lbl.text = "  •  ".join(prereq_lines)
 		pr_lbl.add_theme_font_size_override("font_size", 10)
 		pr_lbl.add_theme_color_override("font_color", Color(0.46, 0.92, 0.96, 0.90) if req_met else Color(1.0, 0.56, 0.38, 0.95))
 		vbox.add_child(pr_lbl)
+
+	_card_refs.append({
+		"bdata": bdata,
+		"faction": faction,
+		"track_live": track_live,
+		"sb": sb,
+		"name_lbl": name_lbl,
+		"status_lbl": status_lbl,
+		"pr_lbl": pr_lbl,
+	})
 
 	var trainable: Array[UnitData] = bdata.resolve_trainable_units()
 	if not trainable.is_empty():
@@ -299,9 +314,83 @@ func _build_tech_card(bdata: BuildingData, faction: FactionData, econ: EconomyMa
 		else:
 			upg_lbl.add_theme_color_override("font_color", Color(0.96, 0.84, 0.50, 0.92))
 		vbox.add_child(upg_lbl)
+		_upgrade_refs.append({
+			"upg": upg,
+			"lbl": upg_lbl,
+			"cost_str": upg_cost,
+			"track_live": track_live,
+		})
 
 	panel.add_child(vbox)
 	return panel
+
+
+func _refresh_live_states() -> void:
+	if not is_inside_tree():
+		return
+	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	for ref: Dictionary in _card_refs:
+		var track_live: bool = bool(ref["track_live"])
+		if not track_live:
+			continue
+		var bdata: BuildingData = ref["bdata"] as BuildingData
+		var faction: FactionData = ref["faction"] as FactionData
+		var sb: StyleBoxFlat = ref["sb"] as StyleBoxFlat
+		var name_lbl: Label = ref["name_lbl"] as Label
+		var status_lbl: Label = ref["status_lbl"] as Label
+		var pr_lbl: Label = ref["pr_lbl"] as Label
+		if bdata == null or sb == null or not is_instance_valid(status_lbl):
+			continue
+		var owned: bool = econ != null and econ.has_constructed_building(_tracked_team, bdata.building_id)
+		var prereq_ids: Array[StringName] = bdata.get_prerequisite_ids()
+		var req_met: bool = true
+		for pid: StringName in prereq_ids:
+			if econ == null or not econ.has_constructed_building(_tracked_team, pid):
+				req_met = false
+				break
+		sb.set_border_width_all(2 if owned else 1)
+		if owned:
+			sb.bg_color = Color(0.06, 0.16, 0.19, 0.96)
+			sb.border_color = faction.hud_accent_color
+			status_lbl.text = "[ONLINE]"
+			status_lbl.add_theme_color_override("font_color", Color(0.28, 1.0, 0.68, 1.0))
+			if is_instance_valid(name_lbl):
+				name_lbl.add_theme_color_override("font_color", faction.hud_accent_color)
+		elif not req_met:
+			sb.bg_color = Color(0.08, 0.07, 0.09, 0.92)
+			sb.border_color = Color(0.62, 0.36, 0.34, 0.72)
+			status_lbl.text = "[LOCKED]"
+			status_lbl.add_theme_color_override("font_color", Color(1.0, 0.46, 0.36, 0.95))
+			if is_instance_valid(name_lbl):
+				name_lbl.add_theme_color_override("font_color", Color(0.92, 0.98, 1.0, 1.0))
+		else:
+			sb.bg_color = Color(0.05, 0.09, 0.13, 0.94)
+			sb.border_color = Color(0.26, 0.56, 0.68, 0.72)
+			status_lbl.text = "[AVAILABLE]"
+			status_lbl.add_theme_color_override("font_color", Color(0.62, 0.82, 0.90, 0.85))
+			if is_instance_valid(name_lbl):
+				name_lbl.add_theme_color_override("font_color", Color(0.92, 0.98, 1.0, 1.0))
+		if pr_lbl != null and is_instance_valid(pr_lbl):
+			pr_lbl.add_theme_color_override("font_color", Color(0.46, 0.92, 0.96, 0.90) if req_met else Color(1.0, 0.56, 0.38, 0.95))
+
+	for uref: Dictionary in _upgrade_refs:
+		var track_live: bool = bool(uref["track_live"])
+		if not track_live:
+			continue
+		var upg: UpgradeData = uref["upg"] as UpgradeData
+		var upg_lbl: Label = uref["lbl"] as Label
+		if upg == null or not is_instance_valid(upg_lbl):
+			continue
+		var done: bool = econ != null and econ.has_upgrade(_tracked_team, upg.upgrade_id)
+		var prog: bool = econ != null and econ.is_upgrade_in_progress(_tracked_team, upg.upgrade_id)
+		var tag: String = "[DONE] " if done else ("[RESEARCHING] " if prog else "[UPG] ")
+		upg_lbl.text = "%s%s (%s) — %s" % [tag, upg.display_name, String(uref["cost_str"]), upg.description]
+		if done:
+			upg_lbl.add_theme_color_override("font_color", Color(0.32, 1.0, 0.72, 1.0))
+		elif prog:
+			upg_lbl.add_theme_color_override("font_color", Color(1.0, 0.86, 0.34, 1.0))
+		else:
+			upg_lbl.add_theme_color_override("font_color", Color(0.96, 0.84, 0.50, 0.92))
 
 
 func _format_upgrade_cost(upg: UpgradeData) -> String:

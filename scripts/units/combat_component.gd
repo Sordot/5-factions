@@ -350,10 +350,15 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 	var pierce_width: float = owner_unit.data.line_pierce_width
 	var tracer_style: StringName = owner_unit.data.weapon_tracer_style
 	var tracer_width: float = maxf(1.8, owner_unit.data.weapon_tracer_width)
+	var is_spec: bool = TeamManager != null and TeamManager.is_spectator_mode()
 	var is_local_player: bool = TeamManager.is_team_controlled_by_local_human(int(owner_unit.team)) if TeamManager != null else (owner_unit.team == Unit.Team.PLAYER)
-	var friendly_col: Color = owner_unit.data.weapon_tracer_color
-	var hostile_col: Color = Color(1.0, 0.40, 0.26, 0.96)
-	var shot_col: Color = friendly_col if is_local_player else hostile_col
+	var base_weapon_col: Color = owner_unit.data.weapon_tracer_color
+	var shot_col: Color = base_weapon_col
+	if not is_local_player:
+		var team_col: Color = TeamManager.get_team_color(int(owner_unit.team)) if TeamManager != null else Color(1.0, 0.40, 0.26, 0.96)
+		var blend: float = 0.58 if is_spec else 0.72
+		shot_col = base_weapon_col.lerp(team_col, blend)
+		shot_col.a = maxf(base_weapon_col.a, 0.94)
 
 	if AudioManager != null and _is_pos_audible(owner_unit, tracer_origin, tracer_end):
 		AudioManager.play_weapon_for_unit_data(owner_unit.data, owner_unit.global_position)

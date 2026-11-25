@@ -259,6 +259,15 @@ func _bootstrap_skirmish_teams() -> void:
 			var anchor: Vector2 = _spawn_anchors[tid] as Vector2
 			_swap_team_starting_loadout(tid, anchor, fac)
 			mutated_scene = true
+		elif hub_matches and not fac.extra_starting_units.is_empty() and _spawn_anchors.has(tid):
+			if not _team_has_combat_units(tid):
+				var scene_root: Node = get_tree().current_scene
+				var units_parent: Node = scene_root.get_node_or_null("Units") if scene_root != null else null
+				if units_parent == null:
+					units_parent = scene_root
+				if units_parent != null:
+					_spawn_extra_starting_units(tid, _spawn_anchors[tid] as Vector2, fac, units_parent)
+					mutated_scene = true
 
 	if mutated_scene:
 		if econ != null:
@@ -352,6 +361,19 @@ func _swap_team_starting_loadout(tid: int, anchor: Vector2, fac: FactionData) ->
 				w_inst.queue_free()
 
 	# Instantiate optional extra_starting_units facing map center
+	_spawn_extra_starting_units(tid, anchor, fac, units_parent)
+
+
+func _team_has_combat_units(tid: int) -> bool:
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if node is Unit and is_instance_valid(node):
+			var u: Unit = node as Unit
+			if not u.is_dead and int(u.team) == tid and u.data != null and u.data.is_combat_unit():
+				return true
+	return false
+
+
+func _spawn_extra_starting_units(tid: int, anchor: Vector2, fac: FactionData, units_parent: Node) -> void:
 	var to_center: Vector2 = (Vector2.ZERO - anchor).normalized() if anchor.length_squared() > 1.0 else Vector2.RIGHT
 	var c_perp: Vector2 = to_center.orthogonal()
 	for idx: int in range(fac.extra_starting_units.size()):

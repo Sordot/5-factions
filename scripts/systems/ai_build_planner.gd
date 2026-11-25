@@ -19,6 +19,9 @@ func get_building_for_role(role: StringName) -> BuildingData:
 		return direct
 
 	# Semantic fallback scan across faction.building_roster
+	var primary_t1: BuildingData = null
+	if role == &"counter_foundry":
+		primary_t1 = get_building_for_role(&"barracks_t1")
 	for b: BuildingData in faction.building_roster:
 		if b == null:
 			continue
@@ -39,7 +42,7 @@ func get_building_for_role(role: StringName) -> BuildingData:
 				if b.is_military_production and b.tech_tier == 1:
 					return b
 			&"counter_foundry":
-				if b.is_military_production and b.tech_tier == 1 and b.batch_production_count <= 1:
+				if b != primary_t1 and b.is_military_production and b.tech_tier == 1:
 					return b
 			&"heavy_t2":
 				if b.is_military_production and b.tech_tier >= 2:

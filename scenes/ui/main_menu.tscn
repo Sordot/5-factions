@@ -99,7 +99,7 @@ text = "5 FACTIONS // SOVEREIGN KERNEL"
 layout_mode = 2
 theme_override_colors/font_color = Color(0.28, 0.94, 0.88, 0.94)
 theme_override_font_sizes/font_size = 12
-text = "TECHNOZEN REAL-TIME STRATEGY  •  MILESTONE 2.5 SKIRMISH EXPANSION  •  BUILD 0.2.5"
+text = "TECHNOZEN REAL-TIME STRATEGY  •  MILESTONE 2.8 ENGINE HARDENING  •  BUILD 0.2.8"
 
 [node name="HeaderRight" type="HBoxContainer" parent="RootMargin/RootVBox/HeaderPanel/HeaderHBox"]
 layout_mode = 2
@@ -281,8 +281,11 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 focus_mode = 0
 modulate = Color(0.76, 0.82, 0.9, 0.78)
+theme_override_font_sizes/font_size = 11
 text = "02 // AETHER_PRIME — The Radiant Grid
 Solar-Optic Precision  •  LOCKED — IN DEVELOPMENT"
+clip_text = true
+autowrap_mode = 3
 
 [node name="LockedSlot3" type="Button" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/LockedGrid"]
 unique_name_in_owner = true
@@ -292,8 +295,11 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 focus_mode = 0
 modulate = Color(0.84, 0.78, 0.72, 0.78)
+theme_override_font_sizes/font_size = 11
 text = "03 // IRON_CONSENSUS — The Foundry Bloc
 Heavy Automata Armor  •  LOCKED — IN DEVELOPMENT"
+clip_text = true
+autowrap_mode = 3
 
 [node name="LockedSlot4" type="Button" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/LockedGrid"]
 unique_name_in_owner = true
@@ -303,8 +309,11 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 focus_mode = 0
 modulate = Color(0.8, 0.74, 0.9, 0.78)
+theme_override_font_sizes/font_size = 11
 text = "04 // NULL_VECTOR — The Whisper Net
 Stealth & Algorithmic Subversion  •  LOCKED — IN DEVELOPMENT"
+clip_text = true
+autowrap_mode = 3
 
 [node name="LockedSlot5" type="Button" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/LockedGrid"]
 unique_name_in_owner = true
@@ -314,8 +323,11 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 focus_mode = 0
 modulate = Color(0.72, 0.86, 0.78, 0.78)
+theme_override_font_sizes/font_size = 11
 text = "05 // VERDANT_OS — The Canopy Mesh
 Adaptive Bio-Lattice  •  LOCKED — IN DEVELOPMENT"
+clip_text = true
+autowrap_mode = 3
 
 [node name="DossierNoticePanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn"]
 layout_mode = 2
@@ -331,8 +343,9 @@ text = "GENESIS_V2 dossier active for deployment. Click Factions #2–#5 above t
 autowrap_mode = 3
 
 [node name="ConfigPanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox"]
-custom_minimum_size = Vector2(424, 0)
+custom_minimum_size = Vector2(448, 0)
 layout_mode = 2
+size_flags_horizontal = 0
 
 [node name="ConfigVBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel"]
 layout_mode = 2
@@ -359,6 +372,8 @@ custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
+clip_text = true
+fit_to_longest_item = false
 
 [node name="MatchFormatHeaderRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
@@ -421,6 +436,8 @@ layout_mode = 2
 size_flags_horizontal = 3
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
+clip_text = true
+fit_to_longest_item = false
 
 [node name="RosterHeaderRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
@@ -431,7 +448,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
 theme_override_font_sizes/font_size = 10
-text = "TEAM SLOTS (CTRL • TEAM • DIFF • STYLE)"
+text = "TEAM SLOTS (CTRL • TEAM • FAC • DIFF • STYLE)"
 
 [node name="SpectatorBadge" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/RosterHeaderRow"]
 unique_name_in_owner = true
@@ -544,6 +561,7 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.84, 0.95, 0.98, 0.95)
 theme_override_font_sizes/font_size = 10
 text = "FACTION: GENESIS_V2"
+autowrap_mode = 3
 
 [node name="Spacer" type="Control" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
