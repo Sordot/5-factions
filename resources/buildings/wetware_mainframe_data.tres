@@ -24,3 +24,12 @@ can_set_rally = false
 batch_production_count = 1
 base_batch_cost_multiplier = 1.0
 required_building_id = &""
+
+is_command_hub = false
+is_military_production = false
+is_supply_provider = false
+accepted_dropoff_resources = Array[StringName]([])
+tech_tier = 0
+prerequisite_building_ids = Array[StringName]([])
+audio_select_class = &"tech"
+tech_tree_summary = "Build on Compute Vent • Staff up to 2 Engineers (+5 Compute / 3s each)"

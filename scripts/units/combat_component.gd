@@ -53,16 +53,14 @@ func get_effective_windup(owner_unit: Unit) -> float:
 		return 0.08
 	var base_w: float = owner_unit.data.attack_windup
 	if base_w < 0.0:
-		var uid: StringName = owner_unit.get_unit_type_id()
-		match uid:
-			&"clone_trooper", &"stinger", &"scout_unit":
-				base_w = 0.06
-			&"goliath_frame", &"lance_rig":
-				base_w = 0.11
-			&"chrysalis_mortar", &"arc_lancer":
-				base_w = 0.15
-			_:
-				base_w = 0.08
+		if owner_unit.data.has_tag(&"artillery") or owner_unit.data.has_tag(&"siege") or owner_unit.data.line_pierce_width > 0.0:
+			base_w = 0.15
+		elif owner_unit.data.is_heavy_unit() or owner_unit.data.bonus_vs_armored > 0.0:
+			base_w = 0.11
+		elif owner_unit.data.has_tag(&"swarm") or owner_unit.data.has_tag(&"flanker") or owner_unit.data.has_tag(&"scout"):
+			base_w = 0.06
+		else:
+			base_w = 0.08
 	var base_cd: float = maxf(0.05, owner_unit.data.attack_cooldown)
 	var eff_cd: float = owner_unit.get_effective_attack_cooldown()
 	var scale: float = clampf(eff_cd / base_cd, 0.55, 1.35)
@@ -177,10 +175,7 @@ func get_target_priority_tier(candidate: Variant) -> int:
 		var u: Unit = candidate
 		if u.data == null:
 			return TIER_SUPPORT_OR_ECON
-		var uid: StringName = u.data.unit_type_id
-		if u.data.can_gather or u.data.can_staff_compute:
-			return TIER_SUPPORT_OR_ECON
-		if uid == &"symbiote" or uid == &"signal_jammer" or uid == &"worker" or uid == &"silica_harvester" or uid == &"engineer" or uid == &"target_dummy":
+		if u.data.is_worker_class() or u.data.has_tag(&"support") or u.data.has_tag(&"dummy"):
 			return TIER_SUPPORT_OR_ECON
 		if u.data.attack_damage > 0.0:
 			return TIER_COMBAT_UNIT
@@ -348,21 +343,25 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 	var tracer_origin: Vector2 = owner_unit.global_position + muzzle_offset
 	var tracer_end: Vector2 = target_node.global_position
 
-	var unit_id: StringName = owner_unit.get_unit_type_id()
 	var dmg_dealt_mult: float = float(owner_unit.status_effect_component.call("get_damage_dealt_multiplier")) if owner_unit.status_effect_component != null else 1.0
 	var base_dmg: float = owner_unit.data.attack_damage * dmg_dealt_mult
 	var bonus_armored: float = owner_unit.data.bonus_vs_armored * dmg_dealt_mult
 	var aoe_radius: float = owner_unit.data.aoe_attack_radius
 	var pierce_width: float = owner_unit.data.line_pierce_width
+	var tracer_style: StringName = owner_unit.data.weapon_tracer_style
+	var tracer_width: float = maxf(1.8, owner_unit.data.weapon_tracer_width)
+	var is_local_player: bool = TeamManager.is_team_controlled_by_local_human(int(owner_unit.team)) if TeamManager != null else (owner_unit.team == Unit.Team.PLAYER)
+	var friendly_col: Color = owner_unit.data.weapon_tracer_color
+	var hostile_col: Color = Color(1.0, 0.40, 0.26, 0.96)
+	var shot_col: Color = friendly_col if is_local_player else hostile_col
 
 	if AudioManager != null and _is_pos_audible(owner_unit, tracer_origin, tracer_end):
-		AudioManager.play_weapon_for_unit(unit_id, owner_unit.global_position)
+		AudioManager.play_weapon_for_unit_data(owner_unit.data, owner_unit.global_position)
 		if AudioManager.has_method("notify_combat_activity"):
 			AudioManager.call("notify_combat_activity", 0.35)
 
 	if aoe_radius > 0.0:
-		# Chrysalis Mortar: lobbed parabolic caustic shell with ground impact telegraph ring & delayed splash
-		var mortar_col: Color = Color(0.46, 1.0, 0.54, 0.96) if owner_unit.team == Unit.Team.PLAYER else Color(1.0, 0.44, 0.24, 0.96)
+		# Artillery / lobbed parabolic shell with ground impact telegraph ring & delayed splash
 		var flight_dist: float = tracer_origin.distance_to(tracer_end)
 		var flight_time: float = clampf(flight_dist / 560.0, 0.36, 0.54)
 		var arc_h: float = clampf(flight_dist * 0.26, 48.0, 86.0)
@@ -373,46 +372,41 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 			var valid_attacker: Unit = owner_unit if (is_instance_valid(owner_unit) and not owner_unit.is_dead) else null
 			_apply_aoe_damage_for_team(tree, valid_attacker, attacker_team, impact_pos, aoe_radius, base_dmg, bonus_armored)
 			_trigger_camera_shake(tree, 2.8, 0.14, impact_pos)
-		_spawn_mortar_shell_vfx(owner_unit, tracer_origin, impact_pos, aoe_radius, flight_time, arc_h, mortar_col, on_impact)
+		_spawn_mortar_shell_vfx(owner_unit, tracer_origin, impact_pos, aoe_radius, flight_time, arc_h, shot_col, on_impact)
 		return true
 
 	if pierce_width > 0.0:
-		# High-energy Arc-Lancer piercing plasma lance beam with sweep flash
+		# High-energy piercing beam with sweep flash
 		var dir: Vector2 = (tracer_end - tracer_origin).normalized() if tracer_end.distance_squared_to(tracer_origin) > 1.0 else Vector2.RIGHT
 		var beam_end: Vector2 = tracer_end + dir * 56.0
-		var lance_col: Color = Color(0.46, 0.96, 1.0, 0.98) if owner_unit.team == Unit.Team.PLAYER else Color(1.0, 0.36, 0.30, 0.98)
-		_spawn_attack_tracer(owner_unit, tracer_origin, beam_end, lance_col, 5.0, 0.21, 0.0, AttackTracer.TracerStyle.ARC_LANCE)
+		_spawn_attack_tracer(owner_unit, tracer_origin, beam_end, shot_col, maxf(3.5, tracer_width), 0.21, 0.0, AttackTracer.TracerStyle.ARC_LANCE)
 		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
 		_apply_line_pierce_damage(owner_unit, tracer_origin, beam_end, pierce_width, base_dmg * 0.65, bonus_armored, target_node)
 		return true
 
-	if unit_id == &"stinger":
-		# Stinger: fast directional melee acid cleave arc
-		var cleave_col: Color = Color(0.98, 0.84, 0.26, 0.96) if owner_unit.team == Unit.Team.PLAYER else Color(1.0, 0.44, 0.24, 0.96)
-		_spawn_melee_cleave_vfx(owner_unit, owner_unit.global_position, tracer_end, cleave_col)
+	if tracer_style == &"bio" or tracer_style == &"melee_cleave" or owner_unit.data.attack_range <= 64.0:
+		# Fast directional melee cleave arc
+		_spawn_melee_cleave_vfx(owner_unit, owner_unit.global_position, tracer_end, shot_col)
 		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
 		return true
 
-	if unit_id == &"lance_rig" or bonus_armored > 0.0:
-		# Lance-Rig: focused high-voltage rail beam + distinct anti-armor spark on armored targets/buildings
-		var rail_col: Color = Color(1.0, 0.80, 0.32, 0.98) if owner_unit.team == Unit.Team.PLAYER else Color(1.0, 0.42, 0.26, 0.98)
-		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, rail_col, 3.4, 0.16, 0.0, AttackTracer.TracerStyle.RAIL_BEAM)
+	if tracer_style == &"rail" or tracer_style == &"rail_beam" or bonus_armored > 0.0:
+		# Focused high-voltage rail beam + distinct anti-armor spark on armored targets/buildings
+		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(2.6, tracer_width), 0.16, 0.0, AttackTracer.TracerStyle.RAIL_BEAM)
 		if _is_armored_target(target_node):
 			var shot_dir: Vector2 = (tracer_end - tracer_origin).normalized() if tracer_end.distance_squared_to(tracer_origin) > 1.0 else Vector2.RIGHT
 			_spawn_armor_pierce_spark_vfx(owner_unit, tracer_end, shot_dir, Color(1.0, 0.88, 0.36, 1.0))
 		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
 		return true
 
-	if unit_id == &"goliath_frame":
-		# Goliath Frame: heavy twin-slug parallel autocannon tracers
-		var slug_col: Color = Color(0.42, 0.94, 1.0, 0.96) if owner_unit.team == Unit.Team.PLAYER else Color(1.0, 0.40, 0.28, 0.96)
-		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, slug_col, 3.0, 0.14, 0.0, AttackTracer.TracerStyle.TWIN_SLUG)
+	if tracer_style == &"heavy" or tracer_style == &"twin_slug":
+		# Heavy twin-slug parallel autocannon tracers
+		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(2.6, tracer_width), 0.14, 0.0, AttackTracer.TracerStyle.TWIN_SLUG)
 		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
 		return true
 
-	# Clone Trooper / standard pulse bolt
-	var tracer_color: Color = Color(0.32, 0.98, 0.90, 0.95) if owner_unit.team == Unit.Team.PLAYER else Color(1.0, 0.35, 0.25, 0.95)
-	_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, tracer_color, 2.4, 0.11, 0.0, AttackTracer.TracerStyle.PULSE_BOLT)
+	# Standard pulse bolt
+	_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, tracer_width, 0.11, 0.0, AttackTracer.TracerStyle.PULSE_BOLT)
 	_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
 	return true
 

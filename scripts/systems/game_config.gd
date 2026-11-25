@@ -206,7 +206,8 @@ func get_active_slot_configs() -> Array[Dictionary]:
 	for i: int in range(count):
 		var copy: Dictionary = (slot_configs[i] as Dictionary).duplicate(true)
 		copy["team_id"] = i
-		copy["faction_id"] = selected_faction_id
+		var slot_fac: StringName = copy.get("faction_id", selected_faction_id) as StringName
+		copy["faction_id"] = slot_fac if slot_fac != &"" else selected_faction_id
 		out.append(copy)
 	return out
 
@@ -324,11 +325,14 @@ func set_lobby_config(
 	var normalized: Array[Dictionary] = []
 	for i: int in range(4):
 		var src: Dictionary = (p_slot_configs[i] as Dictionary) if (i < p_slot_configs.size() and p_slot_configs[i] is Dictionary) else (slot_configs[i] as Dictionary)
+		var slot_fac: StringName = src.get("faction_id", faction_id) as StringName
+		if slot_fac == &"":
+			slot_fac = faction_id
 		normalized.append({
 			"team_id": i,
 			"alliance_id": clampi(int(src.get("alliance_id", i)), 0, 3),
 			"controller_type": clampi(int(src.get("controller_type", 1)), 0, 1),
-			"faction_id": faction_id,
+			"faction_id": slot_fac,
 			"ai_difficulty": clampi(int(src.get("ai_difficulty", int(AIDifficulty.STANDARD))), 0, 2),
 			"ai_playstyle": clampi(int(src.get("ai_playstyle", int(AIPlaystyle.BALANCED))), 0, 2),
 		})

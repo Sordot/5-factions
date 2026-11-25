@@ -30,3 +30,12 @@ can_set_rally = true
 batch_production_count = 1
 base_batch_cost_multiplier = 1.0
 required_building_id = &"cloning_vat"
+
+is_command_hub = false
+is_military_production = true
+is_supply_provider = false
+accepted_dropoff_resources = Array[StringName]([])
+tech_tier = 2
+prerequisite_building_ids = Array[StringName]([&"cloning_vat"])
+audio_select_class = &"production"
+tech_tree_summary = "Tier-2 Heavy Synthetic Walkers & Siege Artillery"

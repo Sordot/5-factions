@@ -26,3 +26,12 @@ compute_cost = 0
 build_time = 3.0
 train_time = 3.0
 unit_scene_path = "res://scenes/units/scout_unit.tscn"
+
+unit_tags = Array[StringName]([&"infantry", &"scout", &"flanker"])
+weapon_tracer_style = &"pulse"
+weapon_tracer_color = Color(0.98, 0.84, 0.26, 0.96)
+weapon_tracer_width = 2.2
+weapon_sfx_id = &"weapon_rifle"
+audio_bark_class = &"swarm"
+minimap_icon_shape = &"dot"
+role_tags_display = "Recon Scout • Fast Flanker"

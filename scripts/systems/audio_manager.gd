@@ -428,7 +428,7 @@ func resolve_selection_audio_class(entities: Array) -> Dictionary:
 			if u.is_dead:
 				continue
 			if local_team >= 0 and int(u.team) == local_team:
-				var u_cls: StringName = classify_unit_bark_class(u.get_unit_type_id())
+				var u_cls: StringName = u.data.audio_bark_class if (u.data != null and u.data.audio_bark_class != &"") else classify_unit_bark_class(u.get_unit_type_id())
 				var u_prio: int = int(UNIT_CLASS_PRIORITY.get(u_cls, 1))
 				if u_prio > best_unit_prio:
 					best_unit_prio = u_prio
@@ -462,16 +462,19 @@ func resolve_selection_audio_class(entities: Array) -> Dictionary:
 func classify_building_audio_class(building: Building) -> StringName:
 	if building == null:
 		return &"utility"
-	var bid: StringName = building.building_type_id
-	if bid == &"cloning_vat" or bid == &"synthetics_fabricator" or bid == &"calibration_foundry":
-		return &"production"
-	if building.is_core_hub or bid == &"nexus_vat":
-		return &"hub"
-	if bid == &"wetware_mainframe" or building.max_staff_slots > 0:
-		return &"tech"
-	if building.has_turret or bid == &"defense_turret":
-		return &"defense"
-	return &"utility"
+	return building.get_audio_select_class()
+
+
+func _get_local_faction_pitch_bias() -> float:
+	if TeamManager == null:
+		return 1.0
+	var local_team: int = TeamManager.get_local_human_team()
+	if local_team < 0:
+		return 1.0
+	var fdata: FactionData = TeamManager.get_team_faction_data(local_team)
+	if fdata != null:
+		return clampf(fdata.audio_bark_pitch_bias, 0.75, 1.35)
+	return 1.0
 
 
 func _play_on_bark_channel(
@@ -499,10 +502,11 @@ func _play_on_bark_channel(
 		_bark_player.stop()
 	_bark_player.stream = _streams[stream_key] as AudioStreamWAV
 	_bark_player.volume_db = volume_db_offset + _slider_to_db(ui_volume_linear)
+	var pitch_bias: float = _get_local_faction_pitch_bias()
 	if pitch_jitter > 0.0:
-		_bark_player.pitch_scale = 1.0 + randf_range(-pitch_jitter, pitch_jitter)
+		_bark_player.pitch_scale = pitch_bias * (1.0 + randf_range(-pitch_jitter, pitch_jitter))
 	else:
-		_bark_player.pitch_scale = 1.0
+		_bark_player.pitch_scale = pitch_bias
 	_bark_player.play()
 
 
@@ -539,7 +543,7 @@ func play_order_audio(units: Array, fallback_sfx: StringName = &"order_move") ->
 		if is_instance_valid(item) and item is Unit:
 			var u: Unit = item as Unit
 			if not u.is_dead:
-				var u_cls: StringName = classify_unit_bark_class(u.get_unit_type_id())
+				var u_cls: StringName = u.data.audio_bark_class if (u.data != null and u.data.audio_bark_class != &"") else classify_unit_bark_class(u.get_unit_type_id())
 				var u_prio: int = int(UNIT_CLASS_PRIORITY.get(u_cls, 1))
 				if u_prio > best_prio:
 					best_prio = u_prio
@@ -610,6 +614,29 @@ func play_slider_preview(channel: StringName) -> void:
 
 func play_weapon_sfx(unit_type_id: StringName, world_pos: Vector2 = Vector2.INF) -> void:
 	play_weapon_for_unit(unit_type_id, world_pos)
+
+
+func play_weapon_for_unit_data(unit_data: UnitData, world_pos: Vector2 = Vector2.INF) -> void:
+	if unit_data == null:
+		play_sfx(&"weapon_rifle", -7.5, 0.06, world_pos, true)
+		return
+	var sfx: StringName = unit_data.weapon_sfx_id
+	match sfx:
+		&"weapon_slash", &"acid_slash", &"melee_slash", &"bio_slash":
+			play_sfx(&"weapon_slash", -6.5, 0.06, world_pos, true)
+		&"weapon_rail", &"rail_shot", &"rail_beam", &"arc_lance":
+			play_sfx(&"weapon_rail", -5.0, 0.06, world_pos, true)
+		&"weapon_mortar", &"mortar_thud", &"siege_mortar":
+			play_sfx(&"weapon_mortar", -3.5, 0.06, world_pos, true)
+		&"heavy_cannon", &"twin_cannon", &"autocannon":
+			play_sfx(&"weapon_mortar", -6.0, 0.06, world_pos, true)
+		&"weapon_rifle", &"pulse_rifle", &"pulse_bolt":
+			play_sfx(&"weapon_rifle", -7.5, 0.06, world_pos, true)
+		_:
+			if _streams.has(sfx):
+				play_sfx(sfx, -6.5, 0.06, world_pos, true)
+			else:
+				play_weapon_for_unit(unit_data.unit_type_id, world_pos)
 
 
 func play_weapon_for_unit(unit_type_id: StringName, world_pos: Vector2 = Vector2.INF) -> void:

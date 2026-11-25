@@ -30,3 +30,12 @@ salvage_compute = 15
 build_time = 12.0
 train_time = 12.0
 unit_scene_path = "res://scenes/units/goliath_frame.tscn"
+
+unit_tags = Array[StringName]([&"heavy", &"synthetic", &"armored"])
+weapon_tracer_style = &"heavy"
+weapon_tracer_color = Color(0.42, 0.94, 1, 0.96)
+weapon_tracer_width = 3.0
+weapon_sfx_id = &"weapon_mortar"
+audio_bark_class = &"heavy"
+minimap_icon_shape = &"triangle_heavy"
+role_tags_display = "Heavy Synthetic • Tank Armor • Seismic Slam (Q)"

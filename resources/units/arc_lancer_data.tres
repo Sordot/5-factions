@@ -30,3 +30,12 @@ salvage_compute = 25
 build_time = 13.0
 train_time = 13.0
 unit_scene_path = "res://scenes/units/arc_lancer.tscn"
+
+unit_tags = Array[StringName]([&"heavy", &"synthetic", &"armored", &"anti_armor"])
+weapon_tracer_style = &"arc"
+weapon_tracer_color = Color(0.46, 0.96, 1, 0.98)
+weapon_tracer_width = 5.0
+weapon_sfx_id = &"weapon_rail"
+audio_bark_class = &"heavy"
+minimap_icon_shape = &"triangle_heavy"
+role_tags_display = "Heavy Synthetic • Colossus Stride • Line Pierce"

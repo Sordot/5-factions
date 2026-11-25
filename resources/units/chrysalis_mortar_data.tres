@@ -31,3 +31,12 @@ salvage_compute = 20
 build_time = 12.0
 train_time = 12.0
 unit_scene_path = "res://scenes/units/chrysalis_mortar.tscn"
+
+unit_tags = Array[StringName]([&"heavy", &"synthetic", &"armored", &"artillery", &"siege"])
+weapon_tracer_style = &"mortar"
+weapon_tracer_color = Color(0.46, 1, 0.54, 0.96)
+weapon_tracer_width = 3.2
+weapon_sfx_id = &"weapon_mortar"
+audio_bark_class = &"heavy"
+minimap_icon_shape = &"triangle_heavy"
+role_tags_display = "Armored Siege • Long-Range AoE Splash (Min Range)"

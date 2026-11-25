@@ -45,6 +45,37 @@ extends Resource
 @export_file("*.tscn") var unit_scene_path: String = ""
 @export var unit_scene: PackedScene = null
 
+# Data-driven Weapon, VFX, Audio & UI Profile (Milestone 2.8)
+@export var weapon_tracer_style: StringName = &"pulse" # &"pulse", &"rail", &"mortar", &"arc", &"bio", &"heavy"
+@export var weapon_tracer_color: Color = Color(0.22, 0.74, 0.97, 1.0)
+@export var weapon_tracer_width: float = 2.4
+@export var weapon_sfx_id: StringName = &"weapon_rifle"
+@export var audio_bark_class: StringName = &"swarm" # &"worker", &"swarm", &"counter", &"support", &"heavy"
+@export var minimap_icon_shape: StringName = &"dot" # &"dot", &"worker", &"triangle_heavy"
+@export var role_tags_display: String = ""
+
+
+func has_tag(tag: StringName) -> bool:
+	return tag != &"" and unit_tags.has(tag)
+
+
+func is_worker_class() -> bool:
+	return can_gather or can_staff_compute or has_tag(&"worker") or has_tag(&"harvester") or has_tag(&"engineer")
+
+
+func is_combat_unit() -> bool:
+	if is_worker_class() or has_tag(&"dummy"):
+		return false
+	return attack_damage > 0.0 or has_tag(&"support")
+
+
+func is_heavy_unit() -> bool:
+	return has_tag(&"heavy")
+
+
+func is_synthetic_repairable() -> bool:
+	return has_tag(&"synthetic") or has_tag(&"heavy") or has_tag(&"mechanical")
+
 
 func resolve_unit_scene() -> PackedScene:
 	if unit_scene != null:

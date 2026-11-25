@@ -8,16 +8,6 @@ const ALERT_REGION_RADIUS: float = 300.0
 const ALERT_DAMAGE_THROTTLE_S: float = 4.0
 const MAX_RECENT_ALERTS: int = 3
 const TIMELINE_SAMPLE_INTERVAL: float = 5.0
-const HEAVY_UNIT_IDS: Array = [&"goliath_frame", &"arc_lancer", &"chrysalis_mortar"]
-const MAJOR_STRUCTURE_IDS: Array = [
-	&"nexus_vat",
-	&"cloning_vat",
-	&"calibration_foundry",
-	&"synthetics_fabricator",
-	&"wetware_mainframe",
-	&"defense_turret",
-]
-const TIER2_STRUCTURE_IDS: Array = [&"synthetics_fabricator", &"calibration_foundry", &"wetware_mainframe"]
 
 signal match_ended(winner_team: int, stats: Dictionary)
 signal aggro_ai_toggled(enabled: bool)
@@ -55,6 +45,7 @@ var _tracked_units: Dictionary = {}
 var _tracked_prod: Dictionary = {}
 var _team_stats: Dictionary = {}
 var _team_last_core_pos: Dictionary = {}
+var _spawn_anchors: Dictionary = {}
 var _eliminated_teams: Dictionary = {}
 var _recent_alerts: Array[Dictionary] = []
 var _damage_alert_log: Array[Dictionary] = []
@@ -112,7 +103,7 @@ func _initialize_match_runtime() -> void:
 	if not is_inside_tree():
 		return
 	_ensure_pause_menu()
-	_prune_inactive_team_spawns()
+	_bootstrap_skirmish_teams()
 	_center_camera_on_local_base()
 	_ensure_ai_commanders()
 	_hook_initial_entities()
@@ -164,7 +155,7 @@ func _dispatch_starting_workers_to_biomass() -> void:
 			for b_node: Node in get_tree().get_nodes_in_group("buildings"):
 				if b_node is Building and is_instance_valid(b_node):
 					var b: Building = b_node
-					if not b.is_destroyed and int(b.team) == tid and (b.is_core_hub or b.building_type_id == &"nexus_vat"):
+					if not b.is_destroyed and int(b.team) == tid and b.is_command_hub():
 						hub_pos = b.global_position
 						break
 		if hub_pos == Vector2.INF:
@@ -185,9 +176,10 @@ func _dispatch_starting_workers_to_biomass() -> void:
 			if not (u_node is Unit) or not is_instance_valid(u_node):
 				continue
 			var u: Unit = u_node
-			if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
+			if u.is_dead or u.is_staffed or u.is_queued_for_deletion() or u.data == null:
 				continue
-			if int(u.team) != tid or u.get_unit_type_id() != &"worker":
+			var is_starting_worker: bool = u.data.has_tag(&"worker") or (u.data.can_gather and not u.data.auto_gather_on_spawn)
+			if int(u.team) != tid or not is_starting_worker:
 				continue
 			if u.command_state != Unit.CommandState.IDLE or not u.command_queue.is_empty():
 				continue
@@ -204,51 +196,73 @@ func _dispatch_starting_workers_to_biomass() -> void:
 			worker.command_gather(best_node, false)
 
 
-func _prune_inactive_team_spawns() -> void:
-	if sandbox_mode_active or TeamManager == null or not is_inside_tree():
+func _bootstrap_skirmish_teams() -> void:
+	if _is_sandbox_testbed_scene() or TeamManager == null or not is_inside_tree():
 		return
+	var active_teams: Array[int] = TeamManager.get_active_teams()
 	var active_map: Dictionary = {}
-	for tid: int in TeamManager.get_active_teams():
+	for tid: int in active_teams:
 		active_map[tid] = true
 
-	var pruned_any: bool = false
+	_spawn_anchors.clear()
+	var preplaced_hubs: Dictionary = {} # tid -> Building
+	var mutated_scene: bool = false
+
+	# 1. Record corner anchors from pre-placed hubs and prune inactive teams' buildings.
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not (node is Building) or not is_instance_valid(node):
 			continue
 		var b: Building = node
 		var b_tid: int = int(b.team)
+		if b.is_command_hub() and not _spawn_anchors.has(b_tid):
+			_spawn_anchors[b_tid] = b.global_position
 		if not active_map.has(b_tid):
-			if SpatialGrid != null:
-				SpatialGrid.unregister_building(b)
-			b.is_destroyed = true
-			if b.is_in_group("nav_bake_obstacles"):
-				b.remove_from_group("nav_bake_obstacles")
-			if b.is_in_group("buildings"):
-				b.remove_from_group("buildings")
-			b.queue_free()
-			pruned_any = true
-		elif b.is_core_hub or b.building_type_id == &"nexus_vat":
+			_remove_spawn_building(b)
+			mutated_scene = true
+		elif b.is_command_hub():
 			_team_last_core_pos[b_tid] = b.global_position
+			preplaced_hubs[b_tid] = b
 
+	# 2. Prune inactive teams' units.
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not (node is Unit) or not is_instance_valid(node):
 			continue
 		var u: Unit = node
-		if u.get_unit_type_id() == &"target_dummy":
+		if u.data != null and u.data.has_tag(&"dummy"):
 			continue
 		if not active_map.has(int(u.team)):
-			if SpatialGrid != null:
-				SpatialGrid.unregister_unit(u)
-			u.is_dead = true
-			if u.is_in_group("units"):
-				u.remove_from_group("units")
-			u.queue_free()
-			pruned_any = true
+			_remove_spawn_unit(u)
+			mutated_scene = true
 
-	if pruned_any:
-		var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	# 3. For each active team, ensure starting hub & loadout match its FactionData and seed resources.
+	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	var is_fast_tech: bool = GameConfig != null and GameConfig.configured_from_menu and GameConfig.resource_preset == GameConfig.PRESET_FAST_TECH
+
+	for tid: int in active_teams:
+		var fac: FactionData = TeamManager.get_team_faction_data(tid)
+		if fac == null:
+			continue
+
+		if econ != null and not is_fast_tech:
+			econ.set_team_starting_resources(tid, fac.starting_biomass, fac.starting_silica, fac.starting_compute)
+
+		var existing_hub: Building = preplaced_hubs.get(tid, null) as Building
+		var desired_hub_path: String = fac.starting_hub_scene.resource_path if fac.starting_hub_scene != null else ""
+		var hub_matches: bool = (
+			existing_hub != null
+			and is_instance_valid(existing_hub)
+			and not desired_hub_path.is_empty()
+			and existing_hub.scene_file_path == desired_hub_path
+		)
+
+		if not hub_matches and _spawn_anchors.has(tid) and fac.starting_hub_scene != null:
+			var anchor: Vector2 = _spawn_anchors[tid] as Vector2
+			_swap_team_starting_loadout(tid, anchor, fac)
+			mutated_scene = true
+
+	if mutated_scene:
 		if econ != null:
-			for tid: int in TeamManager.get_active_teams():
+			for tid: int in active_teams:
 				econ.call_deferred("recalculate_bandwidth", tid)
 		var nav_reg: Node = get_tree().get_first_node_in_group("arena_nav_region")
 		if nav_reg != null and nav_reg.has_method("request_rebake"):
@@ -256,6 +270,103 @@ func _prune_inactive_team_spawns() -> void:
 		var fog: Node = get_tree().get_first_node_in_group("fog_of_war")
 		if fog != null and fog.has_method("invalidate_building_vision_cache"):
 			fog.call("invalidate_building_vision_cache")
+
+
+func _remove_spawn_building(b: Building) -> void:
+	if SpatialGrid != null:
+		SpatialGrid.unregister_building(b)
+	b.is_destroyed = true
+	if b.is_in_group("nav_bake_obstacles"):
+		b.remove_from_group("nav_bake_obstacles")
+	if b.is_in_group("buildings"):
+		b.remove_from_group("buildings")
+	b.queue_free()
+
+
+func _remove_spawn_unit(u: Unit) -> void:
+	if SpatialGrid != null:
+		SpatialGrid.unregister_unit(u)
+	u.is_dead = true
+	if u.is_in_group("units"):
+		u.remove_from_group("units")
+	u.queue_free()
+
+
+func _swap_team_starting_loadout(tid: int, anchor: Vector2, fac: FactionData) -> void:
+	# Free placeholder pre-placed entities for this team before instantiating its FactionData loadout.
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if node is Building and is_instance_valid(node) and int((node as Building).team) == tid:
+			_remove_spawn_building(node as Building)
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if node is Unit and is_instance_valid(node) and int((node as Unit).team) == tid:
+			var u: Unit = node as Unit
+			if u.data == null or not u.data.has_tag(&"dummy"):
+				_remove_spawn_unit(u)
+
+	var scene_root: Node = get_tree().current_scene
+	if scene_root == null:
+		return
+	var bldgs_parent: Node = scene_root.get_node_or_null("Buildings")
+	if bldgs_parent == null:
+		bldgs_parent = scene_root
+	var units_parent: Node = scene_root.get_node_or_null("Units")
+	if units_parent == null:
+		units_parent = scene_root
+
+	# Instantiate FactionData starting command hub
+	var hub_inst: Node = fac.starting_hub_scene.instantiate()
+	if hub_inst is Building:
+		var hub: Building = hub_inst as Building
+		hub.team = tid as Unit.Team
+		hub.is_constructed = true
+		hub.is_core_hub = true
+		hub.global_position = anchor
+		bldgs_parent.add_child(hub)
+		_team_last_core_pos[tid] = anchor
+	else:
+		hub_inst.queue_free()
+
+	# Orient starting workers toward nearest Biomass cluster
+	var bio_dir: Vector2 = (Vector2.ZERO - anchor).normalized()
+	var best_bio_d_sq: float = INF
+	for rn_node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+		if rn_node is ResourceNode and is_instance_valid(rn_node):
+			var rn: ResourceNode = rn_node as ResourceNode
+			if not rn.is_depleted() and not rn.is_vent and rn.resource_type == &"biomass":
+				var d_sq: float = anchor.distance_squared_to(rn.global_position)
+				if d_sq < best_bio_d_sq:
+					best_bio_d_sq = d_sq
+					bio_dir = (rn.global_position - anchor).normalized()
+	var bio_perp: Vector2 = bio_dir.orthogonal()
+
+	if fac.worker_scene != null and fac.starting_worker_count > 0:
+		for i: int in range(fac.starting_worker_count):
+			var w_inst: Node = fac.worker_scene.instantiate()
+			if w_inst is Unit:
+				var w: Unit = w_inst as Unit
+				w.team = tid as Unit.Team
+				var spread: float = (float(i) - float(fac.starting_worker_count - 1) * 0.5) * 52.0
+				w.global_position = anchor + bio_dir * 96.0 + bio_perp * spread
+				units_parent.add_child(w)
+			else:
+				w_inst.queue_free()
+
+	# Instantiate optional extra_starting_units facing map center
+	var to_center: Vector2 = (Vector2.ZERO - anchor).normalized() if anchor.length_squared() > 1.0 else Vector2.RIGHT
+	var c_perp: Vector2 = to_center.orthogonal()
+	for idx: int in range(fac.extra_starting_units.size()):
+		var extra_scene: PackedScene = fac.extra_starting_units[idx]
+		if extra_scene == null:
+			continue
+		var u_inst: Node = extra_scene.instantiate()
+		if u_inst is Unit:
+			var eu: Unit = u_inst as Unit
+			eu.team = tid as Unit.Team
+			var lat: float = (float(idx) - float(fac.extra_starting_units.size() - 1) * 0.5) * 56.0
+			eu.global_position = anchor + to_center * 175.0 + c_perp * lat
+			units_parent.add_child(eu)
+		else:
+			u_inst.queue_free()
 
 
 func _center_camera_on_local_base() -> void:
@@ -283,12 +394,22 @@ func _play_match_start_boot_sequence() -> void:
 	if host.get_node_or_null("MatchBootOverlay") != null:
 		return
 	var is_spec: bool = TeamManager != null and TeamManager.is_spectator_mode()
-	var banner: String = "// SPECTATOR LINK ONLINE" if is_spec else "// NEURAL LINK ONLINE — GENESIS_V2"
+	var banner: String = "// SPECTATOR LINK ONLINE"
+	var accent_col: Color = Color(0.220, 0.741, 0.973, 1.0)
+	if not is_spec:
+		var local_tid: int = TeamManager.get_local_human_team() if TeamManager != null else 0
+		var fac: FactionData = TeamManager.get_team_faction_data(local_tid) if (TeamManager != null and TeamManager.has_method("get_team_faction_data")) else null
+		if fac != null:
+			banner = fac.boot_banner_text if not fac.boot_banner_text.is_empty() else ("// NEURAL LINK ONLINE — %s" % fac.short_code)
+			accent_col = fac.hud_accent_color
+		else:
+			banner = "// NEURAL LINK ONLINE"
 	var layer: CanvasLayer = CanvasLayer.new()
 	layer.name = "MatchBootOverlay"
 	layer.layer = 90
 	var veil: MatchBootVeil = MatchBootVeil.new()
 	veil.banner_text = banner
+	veil.accent_color = accent_col
 	veil.host_layer = layer
 	layer.add_child(veil)
 	host.add_child(layer)
@@ -628,11 +749,9 @@ func _record_timeline_sample(force_append: bool = false) -> void:
 			unit_counts[tid] = 0
 			army_values[tid] = 0
 		unit_counts[tid] = int(unit_counts[tid]) + 1
-		if u.data != null and not u.data.can_gather and not u.data.can_staff_compute:
-			var uid: StringName = u.get_unit_type_id()
-			if uid != &"worker" and uid != &"silica_harvester" and uid != &"engineer" and uid != &"target_dummy":
-				var val: int = maxi(0, u.data.biomass_cost) + maxi(0, u.data.silica_cost) + maxi(0, u.data.compute_cost)
-				army_values[tid] = int(army_values[tid]) + val
+		if u.data != null and u.data.is_combat_unit():
+			var val: int = maxi(0, u.data.biomass_cost) + maxi(0, u.data.silica_cost) + maxi(0, u.data.compute_cost)
+			army_values[tid] = int(army_values[tid]) + val
 
 	var teams_snapshot: Dictionary = {}
 	for tid: int in active_teams:
@@ -684,7 +803,7 @@ func evaluate_match_state() -> void:
 			continue
 		var t: int = int(b.team)
 		team_buildings[t] = int(team_buildings.get(t, 0)) + 1
-		if b.is_core_hub or b.building_type_id == &"nexus_vat":
+		if b.is_command_hub():
 			team_cores[t] = int(team_cores.get(t, 0)) + 1
 			_team_last_core_pos[t] = b.global_position
 
@@ -709,9 +828,9 @@ func evaluate_match_state() -> void:
 		if surviving_alliances.size() == 1:
 			var first_key: Variant = surviving_alliances.keys()[0]
 			winner_tid = int(surviving_alliances[first_key])
-		var reason: String = "All Opposing Command Cores Neutralized"
+		var reason: String = "All Opposing Command Hubs Neutralized"
 		if active_teams.size() <= 2:
-			reason = "Hostile Nexus Vat Neutralized" if winner_tid == 0 else "Command Core Destroyed"
+			reason = "Hostile Command Hub Neutralized" if winner_tid == 0 else "Command Hub Destroyed"
 		if TeamManager != null and TeamManager.is_spectator_mode():
 			reason = "%s Achieved Total Domination" % _format_winner_label(winner_tid)
 		_finish_match(winner_tid as Unit.Team, reason)
@@ -887,7 +1006,8 @@ func _on_building_construction_completed(building: Building) -> void:
 	elif tid == int(Unit.Team.ENEMY):
 		enemy_buildings_built += 1
 
-	if TIER2_STRUCTURE_IDS.has(building.building_type_id):
+	var is_notable_tech: bool = building.get_tech_tier() >= 2 or building.max_staff_slots > 0 or (building.is_military_production_building() and building.batch_production_count <= 1)
+	if is_notable_tech:
 		var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 		var is_visible_to_feed: bool = viewer < 0 or (TeamManager.are_allies(viewer, tid) if TeamManager != null else (tid == viewer))
 		if is_visible_to_feed:
@@ -947,13 +1067,12 @@ func _on_unit_died(unit: Unit) -> void:
 		enemy_units_destroyed += 1
 
 	# Log heavy unit losses in Tactical Event Feed
-	var uid: StringName = unit.get_unit_type_id()
-	if HEAVY_UNIT_IDS.has(uid):
+	if unit.data != null and unit.data.is_heavy_unit():
 		var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 		var is_ally: bool = viewer >= 0 and (TeamManager.are_allies(viewer, tid) if TeamManager != null else (tid == viewer))
 		if is_ally or viewer < 0 or unit.visible:
 			var tag: String = TeamManager.get_team_short_label(tid, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (tid + 1))
-			var u_name: String = unit.data.display_name if unit.data != null else "Heavy Unit"
+			var u_name: String = unit.data.display_name
 			var col: Color = Color(1.0, 0.34, 0.28, 1.0) if is_ally else Color(1.0, 0.72, 0.28, 1.0)
 			emit_tactical_event(&"combat", "%s %s Destroyed" % [tag, u_name], unit.global_position, col)
 
@@ -968,10 +1087,11 @@ func _on_building_destroyed(building: Building) -> void:
 		elif tid == int(Unit.Team.PLAYER):
 			player_buildings_lost += 1
 
-		if MAJOR_STRUCTURE_IDS.has(building.building_type_id) or building.is_core_hub:
+		var is_major_bldg: bool = building.is_command_hub() or building.is_military_production_building() or building.max_staff_slots > 0 or building.has_turret
+		if is_major_bldg:
 			var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 			var is_ally: bool = viewer >= 0 and (TeamManager.are_allies(viewer, tid) if TeamManager != null else (tid == viewer))
-			if is_ally or viewer < 0 or building.visible or building.is_core_hub:
+			if is_ally or viewer < 0 or building.visible or building.is_command_hub():
 				var tag: String = TeamManager.get_team_short_label(tid, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (tid + 1))
 				var col: Color = Color(1.0, 0.30, 0.26, 1.0) if is_ally else Color(1.0, 0.72, 0.28, 1.0)
 				emit_tactical_event(&"combat", "%s %s Destroyed!" % [tag, building.display_name], building.global_position, col)
@@ -1000,7 +1120,8 @@ class MatchBootVeil extends Control:
 	const VEIL_FADE_DURATION: float = 1.10
 	const INPUT_UNLOCK_TIME: float = 0.25
 
-	var banner_text: String = "// NEURAL LINK ONLINE — GENESIS_V2"
+	var banner_text: String = "// NEURAL LINK ONLINE"
+	var accent_color: Color = Color(0.204, 0.827, 0.600, 1.0)
 	var host_layer: CanvasLayer = null
 	var _elapsed: float = 0.0
 
@@ -1036,8 +1157,8 @@ class MatchBootVeil extends Control:
 		if scan_t < 1.0:
 			var scan_y: float = lerpf(-12.0, sz.y + 12.0, 1.0 - pow(1.0 - scan_t, 2.0))
 			var scan_a: float = sin(scan_t * PI) * 0.68
-			draw_rect(Rect2(0.0, scan_y - 10.0, sz.x, 12.0), Color(0.220, 0.741, 0.973, scan_a * 0.14), true)
-			draw_line(Vector2(0.0, scan_y), Vector2(sz.x, scan_y), Color(0.220, 0.941, 0.960, scan_a), 1.6, true)
+			draw_rect(Rect2(0.0, scan_y - 10.0, sz.x, 12.0), Color(accent_color.r, accent_color.g, accent_color.b, scan_a * 0.14), true)
+			draw_line(Vector2(0.0, scan_y), Vector2(sz.x, scan_y), Color(accent_color.r, accent_color.g, accent_color.b, scan_a), 1.6, true)
 
 		# Slim centered terminal banner fading smoothly out over 1.2s
 		var banner_fade: float = 1.0
@@ -1056,6 +1177,6 @@ class MatchBootVeil extends Control:
 			var cy: float = sz.y * 0.24
 			var rect: Rect2 = Rect2(cx - box_w * 0.5, cy - box_h * 0.5, box_w, box_h)
 			draw_rect(rect, Color(0.04, 0.08, 0.13, 0.82 * banner_fade), true)
-			draw_line(Vector2(rect.position.x, rect.position.y), Vector2(rect.end.x, rect.position.y), Color(0.220, 0.741, 0.973, 0.90 * banner_fade), 1.6, true)
-			draw_line(Vector2(rect.position.x, rect.end.y), Vector2(rect.end.x, rect.end.y), Color(0.204, 0.827, 0.600, 0.75 * banner_fade), 1.2, true)
+			draw_line(Vector2(rect.position.x, rect.position.y), Vector2(rect.end.x, rect.position.y), Color(accent_color.r, accent_color.g, accent_color.b, 0.92 * banner_fade), 1.6, true)
+			draw_line(Vector2(rect.position.x, rect.end.y), Vector2(rect.end.x, rect.end.y), Color(accent_color.r, accent_color.g, accent_color.b, 0.72 * banner_fade), 1.2, true)
 			draw_string(font, Vector2(cx - txt_sz.x * 0.5, cy + txt_sz.y * 0.34), banner_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0.86, 0.98, 1.0, 0.96 * banner_fade))

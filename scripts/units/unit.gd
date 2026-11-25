@@ -160,7 +160,7 @@ func _ready() -> void:
 		heal_aura.aura_radius = data.heal_aura_radius
 		add_child(heal_aura)
 
-	if data.can_gather or data.can_staff_compute or data.unit_type_id == &"worker" or data.unit_type_id == &"engineer":
+	if data.is_worker_class():
 		repair_component = get_node_or_null("RepairComponent")
 		if repair_component == null:
 			repair_component = REPAIR_COMPONENT_SCRIPT.new()
@@ -435,8 +435,7 @@ func _start_repair(target: Node2D) -> bool:
 func can_salvage_core() -> bool:
 	if is_dead or is_staffed or data == null:
 		return false
-	var uid: StringName = get_unit_type_id()
-	return data.can_gather or data.can_staff_compute or uid == &"worker" or uid == &"engineer"
+	return data.is_worker_class()
 
 
 func is_salvaging_in_place() -> bool:
@@ -483,15 +482,7 @@ func is_idle_worker() -> bool:
 		return false
 	if team != Team.PLAYER or current_hp <= 0.0:
 		return false
-	var uid: StringName = data.unit_type_id
-	var is_worker_role: bool = (
-		data.can_gather
-		or data.can_staff_compute
-		or uid == &"worker"
-		or uid == &"silica_harvester"
-		or uid == &"engineer"
-	)
-	if not is_worker_role:
+	if not data.is_worker_class():
 		return false
 	if command_state != CommandState.IDLE or not command_queue.is_empty() or not active_command.is_empty():
 		return false
@@ -1222,13 +1213,13 @@ func _draw() -> void:
 			draw_circle(Vector2.ZERO, min_r, Color(1.0, 0.28, 0.24, 0.05))
 			_draw_dashed_ring(Vector2.ZERO, min_r, Color(1.0, 0.36, 0.28, 0.44), 1.4, 20)
 
-	# Elevated ground shadow for Arc-Lancer Colossus Stride readability
-	if type_id == &"arc_lancer":
+	# Elevated ground shadow for Colossus Stride units
+	if data != null and data.ignore_friendly_unit_collision:
 		draw_circle(Vector2(5.0, 11.0), 17.5, Color(0.02, 0.04, 0.06, 0.42))
 		draw_arc(Vector2(5.0, 11.0), 17.5, 0.0, TAU, 24, Color(0.28, 0.92, 1.0, 0.22) if team == Team.PLAYER else Color(1.0, 0.36, 0.26, 0.22), 1.2, true)
 
-	# Speed-dart motion trail for Stingers
-	if type_id == &"stinger" and _trail_points.size() >= 2:
+	# Speed-dart motion trail for fast flanker units
+	if data != null and data.has_tag(&"flanker") and _trail_points.size() >= 2:
 		var trail_base: Color = Color(0.98, 0.80, 0.24, 1.0) if team == Team.PLAYER else Color(1.0, 0.46, 0.24, 1.0)
 		for i: int in range(1, _trail_points.size()):
 			var t: float = float(i) / float(_trail_points.size())
@@ -1334,14 +1325,11 @@ func _die() -> void:
 				get_parent().add_child(core)
 				if core.has_method("configure_payload"):
 					core.call("configure_payload", data.salvage_silica, data.salvage_compute, data.display_name)
-	var uid: StringName = get_unit_type_id()
-	var is_heavy: bool = (uid == &"goliath_frame" or uid == &"arc_lancer" or uid == &"chrysalis_mortar")
+	var is_heavy: bool = data != null and data.is_heavy_unit()
 	var burst_r: float = (data.collision_radius * 1.15) if data != null else 18.0
 	var burst_col: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else (Color(0.34, 0.98, 0.88, 1.0) if team == Team.PLAYER else Color(1.0, 0.42, 0.28, 1.0))
-	if uid == &"chrysalis_mortar" and team == Team.PLAYER:
-		burst_col = Color(0.46, 1.0, 0.56, 1.0)
-	elif uid == &"lance_rig" and team == Team.PLAYER:
-		burst_col = Color(1.0, 0.80, 0.34, 1.0)
+	if data != null and team == Team.PLAYER and (data.has_tag(&"artillery") or data.has_tag(&"anti_armor")):
+		burst_col = data.weapon_tracer_color
 	if is_heavy and is_inside_tree():
 		var scars: Node = get_tree().get_first_node_in_group("battle_scars")
 		if scars != null and scars.has_method("add_scar"):
@@ -1392,7 +1380,7 @@ func _physics_process(delta: float) -> void:
 				var s_val: float = lerpf(0.72, 1.0, ease_out)
 				body_visual.scale = Vector2(s_val, s_val)
 
-	if get_unit_type_id() == &"stinger":
+	if data != null and data.has_tag(&"flanker"):
 		_update_stinger_trail(delta)
 
 	if not _can_move() and not _can_attack():
@@ -1965,7 +1953,7 @@ func _setup_procedural_visuals() -> void:
 		_entity_visuals.name = "EntityVisuals"
 		body_visual.add_child(_entity_visuals)
 	_entity_visuals.bind_unit(self)
-	if type_id == &"arc_lancer":
+	if data != null and data.ignore_friendly_unit_collision:
 		body_visual.position = Vector2(0.0, -6.0)
 		queue_redraw()
 
@@ -2032,7 +2020,7 @@ func _on_gather_state_changed(_new_state: GatherComponent.GatherState) -> void:
 func get_armor_class_label() -> String:
 	if data == null:
 		return "Light"
-	if data.unit_type_id == &"goliath_frame" or data.unit_type_id == &"arc_lancer":
+	if data.is_heavy_unit() and data.has_tag(&"synthetic"):
 		return "Heavy Synthetic"
 	if data.is_armored:
 		return "Armored"
@@ -2049,39 +2037,30 @@ func get_inspection_data() -> Dictionary:
 	var subtitle: String = ("HOSTILE %s" % class_tag) if is_enemy else (("ALLIED %s" % class_tag) if is_allied_ai else ("FRIENDLY %s" % class_tag))
 
 	if not is_enemy and data != null:
-		if data.unit_type_id == &"scout_unit" or data.unit_type_id == &"stinger":
-			accent = Color(0.98, 0.78, 0.24, 1.0)
-			subtitle = "LIGHT  •  FAST FLANKER"
-		elif data.unit_type_id == &"clone_trooper":
-			accent = Color(0.24, 0.94, 0.82, 1.0)
-			subtitle = "LIGHT  •  VAT-BORN INFANTRY"
-		elif data.unit_type_id == &"symbiote":
-			accent = Color(0.32, 1.0, 0.66, 1.0)
-			subtitle = "LIGHT  •  BIO-SUPPORT DRONE"
-		elif data.unit_type_id == &"lance_rig":
-			accent = Color(0.98, 0.68, 0.28, 1.0)
-			subtitle = "LIGHT  •  ANTI-ARMOR MECH"
-		elif data.unit_type_id == &"signal_jammer":
-			accent = Color(0.76, 0.56, 1.0, 1.0)
-			subtitle = "LIGHT  •  DISRUPTION WALKER"
-		elif data.unit_type_id == &"goliath_frame":
-			accent = Color(0.36, 0.92, 1.0, 1.0)
-			subtitle = "HEAVY SYNTHETIC  •  JUGGERNAUT"
-		elif data.unit_type_id == &"arc_lancer":
-			accent = Color(0.46, 0.98, 1.0, 1.0)
-			subtitle = "HEAVY SYNTHETIC  •  COLOSSUS STRIDER"
-		elif data.unit_type_id == &"chrysalis_mortar":
-			accent = Color(0.46, 1.0, 0.54, 1.0)
-			subtitle = "ARMORED  •  SIEGE ARTILLERY"
-		elif data.unit_type_id == &"silica_harvester":
-			accent = Color(0.96, 0.68, 0.22, 1.0)
-			subtitle = "ARMORED  •  SILICA HARVESTER"
+		if not data.role_tags_display.is_empty():
+			subtitle = "%s  •  %s" % [class_tag, data.role_tags_display.to_upper()]
+			if data.has_tag(&"flanker") or data.has_tag(&"scout"):
+				accent = Color(0.98, 0.78, 0.24, 1.0)
+			elif data.has_tag(&"anti_armor"):
+				accent = Color(0.98, 0.68, 0.28, 1.0)
+			elif data.has_tag(&"disruptor"):
+				accent = Color(0.76, 0.56, 1.0, 1.0)
+			elif data.has_tag(&"support") or data.has_tag(&"artillery"):
+				accent = Color(0.38, 1.0, 0.60, 1.0)
+			elif data.is_heavy_unit():
+				accent = Color(0.40, 0.94, 1.0, 1.0)
+			elif data.can_staff_compute:
+				accent = Color(0.32, 0.82, 1.0, 1.0)
+			elif data.can_gather:
+				accent = Color(0.96, 0.68, 0.22, 1.0) if data.allowed_resource == &"silica" else Color(0.28, 0.94, 0.56, 1.0)
+			else:
+				accent = Color(0.24, 0.94, 0.82, 1.0)
 		elif data.can_staff_compute:
 			accent = Color(0.32, 0.82, 1.0, 1.0)
-			subtitle = "LIGHT  •  COMPUTE SPECIALIST"
+			subtitle = "%s  •  COMPUTE SPECIALIST" % class_tag
 		elif data.can_gather:
 			accent = Color(0.28, 0.94, 0.56, 1.0)
-			subtitle = "LIGHT  •  UTILITY WORKER"
+			subtitle = "%s  •  UTILITY WORKER" % class_tag
 
 	var max_hp_val: float = get_max_hp()
 	var stats: Array[Dictionary] = []

@@ -33,3 +33,12 @@ compute_cost = 0
 build_time = 3.5
 train_time = 3.5
 unit_scene_path = "res://scenes/units/engineer_unit.tscn"
+
+unit_tags = Array[StringName]([&"engineer", &"bio", &"support"])
+weapon_tracer_style = &"pulse"
+weapon_tracer_color = Color(0.32, 0.88, 1, 0.95)
+weapon_tracer_width = 2.0
+weapon_sfx_id = &"weapon_rifle"
+audio_bark_class = &"worker"
+minimap_icon_shape = &"worker"
+role_tags_display = "Staff Mainframe • Repair Heavy • Fast Salvage"

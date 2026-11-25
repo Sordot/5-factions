@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="FactionData" load_steps=27 format=3]
+[gd_resource type="Resource" script_class="FactionData" load_steps=29 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/faction_data.gd" id="1_script"]
 [ext_resource type="PackedScene" path="res://scenes/buildings/nexus_vat.tscn" id="2_hub"]
@@ -26,19 +26,31 @@
 [ext_resource type="Resource" path="res://resources/upgrades/batch_efficiency.tres" id="24_upg_be"]
 [ext_resource type="Resource" path="res://resources/upgrades/adrenal_potency.tres" id="25_upg_ap"]
 [ext_resource type="Resource" path="res://resources/upgrades/compute_overdrive.tres" id="26_upg_co"]
+[ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="27_clone"]
+[ext_resource type="PackedScene" path="res://scenes/units/stinger.tscn" id="28_stinger"]
 
 [resource]
 script = ExtResource("1_script")
 faction_id = &"genesis_v2"
 display_name = "GENESIS_V2 — The Vat-Born"
+short_code = "GEN-V2"
 tagline = "High-tempo vat-cloned bio-infantry pivoting into Compute-forged heavy synthetics."
 is_playable = true
 primary_color = Color(0.2, 0.96, 0.86, 1)
 accent_color = Color(0.28, 0.98, 0.62, 1)
+hud_accent_color = Color(0.2, 0.83, 0.6, 1)
+boot_banner_text = "// NEURAL LINK ONLINE — GENESIS_V2"
+audio_bark_pitch_bias = 1.0
+audio_timbre_profile = &"technozen_bio"
+starting_biomass = 200
+starting_silica = 50
+starting_compute = 0
+starting_worker_count = 3
 starting_hub_scene = ExtResource("2_hub")
 worker_scene = ExtResource("3_worker")
 harvester_scene = ExtResource("4_harvester")
 engineer_scene = ExtResource("5_engineer")
+extra_starting_units = Array[PackedScene]([ExtResource("27_clone"), ExtResource("27_clone"), ExtResource("28_stinger")])
 building_roster = Array[Resource("res://scripts/data/building_data.gd")]([ExtResource("6_b_nexus"), ExtResource("7_b_pylon"), ExtResource("8_b_cond"), ExtResource("9_b_main"), ExtResource("10_b_vat"), ExtResource("11_b_fnd"), ExtResource("12_b_fab")])
 unit_roster = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("13_u_wrk"), ExtResource("14_u_harv"), ExtResource("15_u_eng"), ExtResource("16_u_cln"), ExtResource("17_u_stg"), ExtResource("18_u_sym"), ExtResource("19_u_lnc"), ExtResource("20_u_jam"), ExtResource("21_u_gol"), ExtResource("22_u_arc"), ExtResource("23_u_mrt")])
 upgrade_roster = Array[Resource("res://scripts/data/upgrade_data.gd")]([ExtResource("24_upg_be"), ExtResource("25_upg_ap"), ExtResource("26_upg_co")])
@@ -50,4 +62,44 @@ ai_build_profile = {
 &"hub": &"nexus_vat",
 &"refinery": &"silica_condenser",
 &"supply": &"synapse_pylon"
+}
+ai_scout_unit_id = &"stinger"
+ai_salvage_unit_ids = Array[StringName]([&"engineer", &"worker"])
+ai_counter_units = {
+&"ANTI_ARMOR": [&"lance_rig", &"arc_lancer", &"goliath_frame"],
+&"ANTI_SIEGE": [&"stinger", &"goliath_frame", &"arc_lancer"],
+&"ANTI_SWARM": [&"chrysalis_mortar", &"signal_jammer", &"symbiote"],
+&"BREACH": [&"lance_rig", &"chrysalis_mortar", &"goliath_frame", &"arc_lancer"]
+}
+ai_playstyle_weights = {
+&"balanced": {
+&"arc_lancer": 1.0,
+&"chrysalis_mortar": 1.0,
+&"clone_trooper": 3.5,
+&"goliath_frame": 1.2,
+&"lance_rig": 2.0,
+&"signal_jammer": 1.0,
+&"stinger": 1.2,
+&"symbiote": 0.6
+},
+&"swarm_rush": {
+&"arc_lancer": 0.8,
+&"chrysalis_mortar": 0.7,
+&"clone_trooper": 4.2,
+&"goliath_frame": 1.0,
+&"lance_rig": 1.5,
+&"signal_jammer": 1.0,
+&"stinger": 2.4,
+&"symbiote": 0.8
+},
+&"synthetics_tech": {
+&"arc_lancer": 1.6,
+&"chrysalis_mortar": 1.4,
+&"clone_trooper": 2.4,
+&"goliath_frame": 2.0,
+&"lance_rig": 2.2,
+&"signal_jammer": 1.2,
+&"stinger": 0.9,
+&"symbiote": 0.6
+}
 }

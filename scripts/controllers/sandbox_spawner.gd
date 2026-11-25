@@ -189,7 +189,7 @@ func reset_sandbox() -> void:
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if node is Building and is_instance_valid(node):
 			var b: Building = node
-			if not b.is_core_hub and b.building_type_id != &"nexus_vat":
+			if not b.is_command_hub():
 				b.queue_free()
 
 	var container: Node = _get_units_container()
@@ -258,6 +258,50 @@ func _clamp_to_walkable_arena(pos: Vector2) -> Vector2:
 		clampf(pos.x, arena_safe_bounds.position.x, arena_safe_bounds.end.x),
 		clampf(pos.y, arena_safe_bounds.position.y, arena_safe_bounds.end.y)
 	)
+
+
+func spawn_unit_data(unit_data: UnitData, target_team: Unit.Team, count: int = 1, origin: Vector2 = Vector2.INF) -> Array[Unit]:
+	if unit_data == null:
+		return []
+	var scene: PackedScene = unit_data.resolve_unit_scene()
+	if scene == null:
+		var fallback_path: String = _find_unit_scene_path(unit_data.unit_type_id)
+		if not fallback_path.is_empty():
+			scene = load(fallback_path) as PackedScene
+	if scene == null:
+		return []
+	var default_origin: Vector2 = player_spawn_origin if target_team == Unit.Team.PLAYER else enemy_spawn_origin
+	var base_pos: Vector2 = _resolve_origin(origin, default_origin)
+	return _spawn_batch(scene, count, base_pos, 46.0, int(target_team))
+
+
+func spawn_building_data(bldg_data: BuildingData, target_team: Unit.Team, origin: Vector2 = Vector2.INF) -> Building:
+	if bldg_data == null:
+		return null
+	var scene: PackedScene = bldg_data.resolve_scene()
+	if scene == null:
+		var fallback_path: String = _find_building_scene_path(bldg_data.building_id)
+		if not fallback_path.is_empty():
+			scene = load(fallback_path) as PackedScene
+	if scene == null:
+		return null
+	var container: Node = _get_buildings_container()
+	if container == null:
+		return null
+	var node: Node = scene.instantiate()
+	if not (node is Building):
+		node.queue_free()
+		return null
+	var building: Building = node
+	building.building_data = bldg_data
+	building.team = target_team
+	building.is_constructed = true
+	var default_origin: Vector2 = (player_spawn_origin + Vector2(90.0, -70.0)) if target_team == Unit.Team.PLAYER else (enemy_spawn_origin + Vector2(-90.0, 70.0))
+	var spawn_pos: Vector2 = _find_open_building_spot(_resolve_origin(origin, default_origin), building.footprint_radius)
+	building.global_position = spawn_pos
+	container.add_child(building)
+	entities_changed.emit()
+	return building
 
 
 func spawn_genesis_unit_by_index(catalog_index: int, target_team: Unit.Team, count: int = 1, origin: Vector2 = Vector2.INF) -> Array[Unit]:
@@ -464,7 +508,7 @@ func clear_combat_lab_entities() -> void:
 			continue
 		if node is Building:
 			var b: Building = node
-			if b.is_core_hub or b.building_type_id == &"nexus_vat":
+			if b.is_command_hub():
 				continue
 		cleared_ids[node.get_instance_id()] = true
 		node.queue_free()
@@ -490,9 +534,9 @@ func clear_combat_lab_entities() -> void:
 		if cleared_ids.has(node.get_instance_id()):
 			continue
 		var b: Building = node
-		if b.is_core_hub or b.building_type_id == &"nexus_vat":
+		if b.is_command_hub():
 			continue
-		if b.building_type_id == &"defense_turret" and b.global_position.distance_squared_to(center) <= lab_r_sq:
+		if b.has_turret and b.global_position.distance_squared_to(center) <= lab_r_sq:
 			b.queue_free()
 
 	entities_changed.emit()

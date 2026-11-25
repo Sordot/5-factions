@@ -34,3 +34,12 @@ turret_splash_radius = 0.0
 turret_bonus_vs_armored = 1.35
 turret_tracer_style = &"rail"
 turret_turn_speed = 7.5
+
+is_command_hub = false
+is_military_production = false
+is_supply_provider = false
+accepted_dropoff_resources = Array[StringName]([])
+tech_tier = 1
+prerequisite_building_ids = Array[StringName]([])
+audio_select_class = &"defense"
+tech_tree_summary = "Automated Static Defense Pylon"

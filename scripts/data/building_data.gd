@@ -15,6 +15,7 @@ extends Resource
 @export var bandwidth_provided: int = 0
 @export var is_dropoff: bool = false
 @export var accepted_resources: Array[StringName] = []
+@export var accepted_dropoff_resources: Array[StringName] = []
 @export var requires_vent: bool = false
 @export var max_staff_slots: int = 0
 @export var trainable_units: Array[UnitData] = []
@@ -24,7 +25,14 @@ extends Resource
 @export var batch_production_count: int = 1
 @export var base_batch_cost_multiplier: float = 1.0
 @export var required_building_id: StringName = &""
+@export var prerequisite_building_ids: Array[StringName] = []
 @export var is_core_hub: bool = false
+@export var is_command_hub: bool = false
+@export var is_military_production: bool = false
+@export var is_supply_provider: bool = false
+@export var tech_tier: int = 0 # 0 = Core/Econ, 1 = Tier 1 Production/Counter, 2 = Tier 2 Heavy/Elite
+@export var audio_select_class: StringName = &"utility" # &"hub", &"production", &"tech", &"defense", &"utility"
+@export var tech_tree_summary: String = ""
 
 # Optional static defense / turret weapon parameters (disabled by default)
 @export var has_turret: bool = false
@@ -36,6 +44,26 @@ extends Resource
 @export var turret_bonus_vs_armored: float = 1.0
 @export var turret_tracer_style: StringName = &"pulse"
 @export var turret_turn_speed: float = 7.0
+
+
+func is_hub() -> bool:
+	return is_command_hub or is_core_hub
+
+
+func get_dropoff_resources() -> Array[StringName]:
+	if not accepted_dropoff_resources.is_empty():
+		return accepted_dropoff_resources
+	return accepted_resources
+
+
+func get_prerequisite_ids() -> Array[StringName]:
+	var out: Array[StringName] = []
+	for pid: StringName in prerequisite_building_ids:
+		if pid != &"" and not out.has(pid):
+			out.append(pid)
+	if required_building_id != &"" and not out.has(required_building_id):
+		out.append(required_building_id)
+	return out
 
 
 func resolve_scene() -> PackedScene:

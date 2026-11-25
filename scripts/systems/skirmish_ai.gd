@@ -2,29 +2,7 @@ class_name SkirmishAICommander
 extends Node
 
 const MapLandmarkScript = preload("res://scripts/world/map_landmark.gd")
-
-const CONDENSER_DATA_PATH: String = "res://resources/buildings/silica_condenser_data.tres"
-const PYLON_DATA_PATH: String = "res://resources/buildings/synapse_pylon_data.tres"
-const MAINFRAME_DATA_PATH: String = "res://resources/buildings/wetware_mainframe_data.tres"
-const CLONING_VAT_DATA_PATH: String = "res://resources/buildings/cloning_vat_data.tres"
-const FOUNDRY_DATA_PATH: String = "res://resources/buildings/calibration_foundry_data.tres"
-const FABRICATOR_DATA_PATH: String = "res://resources/buildings/synthetics_fabricator_data.tres"
-
-const WORKER_DATA_PATH: String = "res://resources/units/worker_unit_data.tres"
-const HARVESTER_DATA_PATH: String = "res://resources/units/silica_harvester_data.tres"
-const ENGINEER_DATA_PATH: String = "res://resources/units/engineer_data.tres"
-const CLONE_TROOPER_DATA_PATH: String = "res://resources/units/clone_trooper_data.tres"
-const STINGER_DATA_PATH: String = "res://resources/units/stinger_data.tres"
-const SYMBIOTE_DATA_PATH: String = "res://resources/units/symbiote_data.tres"
-const LANCE_RIG_DATA_PATH: String = "res://resources/units/lance_rig_data.tres"
-const SIGNAL_JAMMER_DATA_PATH: String = "res://resources/units/signal_jammer_data.tres"
-const GOLIATH_DATA_PATH: String = "res://resources/units/goliath_frame_data.tres"
-const ARC_LANCER_DATA_PATH: String = "res://resources/units/arc_lancer_data.tres"
-const MORTAR_DATA_PATH: String = "res://resources/units/chrysalis_mortar_data.tres"
-
-const UPG_BATCH_EFFICIENCY_PATH: String = "res://resources/upgrades/batch_efficiency.tres"
-const UPG_ADRENAL_POTENCY_PATH: String = "res://resources/upgrades/adrenal_potency.tres"
-const UPG_COMPUTE_OVERDRIVE_PATH: String = "res://resources/upgrades/compute_overdrive.tres"
+const AIBuildPlannerScript = preload("res://scripts/systems/ai_build_planner.gd")
 
 const INTEL_SCAN_INTERVAL: float = 1.5
 const INTEL_TTL_SECONDS: float = 90.0
@@ -51,26 +29,16 @@ enum ArmyState {
 @export var base_defense_radius: float = 650.0
 @export var arena_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 
-var _condenser_data: BuildingData = null
-var _pylon_data: BuildingData = null
-var _mainframe_data: BuildingData = null
-var _cloning_vat_data: BuildingData = null
-var _foundry_data: BuildingData = null
-var _fabricator_data: BuildingData = null
+var _planner: AIBuildPlannerScript = AIBuildPlannerScript.new()
+var _refinery_data: BuildingData = null
+var _supply_data: BuildingData = null
+var _compute_hub_data: BuildingData = null
+var _barracks_t1_data: BuildingData = null
+var _counter_foundry_data: BuildingData = null
+var _heavy_t2_data: BuildingData = null
 var _worker_data: UnitData = null
 var _harvester_data: UnitData = null
 var _engineer_data: UnitData = null
-var _clone_trooper_data: UnitData = null
-var _stinger_data: UnitData = null
-var _symbiote_data: UnitData = null
-var _lance_rig_data: UnitData = null
-var _signal_jammer_data: UnitData = null
-var _goliath_data: UnitData = null
-var _arc_lancer_data: UnitData = null
-var _mortar_data: UnitData = null
-var _upg_batch_efficiency: UpgradeData = null
-var _upg_adrenal_potency: UpgradeData = null
-var _upg_compute_overdrive: UpgradeData = null
 
 var _decision_timer: float = 0.0
 var _ai_elapsed: float = 0.0
@@ -129,71 +97,17 @@ func _ready() -> void:
 
 
 func _load_faction_rosters() -> void:
-	var faction_id: StringName = TeamManager.get_team_faction(int(ai_team)) if TeamManager != null else &"genesis_v2"
-	var faction_res: Resource = TeamManager.get_faction_data(faction_id) if (TeamManager != null and TeamManager.has_method("get_faction_data")) else null
-	if faction_res != null:
-		_condenser_data = faction_res.call("get_ai_building_for_role", &"refinery") as BuildingData
-		_pylon_data = faction_res.call("get_ai_building_for_role", &"supply") as BuildingData
-		_mainframe_data = faction_res.call("get_ai_building_for_role", &"compute_hub") as BuildingData
-		_cloning_vat_data = faction_res.call("get_ai_building_for_role", &"barracks_t1") as BuildingData
-		_foundry_data = faction_res.call("get_ai_building_for_role", &"counter_foundry") as BuildingData
-		_fabricator_data = faction_res.call("get_ai_building_for_role", &"heavy_t2") as BuildingData
-		_worker_data = faction_res.call("get_unit_by_id", &"worker") as UnitData
-		_harvester_data = faction_res.call("get_unit_by_id", &"silica_harvester") as UnitData
-		_engineer_data = faction_res.call("get_unit_by_id", &"engineer") as UnitData
-		_clone_trooper_data = faction_res.call("get_unit_by_id", &"clone_trooper") as UnitData
-		_stinger_data = faction_res.call("get_unit_by_id", &"stinger") as UnitData
-		_symbiote_data = faction_res.call("get_unit_by_id", &"symbiote") as UnitData
-		_lance_rig_data = faction_res.call("get_unit_by_id", &"lance_rig") as UnitData
-		_signal_jammer_data = faction_res.call("get_unit_by_id", &"signal_jammer") as UnitData
-		_goliath_data = faction_res.call("get_unit_by_id", &"goliath_frame") as UnitData
-		_arc_lancer_data = faction_res.call("get_unit_by_id", &"arc_lancer") as UnitData
-		_mortar_data = faction_res.call("get_unit_by_id", &"chrysalis_mortar") as UnitData
-		_upg_batch_efficiency = faction_res.call("get_upgrade_by_id", &"batch_efficiency") as UpgradeData
-		_upg_adrenal_potency = faction_res.call("get_upgrade_by_id", &"adrenal_potency") as UpgradeData
-		_upg_compute_overdrive = faction_res.call("get_upgrade_by_id", &"compute_overdrive") as UpgradeData
-
-	# Fallback to direct resource paths if any entry is absent
-	if _condenser_data == null:
-		_condenser_data = load(CONDENSER_DATA_PATH) as BuildingData
-	if _pylon_data == null:
-		_pylon_data = load(PYLON_DATA_PATH) as BuildingData
-	if _mainframe_data == null:
-		_mainframe_data = load(MAINFRAME_DATA_PATH) as BuildingData
-	if _cloning_vat_data == null:
-		_cloning_vat_data = load(CLONING_VAT_DATA_PATH) as BuildingData
-	if _foundry_data == null:
-		_foundry_data = load(FOUNDRY_DATA_PATH) as BuildingData
-	if _fabricator_data == null:
-		_fabricator_data = load(FABRICATOR_DATA_PATH) as BuildingData
-	if _worker_data == null:
-		_worker_data = load(WORKER_DATA_PATH) as UnitData
-	if _harvester_data == null:
-		_harvester_data = load(HARVESTER_DATA_PATH) as UnitData
-	if _engineer_data == null:
-		_engineer_data = load(ENGINEER_DATA_PATH) as UnitData
-	if _clone_trooper_data == null:
-		_clone_trooper_data = load(CLONE_TROOPER_DATA_PATH) as UnitData
-	if _stinger_data == null:
-		_stinger_data = load(STINGER_DATA_PATH) as UnitData
-	if _symbiote_data == null:
-		_symbiote_data = load(SYMBIOTE_DATA_PATH) as UnitData
-	if _lance_rig_data == null:
-		_lance_rig_data = load(LANCE_RIG_DATA_PATH) as UnitData
-	if _signal_jammer_data == null:
-		_signal_jammer_data = load(SIGNAL_JAMMER_DATA_PATH) as UnitData
-	if _goliath_data == null:
-		_goliath_data = load(GOLIATH_DATA_PATH) as UnitData
-	if _arc_lancer_data == null:
-		_arc_lancer_data = load(ARC_LANCER_DATA_PATH) as UnitData
-	if _mortar_data == null:
-		_mortar_data = load(MORTAR_DATA_PATH) as UnitData
-	if _upg_batch_efficiency == null:
-		_upg_batch_efficiency = load(UPG_BATCH_EFFICIENCY_PATH) as UpgradeData
-	if _upg_adrenal_potency == null:
-		_upg_adrenal_potency = load(UPG_ADRENAL_POTENCY_PATH) as UpgradeData
-	if _upg_compute_overdrive == null:
-		_upg_compute_overdrive = load(UPG_COMPUTE_OVERDRIVE_PATH) as UpgradeData
+	var faction_data: FactionData = TeamManager.get_team_faction_data(int(ai_team)) if TeamManager != null else null
+	_planner.bind_faction(faction_data)
+	_refinery_data = _planner.get_building_for_role(&"refinery")
+	_supply_data = _planner.get_building_for_role(&"supply")
+	_compute_hub_data = _planner.get_building_for_role(&"compute_hub")
+	_barracks_t1_data = _planner.get_building_for_role(&"barracks_t1")
+	_counter_foundry_data = _planner.get_building_for_role(&"counter_foundry")
+	_heavy_t2_data = _planner.get_building_for_role(&"heavy_t2")
+	_worker_data = _planner.get_unit_for_role(&"worker")
+	_harvester_data = _planner.get_unit_for_role(&"harvester")
+	_engineer_data = _planner.get_unit_for_role(&"engineer")
 
 
 func _apply_lobby_ai_profile() -> void:
@@ -354,10 +268,7 @@ func _sync_military_rallies() -> void:
 
 
 func _is_military_production_building(b: Building) -> bool:
-	if b == null:
-		return false
-	var bid: StringName = b.building_type_id
-	return bid == &"cloning_vat" or bid == &"calibration_foundry" or bid == &"synthetics_fabricator"
+	return b != null and b.is_military_production_building()
 
 
 func _run_decision_tick(tick_dt: float) -> void:
@@ -448,9 +359,9 @@ func _find_base_perimeter_threat(core: Building) -> Variant:
 	var threat_unit: Unit = null
 	var best_d_sq: float = INF
 
-	# Check ~650px perimeter around every owned Nexus Vat and economy hub via SpatialGrid
+	# Check ~650px perimeter around every owned Command Hub and economy drop-off via SpatialGrid
 	for b: Building in ai_buildings:
-		var check_r: float = base_defense_radius if (b.is_core_hub or b.building_type_id == &"nexus_vat" or b.is_resource_dropoff) else 380.0
+		var check_r: float = base_defense_radius if (b.is_command_hub() or b.is_resource_dropoff) else 380.0
 		var nearby: Array = SpatialGrid.query_units_in_radius(b.global_position, check_r) if SpatialGrid != null else get_tree().get_nodes_in_group("units")
 		var r_sq: float = check_r * check_r
 		for item: Variant in nearby:
@@ -713,17 +624,15 @@ func _get_target_wave_size() -> int:
 
 
 func _get_unit_power_weight(unit: Unit) -> float:
-	if unit == null or not is_instance_valid(unit):
+	if unit == null or not is_instance_valid(unit) or unit.data == null:
 		return 0.0
-	match unit.get_unit_type_id():
-		&"goliath_frame", &"arc_lancer", &"chrysalis_mortar":
-			return 3.0
-		&"lance_rig", &"signal_jammer":
-			return 2.0
-		&"symbiote":
-			return 1.5
-		_:
-			return 1.0
+	if unit.data.is_heavy_unit() or unit.data.has_tag(&"artillery"):
+		return 3.0
+	if unit.data.has_tag(&"anti_armor") or unit.data.has_tag(&"disruptor"):
+		return 2.0
+	if unit.data.has_tag(&"support"):
+		return 1.5
+	return 1.0
 
 
 func _compute_units_strength(units: Array[Unit]) -> float:
@@ -745,7 +654,7 @@ func _is_wave_finishing_enemy_core() -> bool:
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if node is Building and is_instance_valid(node):
 			var b: Building = node as Building
-			if not b.is_destroyed and _is_enemy_team(int(b.team)) and (b.is_core_hub or b.building_type_id == &"nexus_vat"):
+			if not b.is_destroyed and _is_enemy_team(int(b.team)) and b.is_command_hub():
 				if (b.current_hp / maxf(1.0, b.max_hp)) < 0.35:
 					enemy_cores.append(b)
 	if enemy_cores.is_empty():
@@ -802,19 +711,23 @@ func _manage_early_scouting(core: Building) -> void:
 	if _ai_elapsed < _next_scout_dispatch_time:
 		return
 
-	# Pick a fast Stinger first; fall back to Clone Trooper if no Stinger is fielded
-	var best_stinger: Unit = null
-	var best_clone: Unit = null
+	# Pick the faction's designated fast scout first; fall back to any light mobile combatant
+	var preferred_scout_id: StringName = _planner.get_scout_unit_id()
+	var best_scout: Unit = null
+	var fallback_scout: Unit = null
 	for u: Unit in _get_team_units(ai_team):
 		if _wave_units.has(u) and army_state == ArmyState.ATTACKING:
 			continue
+		if u.data == null or not u.data.is_combat_unit() or u.data.move_speed <= 0.0:
+			continue
 		var uid: StringName = u.get_unit_type_id()
-		if uid == &"stinger" and best_stinger == null:
-			best_stinger = u
-		elif uid == &"clone_trooper" and best_clone == null:
-			best_clone = u
+		if (preferred_scout_id != &"" and uid == preferred_scout_id) or u.data.has_tag(&"scout") or u.data.has_tag(&"flanker"):
+			if best_scout == null:
+				best_scout = u
+		elif not u.data.is_heavy_unit() and fallback_scout == null:
+			fallback_scout = u
 
-	var scout: Unit = best_stinger if best_stinger != null else best_clone
+	var scout: Unit = best_scout if best_scout != null else fallback_scout
 	if scout == null:
 		return
 
@@ -917,26 +830,26 @@ func _update_scouted_intel() -> void:
 
 	for eu_var: Variant in seen_enemy_units.values():
 		var eu: Unit = eu_var as Unit
-		var uid: StringName = eu.get_unit_type_id()
-		if uid == &"goliath_frame" or uid == &"arc_lancer":
-			_scouted_intel["heavy_armor_at"] = now
-		elif uid == &"chrysalis_mortar":
+		if eu.data == null:
+			continue
+		if eu.data.has_tag(&"artillery") or eu.data.has_tag(&"siege"):
 			_scouted_intel["artillery_at"] = now
-		elif uid == &"clone_trooper" or uid == &"stinger":
+		elif eu.data.is_heavy_unit():
+			_scouted_intel["heavy_armor_at"] = now
+		elif eu.data.has_tag(&"swarm") or eu.data.has_tag(&"infantry") or eu.data.has_tag(&"flanker"):
 			infantry_count += 1
 
 	for eb_var: Variant in seen_enemy_buildings.values():
 		var eb: Building = eb_var as Building
-		var bid: StringName = eb.building_type_id
-		if bid == &"synthetics_fabricator":
+		if eb.is_military_production_building() and eb.get_tech_tier() >= 2:
 			_scouted_intel["heavy_armor_at"] = now
 			_scouted_intel["last_known_enemy_base"] = eb.global_position
-		elif bid == &"cloning_vat":
+		elif eb.is_military_production_building() and eb.get_tech_tier() == 1:
 			vat_count += 1
 			_scouted_intel["last_known_enemy_base"] = eb.global_position
-		elif eb.is_core_hub or bid == &"nexus_vat":
+		elif eb.is_command_hub():
 			_scouted_intel["last_known_enemy_base"] = eb.global_position
-		if eb.has_turret or bid == &"defense_turret":
+		if eb.has_turret:
 			_scouted_intel["turrets_at"] = now
 
 	if vat_count >= 2 or infantry_count >= 6:
@@ -1032,10 +945,7 @@ func _count_nearby_intact_barricades(origin: Vector2, max_radius: float) -> int:
 
 func _squad_has_anti_armor_or_siege(squad: Array[Unit]) -> bool:
 	for u: Unit in squad:
-		if not is_instance_valid(u) or u.is_dead:
-			continue
-		var uid: StringName = u.get_unit_type_id()
-		if uid == &"lance_rig" or uid == &"chrysalis_mortar" or uid == &"goliath_frame" or uid == &"arc_lancer":
+		if _planner.is_breach_capable(u):
 			return true
 	return false
 
@@ -1096,29 +1006,36 @@ func _collect_safe_salvage(core: Building) -> void:
 	if target_core == null:
 		return
 
-	# Pick 1 available Engineer (faster 1.8s extraction) or 1 Worker (never pulling below 3 Biomass harvesters)
+	# Pick 1 available fast specialist (engineer) or 1 worker (never pulling below 3 primary gatherers)
+	var salvage_ids: Array[StringName] = _planner.get_salvage_unit_ids()
 	var team_units: Array[Unit] = _get_team_units(ai_team)
-	var biomass_workers: int = 0
+	var primary_gatherers: int = 0
 	var best_engineer: Unit = null
 	var best_eng_d_sq: float = INF
 	var best_worker: Unit = null
 	var best_wrk_d_sq: float = INF
 
 	for u: Unit in team_units:
-		if u.get_unit_type_id() == &"worker" and u.command_state == Unit.CommandState.GATHERING:
-			biomass_workers += 1
+		if u.data == null:
+			continue
+		var is_primary_worker: bool = u.data.can_gather and not u.data.auto_gather_on_spawn
+		var is_specialist: bool = u.data.can_staff_compute or u.data.has_tag(&"engineer")
+		if is_primary_worker and u.command_state == Unit.CommandState.GATHERING:
+			primary_gatherers += 1
 		if not u.can_salvage_core():
+			continue
+		if not salvage_ids.is_empty() and not salvage_ids.has(u.get_unit_type_id()):
 			continue
 		if u.command_state == Unit.CommandState.CONSTRUCTING or u.command_state == Unit.CommandState.SALVAGING or u.command_state == Unit.CommandState.STAFFING_BUILDING:
 			continue
 		if not u.command_queue.is_empty():
 			continue
 		var d_sq: float = u.global_position.distance_squared_to(target_core.global_position)
-		if u.get_unit_type_id() == &"engineer" and u.command_state == Unit.CommandState.IDLE:
+		if is_specialist and u.command_state == Unit.CommandState.IDLE:
 			if d_sq < best_eng_d_sq:
 				best_eng_d_sq = d_sq
 				best_engineer = u
-		elif u.get_unit_type_id() == &"worker":
+		elif is_primary_worker:
 			if u.command_state == Unit.CommandState.IDLE:
 				if d_sq < best_wrk_d_sq:
 					best_wrk_d_sq = d_sq
@@ -1134,7 +1051,7 @@ func _collect_safe_salvage(core: Building) -> void:
 		best_engineer.command_salvage(target_core)
 		return
 	if best_worker != null:
-		if best_worker.command_state == Unit.CommandState.IDLE or biomass_workers > 3:
+		if best_worker.command_state == Unit.CommandState.IDLE or primary_gatherers > 3:
 			best_worker.command_salvage(target_core)
 
 
@@ -1193,7 +1110,7 @@ func _assign_idle_workers(core: Building) -> void:
 			anchor_bio = rn
 
 	for unit: Unit in _get_team_units(ai_team):
-		if unit.get_unit_type_id() != &"worker":
+		if unit.data == null or not unit.data.can_gather or unit.data.auto_gather_on_spawn:
 			continue
 		if unit.command_state != Unit.CommandState.IDLE or not unit.command_queue.is_empty():
 			continue
@@ -1211,12 +1128,12 @@ func _assign_idle_workers(core: Building) -> void:
 func _assign_idle_harvesters() -> void:
 	var silica_nodes: Array[ResourceNode] = []
 	for b: Building in _get_team_buildings(ai_team):
-		if b.building_type_id == &"silica_condenser" and b.is_constructed:
+		if b.is_constructed and not b.is_command_hub() and b.accepts_resource(&"silica"):
 			for rn: ResourceNode in _get_resources_near(b.global_position, &"silica", 520.0):
 				if not silica_nodes.has(rn):
 					silica_nodes.append(rn)
 	for unit: Unit in _get_team_units(ai_team):
-		if unit.get_unit_type_id() != &"silica_harvester":
+		if unit.data == null or not unit.data.can_gather or not unit.data.auto_gather_on_spawn:
 			continue
 		if unit.command_state != Unit.CommandState.IDLE or not unit.command_queue.is_empty():
 			continue
@@ -1315,68 +1232,69 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 	var harvester_count: int = 0
 	var engineer_count: int = 0
 	for u: Unit in units:
-		var uid: StringName = u.get_unit_type_id()
-		if uid == &"worker":
+		if u.data == null:
+			continue
+		if u.data.can_gather and not u.data.auto_gather_on_spawn:
 			worker_count += 1
-		elif uid == &"silica_harvester":
+		elif u.data.can_gather and u.data.auto_gather_on_spawn:
 			harvester_count += 1
-		elif uid == &"engineer":
+		elif u.data.can_staff_compute:
 			engineer_count += 1
 
-	var condensers: Array[Building] = []
-	var constructed_condensers: Array[Building] = []
-	var constructed_condenser: Building = null
-	var mainframes: Array[Building] = []
-	var constructed_mainframes: Array[Building] = []
-	var constructed_mainframe: Building = null
-	var cloning_vats: Array[Building] = []
-	var constructed_vats: Array[Building] = []
+	var refineries: Array[Building] = []
+	var constructed_refineries: Array[Building] = []
+	var constructed_refinery: Building = null
+	var compute_hubs: Array[Building] = []
+	var constructed_compute_hubs: Array[Building] = []
+	var constructed_compute_hub: Building = null
+	var barracks_list: Array[Building] = []
+	var constructed_barracks: Array[Building] = []
 	var foundries: Array[Building] = []
 	var constructed_foundries: Array[Building] = []
-	var fabricators: Array[Building] = []
-	var constructed_fabricators: Array[Building] = []
-	var unfinished_pylons: int = 0
+	var heavy_plants: Array[Building] = []
+	var constructed_heavy_plants: Array[Building] = []
+	var unfinished_supply: int = 0
 	var staffed_engineers: int = 0
-	var total_mainframe_slots: int = 0
+	var total_compute_slots: int = 0
 
 	for b: Building in buildings:
-		if b.building_type_id == &"silica_condenser":
-			condensers.append(b)
+		if _planner.is_role_building(b, &"refinery"):
+			refineries.append(b)
 			if b.is_constructed:
-				constructed_condensers.append(b)
-				constructed_condenser = b
-		elif b.building_type_id == &"wetware_mainframe":
-			mainframes.append(b)
+				constructed_refineries.append(b)
+				constructed_refinery = b
+		elif _planner.is_role_building(b, &"compute_hub"):
+			compute_hubs.append(b)
 			if b.is_constructed:
-				constructed_mainframes.append(b)
-				constructed_mainframe = b
+				constructed_compute_hubs.append(b)
+				constructed_compute_hub = b
 				staffed_engineers += b.get_assigned_engineer_count()
-				total_mainframe_slots += b.max_staff_slots
-		elif b.building_type_id == &"cloning_vat":
-			cloning_vats.append(b)
+				total_compute_slots += b.max_staff_slots
+		elif _planner.is_role_building(b, &"barracks_t1"):
+			barracks_list.append(b)
 			if b.is_constructed:
-				constructed_vats.append(b)
-		elif b.building_type_id == &"calibration_foundry":
+				constructed_barracks.append(b)
+		elif _planner.is_role_building(b, &"counter_foundry"):
 			foundries.append(b)
 			if b.is_constructed:
 				constructed_foundries.append(b)
-		elif b.building_type_id == &"synthetics_fabricator":
-			fabricators.append(b)
+		elif _planner.is_role_building(b, &"heavy_t2"):
+			heavy_plants.append(b)
 			if b.is_constructed:
-				constructed_fabricators.append(b)
-		elif b.building_type_id == &"synapse_pylon" and not b.is_constructed:
-			unfinished_pylons += 1
+				constructed_heavy_plants.append(b)
+		elif _planner.is_role_building(b, &"supply") and not b.is_constructed:
+			unfinished_supply += 1
 
-	var queued_workers: int = _count_queued_unit_type(buildings, &"worker")
-	var queued_harvesters: int = _count_queued_unit_type(buildings, &"silica_harvester")
-	var queued_engineers: int = _count_queued_unit_type(buildings, &"engineer")
+	var queued_workers: int = _count_queued_unit_type(buildings, _worker_data.unit_type_id) if _worker_data != null else 0
+	var queued_harvesters: int = _count_queued_unit_type(buildings, _harvester_data.unit_type_id) if _harvester_data != null else 0
+	var queued_engineers: int = _count_queued_unit_type(buildings, _engineer_data.unit_type_id) if _engineer_data != null else 0
 	var total_workers: int = worker_count + queued_workers
 	var total_harvesters: int = harvester_count + queued_harvesters
 	var total_engineers: int = engineer_count + staffed_engineers + queued_engineers
 
 	var bw_used: int = econ.get_bandwidth_used(ai_team)
 	var bw_cap: int = econ.get_bandwidth_cap(ai_team)
-	var needs_pylon: bool = (bw_used >= bw_cap - 4) and unfinished_pylons == 0 and bw_cap < max_bandwidth_cap
+	var needs_supply: bool = (bw_used >= bw_cap - 4) and unfinished_supply == 0 and bw_cap < max_bandwidth_cap
 	var biomass: int = econ.get_resource(ai_team, EconomyManager.RESOURCE_BIOMASS)
 	var silica: int = econ.get_resource(ai_team, EconomyManager.RESOURCE_SILICA)
 	var compute: int = econ.get_resource(ai_team, EconomyManager.RESOURCE_COMPUTE)
@@ -1394,51 +1312,51 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			core.queue_unit_data(_worker_data)
 		return
 
-	# Swarm Rush builds its first Cloning Vat before the Silica Condenser for rapid infantry pressure.
-	if is_swarm_rush and cloning_vats.is_empty() and _cloning_vat_data != null:
-		if econ.can_afford(ai_team, _cloning_vat_data.get_cost_dict()):
+	# Swarm Rush builds its first Tier-1 Barracks before the Refinery for rapid early pressure.
+	if is_swarm_rush and barracks_list.is_empty() and _barracks_t1_data != null:
+		if econ.can_afford(ai_team, _barracks_t1_data.get_cost_dict()):
 			var to_c_rush: Vector2 = (Vector2.ZERO - core.global_position).normalized()
-			var rush_vat: Building = _try_place_and_build(_cloning_vat_data, core.global_position + to_c_rush * 175.0, core.global_position)
-			if rush_vat != null:
-				rush_vat.set_rally_position(rally_pt)
+			var rush_b: Building = _try_place_and_build(_barracks_t1_data, core.global_position + to_c_rush * 175.0, core.global_position)
+			if rush_b != null:
+				rush_b.set_rally_position(rally_pt)
 			return
-		if biomass < _cloning_vat_data.biomass_cost:
+		if biomass < _barracks_t1_data.biomass_cost:
 			return
 
-	# Priority 2: Build Silica Condenser near Silica Vein.
-	if condensers.is_empty():
-		if _condenser_data != null and econ.can_afford(ai_team, _condenser_data.get_cost_dict()):
+	# Priority 2: Build Silica Refinery near nearest Silica Vein.
+	if refineries.is_empty() and _refinery_data != null:
+		if econ.can_afford(ai_team, _refinery_data.get_cost_dict()):
 			var vein: ResourceNode = _find_nearest_resource(core.global_position, &"silica")
 			var anchor: Vector2 = core.global_position.lerp(vein.global_position, 0.58) if vein != null else (core.global_position + Vector2(-120.0, 180.0))
-			_try_place_and_build(_condenser_data, anchor, core.global_position)
+			_try_place_and_build(_refinery_data, anchor, core.global_position)
 		return
 
-	# Priority 3: Expand Bandwidth cap via Synapse Pylon before hitting population block.
-	if needs_pylon:
-		if _pylon_data != null and econ.can_afford(ai_team, _pylon_data.get_cost_dict()):
+	# Priority 3: Expand Bandwidth cap via Supply Provider before hitting population block.
+	if needs_supply and _supply_data != null:
+		if econ.can_afford(ai_team, _supply_data.get_cost_dict()):
 			var away_dir: Vector2 = (core.global_position - Vector2.ZERO).normalized()
-			var pylon_anchor: Vector2 = core.global_position + away_dir * 125.0
-			_try_place_and_build(_pylon_data, pylon_anchor, core.global_position)
+			var supply_anchor: Vector2 = core.global_position + away_dir * 125.0
+			_try_place_and_build(_supply_data, supply_anchor, core.global_position)
 		return
 
-	# Priority 4: Train automated Silica Harvesters once Condensers are online.
-	var desired_harvesters: int = 3 if (constructed_condensers.size() >= 2 or is_brutal) else (2 if constructed_vats.size() >= 1 else 1)
-	if _harvester_data != null and constructed_condenser != null and total_harvesters < desired_harvesters:
-		var trainer: Building = constructed_condenser if constructed_condenser.can_train_unit_data(_harvester_data) else core
+	# Priority 4: Train automated Harvesters once Refineries are online.
+	var desired_harvesters: int = 3 if (constructed_refineries.size() >= 2 or is_brutal) else (2 if constructed_barracks.size() >= 1 else 1)
+	if _harvester_data != null and constructed_refinery != null and total_harvesters < desired_harvesters:
+		var trainer: Building = constructed_refinery if constructed_refinery.can_train_unit_data(_harvester_data) else core
 		if trainer.get_training_queue_size() < 2 and trainer.can_train_unit_data(_harvester_data):
 			trainer.queue_unit_data(_harvester_data)
 			return
 
-	# Priority 5: Construct primary Tier-1 Cloning Vat on the forward edge facing the map center.
-	if cloning_vats.is_empty() and _cloning_vat_data != null:
-		if econ.can_afford(ai_team, _cloning_vat_data.get_cost_dict()):
+	# Priority 5: Construct primary Tier-1 Barracks facing the map center.
+	if barracks_list.is_empty() and _barracks_t1_data != null:
+		if econ.can_afford(ai_team, _barracks_t1_data.get_cost_dict()):
 			var to_center: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var vat_anchor: Vector2 = core.global_position + to_center * 175.0
-			var built_vat: Building = _try_place_and_build(_cloning_vat_data, vat_anchor, core.global_position)
+			var built_vat: Building = _try_place_and_build(_barracks_t1_data, vat_anchor, core.global_position)
 			if built_vat != null:
 				built_vat.set_rally_position(rally_pt)
 			return
-		if biomass < _cloning_vat_data.biomass_cost:
+		if biomass < _barracks_t1_data.biomass_cost:
 			return
 
 	# Priority 6: Saturate workers up to target_worker_count.
@@ -1446,187 +1364,121 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 		if core.get_training_queue_size() < 2 and core.can_train_unit_data(_worker_data):
 			core.queue_unit_data(_worker_data)
 
-	# Priority 7: Wetware Mainframes on natural & contested expansion Compute Vents + Engineers.
+	# Priority 7: Compute Hubs on natural & contested expansion Compute Vents + Engineers.
 	var exp_vent_biomass: int = 160 if (is_synth_tech or is_brutal) else 220
-	if (not constructed_vats.is_empty() or is_synth_tech) and _mainframe_data != null:
-		if mainframes.is_empty():
+	if (not constructed_barracks.is_empty() or is_synth_tech) and _compute_hub_data != null:
+		if compute_hubs.is_empty():
 			var vent: ResourceNode = _find_nearest_unoccupied_vent(core.global_position, 580.0)
-			if vent != null and econ.can_afford(ai_team, _mainframe_data.get_cost_dict()):
-				_try_place_and_build_on_vent(_mainframe_data, vent)
-		elif mainframes.size() == 1 and constructed_mainframes.size() >= 1 and staffed_engineers >= 1 and biomass >= exp_vent_biomass:
+			if vent != null and econ.can_afford(ai_team, _compute_hub_data.get_cost_dict()):
+				_try_place_and_build_on_vent(_compute_hub_data, vent)
+		elif compute_hubs.size() == 1 and constructed_compute_hubs.size() >= 1 and staffed_engineers >= 1 and biomass >= exp_vent_biomass:
 			var exp_vent: ResourceNode = _find_nearest_unoccupied_vent(core.global_position, 1650.0)
-			if exp_vent != null and econ.can_afford(ai_team, _mainframe_data.get_cost_dict()):
-				_try_place_and_build_on_vent(_mainframe_data, exp_vent)
+			if exp_vent != null and econ.can_afford(ai_team, _compute_hub_data.get_cost_dict()):
+				_try_place_and_build_on_vent(_compute_hub_data, exp_vent)
 
-	var desired_engineers: int = mini(4, total_mainframe_slots)
-	if constructed_mainframe != null and _engineer_data != null and total_engineers < desired_engineers:
+	var desired_engineers: int = mini(4, total_compute_slots)
+	if constructed_compute_hub != null and _engineer_data != null and total_engineers < desired_engineers:
 		if core.get_training_queue_size() < 2 and core.can_train_unit_data(_engineer_data):
 			core.queue_unit_data(_engineer_data)
 
 	# Priority 7.5: Expand Silica economy to expansion cluster once Tier-1 is established.
 	var exp_cond_biomass: int = 180 if is_brutal else 240
-	if condensers.size() < 2 and not constructed_condensers.is_empty() and not constructed_vats.is_empty() and biomass >= exp_cond_biomass and _condenser_data != null:
-		if econ.can_afford(ai_team, _condenser_data.get_cost_dict()):
-			var exp_vein: ResourceNode = _find_expansion_silica_vein(core.global_position, condensers)
+	if refineries.size() < 2 and not constructed_refineries.is_empty() and not constructed_barracks.is_empty() and biomass >= exp_cond_biomass and _refinery_data != null:
+		if econ.can_afford(ai_team, _refinery_data.get_cost_dict()):
+			var exp_vein: ResourceNode = _find_expansion_silica_vein(core.global_position, refineries)
 			if exp_vein != null:
 				var exp_anchor: Vector2 = exp_vein.global_position.lerp(core.global_position, 0.16)
-				_try_place_and_build(_condenser_data, exp_anchor, exp_vein.global_position)
+				_try_place_and_build(_refinery_data, exp_anchor, exp_vein.global_position)
 
-	# Priority 8: Mid-game Upgrades at Cloning Vat (Batch Efficiency -> Adrenal Potency).
-	if not constructed_vats.is_empty():
-		var primary_vat: Building = constructed_vats[0]
-		if primary_vat.production_component != null and primary_vat.get_training_queue_size() < 2:
-			if _upg_batch_efficiency != null and primary_vat.production_component.can_queue_upgrade(primary_vat, _upg_batch_efficiency):
-				primary_vat.production_component.enqueue_upgrade(primary_vat, _upg_batch_efficiency)
-			elif _upg_adrenal_potency != null and econ.has_upgrade(ai_team, UpgradeManager.UPGRADE_BATCH_EFFICIENCY) and primary_vat.production_component.can_queue_upgrade(primary_vat, _upg_adrenal_potency):
-				primary_vat.production_component.enqueue_upgrade(primary_vat, _upg_adrenal_potency)
+	# Priority 8: Mid-game Upgrades at Tier-1 Production (faction-driven upgrade order).
+	if not constructed_barracks.is_empty():
+		var primary_barracks: Building = constructed_barracks[0]
+		if primary_barracks.production_component != null and primary_barracks.get_training_queue_size() < 2:
+			var next_t1_upg: UpgradeData = _planner.choose_next_upgrade_for_building(primary_barracks)
+			if next_t1_upg != null:
+				primary_barracks.production_component.enqueue_upgrade(primary_barracks, next_t1_upg)
 
-	# Reactive Foundry priority when ANTI_ARMOR intel is active
+	# Reactive Counter Foundry priority when ANTI_ARMOR intel is active.
 	var urgent_anti_armor_foundry: bool = (_active_counter_posture == &"ANTI_ARMOR" and counter_strength >= 0.70)
-	if urgent_anti_armor_foundry and foundries.is_empty() and constructed_mainframe != null and _foundry_data != null and silica >= _foundry_data.silica_cost:
-		if econ.can_afford(ai_team, _foundry_data.get_cost_dict()):
+	if urgent_anti_armor_foundry and foundries.is_empty() and constructed_compute_hub != null and _counter_foundry_data != null and silica >= _counter_foundry_data.silica_cost:
+		if econ.can_afford(ai_team, _counter_foundry_data.get_cost_dict()):
 			var to_c_aa: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var perp_aa: Vector2 = Vector2(-to_c_aa.y, to_c_aa.x)
-			var built_aa: Building = _try_place_and_build(_foundry_data, core.global_position + to_c_aa * 160.0 + perp_aa * 145.0, core.global_position)
+			var built_aa: Building = _try_place_and_build(_counter_foundry_data, core.global_position + to_c_aa * 160.0 + perp_aa * 145.0, core.global_position)
 			if built_aa != null:
 				built_aa.set_rally_position(rally_pt)
 
-	# Priority 9: Late-game Tier-2 Synthetics Fabricator.
-	if fabricators.is_empty() and not constructed_vats.is_empty() and _fabricator_data != null and compute >= _fabricator_data.compute_cost:
-		if econ.can_afford(ai_team, _fabricator_data.get_cost_dict()):
+	# Priority 9: Late-game Tier-2 Heavy Production.
+	if heavy_plants.is_empty() and _heavy_t2_data != null and _planner.are_prerequisites_met(_heavy_t2_data, econ, int(ai_team)) and compute >= _heavy_t2_data.compute_cost:
+		if econ.can_afford(ai_team, _heavy_t2_data.get_cost_dict()):
 			var to_center_f: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var perp_f: Vector2 = Vector2(-to_center_f.y, to_center_f.x)
 			var fab_anchor: Vector2 = core.global_position + to_center_f * 165.0 - perp_f * 145.0
-			var built_fab: Building = _try_place_and_build(_fabricator_data, fab_anchor, core.global_position)
+			var built_fab: Building = _try_place_and_build(_heavy_t2_data, fab_anchor, core.global_position)
 			if built_fab != null:
 				built_fab.set_rally_position(rally_pt)
 
-	# Priority 10: Mid-game Calibration Foundry for Lance-Rigs & Signal Jammers.
-	var allow_foundry: bool = (not is_synth_tech or not fabricators.is_empty() or urgent_anti_armor_foundry)
-	if allow_foundry and foundries.is_empty() and constructed_mainframe != null and _foundry_data != null and silica >= _foundry_data.silica_cost:
-		if econ.can_afford(ai_team, _foundry_data.get_cost_dict()):
+	# Priority 10: Mid-game Counter Foundry for specialized counter tech.
+	var allow_foundry: bool = (not is_synth_tech or not heavy_plants.is_empty() or urgent_anti_armor_foundry)
+	if allow_foundry and foundries.is_empty() and constructed_compute_hub != null and _counter_foundry_data != null and silica >= _counter_foundry_data.silica_cost:
+		if econ.can_afford(ai_team, _counter_foundry_data.get_cost_dict()):
 			var to_center_cf: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var perp_cf: Vector2 = Vector2(-to_center_cf.y, to_center_cf.x)
 			var cf_anchor: Vector2 = core.global_position + to_center_cf * 160.0 + perp_cf * 145.0
-			var built_cf: Building = _try_place_and_build(_foundry_data, cf_anchor, core.global_position)
+			var built_cf: Building = _try_place_and_build(_counter_foundry_data, cf_anchor, core.global_position)
 			if built_cf != null:
 				built_cf.set_rally_position(rally_pt)
 
-	# Priority 11: Synthetics Fabricator heavy mix (reactively biased by _active_counter_posture).
-	for fab: Building in constructed_fabricators:
-		if not fab.has_rally():
-			fab.set_rally_position(rally_pt)
-		if fab.get_training_queue_size() >= 2:
+	# Priority 11: Tier-2 Heavy Production mix (faction-weighted + reactive intel).
+	for heavy_b: Building in constructed_heavy_plants:
+		if not heavy_b.has_rally():
+			heavy_b.set_rally_position(rally_pt)
+		if heavy_b.get_training_queue_size() >= 2:
 			continue
-		if _upg_compute_overdrive != null and fab.production_component != null and fab.production_component.can_queue_upgrade(fab, _upg_compute_overdrive):
-			fab.production_component.enqueue_upgrade(fab, _upg_compute_overdrive)
+		var t2_upg: UpgradeData = _planner.choose_next_upgrade_for_building(heavy_b)
+		if t2_upg != null and heavy_b.production_component != null:
+			heavy_b.production_component.enqueue_upgrade(heavy_b, t2_upg)
 			continue
-		var heavy_choice: UnitData = _choose_fabricator_unit(counter_strength)
-		if heavy_choice != null and fab.can_train_unit_data(heavy_choice):
-			fab.queue_unit_data(heavy_choice)
-			_fab_production_counter += 1
-		elif _goliath_data != null and fab.can_train_unit_data(_goliath_data):
-			fab.queue_unit_data(_goliath_data)
+		var heavy_choice: UnitData = _planner.choose_unit_for_building(heavy_b, _ai_playstyle, _active_counter_posture, counter_strength, _fab_production_counter)
+		if heavy_choice != null and heavy_b.can_train_unit_data(heavy_choice):
+			heavy_b.queue_unit_data(heavy_choice)
 			_fab_production_counter += 1
 
-	# Priority 12: Calibration Foundry production (Lance-Rigs & Signal Jammers biased by intel).
+	# Priority 12: Counter Foundry production (biased by intel & playstyle).
 	for foundry: Building in constructed_foundries:
 		if not foundry.has_rally():
 			foundry.set_rally_position(rally_pt)
 		if foundry.get_training_queue_size() >= 2:
 			continue
-		var foundry_choice: UnitData = _choose_foundry_unit(foundry, counter_strength)
+		var foundry_choice: UnitData = _planner.choose_unit_for_building(foundry, _ai_playstyle, _active_counter_posture, counter_strength, _foundry_production_counter)
 		if foundry_choice != null and foundry.can_train_unit_data(foundry_choice):
 			foundry.queue_unit_data(foundry_choice)
 			_foundry_production_counter += 1
 
-	# Priority 13: Batch-clone GENESIS_V2 core swarm (weighted by playstyle + reactive intel).
-	var hold_for_fab: bool = is_synth_tech and fabricators.is_empty() and constructed_mainframe != null and compute >= 15
-	if not hold_for_fab:
-		for vat: Building in constructed_vats:
-			if not vat.has_rally():
-				vat.set_rally_position(rally_pt)
-			if vat.get_training_queue_size() >= 2:
+	# Priority 13: Tier-1 core army production (weighted by playstyle + reactive intel).
+	var hold_for_t2: bool = is_synth_tech and heavy_plants.is_empty() and constructed_compute_hub != null and compute >= 15
+	if not hold_for_t2:
+		for bar: Building in constructed_barracks:
+			if not bar.has_rally():
+				bar.set_rally_position(rally_pt)
+			if bar.get_training_queue_size() >= 2:
 				continue
-			var chosen: UnitData = _choose_vat_unit(vat, is_swarm_rush, counter_strength)
-			if chosen != null and vat.can_train_unit_data(chosen):
-				vat.queue_unit_data(chosen)
+			var chosen: UnitData = _planner.choose_unit_for_building(bar, _ai_playstyle, _active_counter_posture, counter_strength, _vat_production_counter)
+			if chosen != null and bar.can_train_unit_data(chosen):
+				bar.queue_unit_data(chosen)
 				_vat_production_counter += 1
 
-	# Priority 14: Additional Cloning Vat when floating surplus Biomass.
+	# Priority 14: Additional Tier-1 Barracks when floating surplus Biomass.
 	var extra_vat_biomass: int = 200 if is_swarm_rush else (230 if is_brutal else 280)
 	var extra_vat_silica: int = 40 if is_swarm_rush else 60
-	if _cloning_vat_data != null and cloning_vats.size() < max_cloning_vats and biomass >= extra_vat_biomass and silica >= extra_vat_silica:
-		if econ.can_afford(ai_team, _cloning_vat_data.get_cost_dict()):
+	if _barracks_t1_data != null and barracks_list.size() < max_cloning_vats and biomass >= extra_vat_biomass and silica >= extra_vat_silica:
+		if econ.can_afford(ai_team, _barracks_t1_data.get_cost_dict()):
 			var to_center2: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var perp: Vector2 = Vector2(-to_center2.y, to_center2.x)
 			var vat_anchor2: Vector2 = core.global_position + to_center2 * 180.0 + perp * 130.0
-			var second_vat: Building = _try_place_and_build(_cloning_vat_data, vat_anchor2, core.global_position)
+			var second_vat: Building = _try_place_and_build(_barracks_t1_data, vat_anchor2, core.global_position)
 			if second_vat != null:
 				second_vat.set_rally_position(rally_pt)
-
-
-func _choose_fabricator_unit(counter_strength: float) -> UnitData:
-	# Deterministic weighted cycle biased by scouted intel & difficulty counter_strength
-	var slot: int = _fab_production_counter % 10
-	if _active_counter_posture == &"ANTI_SWARM" and counter_strength >= 0.65 and _mortar_data != null:
-		# +30% Chrysalis Mortar splash weight
-		if slot < 6:
-			return _mortar_data
-		return _goliath_data if (slot % 2 == 0) else (_arc_lancer_data if _arc_lancer_data != null else _goliath_data)
-	if _active_counter_posture == &"ANTI_ARMOR" and counter_strength >= 0.65 and _arc_lancer_data != null:
-		# Boost Arc-Lancer anti-armor presence alongside Goliath frontline
-		if slot < 5:
-			return _arc_lancer_data
-		return _goliath_data if slot < 8 else (_mortar_data if _mortar_data != null else _goliath_data)
-	if _active_counter_posture == &"ANTI_SIEGE" and counter_strength >= 0.65 and _goliath_data != null:
-		# Heavy Goliath frontline push to collapse inside mortar min_attack_range
-		if slot < 6:
-			return _goliath_data
-		return _arc_lancer_data if (_arc_lancer_data != null and slot < 8) else (_mortar_data if _mortar_data != null else _goliath_data)
-
-	var fab_roll: int = _fab_production_counter % 3
-	if fab_roll == 1 and _arc_lancer_data != null:
-		return _arc_lancer_data
-	if fab_roll == 2 and _mortar_data != null:
-		return _mortar_data
-	return _goliath_data
-
-
-func _choose_foundry_unit(foundry: Building, counter_strength: float) -> UnitData:
-	var slot: int = _foundry_production_counter % 10
-	if _active_counter_posture == &"ANTI_ARMOR" and counter_strength >= 0.50:
-		# Strongly favor Lance-Rig anti-armor (+35% shift)
-		var want_jam_aa: bool = (slot == 9) and _signal_jammer_data != null and foundry.can_train_unit_data(_signal_jammer_data)
-		return _signal_jammer_data if want_jam_aa else _lance_rig_data
-	if _active_counter_posture == &"ANTI_SWARM" and counter_strength >= 0.60:
-		# Boost Signal Jammer disruption against infantry swarms
-		var want_jam_sw: bool = (slot % 2 == 0) and _signal_jammer_data != null and foundry.can_train_unit_data(_signal_jammer_data)
-		return _signal_jammer_data if want_jam_sw else _lance_rig_data
-	var want_jammer: bool = (_foundry_production_counter % 3 == 2) and _signal_jammer_data != null and foundry.can_train_unit_data(_signal_jammer_data)
-	return _signal_jammer_data if want_jammer else _lance_rig_data
-
-
-func _choose_vat_unit(vat: Building, is_swarm_rush: bool, counter_strength: float) -> UnitData:
-	var slot: int = _vat_production_counter % 10
-	var want_symbiote: bool = (slot == 9)
-	if _active_counter_posture == &"ANTI_SWARM" and counter_strength >= 0.65:
-		want_symbiote = (slot == 4 or slot == 9)
-	if want_symbiote and _symbiote_data != null and vat.can_train_unit_data(_symbiote_data):
-		return _symbiote_data
-
-	var want_stinger: bool = false
-	if _active_counter_posture == &"ANTI_SIEGE" and counter_strength >= 0.60:
-		# Boost fast flanking Stingers against Chrysalis Mortars
-		want_stinger = (slot == 1 or slot == 3 or slot == 5 or slot == 7 or slot == 8)
-	elif is_swarm_rush:
-		want_stinger = (slot == 1 or slot == 4 or slot == 7)
-	else:
-		want_stinger = (slot == 2 or slot == 6)
-
-	if want_stinger and _stinger_data != null and vat.can_train_unit_data(_stinger_data):
-		return _stinger_data
-	return _clone_trooper_data
 
 
 func _trigger_combat_abilities() -> void:
@@ -1639,15 +1491,22 @@ func _trigger_combat_abilities() -> void:
 				continue
 			if not u.is_ability_ready(ab):
 				continue
-			if ab.ability_id == &"adrenal_surge" and dist <= u.data.attack_range + 45.0:
-				u.command_cast_ability(ab, u.global_position, u)
-				break
-			elif (ab.ability_id == &"static_pulse" or ab.ability_id == &"seismic_slam") and dist <= maxf(80.0, ab.aoe_radius * 0.92):
-				u.command_cast_ability(ab, u.global_position, u)
-				break
-			elif ab.ability_id == &"spore_barrage" and dist <= ab.cast_range and dist >= 100.0:
-				u.command_cast_ability(ab, u.current_target.global_position)
-				break
+			if ab.target_type == AbilityData.TargetType.INSTANT:
+				if ab.aoe_radius > 0.0:
+					if dist <= maxf(80.0, ab.aoe_radius * 0.92):
+						u.command_cast_ability(ab, u.global_position, u)
+						break
+				elif dist <= u.data.attack_range + 45.0:
+					u.command_cast_ability(ab, u.global_position, u)
+					break
+			elif ab.target_type == AbilityData.TargetType.POINT_AOE:
+				if dist <= ab.cast_range and dist >= 100.0:
+					u.command_cast_ability(ab, u.current_target.global_position)
+					break
+			elif ab.target_type == AbilityData.TargetType.UNIT_TARGET:
+				if dist <= ab.cast_range and u.current_target is Unit:
+					u.command_cast_ability(ab, u.current_target.global_position, u.current_target as Unit)
+					break
 
 
 # =============================================================================
@@ -1677,7 +1536,7 @@ func _select_wave_target(wave_idx: int, core: Building = null) -> Vector2:
 		var b: Building = node as Building
 		if b.is_destroyed or not _is_enemy_team(int(b.team)):
 			continue
-		if not (b.is_core_hub or b.building_type_id == &"nexus_vat"):
+		if not b.is_command_hub():
 			continue
 		var score: float = origin.distance_to(b.global_position)
 		# Prioritize an enemy who currently holds or is capturing the Uplink
@@ -1752,7 +1611,7 @@ func _try_place_and_build(data: BuildingData, preferred_pos: Vector2, fallback_o
 	var econ: EconomyManager = _get_economy_manager()
 	if econ == null or data == null or data.resolve_scene() == null:
 		return null
-	if data.required_building_id != &"" and not econ.has_constructed_building(ai_team, data.required_building_id):
+	if not _planner.are_prerequisites_met(data, econ, int(ai_team)):
 		return null
 	if not econ.can_afford(ai_team, data.get_cost_dict()):
 		return null
@@ -1817,7 +1676,7 @@ func _instantiate_ai_building(data: BuildingData, spot: Vector2, worker: Unit, v
 func _on_ai_building_completed(building: Building) -> void:
 	if building == null or not is_instance_valid(building) or building.is_destroyed:
 		return
-	if building.is_core_hub or building.building_type_id == &"nexus_vat":
+	if building.is_command_hub():
 		_compute_staging_point(building)
 		_sync_military_rallies()
 	elif _is_military_production_building(building) and _staging_point_valid:
@@ -1979,7 +1838,7 @@ func _has_worker_building(target_b: Building) -> bool:
 
 func _find_ai_command_core() -> Building:
 	for b: Building in _get_team_buildings(ai_team):
-		if b.is_core_hub or b.building_type_id == &"nexus_vat":
+		if b.is_command_hub():
 			return b
 	return null
 
@@ -1987,7 +1846,7 @@ func _find_ai_command_core() -> Building:
 func _count_constructed_command_cores() -> int:
 	var c: int = 0
 	for b: Building in _get_team_buildings(ai_team):
-		if b.is_constructed and (b.is_core_hub or b.building_type_id == &"nexus_vat"):
+		if b.is_constructed and b.is_command_hub():
 			c += 1
 	return c
 
@@ -2035,12 +1894,7 @@ func _is_brutal_difficulty() -> bool:
 func _is_combat_unit(unit: Unit) -> bool:
 	if unit == null or unit.data == null:
 		return false
-	if unit.data.can_gather or unit.data.can_staff_compute:
-		return false
-	var uid: StringName = unit.get_unit_type_id()
-	if uid == &"symbiote" or uid == &"signal_jammer":
-		return unit.data.move_speed > 0.0
-	return unit.data.attack_damage > 0.0 and unit.data.move_speed > 0.0
+	return unit.data.is_combat_unit() and unit.data.move_speed > 0.0
 
 
 func _count_queued_unit_type(buildings: Array[Building], type_id: StringName) -> int:

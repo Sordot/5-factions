@@ -10,15 +10,6 @@ const BEAM_VFX_INTERVAL: float = 0.18
 const AUTO_REPAIR_RADIUS: float = 220.0
 const AUTO_REPAIR_SCAN_INTERVAL: float = 0.40
 
-const ENGINEER_REPAIRABLE_UNIT_IDS: Array = [
-	&"goliath_frame",
-	&"arc_lancer",
-	&"chrysalis_mortar",
-	&"lance_rig",
-	&"signal_jammer",
-	&"silica_harvester",
-]
-
 signal repair_target_changed(target: Node2D)
 signal auto_repair_changed(enabled: bool)
 
@@ -64,7 +55,7 @@ func _find_most_damaged_nearby_target(owner_unit: Unit) -> Node2D:
 		return null
 	var best: Node2D = null
 	var best_missing_ratio: float = 0.0
-	var is_engineer: bool = owner_unit.data != null and (owner_unit.data.can_staff_compute or owner_unit.get_unit_type_id() == &"engineer")
+	var is_engineer: bool = owner_unit.data != null and (owner_unit.data.can_staff_compute or owner_unit.data.has_tag(&"engineer"))
 
 	var bldgs: Array = SpatialGrid.query_buildings_in_radius(owner_unit.global_position, AUTO_REPAIR_RADIUS) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("buildings")
 	for node: Variant in bldgs:
@@ -105,8 +96,7 @@ func is_active() -> bool:
 func can_unit_repair(owner_unit: Unit) -> bool:
 	if owner_unit == null or owner_unit.is_dead or owner_unit.is_staffed or owner_unit.data == null:
 		return false
-	var uid: StringName = owner_unit.get_unit_type_id()
-	return owner_unit.data.can_gather or owner_unit.data.can_staff_compute or uid == &"worker" or uid == &"engineer"
+	return owner_unit.data.is_worker_class()
 
 
 func is_eligible_target(owner_unit: Unit, candidate: Node2D) -> bool:
@@ -114,7 +104,7 @@ func is_eligible_target(owner_unit: Unit, candidate: Node2D) -> bool:
 		return false
 	if candidate == owner_unit:
 		return false
-	var is_engineer: bool = owner_unit.data.can_staff_compute or owner_unit.get_unit_type_id() == &"engineer"
+	var is_engineer: bool = owner_unit.data.can_staff_compute or owner_unit.data.has_tag(&"engineer")
 
 	if candidate is Building:
 		var b: Building = candidate
@@ -132,7 +122,7 @@ func is_eligible_target(owner_unit: Unit, candidate: Node2D) -> bool:
 		var allied_u: bool = TeamManager.are_allies(int(owner_unit.team), int(u.team)) if TeamManager != null else (u.team == owner_unit.team)
 		if not allied_u:
 			return false
-		if not ENGINEER_REPAIRABLE_UNIT_IDS.has(u.get_unit_type_id()):
+		if not u.data.is_synthetic_repairable():
 			return false
 		return u.current_hp < u.get_max_hp() - 0.5
 
@@ -222,7 +212,7 @@ func _apply_repair_step(owner_unit: Unit, delta: float) -> void:
 		if not spend_dict.is_empty():
 			econ.spend_resources(int(owner_unit.team), spend_dict)
 
-	var is_engineer: bool = owner_unit.data != null and (owner_unit.data.can_staff_compute or owner_unit.get_unit_type_id() == &"engineer")
+	var is_engineer: bool = owner_unit.data != null and (owner_unit.data.can_staff_compute or owner_unit.data.has_tag(&"engineer"))
 	var hp_rate: float = ENGINEER_REPAIR_RATE if is_engineer else WORKER_REPAIR_RATE
 	var repair_amount: float = hp_rate * delta
 

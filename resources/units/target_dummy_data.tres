@@ -18,3 +18,12 @@ aggro_range = 0.0
 vision_range = 200.0
 attack_cooldown = 1.0
 abilities = Array[Resource("res://scripts/data/ability_data.gd")]([])
+
+unit_tags = Array[StringName]([&"dummy"])
+weapon_tracer_style = &"pulse"
+weapon_tracer_color = Color(0.6, 0.7, 0.8, 0.9)
+weapon_tracer_width = 2.0
+weapon_sfx_id = &"weapon_rifle"
+audio_bark_class = &"worker"
+minimap_icon_shape = &"dot"
+role_tags_display = "Training Target Dummy"

@@ -43,6 +43,10 @@ var _selection_controller: SelectionController = null
 var _camera: RTSCamera = null
 var _match_manager: MatchManager = null
 var _catalog_team: Unit.Team = Unit.Team.PLAYER
+var _active_faction_id: StringName = &""
+var _catalog_units: Array[UnitData] = []
+var _catalog_buildings: Array[BuildingData] = []
+var _faction_option: OptionButton = null
 var _combat_lab_open: bool = false
 var _is_collapsed: bool = false
 var _ai_telemetry_label: Label = null
@@ -162,14 +166,8 @@ func _ready() -> void:
 
 
 func _setup_genesis_catalog_controls() -> void:
-	if unit_catalog_option != null:
-		unit_catalog_option.clear()
-		for i: int in range(SandboxSpawner.GENESIS_UNIT_CATALOG.size()):
-			unit_catalog_option.add_item(String(SandboxSpawner.GENESIS_UNIT_CATALOG[i]["label"]), i)
-	if building_catalog_option != null:
-		building_catalog_option.clear()
-		for i: int in range(SandboxSpawner.GENESIS_BUILDING_CATALOG.size()):
-			building_catalog_option.add_item(String(SandboxSpawner.GENESIS_BUILDING_CATALOG[i]["label"]), i)
+	_setup_faction_catalog_selector()
+	_populate_faction_catalog_options()
 
 	if btn_spawn_team != null:
 		btn_spawn_team.pressed.connect(func() -> void:
@@ -183,14 +181,22 @@ func _setup_genesis_catalog_controls() -> void:
 			if AudioManager != null:
 				AudioManager.play_ui_click()
 			if _spawner != null and unit_catalog_option != null:
-				_spawner.spawn_genesis_unit_by_index(unit_catalog_option.selected, _catalog_team, 1)
+				var idx: int = unit_catalog_option.selected
+				if idx >= 0 and idx < _catalog_units.size():
+					_spawner.spawn_unit_data(_catalog_units[idx], _catalog_team, 1)
+				else:
+					_spawner.spawn_genesis_unit_by_index(idx, _catalog_team, 1)
 		)
 	if btn_spawn_catalog_building != null:
 		btn_spawn_catalog_building.pressed.connect(func() -> void:
 			if AudioManager != null:
 				AudioManager.play_ui_click()
 			if _spawner != null and building_catalog_option != null:
-				_spawner.spawn_genesis_building_by_index(building_catalog_option.selected, _catalog_team)
+				var idx: int = building_catalog_option.selected
+				if idx >= 0 and idx < _catalog_buildings.size():
+					_spawner.spawn_building_data(_catalog_buildings[idx], _catalog_team)
+				else:
+					_spawner.spawn_genesis_building_by_index(idx, _catalog_team)
 		)
 	if btn_spawn_turret != null:
 		btn_spawn_turret.pressed.connect(func() -> void:
@@ -228,6 +234,71 @@ func _setup_genesis_catalog_controls() -> void:
 		)
 	_refresh_combat_lab_visibility()
 	_refresh_catalog_team_button()
+
+
+func _setup_faction_catalog_selector() -> void:
+	if TeamManager == null:
+		return
+	var playable: Array[FactionData] = TeamManager.get_playable_factions()
+	if playable.is_empty():
+		return
+	var local_t: int = TeamManager.get_local_human_team()
+	_active_faction_id = TeamManager.get_team_faction(local_t if local_t >= 0 else 0)
+	if playable.size() <= 1 or btn_spawn_team == null or btn_spawn_team.get_parent() == null:
+		return
+	_faction_option = OptionButton.new()
+	_faction_option.name = "FactionCatalogOption"
+	_faction_option.focus_mode = Control.FOCUS_NONE
+	_faction_option.custom_minimum_size = Vector2(96.0, 22.0)
+	_faction_option.add_theme_font_size_override("font_size", 10)
+	var sel_idx: int = 0
+	for i: int in range(playable.size()):
+		var fdata: FactionData = playable[i]
+		_faction_option.add_item(fdata.short_code if not fdata.short_code.is_empty() else fdata.display_name, i)
+		_faction_option.set_item_metadata(i, fdata.faction_id)
+		if fdata.faction_id == _active_faction_id:
+			sel_idx = i
+	_faction_option.select(sel_idx)
+	_faction_option.item_selected.connect(func(index: int) -> void:
+		if AudioManager != null:
+			AudioManager.play_ui_click()
+		_active_faction_id = _faction_option.get_item_metadata(index) as StringName
+		_populate_faction_catalog_options()
+	)
+	btn_spawn_team.get_parent().add_child(_faction_option)
+	btn_spawn_team.get_parent().move_child(_faction_option, btn_spawn_team.get_index() + 1)
+
+
+func _populate_faction_catalog_options() -> void:
+	_catalog_units.clear()
+	_catalog_buildings.clear()
+	var fdata: FactionData = TeamManager.get_faction_data(_active_faction_id) if (TeamManager != null and _active_faction_id != &"") else null
+	if fdata == null and TeamManager != null:
+		fdata = TeamManager.get_team_faction_data(0)
+
+	if unit_catalog_option != null:
+		unit_catalog_option.clear()
+		if fdata != null and not fdata.unit_roster.is_empty():
+			for udata: UnitData in fdata.unit_roster:
+				if udata == null or (udata.unit_scene == null and udata.unit_scene_path.is_empty()):
+					continue
+				_catalog_units.append(udata)
+				unit_catalog_option.add_item(udata.display_name, _catalog_units.size() - 1)
+		else:
+			for i: int in range(SandboxSpawner.GENESIS_UNIT_CATALOG.size()):
+				unit_catalog_option.add_item(String(SandboxSpawner.GENESIS_UNIT_CATALOG[i]["label"]), i)
+
+	if building_catalog_option != null:
+		building_catalog_option.clear()
+		if fdata != null and not fdata.building_roster.is_empty():
+			for bdata: BuildingData in fdata.building_roster:
+				if bdata == null or (bdata.scene == null and bdata.scene_path.is_empty()):
+					continue
+				_catalog_buildings.append(bdata)
+				building_catalog_option.add_item(bdata.display_name, _catalog_buildings.size() - 1)
+		else:
+			for i: int in range(SandboxSpawner.GENESIS_BUILDING_CATALOG.size()):
+				building_catalog_option.add_item(String(SandboxSpawner.GENESIS_BUILDING_CATALOG[i]["label"]), i)
 
 
 func _setup_ai_telemetry_label() -> void:

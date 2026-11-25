@@ -35,6 +35,7 @@ var _player_count: int = 2
 var _team_preset: StringName = GameConfig.TEAM_PRESET_1V1
 var _slot_configs: Array[Dictionary] = []
 var _slot_row_widgets: Array[Dictionary] = []
+var _playable_factions: Array[FactionData] = []
 var _preset_ids: Array[StringName] = []
 var _aggro_ai_enabled: bool = true
 var _resource_preset: StringName = GameConfig.PRESET_STANDARD
@@ -217,6 +218,7 @@ func _build_slot_roster_widgets() -> void:
 	for child: Node in slot_roster_vbox.get_children():
 		child.queue_free()
 	_slot_row_widgets.clear()
+	_playable_factions = TeamManager.get_playable_factions() if (TeamManager != null and TeamManager.has_method("get_playable_factions")) else []
 
 	for i: int in range(4):
 		var row: HBoxContainer = HBoxContainer.new()
@@ -237,7 +239,7 @@ func _build_slot_roster_widgets() -> void:
 		row.add_child(slot_lbl)
 
 		var ctrl_btn: Button = Button.new()
-		ctrl_btn.custom_minimum_size = Vector2(58.0, 24.0)
+		ctrl_btn.custom_minimum_size = Vector2(54.0, 24.0)
 		ctrl_btn.focus_mode = Control.FOCUS_NONE
 		ctrl_btn.add_theme_font_size_override("font_size", 10)
 		ctrl_btn.tooltip_text = "Click to switch between Human and AI (all AI = Spectator Mode)"
@@ -248,7 +250,7 @@ func _build_slot_roster_widgets() -> void:
 		row.add_child(ctrl_btn)
 
 		var ally_opt: OptionButton = OptionButton.new()
-		ally_opt.custom_minimum_size = Vector2(56.0, 24.0)
+		ally_opt.custom_minimum_size = Vector2(52.0, 24.0)
 		ally_opt.focus_mode = Control.FOCUS_NONE
 		ally_opt.add_theme_font_size_override("font_size", 10)
 		ally_opt.add_item("T-A", 0)
@@ -260,8 +262,28 @@ func _build_slot_roster_widgets() -> void:
 		)
 		row.add_child(ally_opt)
 
+		var fac_opt: OptionButton = OptionButton.new()
+		fac_opt.custom_minimum_size = Vector2(78.0, 24.0)
+		fac_opt.focus_mode = Control.FOCUS_NONE
+		fac_opt.add_theme_font_size_override("font_size", 10)
+		if _playable_factions.is_empty():
+			fac_opt.add_item("GEN-V2", 0)
+			fac_opt.disabled = true
+			fac_opt.tooltip_text = "More factions unlocking in 3.0"
+		else:
+			for fi: int in range(_playable_factions.size()):
+				var fd: FactionData = _playable_factions[fi]
+				var f_lbl: String = fd.short_code if not fd.short_code.is_empty() else fd.display_name
+				fac_opt.add_item(f_lbl, fi)
+			fac_opt.disabled = (_playable_factions.size() <= 1)
+			fac_opt.tooltip_text = "More factions unlocking in 3.0" if _playable_factions.size() <= 1 else "Select Faction for slot P%d" % (i + 1)
+		fac_opt.item_selected.connect(func(idx: int) -> void:
+			_on_slot_faction_changed(captured_i, idx)
+		)
+		row.add_child(fac_opt)
+
 		var diff_opt: OptionButton = OptionButton.new()
-		diff_opt.custom_minimum_size = Vector2(88.0, 24.0)
+		diff_opt.custom_minimum_size = Vector2(78.0, 24.0)
 		diff_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		diff_opt.focus_mode = Control.FOCUS_NONE
 		diff_opt.add_theme_font_size_override("font_size", 10)
@@ -274,7 +296,7 @@ func _build_slot_roster_widgets() -> void:
 		row.add_child(diff_opt)
 
 		var style_opt: OptionButton = OptionButton.new()
-		style_opt.custom_minimum_size = Vector2(92.0, 24.0)
+		style_opt.custom_minimum_size = Vector2(78.0, 24.0)
 		style_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		style_opt.focus_mode = Control.FOCUS_NONE
 		style_opt.add_theme_font_size_override("font_size", 10)
@@ -300,6 +322,7 @@ func _build_slot_roster_widgets() -> void:
 			"row": row,
 			"ctrl_btn": ctrl_btn,
 			"ally_opt": ally_opt,
+			"fac_opt": fac_opt,
 			"diff_opt": diff_opt,
 			"style_opt": style_opt,
 			"human_tag": human_tag,
@@ -409,6 +432,16 @@ func _on_slot_playstyle_changed(slot_idx: int, style_idx: int) -> void:
 		return
 	AudioManager.play_ui_click()
 	_slot_configs[slot_idx]["ai_playstyle"] = clampi(style_idx, 0, 2)
+	_refresh_ui()
+
+
+func _on_slot_faction_changed(slot_idx: int, fac_idx: int) -> void:
+	if _suppress_callbacks or slot_idx < 0 or slot_idx >= _slot_configs.size():
+		return
+	if fac_idx < 0 or fac_idx >= _playable_factions.size():
+		return
+	AudioManager.play_ui_click()
+	_slot_configs[slot_idx]["faction_id"] = _playable_factions[fac_idx].faction_id
 	_refresh_ui()
 
 
@@ -569,6 +602,7 @@ func _refresh_ui() -> void:
 		var is_human: bool = int(cfg["controller_type"]) == 0
 		var ctrl_btn: Button = w["ctrl_btn"] as Button
 		var ally_opt: OptionButton = w["ally_opt"] as OptionButton
+		var fac_opt: OptionButton = w["fac_opt"] as OptionButton
 		var diff_opt: OptionButton = w["diff_opt"] as OptionButton
 		var style_opt: OptionButton = w["style_opt"] as OptionButton
 		var human_tag: Label = w["human_tag"] as Label
@@ -576,6 +610,14 @@ func _refresh_ui() -> void:
 		ctrl_btn.text = "Human" if is_human else "AI"
 		ctrl_btn.modulate = Color(0.36, 1.0, 0.88, 1.0) if is_human else Color(0.84, 0.90, 0.96, 0.92)
 		ally_opt.select(clampi(int(cfg["alliance_id"]), 0, 3))
+		if fac_opt != null and not _playable_factions.is_empty():
+			var slot_fid: StringName = cfg.get("faction_id", &"genesis_v2") as StringName
+			var f_sel: int = 0
+			for fi: int in range(_playable_factions.size()):
+				if _playable_factions[fi].faction_id == slot_fid:
+					f_sel = fi
+					break
+			fac_opt.select(f_sel)
 		diff_opt.select(clampi(int(cfg["ai_difficulty"]), 0, 2))
 		style_opt.select(clampi(int(cfg["ai_playstyle"]), 0, 2))
 		diff_opt.visible = not is_human

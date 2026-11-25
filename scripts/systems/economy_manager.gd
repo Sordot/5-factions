@@ -108,6 +108,11 @@ func reset_economy() -> void:
 		tech_changed.emit(tid)
 
 
+func set_team_starting_resources(team: int, biomass: int, silica: int, compute: int) -> void:
+	_init_team_state(team, maxi(0, biomass), maxi(0, silica), maxi(0, compute))
+	resources_changed.emit(team, get_resources(team))
+
+
 func add_resource(team: int, resource_type: StringName, amount: int, record_as_income: bool = true) -> void:
 	if amount <= 0:
 		return

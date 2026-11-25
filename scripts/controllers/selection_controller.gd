@@ -5,7 +5,6 @@ const COMMAND_ROUTER_SCRIPT: GDScript = preload("res://scripts/controllers/comma
 const RALLY_POINT_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/rally_point_overlay.gd")
 const COMMAND_QUEUE_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/command_queue_overlay.gd")
 const DOUBLE_TAP_WINDOW_MS: int = 350
-const MILITARY_PRODUCTION_IDS: Array = [&"cloning_vat", &"calibration_foundry", &"synthetics_fabricator"]
 
 signal selection_updated(selected_count: int)
 signal selection_changed(selected_units: Array[Unit], subgroups: Array[Dictionary], active_subgroup_index: int)
@@ -550,7 +549,7 @@ func _play_active_subgroup_bark() -> void:
 		return
 	var lead: Unit = active_units[0]
 	if is_instance_valid(lead) and not lead.is_dead:
-		var cls: StringName = AudioManager.classify_unit_bark_class(lead.get_unit_type_id())
+		var cls: StringName = lead.data.audio_bark_class if (lead.data != null and lead.data.audio_bark_class != &"") else AudioManager.classify_unit_bark_class(lead.get_unit_type_id())
 		AudioManager.play_selection_audio(active_units, cls)
 
 
@@ -865,10 +864,7 @@ func get_army_units() -> Array[Unit]:
 		var u: Unit = node
 		if u.is_dead or u.is_staffed or u.is_queued_for_deletion() or int(u.team) != local_team or u.data == null:
 			continue
-		var uid: StringName = u.get_unit_type_id()
-		if u.data.can_gather or u.data.can_staff_compute or uid == &"worker" or uid == &"silica_harvester" or uid == &"engineer":
-			continue
-		if u.data.attack_damage > 0.0 or uid == &"symbiote" or uid == &"signal_jammer":
+		if u.data.is_combat_unit():
 			army.append(u)
 	return army
 
@@ -910,7 +906,7 @@ func get_idle_production_buildings() -> Array[Building]:
 			continue
 		if int(b.team) != local_team:
 			continue
-		if not MILITARY_PRODUCTION_IDS.has(b.building_type_id):
+		if not b.is_military_production_building():
 			continue
 		if b.production_component == null or b.production_component.get_queue_size() > 0:
 			continue
@@ -1661,10 +1657,7 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 func _is_utility_unit(unit: Unit) -> bool:
 	if unit == null or unit.data == null:
 		return false
-	if unit.data.can_gather or unit.data.can_staff_compute:
-		return true
-	var uid: StringName = unit.get_unit_type_id()
-	return uid == &"worker" or uid == &"worker_unit" or uid == &"silica_harvester" or uid == &"engineer" or uid == &"engineer_unit"
+	return unit.data.is_worker_class()
 
 
 func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
@@ -2263,8 +2256,7 @@ func _is_hovering_repairable_target() -> bool:
 	var has_repairer: bool = false
 	for u: Unit in selected_units:
 		if is_instance_valid(u) and not u.is_dead and not u.is_staffed:
-			var uid: StringName = u.get_unit_type_id()
-			if uid == &"engineer" or uid == &"worker":
+			if u.can_repair():
 				has_repairer = true
 				break
 	if not has_repairer:

@@ -25,3 +25,12 @@ batch_production_count = 1
 base_batch_cost_multiplier = 1.0
 required_building_id = &""
 is_core_hub = true
+
+is_command_hub = true
+is_military_production = false
+is_supply_provider = true
+accepted_dropoff_resources = Array[StringName]([&"biomass"])
+tech_tier = 0
+prerequisite_building_ids = Array[StringName]([])
+audio_select_class = &"hub"
+tech_tree_summary = "Core Hub • +10 BW • Biomass Drop-Off"

@@ -25,3 +25,12 @@ compute_cost = 0
 build_time = 4.5
 train_time = 4.5
 unit_scene_path = "res://scenes/units/stinger.tscn"
+
+unit_tags = Array[StringName]([&"infantry", &"bio", &"swarm", &"flanker", &"scout"])
+weapon_tracer_style = &"bio"
+weapon_tracer_color = Color(0.98, 0.84, 0.26, 0.96)
+weapon_tracer_width = 2.6
+weapon_sfx_id = &"weapon_slash"
+audio_bark_class = &"swarm"
+minimap_icon_shape = &"dot"
+role_tags_display = "Fast Flanker • Acid Cleave • High Vision"

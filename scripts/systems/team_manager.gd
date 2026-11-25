@@ -52,6 +52,7 @@ const DEFAULT_TEAM_PALETTES: Array = [
 	},
 ]
 
+const FACTION_DIR_PATH: String = "res://resources/factions/"
 const FACTION_MANIFEST_PATHS: Array = [
 	"res://resources/factions/genesis_v2_faction.tres",
 ]
@@ -61,24 +62,55 @@ signal teams_reconfigured(mode: StringName)
 var match_mode: StringName = &"player_vs_ai"
 var team_configs: Dictionary = {}
 var _factions: Dictionary = {}
+var _faction_order: Array[StringName] = []
 
 
 func _ready() -> void:
 	_load_faction_registry()
+	_validate_registered_factions()
 	_setup_default_1v1()
 
 
 func _load_faction_registry() -> void:
 	_factions.clear()
+	_faction_order.clear()
+	var paths: Array[String] = []
 	for raw_path: Variant in FACTION_MANIFEST_PATHS:
-		var path_str: String = String(raw_path)
+		var ps: String = String(raw_path)
+		if not paths.has(ps):
+			paths.append(ps)
+
+	# Auto-discover additional FactionData .tres manifests dropped into resources/factions/
+	var dir: DirAccess = DirAccess.open(FACTION_DIR_PATH)
+	if dir != null:
+		dir.list_dir_begin()
+		var fname: String = dir.get_next()
+		while not fname.is_empty():
+			if not dir.current_is_dir() and fname.ends_with(".tres"):
+				var full_p: String = FACTION_DIR_PATH + fname
+				if not paths.has(full_p):
+					paths.append(full_p)
+			fname = dir.get_next()
+		dir.list_dir_end()
+
+	for path_str: String in paths:
 		if not ResourceLoader.exists(path_str):
 			continue
 		var res: Resource = load(path_str)
 		if res != null and res.get("faction_id") != null:
 			var fid: StringName = res.get("faction_id") as StringName
-			if fid != &"":
+			if fid != &"" and not _factions.has(fid):
 				_factions[fid] = res
+				_faction_order.append(fid)
+
+
+func _validate_registered_factions() -> void:
+	for fid: StringName in _faction_order:
+		var res: Resource = _factions.get(fid, null) as Resource
+		if res != null and res.has_method("validate"):
+			var warnings: Array = res.call("validate") as Array
+			for w: Variant in warnings:
+				push_warning("FactionData.validate(): %s" % String(w))
 
 
 func get_faction_data(faction_id: StringName) -> Resource:
@@ -88,17 +120,24 @@ func get_faction_data(faction_id: StringName) -> Resource:
 		return _factions[faction_id] as Resource
 	if _factions.has(&"genesis_v2"):
 		return _factions[&"genesis_v2"] as Resource
+	if not _faction_order.is_empty():
+		return _factions[_faction_order[0]] as Resource
 	return null
 
 
-func get_playable_factions() -> Array:
+func get_team_faction_data(team_id: int) -> FactionData:
+	var fid: StringName = get_team_faction(team_id)
+	return get_faction_data(fid) as FactionData
+
+
+func get_playable_factions() -> Array[FactionData]:
 	if _factions.is_empty():
 		_load_faction_registry()
-	var out: Array = []
-	for raw_id: Variant in _factions.keys():
-		var res: Resource = _factions[raw_id] as Resource
-		if res != null and bool(res.get("is_playable")):
-			out.append(res)
+	var out: Array[FactionData] = []
+	for fid: StringName in _faction_order:
+		var res: Resource = _factions[fid] as Resource
+		if res is FactionData and (res as FactionData).is_playable:
+			out.append(res as FactionData)
 	return out
 
 
@@ -174,12 +213,17 @@ func configure_from_game_config() -> void:
 		var tid: int = int(slot.get("team_id", 0))
 		var ally_id: int = int(slot.get("alliance_id", tid))
 		var ctrl_type: int = int(slot.get("controller_type", ControllerType.AI))
+		var slot_faction: StringName = slot.get("faction_id", faction_id) as StringName
+		if slot_faction == &"":
+			slot_faction = faction_id
+		var fac_data: FactionData = get_faction_data(slot_faction) as FactionData
+		var fac_tag: String = fac_data.short_code if (fac_data != null and not fac_data.short_code.is_empty()) else String(slot_faction).to_upper()
 		var diff: int = int(slot.get("ai_difficulty", 1))
 		var style: int = int(slot.get("ai_playstyle", 0))
 		var ally_tag: String = " [%s]" % GameConfig.get_alliance_letter(ally_id) if show_alliance else ""
 		var disp: String = ""
 		if ctrl_type == ControllerType.HUMAN:
-			disp = "PLAYER%s // %s" % [ally_tag, String(faction_id).to_upper()]
+			disp = "PLAYER%s // %s" % [ally_tag, fac_tag]
 		else:
 			disp = "AI-%02d%s (%s • %s)" % [
 				tid + 1,
@@ -190,7 +234,7 @@ func configure_from_game_config() -> void:
 		built.append({
 			"team_id": tid,
 			"alliance_id": ally_id,
-			"faction_id": faction_id,
+			"faction_id": slot_faction,
 			"controller_type": ctrl_type,
 			"display_name": disp,
 			"ai_difficulty": diff,

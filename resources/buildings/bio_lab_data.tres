@@ -24,3 +24,12 @@ requires_vent = false
 max_staff_slots = 0
 trainable_units = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("3_test_unit"), ExtResource("4_scout_unit")])
 can_set_rally = true
+
+is_command_hub = false
+is_military_production = true
+is_supply_provider = false
+accepted_dropoff_resources = Array[StringName]([])
+tech_tier = 1
+prerequisite_building_ids = Array[StringName]([])
+audio_select_class = &"production"
+tech_tree_summary = "Sandbox Bio-Lab Production"

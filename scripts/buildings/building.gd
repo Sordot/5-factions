@@ -109,12 +109,19 @@ func _ready() -> void:
 	add_to_group("selectable_buildings")
 	if SpatialGrid != null:
 		SpatialGrid.register_building(self)
+	if building_data == null and TeamManager != null and TeamManager.has_method("get_team_faction_data"):
+		var fac_ready: FactionData = TeamManager.get_team_faction_data(int(team))
+		if fac_ready != null:
+			building_data = fac_ready.get_building_by_id(building_type_id)
 	if building_data != null:
 		_sync_turret_from_data(building_data)
-	if building_type_id == &"nexus_vat":
-		is_core_hub = true
+		if building_data.is_hub():
+			is_core_hub = true
 	if construction_costs.is_empty():
-		construction_costs = _get_default_costs_for_type(building_type_id)
+		if building_data != null:
+			construction_costs = building_data.get_cost_dict()
+		else:
+			construction_costs = _get_default_costs_for_type(building_type_id)
 	if is_constructed:
 		current_hp = max_hp
 		construction_progress = 1.0
@@ -307,10 +314,10 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 		build_time = data.build_time
 		bandwidth_provided = data.bandwidth_provided
 		is_resource_dropoff = data.is_dropoff
-		accepted_resources = data.accepted_resources.duplicate()
+		accepted_resources = data.get_dropoff_resources().duplicate()
 		max_staff_slots = data.max_staff_slots
 		can_set_rally = data.can_set_rally
-		is_core_hub = data.is_core_hub or building_type_id == &"nexus_vat"
+		is_core_hub = data.is_hub()
 		batch_production_count = maxi(1, data.batch_production_count)
 		base_batch_cost_multiplier = maxf(1.0, data.base_batch_cost_multiplier)
 		_sync_turret_from_data(data)
@@ -702,9 +709,43 @@ func contains_point(world_point: Vector2) -> bool:
 	return global_position.distance_squared_to(world_point) <= selection_radius * selection_radius
 
 
+func is_command_hub() -> bool:
+	return is_core_hub or (building_data != null and building_data.is_hub())
+
+
+func is_military_production_building() -> bool:
+	if building_data != null:
+		return building_data.is_military_production
+	return not is_command_hub() and not trainable_unit_data.is_empty() and not is_resource_dropoff
+
+
+func get_tech_tier() -> int:
+	if building_data != null:
+		return building_data.tech_tier
+	return 0
+
+
+func get_audio_select_class() -> StringName:
+	if building_data != null and building_data.audio_select_class != &"":
+		return building_data.audio_select_class
+	if is_command_hub():
+		return &"hub"
+	if is_military_production_building():
+		return &"production"
+	if max_staff_slots > 0:
+		return &"tech"
+	if has_turret:
+		return &"defense"
+	return &"utility"
+
+
 func accepts_resource(resource_type: StringName) -> bool:
 	if is_destroyed or not is_constructed or not is_resource_dropoff:
 		return false
+	if building_data != null:
+		var dropoffs: Array[StringName] = building_data.get_dropoff_resources()
+		if not dropoffs.is_empty():
+			return dropoffs.has(resource_type)
 	return accepted_resources.has(resource_type)
 
 
@@ -896,14 +937,14 @@ func cancel_construction() -> bool:
 func can_salvage() -> bool:
 	if is_destroyed or not is_constructed:
 		return false
-	if is_core_hub or building_type_id == &"nexus_vat":
-		# Prevent salvaging the team's sole remaining Nexus Vat
+	if is_command_hub():
+		# Prevent salvaging the team's sole remaining Command Hub
 		var core_count: int = 0
 		if is_inside_tree():
 			for node: Node in get_tree().get_nodes_in_group("buildings"):
 				if node is Building and is_instance_valid(node):
 					var b: Building = node
-					if not b.is_destroyed and not b.is_queued_for_deletion() and b.team == team and (b.is_core_hub or b.building_type_id == &"nexus_vat"):
+					if not b.is_destroyed and not b.is_queued_for_deletion() and b.team == team and b.is_command_hub():
 						core_count += 1
 		if core_count <= 1:
 			return false
@@ -1074,8 +1115,10 @@ func get_inspection_data() -> Dictionary:
 			stats.append({"label": "Armor Class", "value": "Armored Structure"})
 		var tgt_txt: String = "Locked Target" if (turret_component != null and turret_component.explicit_target != null and is_instance_valid(turret_component.explicit_target)) else ("Auto (RMB Focus)" if is_local_owned else "Automated")
 		stats.append({"label": "Targeting", "value": tgt_txt})
-	elif is_core_hub or building_type_id == &"nexus_vat":
-		subtitle = "GENESIS_V2 PRIMARY HUB" if team == Unit.Team.PLAYER else "HOSTILE NEXUS VAT"
+	elif is_command_hub():
+		var fac_hub: FactionData = TeamManager.get_team_faction_data(int(team)) if (TeamManager != null and TeamManager.has_method("get_team_faction_data")) else null
+		var fac_code: String = fac_hub.short_code if (fac_hub != null and not fac_hub.short_code.is_empty()) else "FACTION"
+		subtitle = ("%s PRIMARY HUB" % fac_code) if is_local_owned else "HOSTILE COMMAND HUB"
 		var bw_str: String = "%d / %d" % [econ.get_bandwidth_used(team), econ.get_bandwidth_cap(team)] if econ != null else "--"
 		stats.append({"label": "Drop-Off", "value": "Biomass"})
 		stats.append({"label": "Bandwidth", "value": "+%d Capacity" % bandwidth_provided})

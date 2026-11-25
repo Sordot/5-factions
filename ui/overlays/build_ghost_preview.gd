@@ -73,7 +73,7 @@ func _draw() -> void:
 
 	# 3. Drop-off tether lines & node rings for economy hubs (Nexus Vat / Biomass Silo / Silica Condenser)
 	if building_data.is_dropoff:
-		_draw_dropoff_tethers(preview_pos, building_data.accepted_resources)
+		_draw_dropoff_tethers(preview_pos, building_data.get_dropoff_resources())
 
 	# 4. Subtle spacing & axis-alignment ticks near friendly structures
 	_draw_friendly_alignment_guides(preview_pos, half)

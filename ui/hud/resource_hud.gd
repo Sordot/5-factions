@@ -76,6 +76,7 @@ func _ready() -> void:
 	if btn_tech_tree != null:
 		btn_tech_tree.add_to_group("blocks_edge_pan")
 		btn_tech_tree.pressed.connect(toggle_tech_tree)
+		_apply_faction_hud_accent()
 	if spectator_panel != null:
 		spectator_panel.add_to_group("blocks_edge_pan")
 	if btn_spectator_fog != null:
@@ -217,6 +218,15 @@ func _on_keybind_changed(_action_name: StringName) -> void:
 	_refresh_aggro_badge()
 
 
+func _apply_faction_hud_accent() -> void:
+	if btn_tech_tree == null or TeamManager == null or not TeamManager.has_method("get_team_faction_data"):
+		return
+	var fac: FactionData = TeamManager.get_team_faction_data(int(tracked_team))
+	if fac == null:
+		return
+	btn_tech_tree.modulate = fac.hud_accent_color.lightened(0.25)
+
+
 func _refresh_tech_button_label() -> void:
 	if btn_tech_tree == null:
 		return
@@ -355,7 +365,14 @@ func _on_resource_insufficient(team: int, missing_key: StringName) -> void:
 	_alert_timer = 1.35
 	if resource_alert_label != null:
 		if missing_key == &"bandwidth":
-			resource_alert_label.text = "BANDWIDTH LIMIT REACHED — BUILD SYNAPSE PYLON"
+			var supply_name: String = "SUPPLY STRUCTURE"
+			if TeamManager != null and TeamManager.has_method("get_team_faction_data"):
+				var fac: FactionData = TeamManager.get_team_faction_data(team)
+				if fac != null:
+					var sup_b: BuildingData = fac.get_ai_building_for_role(&"supply")
+					if sup_b != null and not sup_b.display_name.is_empty():
+						supply_name = sup_b.display_name.to_upper()
+			resource_alert_label.text = "BANDWIDTH LIMIT REACHED — BUILD %s" % supply_name
 		else:
 			resource_alert_label.text = "INSUFFICIENT %s" % String(missing_key).to_upper()
 		resource_alert_label.visible = true

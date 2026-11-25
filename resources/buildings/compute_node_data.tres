@@ -20,3 +20,12 @@ is_dropoff = false
 accepted_resources = Array[StringName]([])
 requires_vent = true
 max_staff_slots = 2
+
+is_command_hub = false
+is_military_production = false
+is_supply_provider = false
+accepted_dropoff_resources = Array[StringName]([])
+tech_tier = 0
+prerequisite_building_ids = Array[StringName]([])
+audio_select_class = &"tech"
+tech_tree_summary = "Compute Vent Harvester Node"

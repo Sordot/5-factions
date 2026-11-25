@@ -26,3 +26,12 @@ can_set_rally = true
 batch_production_count = 1
 base_batch_cost_multiplier = 1.0
 required_building_id = &""
+
+is_command_hub = false
+is_military_production = false
+is_supply_provider = false
+accepted_dropoff_resources = Array[StringName]([&"silica"])
+tech_tier = 0
+prerequisite_building_ids = Array[StringName]([])
+audio_select_class = &"utility"
+tech_tree_summary = "Silica Drop-Off • Refines Silica Veins & trains Harvesters"

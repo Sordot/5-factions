@@ -460,7 +460,7 @@ func _on_map_viewport_draw() -> void:
 		if is_hostile_b and not b.visible:
 			continue
 		var bp: Vector2 = _world_to_minimap(b.global_position)
-		var is_hub: bool = b.is_core_hub or b.building_type_id == &"nexus_vat"
+		var is_hub: bool = b.is_command_hub()
 		var sz: float = 7.0 if is_hub else 4.5
 		var col: Color = TeamManager.get_team_color(int(b.team)) if TeamManager != null else (Color(0.22, 0.96, 0.88, 1.0) if b.team == Unit.Team.PLAYER else Color(1.0, 0.32, 0.26, 0.95))
 		if is_hostile_b and _fog_system != null and _fog_system.fog_enabled and not _fog_system.is_world_pos_visible(b.global_position):
@@ -483,14 +483,15 @@ func _on_map_viewport_draw() -> void:
 		if is_hostile_u and not u.visible:
 			continue
 		var upos: Vector2 = _world_to_minimap(u.global_position)
-		var uid: StringName = u.get_unit_type_id()
 		var ucol: Color = TeamManager.get_team_color(int(u.team)) if TeamManager != null else (Color(0.26, 0.96, 1.0, 1.0) if u.team == Unit.Team.PLAYER else Color(1.0, 0.30, 0.24, 1.0))
-		var is_worker: bool = (uid == &"worker" or uid == &"silica_harvester")
-		var is_heavy: bool = (uid == &"goliath_frame" or uid == &"arc_lancer" or uid == &"chrysalis_mortar")
+		var shape: StringName = u.data.minimap_icon_shape if u.data != null else &"dot"
+		var is_worker: bool = (shape == &"worker") or (u.data != null and u.data.is_worker_class() and not u.data.can_staff_compute)
+		var is_heavy: bool = (shape == &"triangle_heavy") or (u.data != null and u.data.is_heavy_unit())
+		var is_flanker: bool = (u.data != null and u.data.has_tag(&"flanker"))
 		if viewer_team >= 0 and int(u.team) == viewer_team:
 			if is_worker:
 				ucol = Color(0.32, 0.94, 0.62, 0.88)
-			elif uid == &"stinger":
+			elif is_flanker:
 				ucol = Color(0.98, 0.86, 0.32, 1.0)
 		if is_heavy:
 			var half_b: float = 2.85
