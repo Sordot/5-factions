@@ -45,6 +45,7 @@ var _match_manager: MatchManager = null
 var _catalog_team: Unit.Team = Unit.Team.PLAYER
 var _combat_lab_open: bool = false
 var _is_collapsed: bool = false
+var _ai_telemetry_label: Label = null
 
 
 func _ready() -> void:
@@ -152,6 +153,7 @@ func _ready() -> void:
 		)
 
 	_setup_genesis_catalog_controls()
+	_setup_ai_telemetry_label()
 
 	_refresh_edge_pan_button()
 	_refresh_fullscreen_button()
@@ -226,6 +228,19 @@ func _setup_genesis_catalog_controls() -> void:
 		)
 	_refresh_combat_lab_visibility()
 	_refresh_catalog_team_button()
+
+
+func _setup_ai_telemetry_label() -> void:
+	if body_vbox == null or _ai_telemetry_label != null:
+		return
+	_ai_telemetry_label = Label.new()
+	_ai_telemetry_label.name = "AITelemetryLabel"
+	_ai_telemetry_label.visible = false
+	_ai_telemetry_label.add_theme_font_size_override("font_size", 10)
+	_ai_telemetry_label.add_theme_color_override("font_color", Color(0.98, 0.84, 0.38, 0.96))
+	body_vbox.add_child(_ai_telemetry_label)
+	var ctrl_idx: int = maxi(0, body_vbox.get_child_count() - 2)
+	body_vbox.move_child(_ai_telemetry_label, ctrl_idx)
 
 
 func _refresh_combat_lab_visibility() -> void:
@@ -381,3 +396,24 @@ func _refresh_status() -> void:
 				if summary.has(num):
 					parts.append("[%d]: %d" % [num, int(summary[num])])
 			groups_label.text = "Control Groups: " + "  ".join(parts)
+
+	_refresh_ai_telemetry()
+
+
+func _refresh_ai_telemetry() -> void:
+	if _ai_telemetry_label == null or not is_inside_tree():
+		return
+	var ai_nodes: Array[Node] = get_tree().get_nodes_in_group("skirmish_ai")
+	var lines: PackedStringArray = PackedStringArray()
+	var sorted_ais: Array[Node] = []
+	for node: Node in ai_nodes:
+		if is_instance_valid(node) and not node.is_queued_for_deletion() and node.has_method("get_debug_status_line"):
+			sorted_ais.append(node)
+	sorted_ais.sort_custom(func(a: Node, b: Node) -> bool:
+		return int(a.get("ai_team")) < int(b.get("ai_team"))
+	)
+	for ai_node: Node in sorted_ais:
+		lines.append(String(ai_node.call("get_debug_status_line")))
+	_ai_telemetry_label.visible = not lines.is_empty()
+	if not lines.is_empty():
+		_ai_telemetry_label.text = "\n".join(lines)
