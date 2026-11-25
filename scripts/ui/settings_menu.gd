@@ -41,6 +41,7 @@ signal closed
 @onready var chk_alert_toasts: CheckButton = %ChkAlertToasts
 @onready var chk_camera_shake: CheckButton = %ChkCameraShake
 @onready var chk_battle_scars: CheckButton = %ChkBattleScars
+@onready var chk_build_grid_snap: CheckButton = %ChkBuildGridSnap
 
 @onready var sld_master_vol: HSlider = %SldMasterVol
 @onready var val_master_vol: Label = %ValMasterVol
@@ -421,6 +422,7 @@ func _wire_gameplay_controls() -> void:
 	chk_alert_toasts.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 	chk_camera_shake.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 	chk_battle_scars.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
+	chk_build_grid_snap.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 
 
 func _push_gameplay_settings() -> void:
@@ -436,7 +438,8 @@ func _push_gameplay_settings() -> void:
 		ar_mode,
 		am_mode,
 		chk_smart_box_select.button_pressed,
-		chk_battle_scars.button_pressed
+		chk_battle_scars.button_pressed,
+		chk_build_grid_snap.button_pressed
 	)
 	AudioManager.play_ui_click()
 
@@ -544,6 +547,7 @@ func _sync_all_from_manager() -> void:
 	chk_alert_toasts.button_pressed = SettingsManager.show_alert_toasts
 	chk_camera_shake.button_pressed = SettingsManager.camera_shake_enabled
 	chk_battle_scars.button_pressed = SettingsManager.battle_scars_enabled
+	chk_build_grid_snap.button_pressed = SettingsManager.build_grid_snap_enabled
 
 	sld_master_vol.value = SettingsManager.master_volume * 100.0
 	sld_sfx_vol.value = SettingsManager.sfx_volume * 100.0

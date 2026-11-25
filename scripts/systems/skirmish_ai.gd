@@ -823,12 +823,37 @@ func _manage_early_scouting(core: Building) -> void:
 
 	var uplink: HyperUplink = get_tree().get_first_node_in_group("hyper_uplinks") as HyperUplink
 	var mid_pt: Vector2 = uplink.global_position if (uplink != null and is_instance_valid(uplink)) else Vector2.ZERO
+	var relay_pt: Variant = _find_nearest_neutral_sensor_relay_pos(core.global_position)
 	var quadrant_pt: Vector2 = _pick_scout_quadrant_waypoint(core)
 	var return_pt: Vector2 = _staging_point if _staging_point_valid else core.global_position
 
-	scout.command_move(mid_pt, false)
-	scout.command_move(quadrant_pt, true)
-	scout.command_move(return_pt, true)
+	if relay_pt is Vector2:
+		scout.command_move(relay_pt as Vector2, false)
+		scout.command_move(mid_pt, true)
+		scout.command_move(quadrant_pt, true)
+		scout.command_move(return_pt, true)
+	else:
+		scout.command_move(mid_pt, false)
+		scout.command_move(quadrant_pt, true)
+		scout.command_move(return_pt, true)
+
+
+func _find_nearest_neutral_sensor_relay_pos(origin: Vector2) -> Variant:
+	var best_pos: Variant = null
+	var best_d_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("sensor_relays"):
+		if not is_instance_valid(node) or not (node is Node2D):
+			continue
+		var is_active_r: bool = node.has_method("is_active") and bool(node.call("is_active"))
+		var ctrl_t: int = int(node.get("controlling_team"))
+		if is_active_r and _is_allied_team(ctrl_t):
+			continue
+		var r_pos: Vector2 = (node as Node2D).global_position
+		var d_sq: float = origin.distance_squared_to(r_pos)
+		if d_sq < best_d_sq:
+			best_d_sq = d_sq
+			best_pos = r_pos
+	return best_pos
 
 
 func _pick_scout_quadrant_waypoint(core: Building) -> Vector2:
@@ -880,6 +905,11 @@ func _update_scouted_intel() -> void:
 	for obs_b: Building in observers_buildings:
 		var vr_b: float = obs_b.get_vision_range()
 		_scan_vision_circle_for_intel(obs_b.global_position, vr_b, seen_enemy_units, seen_enemy_buildings)
+	for node: Node in get_tree().get_nodes_in_group("sensor_relays"):
+		if is_instance_valid(node) and node is Node2D and node.has_method("is_active") and bool(node.call("is_active")):
+			var ctrl_t: int = int(node.get("controlling_team"))
+			if ctrl_t >= 0 and _is_allied_team(ctrl_t):
+				_scan_vision_circle_for_intel((node as Node2D).global_position, float(node.get("vision_radius")), seen_enemy_units, seen_enemy_buildings)
 
 	var infantry_count: int = 0
 	var vat_count: int = 0

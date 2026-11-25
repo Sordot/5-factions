@@ -98,18 +98,31 @@ func _are_teams_hostile(team_a: int, team_b: int) -> bool:
 	return team_a != team_b
 
 
-func is_valid_target(candidate: Variant) -> bool:
-	if owner_building == null or not is_instance_valid(owner_building) or candidate == null or not is_instance_valid(candidate):
+func can_target_entity(target: Node2D) -> bool:
+	if owner_building == null or not is_instance_valid(owner_building) or target == null or not is_instance_valid(target):
 		return false
-	if candidate is Unit:
-		var u: Unit = candidate
-		return not u.is_dead and not u.is_staffed and not u.is_queued_for_deletion() and _are_teams_hostile(int(owner_building.team), int(u.team))
-	if candidate is Building:
-		var b: Building = candidate
+	if target is Unit:
+		var u: Unit = target as Unit
+		if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
+			return false
+		if not _are_teams_hostile(int(owner_building.team), int(u.team)):
+			return false
+		if u.has_method("has_unit_tag"):
+			if bool(u.call("has_unit_tag", &"untargetable")) or bool(u.call("has_unit_tag", &"phase_invulnerable")):
+				return false
+		return true
+	if target is Building:
+		var b: Building = target as Building
 		return not b.is_destroyed and not b.is_queued_for_deletion() and _are_teams_hostile(int(owner_building.team), int(b.team))
-	if candidate is Node2D and (candidate as Node).is_in_group("destructible_barricades"):
-		return not bool((candidate as Node).get("is_destroyed")) and not (candidate as Node).is_queued_for_deletion()
+	if target.is_in_group("destructible_barricades"):
+		return not bool(target.get("is_destroyed")) and not target.is_queued_for_deletion()
 	return false
+
+
+func is_valid_target(candidate: Variant) -> bool:
+	if candidate == null or not is_instance_valid(candidate) or not (candidate is Node2D):
+		return false
+	return can_target_entity(candidate as Node2D)
 
 
 func distance_to_target_edge(target: Node2D) -> float:
@@ -200,7 +213,7 @@ func _find_best_target() -> Node2D:
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var u: Unit = node
-		if u.is_dead or u.is_staffed or u.is_queued_for_deletion() or not _are_teams_hostile(int(owner_building.team), int(u.team)):
+		if not can_target_entity(u):
 			continue
 		var dist: float = distance_to_target_edge(u)
 		if dist < min_range or dist > max_range:
@@ -218,7 +231,7 @@ func _find_best_target() -> Node2D:
 		if not is_instance_valid(node) or not (node is Building):
 			continue
 		var b: Building = node
-		if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(int(owner_building.team), int(b.team)):
+		if not can_target_entity(b):
 			continue
 		var dist: float = distance_to_target_edge(b)
 		if dist < min_range or dist > max_range:

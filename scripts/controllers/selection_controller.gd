@@ -184,13 +184,14 @@ func _process(delta: float) -> void:
 		if ability_reticle != null:
 			ability_reticle.clear_targeting()
 		if build_ghost_preview != null:
-			var eval: Dictionary = command_router.evaluate_build_placement(active_targeting_ability.building_to_build, cursor_world, _get_local_human_team_enum())
+			var eval: Dictionary = command_router.evaluate_build_placement(active_targeting_ability.building_to_build, cursor_world, _get_local_human_team_enum(), true)
 			build_ghost_preview.set_preview(
 				active_targeting_ability.building_to_build,
 				eval["pos"],
 				eval["valid"],
 				eval["reason"],
-				eval["vent"]
+				eval["vent"],
+				bool(eval.get("grid_snapped", false))
 			)
 		return
 
@@ -392,6 +393,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		cancel_patrol_targeting()
 		issue_hold_command()
 		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("cmd_defensive_stance") and not event.is_echo():
+		if event is InputEventKey:
+			var d_key: InputEventKey = event
+			if d_key.ctrl_pressed or d_key.alt_pressed:
+				return
+		if not selected_units.is_empty():
+			cancel_ability_targeting()
+			cancel_attack_move_targeting()
+			cancel_patrol_targeting()
+			issue_defensive_command()
+			get_viewport().set_input_as_handled()
+		elif event is InputEventMouseButton:
+			get_viewport().set_input_as_handled()
 		return
 
 	if event is InputEventMouseButton:
@@ -997,6 +1013,12 @@ func issue_hold_command() -> void:
 		command_router.issue_hold(selected_units)
 
 
+func issue_defensive_command() -> void:
+	_prune_invalid_units()
+	if command_router != null:
+		command_router.issue_defensive(selected_units)
+
+
 func assign_control_group(group_num: int) -> void:
 	if group_num < 1 or group_num > 9:
 		return
@@ -1510,6 +1532,10 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 		if spec_bar != null:
 			_set_inspected_entity(spec_bar)
 			return
+		var spec_relay: Node2D = command_router.find_sensor_relay_at_point(world_point)
+		if spec_relay != null:
+			_set_inspected_entity(spec_relay)
+			return
 		var spec_salvage: Node2D = command_router.find_salvage_core_at_point(world_point)
 		if spec_salvage != null:
 			_set_inspected_entity(spec_salvage)
@@ -1603,6 +1629,13 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 		_set_selected_units([])
 		_set_selected_buildings([])
 		_set_inspected_entity(clicked_barricade)
+		return
+
+	var clicked_relay: Node2D = command_router.find_sensor_relay_at_point(world_point)
+	if clicked_relay != null:
+		_set_selected_units([])
+		_set_selected_buildings([])
+		_set_inspected_entity(clicked_relay)
 		return
 
 	var clicked_salvage: Node2D = command_router.find_salvage_core_at_point(world_point)
@@ -1927,6 +1960,8 @@ func _set_inspected_entity(entity: Node, emit_audio: bool = true) -> void:
 			next_entity = entity
 		elif entity.is_in_group("salvage_cores") and not bool(entity.get("is_claimed")):
 			next_entity = entity
+		elif entity.is_in_group("sensor_relays"):
+			next_entity = entity
 
 	if inspected_entity == next_entity:
 		return
@@ -1957,6 +1992,9 @@ func _set_inspected_entity(entity: Node, emit_audio: bool = true) -> void:
 				inspected_entity.disconnect("claimed", _on_inspected_entity_removed)
 			if inspected_entity.has_signal("expired") and inspected_entity.is_connected("expired", _on_inspected_entity_removed):
 				inspected_entity.disconnect("expired", _on_inspected_entity_removed)
+			if inspected_entity.has_method("set_selected"):
+				inspected_entity.call("set_selected", false)
+		elif inspected_entity.is_in_group("sensor_relays"):
 			if inspected_entity.has_method("set_selected"):
 				inspected_entity.call("set_selected", false)
 
@@ -1993,6 +2031,9 @@ func _set_inspected_entity(entity: Node, emit_audio: bool = true) -> void:
 				inspected_entity.connect("claimed", _on_inspected_entity_removed)
 			if inspected_entity.has_signal("expired") and not inspected_entity.is_connected("expired", _on_inspected_entity_removed):
 				inspected_entity.connect("expired", _on_inspected_entity_removed)
+		elif inspected_entity.is_in_group("sensor_relays"):
+			if inspected_entity.has_method("set_selected"):
+				inspected_entity.call("set_selected", true)
 
 	if emit_audio and inspected_entity != null and AudioManager != null:
 		AudioManager.play_selection_audio([inspected_entity])
@@ -2299,6 +2340,9 @@ func _find_top_hover_entity(world_point: Vector2) -> Node:
 	var bar: Node2D = command_router.find_barricade_at_point(world_point)
 	if bar != null:
 		return bar
+	var relay_h: Node2D = command_router.find_sensor_relay_at_point(world_point)
+	if relay_h != null:
+		return relay_h
 	var salv: Node2D = command_router.find_salvage_core_at_point(world_point)
 	if salv != null:
 		return salv

@@ -215,41 +215,48 @@ theme_override_constants/separation = 5
 [node name="StandardCommandsRow" type="HBoxContainer" parent="BottomStack/BottomPanel/HBox/RightPanel"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 5
+theme_override_constants/separation = 4
 
 [node name="BtnCmdMove" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "Move (RMB)"
 
 [node name="BtnCmdStop" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "Stop (S)"
 
 [node name="BtnCmdHold" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "Hold (H)"
+
+[node name="BtnCmdDefensive" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 10
+text = "Defend (D)"
 
 [node name="BtnCmdPatrol" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "Patrol (P)"
 
 [node name="BtnCmdAMove" type="Button" parent="BottomStack/BottomPanel/HBox/RightPanel/StandardCommandsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "Atk-Mv (A)"
 
 [node name="AbilityRow" type="GridContainer" parent="BottomStack/BottomPanel/HBox/RightPanel"]

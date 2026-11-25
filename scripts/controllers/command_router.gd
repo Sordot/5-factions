@@ -450,6 +450,22 @@ func issue_hold(selected_units: Array[Unit]) -> void:
 		unit.set_stance(target_stance)
 
 
+func issue_defensive(selected_units: Array[Unit]) -> void:
+	var living: Array[Unit] = []
+	var all_defensive: bool = true
+	for unit: Unit in selected_units:
+		if not is_instance_valid(unit) or unit.is_dead or unit.is_staffed:
+			continue
+		living.append(unit)
+		if unit.stance != Unit.Stance.DEFENSIVE:
+			all_defensive = false
+	if living.is_empty():
+		return
+	var target_stance: Unit.Stance = Unit.Stance.AGGRESSIVE if all_defensive else Unit.Stance.DEFENSIVE
+	for unit: Unit in living:
+		unit.set_stance(target_stance)
+
+
 func issue_ability_order(
 	subgroup_units: Array[Unit],
 	ability: AbilityData,
@@ -488,12 +504,13 @@ func issue_ability_order(
 	return accepted
 
 
-func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2, target_team: Unit.Team = Unit.Team.PLAYER) -> Dictionary:
+func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2, target_team: Unit.Team = Unit.Team.PLAYER, apply_grid_snap: bool = false) -> Dictionary:
 	var result: Dictionary = {
 		"pos": cursor_world,
 		"valid": false,
 		"reason": "",
 		"vent": null,
+		"grid_snapped": false,
 	}
 	if building_data == null or building_data.resolve_scene() == null:
 		result["reason"] = "Invalid building"
@@ -509,6 +526,13 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 		place_pos = snapped_vent.global_position
 		result["pos"] = place_pos
 		result["vent"] = snapped_vent
+	elif apply_grid_snap:
+		var pref_snap: bool = SettingsManager != null and SettingsManager.build_grid_snap_enabled
+		var use_snap: bool = (pref_snap != Input.is_key_pressed(KEY_ALT))
+		if use_snap:
+			place_pos = place_pos.snapped(Vector2(32.0, 32.0))
+			result["pos"] = place_pos
+			result["grid_snapped"] = true
 
 	var half: Vector2 = building_data.footprint_size * 0.5
 	var new_radius: float = building_data.get_footprint_radius()
@@ -546,6 +570,14 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 			var min_u: float = 72.0 + new_radius
 			if (node as Node2D).global_position.distance_squared_to(place_pos) < min_u * min_u:
 				result["reason"] = "Too close to Hyper-Uplink"
+				return result
+
+	# Keep Sensor Relay towers clear of structures.
+	for node: Node in get_tree().get_nodes_in_group("sensor_relays"):
+		if node is Node2D and is_instance_valid(node):
+			var min_sr: float = 42.0 + new_radius
+			if (node as Node2D).global_position.distance_squared_to(place_pos) < min_sr * min_sr:
+				result["reason"] = "Too close to Sensor Relay"
 				return result
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
@@ -593,7 +625,7 @@ func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_
 		return false
 
 	var local_t: Unit.Team = (TeamManager.get_local_human_team() as Unit.Team) if (TeamManager != null and TeamManager.get_local_human_team() >= 0) else Unit.Team.PLAYER
-	var eval: Dictionary = evaluate_build_placement(building_data, world_pos, local_t)
+	var eval: Dictionary = evaluate_build_placement(building_data, world_pos, local_t, true)
 	if not bool(eval["valid"]):
 		var econ_fail: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 		if econ_fail != null and not econ_fail.can_afford(local_t, building_data.get_cost_dict()):
@@ -688,6 +720,22 @@ func find_salvage_core_at_point(world_point: Vector2) -> Node2D:
 			if d_sq < closest_dist_sq:
 				closest_dist_sq = d_sq
 				closest = sc
+	return closest
+
+
+func find_sensor_relay_at_point(world_point: Vector2) -> Node2D:
+	var closest: Node2D = null
+	var closest_dist_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("sensor_relays"):
+		if not is_instance_valid(node) or not (node is Node2D):
+			continue
+		if node.is_queued_for_deletion():
+			continue
+		if node.has_method("contains_point") and bool(node.call("contains_point", world_point)):
+			var d_sq: float = (node as Node2D).global_position.distance_squared_to(world_point)
+			if d_sq < closest_dist_sq:
+				closest_dist_sq = d_sq
+				closest = node as Node2D
 	return closest
 
 

@@ -1,4 +1,4 @@
-[gd_scene load_steps=36 format=3]
+[gd_scene load_steps=37 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
 [ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
@@ -34,6 +34,7 @@
 [ext_resource type="PackedScene" path="res://scenes/world/destructible_barricade.tscn" id="33_barricade"]
 [ext_resource type="Script" path="res://ui/overlays/battle_scars_overlay.gd" id="34_battle_scars"]
 [ext_resource type="PackedScene" path="res://ui/hud/tactical_event_feed.tscn" id="35_event_feed"]
+[ext_resource type="PackedScene" path="res://scenes/world/sensor_relay.tscn" id="36_sensor_relay"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_quad_nexus"]
 vertices = PackedVector2Array(-1600, -1600, 1600, -1600, 1600, 1600, -1600, 1600)
@@ -276,6 +277,22 @@ label_offset = Vector2(0, 44)
 
 [node name="HyperUplink" parent="Objectives" instance=ExtResource("19_hyper_uplink")]
 position = Vector2(0, 0)
+
+[node name="SensorRelayNorth" parent="Objectives" instance=ExtResource("36_sensor_relay")]
+position = Vector2(0, -560)
+relay_name = "North Perimeter Sensor Relay"
+
+[node name="SensorRelaySouth" parent="Objectives" instance=ExtResource("36_sensor_relay")]
+position = Vector2(0, 560)
+relay_name = "South Perimeter Sensor Relay"
+
+[node name="SensorRelayWest" parent="Objectives" instance=ExtResource("36_sensor_relay")]
+position = Vector2(-560, 0)
+relay_name = "West Perimeter Sensor Relay"
+
+[node name="SensorRelayEast" parent="Objectives" instance=ExtResource("36_sensor_relay")]
+position = Vector2(560, 0)
+relay_name = "East Perimeter Sensor Relay"
 
 [node name="ResourceNodes" type="Node2D" parent="."]
 

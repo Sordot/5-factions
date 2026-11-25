@@ -26,6 +26,7 @@ const KEYBIND_DEFS: Array = [
 	{"action": &"cmd_attack_move", "label": "Attack-Move", "default_key": KEY_A, "category": "Unit Commands"},
 	{"action": &"cmd_stop", "label": "Stop", "default_key": KEY_S, "category": "Unit Commands"},
 	{"action": &"cmd_hold", "label": "Hold Position", "default_key": KEY_H, "category": "Unit Commands"},
+	{"action": &"cmd_defensive_stance", "label": "Defensive Stance", "default_key": KEY_D, "category": "Unit Commands"},
 	{"action": &"cmd_patrol", "label": "Patrol", "default_key": KEY_P, "category": "Unit Commands"},
 	{"action": &"cmd_select_idle_worker", "label": "Select Idle Worker", "default_key": KEY_QUOTELEFT, "category": "Abilities & Selection"},
 	{"action": &"cmd_select_idle_production", "label": "Select Idle Production", "default_key": KEY_SEMICOLON, "category": "Abilities & Selection"},
@@ -89,6 +90,7 @@ var smart_box_select_enabled: bool = false
 var show_alert_toasts: bool = true
 var camera_shake_enabled: bool = true
 var battle_scars_enabled: bool = true
+var build_grid_snap_enabled: bool = false
 
 # Audio preferences
 var master_volume: float = 0.72
@@ -186,6 +188,7 @@ func load_settings() -> void:
 	show_alert_toasts = bool(cfg.get_value("gameplay", "show_alert_toasts", true))
 	camera_shake_enabled = bool(cfg.get_value("gameplay", "camera_shake_enabled", true))
 	battle_scars_enabled = bool(cfg.get_value("gameplay", "battle_scars_enabled", true))
+	build_grid_snap_enabled = bool(cfg.get_value("gameplay", "build_grid_snap_enabled", false))
 
 	master_volume = clampf(float(cfg.get_value("audio", "master_volume", 0.72)), 0.0, 1.0)
 	sfx_volume = clampf(float(cfg.get_value("audio", "sfx_volume", 0.85)), 0.0, 1.0)
@@ -262,6 +265,7 @@ func save_settings() -> void:
 	cfg.set_value("gameplay", "show_alert_toasts", show_alert_toasts)
 	cfg.set_value("gameplay", "camera_shake_enabled", camera_shake_enabled)
 	cfg.set_value("gameplay", "battle_scars_enabled", battle_scars_enabled)
+	cfg.set_value("gameplay", "build_grid_snap_enabled", build_grid_snap_enabled)
 
 	cfg.set_value("audio", "master_volume", master_volume)
 	cfg.set_value("audio", "sfx_volume", sfx_volume)
@@ -321,7 +325,8 @@ func set_gameplay_settings(
 	p_attack_range_mode: Variant = null,
 	p_attack_move_mode: Variant = null,
 	p_smart_box_select_enabled: Variant = null,
-	p_battle_scars_enabled: Variant = null
+	p_battle_scars_enabled: Variant = null,
+	p_build_grid_snap_enabled: Variant = null
 ) -> void:
 	health_bar_mode = clampi(p_health_bar_mode, 0, 2)
 	show_alert_toasts = p_show_alert_toasts
@@ -335,6 +340,8 @@ func set_gameplay_settings(
 		smart_box_select_enabled = bool(p_smart_box_select_enabled)
 	if p_battle_scars_enabled is bool:
 		battle_scars_enabled = bool(p_battle_scars_enabled)
+	if p_build_grid_snap_enabled is bool:
+		build_grid_snap_enabled = bool(p_build_grid_snap_enabled)
 	save_settings()
 	settings_changed.emit(&"gameplay")
 
@@ -680,6 +687,7 @@ func reset_category(category: StringName) -> void:
 			show_alert_toasts = true
 			camera_shake_enabled = true
 			battle_scars_enabled = true
+			build_grid_snap_enabled = false
 			save_settings()
 			settings_changed.emit(&"gameplay")
 		&"audio":
@@ -728,6 +736,7 @@ func reset_all_to_defaults() -> void:
 	show_alert_toasts = true
 	camera_shake_enabled = true
 	battle_scars_enabled = true
+	build_grid_snap_enabled = false
 	master_volume = 0.72
 	sfx_volume = 0.85
 	ui_volume = 0.85

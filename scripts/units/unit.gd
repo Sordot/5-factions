@@ -25,8 +25,11 @@ enum CommandState {
 
 enum Stance {
 	AGGRESSIVE,
+	DEFENSIVE,
 	HOLD_POSITION,
 }
+
+const DEFENSIVE_LEASH_RADIUS: float = 260.0
 
 const CMD_EXEC_FAILED: int = 0
 const CMD_EXEC_ACTIVE: int = 1
@@ -97,6 +100,7 @@ var command_queue: Array[Dictionary] = []
 var active_command: Dictionary = {}
 var patrol_waypoints: Array[Vector2] = []
 var patrol_index: int = 0
+var defensive_anchor: Vector2 = Vector2.ZERO
 
 var _construction_target: Building = null
 var _salvage_target: Node2D = null
@@ -320,6 +324,8 @@ func get_vision_range() -> float:
 
 
 func is_ability_ready(ability: AbilityData) -> bool:
+	if status_effect_component != null and bool(status_effect_component.call("is_abilities_blocked")):
+		return false
 	return ability_component != null and ability_component.is_ability_ready(ability)
 
 
@@ -865,6 +871,10 @@ func command_move(target_pos: Vector2, append_to_queue: bool = false) -> void:
 func _start_move(target_pos: Vector2) -> bool:
 	if is_dead or is_staffed or not _can_move():
 		return false
+	if stance != Stance.AGGRESSIVE:
+		stance = Stance.AGGRESSIVE
+		stance_changed.emit(self, stance)
+		queue_redraw()
 	if combat_component != null:
 		combat_component.cancel_attack_animation()
 	_cancel_active_tasks(false)
@@ -976,9 +986,17 @@ func set_stance(new_stance: Stance) -> void:
 		command_state = CommandState.HOLD_POSITION
 		current_target = null
 		stop_component_navigation()
+	elif stance == Stance.DEFENSIVE:
+		clear_command_queue()
+		_cancel_active_tasks(false)
+		defensive_anchor = global_position
+		command_state = CommandState.IDLE
+		current_target = null
+		stop_component_navigation()
 	elif command_state == CommandState.HOLD_POSITION:
 		command_state = CommandState.IDLE
 		current_target = null
+	queue_redraw()
 	if changed:
 		stance_changed.emit(self, stance)
 	status_changed.emit(self)
@@ -991,14 +1009,21 @@ func command_stop() -> void:
 		combat_component.cancel_attack_animation()
 	clear_command_queue()
 	_cancel_active_tasks(false)
+	if stance == Stance.DEFENSIVE:
+		defensive_anchor = global_position
 	command_state = CommandState.HOLD_POSITION if stance == Stance.HOLD_POSITION else CommandState.IDLE
 	current_target = null
 	stop_component_navigation()
+	queue_redraw()
 	status_changed.emit(self)
 
 
 func command_hold_position() -> void:
 	set_stance(Stance.HOLD_POSITION)
+
+
+func command_defensive_stance() -> void:
+	set_stance(Stance.DEFENSIVE)
 
 
 func take_damage(amount: float, attacker: Node = null) -> void:
@@ -1007,7 +1032,10 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 	var mitigation: float = get_effective_damage_reduction()
 	var dmg_mult: float = float(status_effect_component.call("get_damage_taken_multiplier")) if status_effect_component != null else 1.0
 	var effective_damage: float = amount * (1.0 - mitigation) * dmg_mult
+	if status_effect_component != null and effective_damage > 0.0:
+		effective_damage = float(status_effect_component.call("absorb_damage_shield", effective_damage, &"generic"))
 	if effective_damage <= 0.0:
+		status_changed.emit(self)
 		return
 	current_hp = maxf(0.0, current_hp - effective_damage)
 	_hit_flash_timer = HIT_FLASH_DURATION
@@ -1023,10 +1051,16 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 	health_changed.emit(self, current_hp, get_max_hp())
 	status_changed.emit(self)
 
-	# Idle aggressive combatants retaliate against attackers even if attacked from beyond aggro range (when Aggro AI is ON).
+	# Idle aggressive/defensive combatants retaliate against attackers (within leash when Defensive).
 	if MatchManager.is_aggro_ai_enabled(get_tree()) and command_state == CommandState.IDLE and (current_target == null or not is_instance_valid(current_target)) and attacker != null and is_instance_valid(attacker) and attacker is Unit and _can_attack():
 		if combat_component != null and combat_component.should_pursue_targets(self) and combat_component.is_valid_target(self, attacker):
-			current_target = attacker as Node2D
+			var atk_node: Node2D = attacker as Node2D
+			var allow_retaliate: bool = true
+			if stance == Stance.DEFENSIVE:
+				var max_engage: float = DEFENSIVE_LEASH_RADIUS + (data.attack_range if data != null else 180.0)
+				allow_retaliate = combat_component.is_within_attack_envelope(self, atk_node) or defensive_anchor.distance_to(atk_node.global_position) <= max_engage
+			if allow_retaliate:
+				current_target = atk_node
 
 	if current_hp <= 0.0:
 		if attacker != null and is_instance_valid(attacker) and attacker is Unit:
@@ -1059,6 +1093,49 @@ func apply_slow_debuff(duration: float, move_penalty: float, attack_penalty: flo
 
 func has_status_effect(effect_id: StringName) -> bool:
 	return status_effect_component != null and bool(status_effect_component.call("has_effect", effect_id))
+
+
+func apply_status_effect(effect_id: StringName, config: Dictionary) -> void:
+	if is_dead or status_effect_component == null:
+		return
+	status_effect_component.call("apply_effect", effect_id, config)
+	_sync_nav_max_speed()
+	queue_redraw()
+	status_changed.emit(self)
+
+
+func add_unit_tag(tag: StringName, duration: float = -1.0) -> void:
+	if is_dead or status_effect_component == null:
+		return
+	status_effect_component.call("add_tag", tag, duration)
+	status_changed.emit(self)
+
+
+func remove_unit_tag(tag: StringName) -> void:
+	if status_effect_component == null:
+		return
+	status_effect_component.call("remove_tag", tag)
+	status_changed.emit(self)
+
+
+func has_unit_tag(tag: StringName) -> bool:
+	if tag == &"":
+		return false
+	if data != null and data.unit_tags.has(tag):
+		return true
+	return status_effect_component != null and bool(status_effect_component.call("has_tag", tag))
+
+
+func add_damage_shield(amount: float, duration: float = -1.0, label: String = "Barrier") -> void:
+	if is_dead or status_effect_component == null:
+		return
+	status_effect_component.call("add_damage_shield", amount, duration, label)
+	queue_redraw()
+	status_changed.emit(self)
+
+
+func get_shield_amount() -> float:
+	return float(status_effect_component.call("get_shield_amount")) if status_effect_component != null else 0.0
 
 
 func get_active_status_effects() -> Array[Dictionary]:
@@ -1184,6 +1261,28 @@ func _draw() -> void:
 			draw_arc(Vector2.ZERO, r + 3.0, a0, a0 + 1.15, 10, arc_col, 2.3, true)
 			var crack_dir: Vector2 = Vector2.RIGHT.rotated(a0 + 0.55)
 			draw_line(crack_dir * (r - 1.0), crack_dir * (r + 6.5), arc_col, 1.4, true)
+
+	# Diegetic Defensive Stance anchor leash ring (when selected) + crisp shield/anchor pip
+	if stance == Stance.DEFENSIVE:
+		var def_col: Color = Color(0.24, 0.96, 0.78, 0.92)
+		if is_selected:
+			var local_anchor: Vector2 = to_local(defensive_anchor)
+			_draw_dashed_ring(local_anchor, DEFENSIVE_LEASH_RADIUS, Color(0.24, 0.96, 0.78, 0.24), 1.3, 36)
+			draw_arc(local_anchor, 7.0, 0.0, TAU, 16, Color(0.24, 0.96, 0.78, 0.56), 1.3, true)
+			draw_circle(local_anchor, 2.5, Color(0.24, 0.96, 0.78, 0.75))
+			if local_anchor.length_squared() > 144.0:
+				draw_line(Vector2.ZERO, local_anchor, Color(0.24, 0.96, 0.78, 0.22), 1.1, true)
+		var pip_y: float = health_bar_root.position.y + 1.0 if health_bar_root != null else -(r + 8.0)
+		var pip_x: float = (HEALTH_BAR_WIDTH * 0.5 + 8.0)
+		var shield_pts: PackedVector2Array = PackedVector2Array([
+			Vector2(pip_x - 3.6, pip_y - 3.8),
+			Vector2(pip_x + 3.6, pip_y - 3.8),
+			Vector2(pip_x + 3.6, pip_y + 0.4),
+			Vector2(pip_x, pip_y + 4.4),
+			Vector2(pip_x - 3.6, pip_y + 0.4),
+		])
+		draw_colored_polygon(shield_pts, Color(0.06, 0.20, 0.22, 0.88))
+		draw_polyline(shield_pts + PackedVector2Array([shield_pts[0]]), def_col, 1.4, true)
 
 	# Diegetic Veterancy rank chevron pips beside unit's health bar
 	if veterancy_rank > 0:
@@ -1341,7 +1440,7 @@ func _tick_status_effects(delta: float) -> void:
 	if status_effect_component == null:
 		return
 	var had_any: bool = bool(status_effect_component.call("has_any_active"))
-	var changed: bool = bool(status_effect_component.call("tick", delta))
+	var changed: bool = bool(status_effect_component.call("tick", delta, self))
 	if had_any:
 		_vfx_anim_time += delta
 		queue_redraw()
@@ -1367,6 +1466,9 @@ func _maybe_retarget_higher_threat(delta: float, scan_range: float) -> void:
 func _process_idle(delta: float) -> void:
 	if stance == Stance.HOLD_POSITION:
 		_process_hold_position(delta)
+		return
+	if stance == Stance.DEFENSIVE:
+		_process_defensive_stance(delta)
 		return
 	if not _can_attack() or combat_component == null:
 		return
@@ -1405,6 +1507,71 @@ func _process_idle(delta: float) -> void:
 	if current_target != null and is_instance_valid(current_target):
 		_face_point(current_target.global_position, delta)
 		combat_component.process_attack_at(self, current_target, delta)
+
+
+func _process_defensive_stance(delta: float) -> void:
+	if is_selected and velocity.length_squared() > 4.0:
+		queue_redraw()
+	if not _can_attack() or combat_component == null or not MatchManager.is_aggro_ai_enabled(get_tree()):
+		current_target = null
+		_return_to_defensive_anchor()
+		return
+
+	var dist_from_anchor: float = global_position.distance_to(defensive_anchor)
+	var attack_r: float = data.attack_range if data != null else 180.0
+	var scan_r: float = maxf(data.aggro_range if data != null else 280.0, attack_r)
+	var max_target_anchor_dist: float = DEFENSIVE_LEASH_RADIUS + attack_r + 24.0
+
+	if current_target != null:
+		if not is_instance_valid(current_target) or not combat_component.is_valid_target(self, current_target):
+			current_target = null
+		elif dist_from_anchor > DEFENSIVE_LEASH_RADIUS + 8.0:
+			combat_component.cancel_attack_animation()
+			current_target = null
+		elif defensive_anchor.distance_to(current_target.global_position) > max_target_anchor_dist and not combat_component.is_within_attack_envelope(self, current_target):
+			combat_component.cancel_attack_animation()
+			current_target = null
+
+	if current_target == null:
+		if dist_from_anchor <= DEFENSIVE_LEASH_RADIUS:
+			var candidate: Node2D = combat_component.find_nearest_enemy(self, scan_r)
+			if candidate != null and is_instance_valid(candidate):
+				if combat_component.is_within_attack_envelope(self, candidate) or defensive_anchor.distance_to(candidate.global_position) <= max_target_anchor_dist:
+					current_target = candidate
+	else:
+		_maybe_retarget_higher_threat(delta, attack_r)
+
+	if current_target != null and is_instance_valid(current_target):
+		if combat_component.is_within_attack_envelope(self, current_target):
+			_face_point(current_target.global_position, delta)
+			combat_component.process_attack_at(self, current_target, delta)
+			return
+		if combat_component.is_target_inside_min_range(self, current_target):
+			combat_component.cancel_attack_animation()
+			current_target = null
+		elif _can_move() and combat_component.should_pursue_targets(self) and dist_from_anchor < DEFENSIVE_LEASH_RADIUS - 6.0:
+			combat_component.cancel_attack_animation()
+			_request_nav_toward_point(current_target.global_position, 8.0)
+			return
+		else:
+			combat_component.cancel_attack_animation()
+			current_target = null
+
+	_return_to_defensive_anchor()
+
+
+func _return_to_defensive_anchor() -> void:
+	if not _can_move():
+		velocity = Vector2.ZERO
+		return
+	var dist_sq: float = global_position.distance_squared_to(defensive_anchor)
+	if dist_sq > 18.0 * 18.0:
+		_request_nav_toward_point(defensive_anchor, 8.0, 10.0)
+		if is_selected:
+			queue_redraw()
+	else:
+		stop_component_navigation()
+		velocity = Vector2.ZERO
 
 
 func _process_moving(delta: float) -> void:
@@ -2008,7 +2175,7 @@ func get_inspection_data() -> Dictionary:
 func _get_command_state_label() -> String:
 	match command_state:
 		CommandState.IDLE:
-			return "Idle"
+			return "Defending Post" if stance == Stance.DEFENSIVE else "Idle"
 		CommandState.MOVING:
 			return "Moving"
 		CommandState.ATTACK_MOVING:

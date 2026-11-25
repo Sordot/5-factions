@@ -55,6 +55,7 @@ const UI_SFX_IDS: Array = [
 	&"veterancy_rank_up",
 	&"salvage_claimed",
 	&"autocast_toggle",
+	&"relay_captured",
 	&"match_victory",
 	&"match_defeat",
 ]
@@ -113,6 +114,7 @@ var _cooldowns_ms: Dictionary = {
 	&"veterancy_rank_up": 350,
 	&"salvage_claimed": 180,
 	&"autocast_toggle": 60,
+	&"relay_captured": 450,
 	&"match_victory": 500,
 	&"match_defeat": 500,
 }
@@ -739,6 +741,7 @@ func _generate_procedural_library() -> void:
 	_streams[&"veterancy_rank_up"] = _synth_rank_up_chime()
 	_streams[&"salvage_claimed"] = _synth_chime(PackedFloat32Array([587.33, 783.99, 1174.66, 1567.98]), 0.045, 0.25)
 	_streams[&"autocast_toggle"] = _synth_chime(PackedFloat32Array([880.0, 1318.5]), 0.04, 0.20)
+	_streams[&"relay_captured"] = _synth_chime(PackedFloat32Array([659.25, 987.77, 1318.51]), 0.06, 0.22)
 
 	# Unit-Class Procedural Synth Barks (150–240ms)
 	_streams[&"bark_worker_select"] = _synth_bark_worker(false)

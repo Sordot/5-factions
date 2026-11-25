@@ -192,6 +192,25 @@ func refresh_visibility() -> void:
 		for idx: int in stamped:
 			_grid[idx] = VisibilityState.VISIBLE
 
+	# Stamp unobstructed vision for active capturable Sensor Relays held by the viewer's alliance.
+	for node: Node in get_tree().get_nodes_in_group("sensor_relays"):
+		if not is_instance_valid(node) or not (node is Node2D):
+			continue
+		if not node.has_method("is_active") or not bool(node.call("is_active")):
+			continue
+		var ctrl_team: int = int(node.get("controlling_team"))
+		if ctrl_team < 0:
+			continue
+		var grants_vision_r: bool = spectator or (TeamManager.are_allies(viewer_team, ctrl_team) if TeamManager != null else (ctrl_team == int(Unit.Team.PLAYER)))
+		if not grants_vision_r:
+			continue
+		var relay_pos: Vector2 = (node as Node2D).global_position
+		var relay_r: float = float(node.get("vision_radius"))
+		if bool(node.get("ignores_los_blockers")):
+			_reveal_circle_unobstructed(relay_pos, relay_r)
+		else:
+			_reveal_circle_los(relay_pos, relay_r)
+
 	_sync_texture_if_dirty()
 	_apply_enemy_visibility(spectator)
 	visibility_updated.emit()
@@ -224,6 +243,26 @@ func is_world_pos_visible(world_pos: Vector2) -> bool:
 
 func is_world_pos_explored(world_pos: Vector2) -> bool:
 	return get_visibility_at_world_pos(world_pos) >= VisibilityState.EXPLORED
+
+
+func _reveal_circle_unobstructed(world_center: Vector2, radius: float) -> void:
+	if radius <= 0.0:
+		return
+	var min_c: Vector2i = world_to_cell(world_center - Vector2(radius, radius))
+	var max_c: Vector2i = world_to_cell(world_center + Vector2(radius, radius))
+	var r_sq: float = radius * radius
+
+	for cy: int in range(min_c.y, max_c.y + 1):
+		var row_offset: int = cy * grid_width
+		var wy: float = arena_bounds.position.y + (float(cy) + 0.5) * cell_size
+		var dy: float = wy - world_center.y
+		var dy_sq: float = dy * dy
+		for cx: int in range(min_c.x, max_c.x + 1):
+			var wx: float = arena_bounds.position.x + (float(cx) + 0.5) * cell_size
+			var dx: float = wx - world_center.x
+			if dx * dx + dy_sq > r_sq:
+				continue
+			_grid[row_offset + cx] = VisibilityState.VISIBLE
 
 
 func _reveal_circle_los(world_center: Vector2, radius: float) -> void:

@@ -28,6 +28,7 @@ extends Control
 @onready var btn_cmd_move: Button = %BtnCmdMove
 @onready var btn_cmd_stop: Button = %BtnCmdStop
 @onready var btn_cmd_hold: Button = %BtnCmdHold
+@onready var btn_cmd_defensive: Button = %BtnCmdDefensive
 @onready var btn_cmd_patrol: Button = %BtnCmdPatrol
 @onready var btn_cmd_amove: Button = %BtnCmdAMove
 
@@ -81,6 +82,13 @@ func _ready() -> void:
 		if _selection_controller != null:
 			_selection_controller.issue_hold_command()
 	)
+	if btn_cmd_defensive != null:
+		btn_cmd_defensive.pressed.connect(func() -> void:
+			if AudioManager != null:
+				AudioManager.play_ui_click()
+			if _selection_controller != null:
+				_selection_controller.issue_defensive_command()
+		)
 	if btn_cmd_patrol != null:
 		btn_cmd_patrol.pressed.connect(func() -> void:
 			if _selection_controller != null:
@@ -147,6 +155,7 @@ func _bind_static_command_tooltips() -> void:
 	_attach_tooltip(btn_cmd_move, "Move", "RMB", "Right-Click Ground", "Orders selected units to navigate to the target location.")
 	_attach_dynamic_action_tooltip(btn_cmd_stop, "Stop", &"cmd_stop", "Immediate", "Cancels current movement, patrol, gathering, construction, or target and flushes command queue.")
 	_attach_dynamic_action_tooltip(btn_cmd_hold, "Hold Position", &"cmd_hold", "Immediate", "Locks unit position while engaging enemies inside attack range.")
+	_attach_dynamic_action_tooltip(btn_cmd_defensive, "Defensive Stance", &"cmd_defensive_stance", "Immediate (260px Leash)", "Auto-acquires nearby enemies and chases up to 260px from anchor before smoothly returning.")
 	_attach_dynamic_action_tooltip(btn_cmd_patrol, "Patrol", &"cmd_patrol", "Click Waypoint (Shift Chains Loop)", "Loops units continuously between waypoints while engaging enemies encountered along the path.")
 	if btn_cmd_amove != null:
 		btn_cmd_amove.tooltip_text = ""
@@ -1001,6 +1010,9 @@ func _connect_inspected_signals(entity: Node) -> void:
 			entity.connect("claimed", _on_inspected_entity_removed)
 		if entity.has_signal("expired") and not entity.is_connected("expired", _on_inspected_entity_removed):
 			entity.connect("expired", _on_inspected_entity_removed)
+	elif entity.is_in_group("sensor_relays"):
+		if entity.has_signal("state_changed") and not entity.is_connected("state_changed", _on_inspected_entity_updated):
+			entity.connect("state_changed", _on_inspected_entity_updated)
 
 
 func _disconnect_inspected_signals() -> void:
@@ -1044,6 +1056,9 @@ func _disconnect_inspected_signals() -> void:
 			_inspected_entity.disconnect("claimed", _on_inspected_entity_removed)
 		if _inspected_entity.has_signal("expired") and _inspected_entity.is_connected("expired", _on_inspected_entity_removed):
 			_inspected_entity.disconnect("expired", _on_inspected_entity_removed)
+	elif _inspected_entity.is_in_group("sensor_relays"):
+		if _inspected_entity.has_signal("state_changed") and _inspected_entity.is_connected("state_changed", _on_inspected_entity_updated):
+			_inspected_entity.disconnect("state_changed", _on_inspected_entity_updated)
 
 
 func _on_ability_targeting_changed(active_ability: AbilityData) -> void:
@@ -1076,6 +1091,7 @@ func _refresh_stance_button() -> void:
 		return
 	var living_count: int = 0
 	var hold_count: int = 0
+	var defensive_count: int = 0
 	for item: Variant in _selection_controller.selected_units:
 		if not is_instance_valid(item) or not (item is Unit):
 			continue
@@ -1085,6 +1101,8 @@ func _refresh_stance_button() -> void:
 		living_count += 1
 		if u.stance == Unit.Stance.HOLD_POSITION:
 			hold_count += 1
+		elif u.stance == Unit.Stance.DEFENSIVE:
+			defensive_count += 1
 	var k_hold: String = _get_compact_action_badge(&"cmd_hold", "H")
 	var hold_suffix: String = (" (%s)" % k_hold) if not k_hold.is_empty() else ""
 	if living_count > 0 and hold_count == living_count:
@@ -1096,6 +1114,19 @@ func _refresh_stance_button() -> void:
 	else:
 		btn_cmd_hold.text = "Hold%s" % hold_suffix
 		btn_cmd_hold.modulate = Color.WHITE
+
+	if btn_cmd_defensive != null:
+		var k_def: String = _get_compact_action_badge(&"cmd_defensive_stance", "D")
+		var def_suffix: String = (" (%s)" % k_def) if not k_def.is_empty() else ""
+		if living_count > 0 and defensive_count == living_count:
+			btn_cmd_defensive.text = "Def: ON%s" % def_suffix
+			btn_cmd_defensive.modulate = Color(0.28, 0.98, 0.80, 1.0)
+		elif defensive_count > 0:
+			btn_cmd_defensive.text = "Defend*%s" % def_suffix
+			btn_cmd_defensive.modulate = Color(0.56, 0.98, 0.88, 1.0)
+		else:
+			btn_cmd_defensive.text = "Defend%s" % def_suffix
+			btn_cmd_defensive.modulate = Color.WHITE
 
 
 func _refresh_selected_units_display() -> void:

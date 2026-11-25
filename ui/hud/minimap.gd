@@ -394,6 +394,38 @@ func _on_map_viewport_draw() -> void:
 		map_viewport.draw_colored_polygon(diamond, u_col)
 		map_viewport.draw_polyline(diamond + PackedVector2Array([diamond[0]]), Color(0.98, 1.0, 1.0, 0.96), 1.2)
 
+	# 4.5. Capturable Sensor Relays (radar-diamond + subtle sensor ring).
+	for node: Node in get_tree().get_nodes_in_group("sensor_relays"):
+		if not is_instance_valid(node) or not (node is Node2D):
+			continue
+		var relay: Node2D = node as Node2D
+		var rp: Vector2 = _world_to_minimap(relay.global_position)
+		var r_vis: bool = _fog_system == null or not _fog_system.fog_enabled or _fog_system.is_world_pos_visible(relay.global_position)
+		var r_col: Color = Color(0.56, 0.78, 0.88, 0.92)
+		var r_active: bool = relay.has_method("is_active") and bool(relay.call("is_active"))
+		var r_contested: bool = relay.has_method("is_contested") and bool(relay.call("is_contested"))
+		var ctrl_t: int = int(relay.get("controlling_team"))
+		var viewer_r: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+		var is_allied_r: bool = r_active and ctrl_t >= 0 and (viewer_r < 0 or (TeamManager.are_allies(viewer_r, ctrl_t) if TeamManager != null else (ctrl_t == int(Unit.Team.PLAYER))))
+		if r_vis or is_allied_r:
+			if r_contested:
+				r_col = Color(1.0, 0.78, 0.24, 1.0)
+			elif r_active and ctrl_t >= 0:
+				r_col = TeamManager.get_team_color(ctrl_t) if TeamManager != null else (Color(0.22, 0.96, 0.88, 1.0) if ctrl_t == int(Unit.Team.PLAYER) else Color(1.0, 0.36, 0.28, 1.0))
+		if is_allied_r:
+			var r_scale: float = rect.size.x / maxf(1.0, arena_bounds.size.x)
+			var vis_mini_r: float = clampf(float(relay.get("vision_radius")) * r_scale, 6.0, 48.0)
+			map_viewport.draw_arc(rp, vis_mini_r, 0.0, TAU, 20, Color(r_col.r, r_col.g, r_col.b, 0.28), 1.0)
+		map_viewport.draw_arc(rp, 5.2 + pulse * 1.4, 0.0, TAU, 16, Color(r_col.r, r_col.g, r_col.b, 0.56), 1.0)
+		var r_dia: PackedVector2Array = PackedVector2Array([
+			rp + Vector2(0.0, -3.5),
+			rp + Vector2(3.5, 0.0),
+			rp + Vector2(0.0, 3.5),
+			rp + Vector2(-3.5, 0.0),
+		])
+		map_viewport.draw_colored_polygon(r_dia, r_col)
+		map_viewport.draw_polyline(r_dia + PackedVector2Array([r_dia[0]]), Color(0.94, 0.99, 1.0, 0.90), 1.0)
+
 	# 5. Fog of War shroud overlay over terrain/landmarks/resources/uplink.
 	if _fog_system != null and _fog_system.fog_enabled and _fog_system.fog_texture != null:
 		map_viewport.draw_texture_rect(_fog_system.fog_texture, rect, false)
