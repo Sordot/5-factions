@@ -376,6 +376,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_f", "F"):
 		return
+	if event is InputEventKey:
+		var g_key: InputEventKey = event as InputEventKey
+		if g_key.pressed and not g_key.echo and not g_key.ctrl_pressed and not g_key.alt_pressed and (g_key.physical_keycode == KEY_G or g_key.keycode == KEY_G):
+			if not selected_units.is_empty() and request_ability_by_hotkey("G", g_key.shift_pressed or Input.is_key_pressed(KEY_SHIFT)):
+				get_viewport().set_input_as_handled()
+				return
 
 	if event.is_action_pressed("cmd_ability_e") and selected_units.is_empty() and inspected_entity is Building:
 		var b_node: Building = inspected_entity

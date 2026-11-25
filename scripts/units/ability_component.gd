@@ -141,6 +141,49 @@ func _find_autocast_point_target(owner_unit: Unit, ability: AbilityData) -> Vect
 				best_enemy_pos = e.global_position
 		return best_enemy_pos
 
+	if ab_id == &"grav_pulse":
+		var gp_r: float = maxf(60.0, ability.aoe_radius)
+		var raw_enemies: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, cast_r + gp_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		var hostile_combat: Array[Unit] = []
+		for node: Variant in raw_enemies:
+			if not is_instance_valid(node) or not (node is Unit):
+				continue
+			var e: Unit = node as Unit
+			if e.is_dead or e.is_staffed or e.is_queued_for_deletion():
+				continue
+			var is_hostile: bool = TeamManager.are_enemies(int(owner_unit.team), int(e.team)) if TeamManager != null else (e.team != owner_unit.team)
+			if not is_hostile:
+				continue
+			if e.data != null and (e.data.can_gather or e.data.can_staff_compute):
+				continue
+			hostile_combat.append(e)
+		if hostile_combat.size() < 2:
+			return Vector2.INF
+		var best_gp_pos: Vector2 = Vector2.INF
+		var best_gp_score: float = 0.0
+		for cand: Unit in hostile_combat:
+			if cand.global_position.distance_to(owner_unit.global_position) > cast_r:
+				continue
+			var cluster_count: int = 0
+			var un_slowed_count: int = 0
+			var center_sum: Vector2 = Vector2.ZERO
+			for other: Unit in hostile_combat:
+				if other.global_position.distance_to(cand.global_position) <= gp_r:
+					cluster_count += 1
+					center_sum += other.global_position
+					if not other.has_status_effect(&"grav_pulse"):
+						un_slowed_count += 1
+			if cluster_count < 2 or un_slowed_count <= 0:
+				continue
+			var centroid: Vector2 = center_sum / float(cluster_count)
+			if centroid.distance_to(owner_unit.global_position) > cast_r:
+				centroid = cand.global_position
+			var gp_score: float = float(cluster_count) * 18.0 + float(un_slowed_count) * 12.0
+			if gp_score > best_gp_score:
+				best_gp_score = gp_score
+				best_gp_pos = centroid
+		return best_gp_pos
+
 	return Vector2.INF
 
 
@@ -154,6 +197,13 @@ func _should_trigger_autocast(owner_unit: Unit, ability: AbilityData) -> bool:
 		return false
 	if ability.ability_id == &"nanite_surge":
 		return owner_unit.current_hp < owner_unit.get_max_hp() * 0.72
+	if ability.ability_id == &"kinetic_barrier":
+		var in_combat: bool = owner_unit.current_target != null and is_instance_valid(owner_unit.current_target)
+		if not in_combat:
+			return false
+		var low_shield: bool = owner_unit.max_shield > 0.0 and owner_unit.current_shield <= owner_unit.max_shield * 0.25
+		var low_hull: bool = owner_unit.current_hp < owner_unit.get_max_hp() * 0.80
+		return low_shield or low_hull
 	return false
 
 
@@ -288,7 +338,10 @@ func execute_ability(owner_unit: Unit, ability: AbilityData, target_pos: Vector2
 
 
 func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vector2) -> void:
-	_spawn_aoe_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
+	if ability.ability_id == &"grav_pulse":
+		_spawn_grav_pulse_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
+	else:
+		_spawn_aoe_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
 	var unit_list: Array = SpatialGrid.query_units_in_radius(target_pos, ability.aoe_radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
 
 	# Allied Shield Overcharge (Aegis Relay)
@@ -322,7 +375,17 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 		if candidate.global_position.distance_to(target_pos) <= ability.aoe_radius + enemy_r:
 			if ability.damage_or_value > 0.0:
 				candidate.take_damage(ability.damage_or_value, owner_unit)
-			if ability.effect_duration > 0.0 and (ability.move_speed_modifier < 0.0 or ability.attack_speed_modifier < 0.0):
+			if ability.ability_id == &"grav_pulse":
+				var gp_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 5.0
+				var mv_mult: float = clampf(1.0 + ability.move_speed_modifier, 0.25, 1.0) if ability.move_speed_modifier < 0.0 else 0.50
+				var atk_mult: float = clampf(1.0 + ability.attack_speed_modifier, 0.25, 1.0) if ability.attack_speed_modifier < 0.0 else 0.65
+				candidate.apply_status_effect(&"grav_pulse", {
+					"duration": gp_dur,
+					"label": "Grav-Pulse",
+					"move_speed_mult": mv_mult,
+					"attack_speed_mult": atk_mult,
+				})
+			elif ability.effect_duration > 0.0 and (ability.move_speed_modifier < 0.0 or ability.attack_speed_modifier < 0.0):
 				candidate.apply_slow_debuff(ability.effect_duration, absf(ability.move_speed_modifier), absf(ability.attack_speed_modifier))
 
 	if ability.damage_or_value > 0.0:
@@ -357,6 +420,15 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 		var atk_bonus: float = econ.get_adrenal_attack_speed_bonus(owner_unit.team, base_atk) if econ != null else base_atk
 		owner_unit.apply_adrenal_surge(duration, move_bonus, atk_bonus)
 		_spawn_self_pulse(owner_unit, maxf(32.0, ability.aoe_radius), ability.effect_color)
+		return
+
+	if ab_id == &"kinetic_barrier":
+		var kb_amt: float = ability.damage_or_value if ability.damage_or_value > 0.0 else 180.0
+		var kb_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 7.0
+		owner_unit.add_damage_shield(kb_amt, kb_dur, "Kinetic Barrier")
+		if owner_unit.has_shields():
+			owner_unit.restore_shield(40.0)
+		_spawn_hex_barrier_effect(owner_unit, maxf(36.0, ability.aoe_radius), ability.effect_color)
 		return
 
 	if ab_id == &"static_pulse" or ab_id == &"seismic_slam":
@@ -440,3 +512,25 @@ func _spawn_aoe_effect(owner_unit: Unit, target_pos: Vector2, radius: float, eff
 		fx.z_index = 55
 		owner_unit.get_parent().add_child(fx)
 	fx.setup_aoe(owner_unit.global_position, target_pos, radius, effect_color)
+
+
+func _spawn_hex_barrier_effect(owner_unit: Unit, radius: float, effect_color: Color) -> void:
+	if owner_unit.get_parent() == null:
+		return
+	var fx: AbilityEffect = VFXPool.acquire_ability_effect(55) if VFXPool != null else null
+	if fx == null:
+		fx = ABILITY_EFFECT_SCRIPT.new()
+		fx.z_index = 55
+		owner_unit.get_parent().add_child(fx)
+	fx.setup_hex_barrier(owner_unit.global_position, radius, effect_color)
+
+
+func _spawn_grav_pulse_effect(owner_unit: Unit, target_pos: Vector2, radius: float, effect_color: Color) -> void:
+	if owner_unit.get_parent() == null:
+		return
+	var fx: AbilityEffect = VFXPool.acquire_ability_effect(55) if VFXPool != null else null
+	if fx == null:
+		fx = ABILITY_EFFECT_SCRIPT.new()
+		fx.z_index = 55
+		owner_unit.get_parent().add_child(fx)
+	fx.setup_grav_pulse(owner_unit.global_position, target_pos, radius, effect_color)

@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="AbilityData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ability_data.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+ability_id = &"grav_pulse"
+display_name = "Grav-Pulse Field"
+hotkey_label = "Q"
+cooldown_duration = 14.0
+cast_range = 310.0
+target_type = 0
+damage_or_value = 22.0
+aoe_radius = 135.0
+effect_duration = 5.0
+move_speed_modifier = -0.5
+attack_speed_modifier = -0.35
+effect_color = Color(1, 0.624, 0.11, 0.96)
+cast_on_all_ready = false
+allow_autocast = true
+default_autocast = true
+description = "Projects a 135px gravity compression field (range 310), dealing 22 damage and slowing enemy movement by -50% and attack speed by -35% for 5.0s. Auto-Cast targets enemy clusters."

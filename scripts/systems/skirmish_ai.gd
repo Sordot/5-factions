@@ -87,6 +87,7 @@ var _active_counter_posture: StringName = &"NONE"
 var _salvage_scan_timer: float = 0.0
 var _unit_last_pos: Dictionary = {}
 var _unit_stall_ticks: Dictionary = {}
+var _deploy_idle_timers: Dictionary = {}
 
 
 func _ready() -> void:
@@ -311,14 +312,16 @@ func _run_decision_tick(tick_dt: float) -> void:
 	_recover_stalled_combat_units()
 	_trigger_combat_abilities()
 
-	# 5. Economy, infrastructure, and reactive GENESIS_V2 production loop
+	# 5. Economy, infrastructure, reactive production & Core Overclock macro
 	_manage_economy_and_production(econ, core)
+	_manage_overclock_macro()
 
 	# 6. Early scouting dispatch
 	_manage_early_scouting(core)
 
-	# 7. Explicit Army State Machine (DEFENDING / RETREATING / BREACHING / ATTACKING / STAGING)
+	# 7. Explicit Army State Machine (DEFENDING / RETREATING / BREACHING / ATTACKING / STAGING) & Deploy micro
 	_tick_army_state_machine(core, tick_dt)
+	_manage_deploy_micro(tick_dt)
 
 
 # =============================================================================
@@ -1154,6 +1157,8 @@ func _recover_stalled_combat_units() -> void:
 	for u: Unit in _get_team_units(ai_team):
 		if not _is_combat_unit(u):
 			continue
+		if u.is_movement_locked_by_deploy():
+			continue
 		var uid: int = u.get_instance_id()
 		live_ids[uid] = true
 		var is_traveling: bool = (
@@ -1339,8 +1344,19 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			_try_place_and_build(_supply_data, supply_anchor, core.global_position)
 		return
 
-	# Priority 4: Train automated Harvesters once Refineries are online.
-	var desired_harvesters: int = 3 if (constructed_refineries.size() >= 2 or is_brutal) else (2 if constructed_barracks.size() >= 1 else 1)
+	# Priority 4: Train automated Harvesters once Refineries are online (respects faction per-vein saturation bonuses).
+	var per_vein_cap: int = 2
+	if constructed_refinery != null:
+		var near_vein: ResourceNode = _find_nearest_resource(constructed_refinery.global_position, &"silica")
+		if near_vein != null:
+			per_vein_cap = maxi(2, near_vein.get_effective_max_harvesters(int(ai_team)))
+	var desired_harvesters: int = 1
+	if constructed_refineries.size() >= 2:
+		desired_harvesters = mini(6, per_vein_cap * 2) if is_brutal else mini(5, per_vein_cap + 1)
+	elif is_brutal:
+		desired_harvesters = maxi(3, per_vein_cap)
+	elif constructed_barracks.size() >= 1:
+		desired_harvesters = per_vein_cap
 	if _harvester_data != null and constructed_refinery != null and total_harvesters < desired_harvesters:
 		var trainer: Building = constructed_refinery if constructed_refinery.can_train_unit_data(_harvester_data) else core
 		if trainer.get_training_queue_size() < 2 and trainer.can_train_unit_data(_harvester_data):
@@ -1376,7 +1392,7 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			if exp_vent != null and econ.can_afford(ai_team, _compute_hub_data.get_cost_dict()):
 				_try_place_and_build_on_vent(_compute_hub_data, exp_vent)
 
-	var desired_engineers: int = mini(4, total_compute_slots)
+	var desired_engineers: int = mini(6, total_compute_slots)
 	if constructed_compute_hub != null and _engineer_data != null and total_engineers < desired_engineers:
 		if core.get_training_queue_size() < 2 and core.can_train_unit_data(_engineer_data):
 			core.queue_unit_data(_engineer_data)
@@ -1418,8 +1434,13 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			if built_fab != null:
 				built_fab.set_rally_position(rally_pt)
 
-	# Priority 10: Mid-game Counter Foundry for specialized counter tech.
-	var allow_foundry: bool = (not is_synth_tech or not heavy_plants.is_empty() or urgent_anti_armor_foundry)
+	# Priority 10: Mid-game Counter Foundry for specialized counter tech (and Tier-2 prerequisites like Ballistics Lab -> Siege Gantry).
+	var t2_needs_foundry: bool = (
+		_heavy_t2_data != null
+		and _counter_foundry_data != null
+		and _heavy_t2_data.get_prerequisite_ids().has(_counter_foundry_data.building_id)
+	)
+	var allow_foundry: bool = (not is_synth_tech or not heavy_plants.is_empty() or urgent_anti_armor_foundry or t2_needs_foundry)
 	if allow_foundry and foundries.is_empty() and constructed_compute_hub != null and _counter_foundry_data != null and silica >= _counter_foundry_data.silica_cost:
 		if econ.can_afford(ai_team, _counter_foundry_data.get_cost_dict()):
 			var to_center_cf: Vector2 = (Vector2.ZERO - core.global_position).normalized()
@@ -1444,11 +1465,15 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			heavy_b.queue_unit_data(heavy_choice)
 			_fab_production_counter += 1
 
-	# Priority 12: Counter Foundry production (biased by intel & playstyle).
+	# Priority 12: Counter Foundry production & tech upgrades (biased by intel & playstyle).
 	for foundry: Building in constructed_foundries:
 		if not foundry.has_rally():
 			foundry.set_rally_position(rally_pt)
 		if foundry.get_training_queue_size() >= 2:
+			continue
+		var foundry_upg: UpgradeData = _planner.choose_next_upgrade_for_building(foundry)
+		if foundry_upg != null and foundry.production_component != null:
+			foundry.production_component.enqueue_upgrade(foundry, foundry_upg)
 			continue
 		var foundry_choice: UnitData = _planner.choose_unit_for_building(foundry, _ai_playstyle, _active_counter_posture, counter_strength, _foundry_production_counter)
 		if foundry_choice != null and foundry.can_train_unit_data(foundry_choice):
@@ -1489,14 +1514,31 @@ func _trigger_combat_abilities() -> void:
 		for ab: AbilityData in u.data.abilities:
 			if ab == null or ab.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
 				continue
+			# Allied-target AOE abilities (e.g., Shield Overcharge) are handled by AbilityComponent autocast.
+			if ab.ability_id == &"monolith_shield_overcharge":
+				continue
 			if not u.is_ability_ready(ab):
+				continue
+			if ab.ability_id == &"kinetic_barrier":
+				var low_shd: bool = u.max_shield > 0.0 and u.current_shield <= u.max_shield * 0.25
+				var low_hp: bool = u.current_hp < u.get_max_hp() * 0.80
+				if (low_shd or low_hp) and dist <= u.get_effective_attack_range() + 80.0:
+					u.command_cast_ability(ab, u.global_position, u)
+					break
+				continue
+			if ab.ability_id == &"grav_pulse":
+				if dist <= ab.cast_range:
+					var cluster_cnt: int = _count_hostile_combat_near(u.current_target.global_position, maxf(60.0, ab.aoe_radius))
+					if cluster_cnt >= 2:
+						u.command_cast_ability(ab, u.current_target.global_position)
+						break
 				continue
 			if ab.target_type == AbilityData.TargetType.INSTANT:
 				if ab.aoe_radius > 0.0:
 					if dist <= maxf(80.0, ab.aoe_radius * 0.92):
 						u.command_cast_ability(ab, u.global_position, u)
 						break
-				elif dist <= u.data.attack_range + 45.0:
+				elif dist <= u.get_effective_attack_range() + 45.0:
 					u.command_cast_ability(ab, u.global_position, u)
 					break
 			elif ab.target_type == AbilityData.TargetType.POINT_AOE:
@@ -1507,6 +1549,178 @@ func _trigger_combat_abilities() -> void:
 				if dist <= ab.cast_range and u.current_target is Unit:
 					u.command_cast_ability(ab, u.current_target.global_position, u.current_target as Unit)
 					break
+
+
+func _count_hostile_combat_near(center: Vector2, radius: float) -> int:
+	var cnt: int = 0
+	var list: Array = SpatialGrid.query_units_in_radius(center, radius) if SpatialGrid != null else get_tree().get_nodes_in_group("units")
+	var r_sq: float = radius * radius
+	for node: Variant in list:
+		if not is_instance_valid(node) or not (node is Unit):
+			continue
+		var e: Unit = node as Unit
+		if e.is_dead or e.is_staffed or not _is_enemy_team(int(e.team)):
+			continue
+		if e.data != null and (e.data.can_gather or e.data.can_staff_compute):
+			continue
+		if e.global_position.distance_squared_to(center) <= r_sq:
+			cnt += 1
+	return cnt
+
+
+func _manage_overclock_macro() -> void:
+	# Faction-agnostic Core Overclock macro: any hub with can_cast_overclock() boosts the highest-priority active producer.
+	var ai_buildings: Array[Building] = _get_team_buildings(ai_team)
+	var ready_hubs: Array[Building] = []
+	for b: Building in ai_buildings:
+		if b.is_constructed and not b.is_destroyed and b.can_cast_overclock():
+			ready_hubs.append(b)
+	if ready_hubs.is_empty():
+		return
+
+	for hub: Building in ready_hubs:
+		var best_target: Building = null
+		var best_score: float = -1.0
+		for cand: Building in ai_buildings:
+			if not cand.is_constructed or cand.is_destroyed or cand.is_overclocked():
+				continue
+			if cand.production_component == null or cand.get_training_queue_size() <= 0:
+				continue
+			var score: float = 0.0
+			if _planner.is_role_building(cand, &"heavy_t2") or (cand.is_military_production_building() and cand.get_tech_tier() >= 2):
+				score = 400.0
+			elif _planner.is_role_building(cand, &"counter_foundry"):
+				score = 300.0
+			elif _planner.is_role_building(cand, &"barracks_t1") or cand.is_military_production_building():
+				score = 200.0
+			elif cand.is_command_hub():
+				score = 100.0
+			else:
+				score = 150.0
+			var active_st: Dictionary = cand.get_active_training_status()
+			if active_st.get("kind", ProductionComponent.KIND_UNIT) == ProductionComponent.KIND_UPGRADE:
+				score += 65.0
+			score += float(cand.get_training_queue_size()) * 12.0
+			if score > best_score:
+				best_score = score
+				best_target = cand
+		if best_target != null:
+			hub.cast_overclock_on(best_target)
+
+
+func _manage_deploy_micro(tick_dt: float) -> void:
+	# Faction-agnostic Deploy/Anchor micro (e.g. Anvil Siege-Walker) using real vision only — zero map-hacking.
+	var deployers: Array[Unit] = []
+	for u: Unit in _get_team_units(ai_team):
+		if u.can_toggle_deploy() and u.data != null:
+			deployers.append(u)
+	if deployers.is_empty():
+		_deploy_idle_timers.clear()
+		return
+
+	# Collect real vision observers (allied units, buildings, active sensor relays)
+	var seen_enemy_units: Dictionary = {}
+	var seen_enemy_buildings: Dictionary = {}
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if node is Unit and is_instance_valid(node):
+			var ally_u: Unit = node as Unit
+			if not ally_u.is_dead and not ally_u.is_staffed and _is_allied_team(int(ally_u.team)):
+				var vr: float = ally_u.data.vision_range if ally_u.data != null else 320.0
+				_scan_vision_circle_for_intel(ally_u.global_position, vr, seen_enemy_units, seen_enemy_buildings)
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if node is Building and is_instance_valid(node):
+			var ally_b: Building = node as Building
+			if not ally_b.is_destroyed and _is_allied_team(int(ally_b.team)):
+				_scan_vision_circle_for_intel(ally_b.global_position, ally_b.get_vision_range(), seen_enemy_units, seen_enemy_buildings)
+	for node: Node in get_tree().get_nodes_in_group("sensor_relays"):
+		if is_instance_valid(node) and node is Node2D and node.has_method("is_active") and bool(node.call("is_active")):
+			var ctrl_t: int = int(node.get("controlling_team"))
+			if ctrl_t >= 0 and _is_allied_team(ctrl_t):
+				_scan_vision_circle_for_intel((node as Node2D).global_position, float(node.get("vision_radius")), seen_enemy_units, seen_enemy_buildings)
+
+	var econ: EconomyManager = _get_economy_manager()
+	var rail_bonus: float = econ.get_rail_range_bonus(int(ai_team)) if econ != null else 0.0
+	var live_dep_ids: Dictionary = {}
+
+	for u: Unit in deployers:
+		var uid: int = u.get_instance_id()
+		live_dep_ids[uid] = true
+		if u.is_deploy_transitioning():
+			continue
+
+		var dep_max_r: float = u.data.deployed_attack_range + (rail_bonus if u.data.unit_type_id == &"anvil_siege_walker" else 0.0)
+		var dep_min_r: float = u.data.deployed_min_attack_range
+		if dep_max_r <= 0.0:
+			continue
+		var my_r: float = u.data.collision_radius
+
+		var has_close_threat: bool = false
+		var has_deploy_target: bool = false
+		var has_keep_target: bool = false
+		var engage_max: float = dep_max_r * 0.92
+		var keep_max: float = dep_max_r * 1.05
+
+		for eu_var: Variant in seen_enemy_units.values():
+			var eu: Unit = eu_var as Unit
+			if not is_instance_valid(eu) or eu.is_dead or eu.is_staffed:
+				continue
+			var other_r: float = eu.data.collision_radius if eu.data != null else 16.0
+			var edge_d: float = maxf(0.0, u.global_position.distance_to(eu.global_position) - my_r - other_r)
+			if dep_min_r > 0.0 and edge_d < dep_min_r + 12.0:
+				if eu.data == null or eu.data.attack_damage > 0.0:
+					has_close_threat = true
+			elif edge_d <= engage_max and edge_d >= dep_min_r + 8.0:
+				has_deploy_target = true
+				has_keep_target = true
+			elif edge_d <= keep_max and edge_d >= dep_min_r:
+				has_keep_target = true
+
+		if not has_deploy_target or not has_keep_target:
+			for eb_var: Variant in seen_enemy_buildings.values():
+				var eb: Building = eb_var as Building
+				if not is_instance_valid(eb) or eb.is_destroyed:
+					continue
+				var edge_db: float = maxf(0.0, u.global_position.distance_to(eb.global_position) - my_r - eb.footprint_radius)
+				if edge_db <= engage_max and edge_db >= dep_min_r + 8.0:
+					has_deploy_target = true
+					has_keep_target = true
+				elif edge_db <= keep_max and edge_db >= dep_min_r:
+					has_keep_target = true
+
+		if army_state == ArmyState.BREACHING and _breach_target != null and is_instance_valid(_breach_target) and not bool(_breach_target.get("is_destroyed")):
+			var bar_r: float = float(_breach_target.call("get_footprint_radius")) if _breach_target.has_method("get_footprint_radius") else 40.0
+			var edge_bar: float = maxf(0.0, u.global_position.distance_to(_breach_target.global_position) - my_r - bar_r)
+			if edge_bar <= engage_max and edge_bar >= dep_min_r + 8.0:
+				has_deploy_target = true
+				has_keep_target = true
+			elif edge_bar <= keep_max and edge_bar >= dep_min_r:
+				has_keep_target = true
+
+		if u.is_deployed():
+			if army_state == ArmyState.RETREATING or has_close_threat:
+				_deploy_idle_timers[uid] = 0.0
+				u.request_undeploy()
+			elif has_keep_target:
+				_deploy_idle_timers[uid] = 0.0
+			else:
+				var idle_t: float = float(_deploy_idle_timers.get(uid, 0.0)) + tick_dt
+				_deploy_idle_timers[uid] = idle_t
+				if idle_t >= 2.5:
+					_deploy_idle_timers[uid] = 0.0
+					u.request_undeploy()
+		else:
+			_deploy_idle_timers[uid] = 0.0
+			var combat_posture: bool = (
+				army_state == ArmyState.ATTACKING
+				or army_state == ArmyState.DEFENDING
+				or army_state == ArmyState.BREACHING
+			)
+			if combat_posture and has_deploy_target and not has_close_threat:
+				u.request_deploy()
+
+	for key: Variant in _deploy_idle_timers.keys():
+		if not live_dep_ids.has(key):
+			_deploy_idle_timers.erase(key)
 
 
 # =============================================================================

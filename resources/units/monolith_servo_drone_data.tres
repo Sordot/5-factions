@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="UnitData" load_steps=9 format=3]
+[gd_resource type="Resource" script_class="UnitData" load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
 [ext_resource type="Resource" path="res://resources/abilities/build_monolith_silica_smelter.tres" id="2_build_smelter"]
@@ -8,6 +8,7 @@
 [ext_resource type="Resource" path="res://resources/abilities/build_monolith_ballistics_lab.tres" id="6_build_ballistics"]
 [ext_resource type="Resource" path="res://resources/abilities/build_monolith_bastion_emplacement.tres" id="7_build_bastion"]
 [ext_resource type="Resource" path="res://resources/abilities/build_monolith_foundry_core.tres" id="8_build_foundry"]
+[ext_resource type="Resource" path="res://resources/abilities/build_monolith_siege_gantry.tres" id="9_build_siege_gantry"]
 
 [resource]
 script = ExtResource("1_unit_data")
@@ -28,7 +29,7 @@ aggro_range = 130.0
 vision_range = 310.0
 attack_cooldown = 1.0
 damage_reduction = 0.08
-abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_build_smelter"), ExtResource("3_build_monolith"), ExtResource("4_build_pylon"), ExtResource("5_build_assembly"), ExtResource("6_build_ballistics"), ExtResource("7_build_bastion"), ExtResource("8_build_foundry")])
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_build_smelter"), ExtResource("3_build_monolith"), ExtResource("4_build_pylon"), ExtResource("5_build_assembly"), ExtResource("6_build_ballistics"), ExtResource("7_build_bastion"), ExtResource("8_build_foundry"), ExtResource("9_build_siege_gantry")])
 bandwidth_cost = 1
 can_gather = true
 gather_duration = 3.0

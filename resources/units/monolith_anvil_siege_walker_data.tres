@@ -1,0 +1,54 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"anvil_siege_walker"
+display_name = "Anvil Siege-Walker"
+max_hp = 340.0
+max_shield = 100.0
+shield_regen_rate = 10.0
+shield_regen_delay = 6.0
+move_speed = 130.0
+acceleration = 1150.0
+turn_speed = 7.5
+selection_radius = 28.0
+collision_radius = 22.0
+attack_damage = 42.0
+attack_range = 240.0
+min_attack_range = 0.0
+aoe_attack_radius = 0.0
+aggro_range = 320.0
+vision_range = 420.0
+attack_cooldown = 1.7
+attack_windup = 0.14
+is_armored = true
+bonus_vs_armored = 24.0
+damage_reduction = 0.22
+bandwidth_cost = 4
+biomass_cost = 110
+silica_cost = 165
+compute_cost = 35
+salvage_silica = 50
+salvage_compute = 15
+build_time = 11.5
+train_time = 11.5
+unit_scene_path = "res://scenes/units/monolith_anvil_siege_walker.tscn"
+unit_tags = Array[StringName]([&"mechanical", &"heavy", &"siege", &"artillery"])
+weapon_tracer_style = &"heavy_slug"
+weapon_tracer_color = Color(1, 0.624, 0.11, 0.98)
+weapon_tracer_width = 3.2
+weapon_sfx_id = &"weapon_mono_slug"
+audio_bark_class = &"heavy"
+minimap_icon_shape = &"triangle_heavy"
+role_tags_display = "Deployable Siege • Long-Range AoE Artillery"
+can_deploy = true
+deploy_duration = 1.4
+deployed_attack_damage = 88.0
+deployed_attack_range = 460.0
+deployed_min_attack_range = 110.0
+deployed_attack_cooldown = 3.2
+deployed_aoe_radius = 78.0
+deployed_damage_reduction_bonus = 0.15
+deployed_weapon_tracer_style = &"mortar"

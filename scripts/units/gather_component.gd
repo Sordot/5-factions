@@ -201,8 +201,8 @@ func _tick_gathering(owner_unit: Unit, delta: float) -> void:
 	if not is_instance_valid(target_node) or target_node.is_depleted():
 		gather_timer = 0.0
 		gather_progress_changed.emit(0.0, false)
-		var depleted_ref: ResourceNode = target_node
-		if is_instance_valid(depleted_ref):
+		var depleted_ref: ResourceNode = target_node if is_instance_valid(target_node) else null
+		if depleted_ref != null:
 			depleted_ref.release_worker(owner_unit)
 		target_node = null
 		_claimed_slot_pos = Vector2.INF

@@ -1,0 +1,46 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/monolith_kinetic_barrier.tres" id="2_ab_barrier"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"monolith_dreadnought"
+display_name = "Monolith Dreadnought"
+max_hp = 640.0
+max_shield = 220.0
+shield_regen_rate = 14.0
+shield_regen_delay = 6.0
+move_speed = 125.0
+acceleration = 1050.0
+turn_speed = 7.0
+selection_radius = 32.0
+collision_radius = 25.0
+attack_damage = 54.0
+attack_range = 195.0
+aggro_range = 300.0
+vision_range = 400.0
+attack_cooldown = 1.6
+attack_windup = 0.12
+is_armored = true
+bonus_vs_armored = 14.0
+damage_reduction = 0.30
+ignore_friendly_unit_collision = true
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_ab_barrier")])
+bandwidth_cost = 5
+biomass_cost = 150
+silica_cost = 210
+compute_cost = 45
+salvage_silica = 65
+salvage_compute = 20
+build_time = 13.5
+train_time = 13.5
+unit_scene_path = "res://scenes/units/monolith_monolith_dreadnought.tscn"
+unit_tags = Array[StringName]([&"mechanical", &"heavy", &"frontline", &"colossus"])
+weapon_tracer_style = &"heavy_slug"
+weapon_tracer_color = Color(1, 0.66, 0.16, 0.98)
+weapon_tracer_width = 3.6
+weapon_sfx_id = &"weapon_mono_slug"
+audio_bark_class = &"heavy"
+minimap_icon_shape = &"triangle_heavy"
+role_tags_display = "Colossus Tank • Kinetic Barrier"

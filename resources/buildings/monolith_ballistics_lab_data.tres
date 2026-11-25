@@ -1,6 +1,8 @@
-[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="BuildingData" load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+[ext_resource type="Resource" path="res://resources/upgrades/monolith_hardened_plating.tres" id="2_upg_plating"]
+[ext_resource type="Resource" path="res://resources/upgrades/monolith_rapid_capacitors.tres" id="3_upg_capacitors"]
 
 [resource]
 script = ExtResource("1_bdata")
@@ -25,6 +27,7 @@ accepted_dropoff_resources = Array[StringName]([])
 requires_vent = false
 max_staff_slots = 0
 trainable_unit_paths = PackedStringArray("res://resources/units/monolith_rail_sentinel_data.tres", "res://resources/units/monolith_aegis_relay_data.tres")
+researchable_upgrades = Array[Resource("res://scripts/data/upgrade_data.gd")]([ExtResource("2_upg_plating"), ExtResource("3_upg_capacitors")])
 can_set_rally = true
 batch_production_count = 1
 base_batch_cost_multiplier = 1.0
@@ -36,4 +39,4 @@ is_military_production = true
 is_supply_provider = false
 tech_tier = 1
 audio_select_class = &"production"
-tech_tree_summary = "Precision & Support Facility • Rail-Sentinel & Aegis Relay"
+tech_tree_summary = "Precision & Support Facility • Rail-Sentinel, Aegis Relay & Chassis Upgrades"

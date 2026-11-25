@@ -256,10 +256,13 @@ func _bootstrap_skirmish_teams() -> void:
 			and existing_hub.scene_file_path == desired_hub_path
 		)
 
-		if not hub_matches and _spawn_anchors.has(tid) and fac.starting_hub_scene != null:
-			var anchor: Vector2 = _spawn_anchors[tid] as Vector2
-			_swap_team_starting_loadout(tid, anchor, fac)
-			mutated_scene = true
+		if not hub_matches and _spawn_anchors.has(tid):
+			if fac.starting_hub_scene == null:
+				push_error("MatchManager: Faction '%s' has null starting_hub_scene for team %d!" % [String(fac.faction_id), tid])
+			else:
+				var anchor: Vector2 = _spawn_anchors[tid] as Vector2
+				_swap_team_starting_loadout(tid, anchor, fac)
+				mutated_scene = true
 		elif hub_matches and not fac.extra_starting_units.is_empty() and _spawn_anchors.has(tid):
 			if not _team_has_combat_units(tid):
 				var scene_root: Node = get_tree().current_scene
@@ -303,19 +306,22 @@ func _remove_spawn_unit(u: Unit) -> void:
 
 
 func _swap_team_starting_loadout(tid: int, anchor: Vector2, fac: FactionData) -> void:
-	# Free placeholder pre-placed entities for this team before instantiating its FactionData loadout.
-	for node: Node in get_tree().get_nodes_in_group("buildings"):
-		if node is Building and is_instance_valid(node) and int((node as Building).team) == tid:
-			_remove_spawn_building(node as Building)
-	for node: Node in get_tree().get_nodes_in_group("units"):
-		if node is Unit and is_instance_valid(node) and int((node as Unit).team) == tid:
-			var u: Unit = node as Unit
-			if u.data == null or not u.data.has_tag(&"dummy"):
-				_remove_spawn_unit(u)
-
 	var scene_root: Node = get_tree().current_scene
 	if scene_root == null:
+		push_error("MatchManager: current_scene is null during _swap_team_starting_loadout for team %d." % tid)
 		return
+	if fac == null or fac.starting_hub_scene == null:
+		push_error("MatchManager: Missing FactionData or starting_hub_scene for team %d." % tid)
+		return
+
+	# Instantiate replacement Command Hub BEFORE freeing pre-placed buildings so a load failure never leaves 0 hubs.
+	var hub_inst: Node = fac.starting_hub_scene.instantiate()
+	if hub_inst == null or not (hub_inst is Building):
+		push_error("MatchManager: starting_hub_scene '%s' for faction '%s' failed to instantiate a Building!" % [fac.starting_hub_scene.resource_path, String(fac.faction_id)])
+		if hub_inst != null:
+			hub_inst.queue_free()
+		return
+
 	var bldgs_parent: Node = scene_root.get_node_or_null("Buildings")
 	if bldgs_parent == null:
 		bldgs_parent = scene_root
@@ -323,18 +329,33 @@ func _swap_team_starting_loadout(tid: int, anchor: Vector2, fac: FactionData) ->
 	if units_parent == null:
 		units_parent = scene_root
 
-	# Instantiate FactionData starting command hub
-	var hub_inst: Node = fac.starting_hub_scene.instantiate()
-	if hub_inst is Building:
-		var hub: Building = hub_inst as Building
-		hub.team = tid as Unit.Team
-		hub.is_constructed = true
-		hub.is_core_hub = true
-		hub.global_position = anchor
-		bldgs_parent.add_child(hub)
-		_team_last_core_pos[tid] = anchor
-	else:
-		hub_inst.queue_free()
+	# Snapshot & free placeholder pre-placed entities for this team before adding the new FactionData loadout.
+	var old_buildings: Array[Building] = []
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if node is Building and is_instance_valid(node) and int((node as Building).team) == tid:
+			old_buildings.append(node as Building)
+	for old_b: Building in old_buildings:
+		_remove_spawn_building(old_b)
+
+	var old_units: Array[Unit] = []
+	for node: Node in get_tree().get_nodes_in_group("units"):
+		if node is Unit and is_instance_valid(node) and int((node as Unit).team) == tid:
+			var u: Unit = node as Unit
+			if u.data == null or not u.data.has_tag(&"dummy"):
+				old_units.append(u)
+	for old_u: Unit in old_units:
+		_remove_spawn_unit(old_u)
+
+	# Add replacement FactionData starting Command Hub
+	var hub: Building = hub_inst as Building
+	hub.team = tid as Unit.Team
+	hub.is_constructed = true
+	hub.is_core_hub = true
+	hub.global_position = anchor
+	bldgs_parent.add_child(hub)
+	_team_last_core_pos[tid] = anchor
+	if not hub.is_in_group("buildings") or not hub.is_command_hub() or hub.is_destroyed or hub.current_hp <= 0.0:
+		push_error("MatchManager: Spawned hub '%s' for team %d failed post-add_child integrity check!" % [hub.display_name, tid])
 
 	# Orient starting workers toward nearest Biomass cluster
 	var bio_dir: Vector2 = (Vector2.ZERO - anchor).normalized()
@@ -496,6 +517,8 @@ func _ensure_ai_commanders() -> void:
 			continue
 		existing_teams[tid] = node
 		node.set("arena_bounds", ref_bounds)
+		if node.has_method("_load_faction_rosters"):
+			node.call("_load_faction_rosters")
 		if node.has_method("_apply_lobby_ai_profile"):
 			node.call("_apply_lobby_ai_profile")
 

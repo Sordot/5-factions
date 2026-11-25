@@ -4,6 +4,9 @@ extends RefCounted
 const UPGRADE_BATCH_EFFICIENCY: StringName = &"batch_efficiency"
 const UPGRADE_ADRENAL_POTENCY: StringName = &"adrenal_potency"
 const UPGRADE_COMPUTE_OVERDRIVE: StringName = &"compute_overdrive"
+const UPGRADE_HARDENED_PLATING: StringName = &"monolith_hardened_plating"
+const UPGRADE_RAPID_CAPACITORS: StringName = &"monolith_rapid_capacitors"
+const UPGRADE_HYPER_VELOCITY_RAILS: StringName = &"monolith_hyper_velocity_rails"
 
 signal upgrade_completed(team: int, upgrade_id: StringName)
 
@@ -117,4 +120,38 @@ func get_goliath_speed_multiplier(team: int) -> float:
 func get_goliath_extra_damage_reduction(team: int) -> float:
 	if has_upgrade(team, UPGRADE_COMPUTE_OVERDRIVE):
 		return 0.15
+	return 0.0
+
+
+func get_bonus_armor(team: int) -> float:
+	if has_upgrade(team, UPGRADE_HARDENED_PLATING):
+		return 0.10
+	return 0.0
+
+
+func get_shield_regen_delay_multiplier(team: int) -> float:
+	if has_upgrade(team, UPGRADE_RAPID_CAPACITORS):
+		return 0.60
+	return 1.0
+
+
+func get_shield_regen_rate_multiplier(team: int) -> float:
+	if has_upgrade(team, UPGRADE_RAPID_CAPACITORS):
+		return 1.40
+	return 1.0
+
+
+func has_hyper_velocity_rails(team: int) -> bool:
+	return has_upgrade(team, UPGRADE_HYPER_VELOCITY_RAILS)
+
+
+func get_rail_damage_multiplier(team: int) -> float:
+	if has_upgrade(team, UPGRADE_HYPER_VELOCITY_RAILS):
+		return 1.20
+	return 1.0
+
+
+func get_rail_range_bonus(team: int) -> float:
+	if has_upgrade(team, UPGRADE_HYPER_VELOCITY_RAILS):
+		return 45.0
 	return 0.0

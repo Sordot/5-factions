@@ -107,12 +107,15 @@ var _cooldowns_ms: Dictionary = {
 	&"weapon_mono_rail": 100,
 	&"weapon_mono_tether": 75,
 	&"weapon_mono_bastion": 105,
+	&"weapon_mono_siege": 120,
 	&"ability_adrenal": 90,
 	&"ability_static": 100,
 	&"ability_slam": 110,
 	&"ability_barrage": 110,
 	&"ability_shield_overcharge": 110,
 	&"ability_suppressive_lock": 95,
+	&"ability_kinetic_barrier": 110,
+	&"ability_grav_pulse": 120,
 	&"entity_destroyed": 95,
 	&"alert_under_attack": 1800,
 	&"alert_uplink": 1400,
@@ -603,11 +606,11 @@ func classify_unit_bark_class(unit_type_id: StringName) -> StringName:
 			return &"worker"
 		&"clone_trooper", &"stinger", &"scout_unit", &"picket_drone":
 			return &"swarm"
-		&"lance_rig", &"signal_jammer", &"rail_sentinel":
+		&"lance_rig", &"signal_jammer", &"rail_sentinel", &"null_grid_projector":
 			return &"counter"
 		&"symbiote", &"aegis_relay":
 			return &"support"
-		&"goliath_frame", &"arc_lancer", &"chrysalis_mortar", &"bulwark_automaton":
+		&"goliath_frame", &"arc_lancer", &"chrysalis_mortar", &"bulwark_automaton", &"anvil_siege_walker", &"monolith_dreadnought":
 			return &"heavy"
 		_:
 			return &"swarm"
@@ -660,6 +663,8 @@ func play_weapon_for_unit_data(unit_data: UnitData, world_pos: Vector2 = Vector2
 			play_sfx(&"weapon_mono_tether", -6.2, 0.05, world_pos, true)
 		&"weapon_mono_bastion":
 			play_sfx(&"weapon_mono_bastion", -4.0, 0.05, world_pos, true)
+		&"weapon_mono_siege":
+			play_sfx(&"weapon_mono_siege", -3.0, 0.04, world_pos, true)
 		&"weapon_slash", &"acid_slash", &"melee_slash", &"bio_slash":
 			play_sfx(&"weapon_slash", -6.5, 0.06, world_pos, true)
 		&"weapon_rail", &"rail_shot", &"rail_beam", &"arc_lance":
@@ -679,11 +684,13 @@ func play_weapon_for_unit_data(unit_data: UnitData, world_pos: Vector2 = Vector2
 
 func play_weapon_for_unit(unit_type_id: StringName, world_pos: Vector2 = Vector2.INF) -> void:
 	match unit_type_id:
-		&"bulwark_automaton":
+		&"bulwark_automaton", &"monolith_dreadnought":
 			play_sfx(&"weapon_mono_slug", -5.0, 0.05, world_pos, true)
+		&"anvil_siege_walker":
+			play_sfx(&"weapon_mono_siege", -3.2, 0.04, world_pos, true)
 		&"rail_sentinel":
 			play_sfx(&"weapon_mono_rail", -4.2, 0.04, world_pos, true)
-		&"picket_drone":
+		&"picket_drone", &"null_grid_projector":
 			play_sfx(&"weapon_mono_tether", -6.2, 0.05, world_pos, true)
 		&"stinger", &"symbiote":
 			play_sfx(&"weapon_slash", -6.5, 0.06, world_pos, true)
@@ -718,6 +725,10 @@ func play_ability_sfx(ability_id: StringName, world_pos: Vector2 = Vector2.INF) 
 			play_sfx(&"ability_suppressive_lock", -3.2, 0.04, world_pos, true)
 		&"monolith_shield_overcharge":
 			play_sfx(&"ability_shield_overcharge", -2.8, 0.03, world_pos, true)
+		&"kinetic_barrier":
+			play_sfx(&"ability_kinetic_barrier", -2.4, 0.03, world_pos, true)
+		&"grav_pulse":
+			play_sfx(&"ability_grav_pulse", -2.2, 0.04, world_pos, true)
 		&"seismic_slam":
 			play_sfx(&"ability_slam", -2.0, 0.04, world_pos, true)
 		&"spore_barrage", &"overcharge_pulse":
@@ -807,12 +818,15 @@ func _generate_procedural_library() -> void:
 	_streams[&"weapon_mono_rail"] = _synth_mono_rail()
 	_streams[&"weapon_mono_tether"] = _synth_mono_tether()
 	_streams[&"weapon_mono_bastion"] = _synth_mono_bastion()
+	_streams[&"weapon_mono_siege"] = _synth_mono_siege()
 	_streams[&"ability_adrenal"] = _synth_adrenal_hum()
 	_streams[&"ability_static"] = _synth_static_pulse()
 	_streams[&"ability_slam"] = _synth_seismic_slam()
 	_streams[&"ability_barrage"] = _synth_mortar_thud()
 	_streams[&"ability_shield_overcharge"] = _synth_mono_shield_overcharge()
 	_streams[&"ability_suppressive_lock"] = _synth_mono_suppressive_lock()
+	_streams[&"ability_kinetic_barrier"] = _synth_mono_kinetic_barrier()
+	_streams[&"ability_grav_pulse"] = _synth_mono_grav_pulse()
 	_streams[&"entity_destroyed"] = _synth_destruction_boom()
 
 	# Tactical Alerts, Veterancy, Salvage & Auto-Cast
@@ -1515,4 +1529,74 @@ func _synth_mono_bark(notes: PackedFloat32Array, is_order: bool) -> AudioStreamW
 			var env: float = minf(1.0, lt / 0.004) * exp(-lt * 18.0)
 			var wave: float = sin(TAU * f * lt) * 0.68 + clampf(sin(TAU * f * 2.0 * lt) * 1.2, -1.0, 1.0) * 0.22 + sin(TAU * f * 0.5 * lt) * 0.10
 			out[pos] = clampf(out[pos] + wave * env * 0.22, -0.95, 0.95)
+	return _make_wav(out)
+
+
+func _synth_mono_siege() -> AudioStreamWAV:
+	# Deep heavy deployed artillery boom + metallic breech clang (Anvil Siege-Walker)
+	var dur: float = 0.38
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	var seed_val: int = 88321
+	var lp: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var freq: float = lerpf(135.0, 32.0, pow(u, 0.42))
+		phase += TAU * freq / float(SAMPLE_RATE)
+		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
+		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
+		lp = lerpf(lp, noise, 0.15)
+		var boom_env: float = minf(1.0, t / 0.003) * exp(-u * 3.8)
+		var clang: float = 0.0
+		if t >= 0.06:
+			var ct: float = t - 0.06
+			var c_env: float = minf(1.0, ct / 0.004) * exp(-ct * 16.0)
+			clang = (sin(TAU * 480.0 * ct) * 0.5 + sin(TAU * 725.0 * ct) * 0.35 + (noise - lp) * 0.25) * c_env * 0.16
+		out[i] = clampf((sin(phase) * 0.82 + lp * 0.52) * boom_env * 0.44 + clang, -0.95, 0.95)
+	return _make_wav(out)
+
+
+func _synth_mono_kinetic_barrier() -> AudioStreamWAV:
+	# Heavy metallic hydraulic lock + harmonic cyan barrier hum (Monolith Dreadnought)
+	var dur: float = 0.36
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var clank: float = 0.0
+		if t < 0.055:
+			var c_env: float = exp(-t * 58.0)
+			clank = (sin(TAU * 190.0 * t) * 0.6 + sin(TAU * 620.0 * t) * 0.4) * c_env * 0.34
+		var sweep_f: float = lerpf(210.0, 520.0, pow(u, 0.55))
+		phase += TAU * sweep_f / float(SAMPLE_RATE)
+		var hum_env: float = minf(1.0, t / 0.020) * exp(-u * 2.9)
+		var hum: float = (sin(phase) * 0.58 + sin(phase * 1.5) * 0.28 + sin(phase * 2.0) * 0.14) * hum_env * 0.26
+		out[i] = clampf(clank + hum, -0.95, 0.95)
+	return _make_wav(out)
+
+
+func _synth_mono_grav_pulse() -> AudioStreamWAV:
+	# Resonant downward gravity-well compression wave + sub-bass thump (Null-Grid Projector)
+	var dur: float = 0.42
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	var phase_sub: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var f_drop: float = lerpf(640.0, 88.0, pow(u, 0.58)) + sin(TAU * 28.0 * t) * 42.0
+		var f_sub: float = lerpf(110.0, 38.0, u)
+		phase += TAU * f_drop / float(SAMPLE_RATE)
+		phase_sub += TAU * f_sub / float(SAMPLE_RATE)
+		var env: float = minf(1.0, t / 0.015) * exp(-u * 3.1)
+		var wave: float = (sin(phase) * 0.55 + clampf(sin(phase * 1.5) * 1.3, -1.0, 1.0) * 0.20 + sin(phase_sub) * 0.45) * env * 0.34
+		out[i] = clampf(wave, -0.95, 0.95)
 	return _make_wav(out)

@@ -21,6 +21,14 @@ const DEFAULT_BUILDING_COSTS: Dictionary = {
 	&"calibration_foundry": {"biomass": 125, "silica": 75, "compute": 0},
 	&"synthetics_fabricator": {"biomass": 150, "silica": 100, "compute": 50},
 	&"defense_turret": {"biomass": 100, "silica": 50, "compute": 0},
+	&"foundry_core": {"biomass": 300, "silica": 150, "compute": 0},
+	&"capacitor_pylon": {"biomass": 75, "silica": 40, "compute": 0},
+	&"silica_smelter": {"biomass": 100, "silica": 60, "compute": 0},
+	&"logic_monolith": {"biomass": 110, "silica": 90, "compute": 0},
+	&"assembly_bay": {"biomass": 140, "silica": 95, "compute": 0},
+	&"ballistics_lab": {"biomass": 120, "silica": 130, "compute": 25},
+	&"bastion_emplacement": {"biomass": 80, "silica": 110, "compute": 0},
+	&"siege_gantry": {"biomass": 150, "silica": 175, "compute": 45},
 }
 
 signal selection_changed(building: Building, selected: bool)
@@ -139,6 +147,14 @@ func _ready() -> void:
 		var fac_ready: FactionData = TeamManager.get_team_faction_data(int(team))
 		if fac_ready != null:
 			building_data = fac_ready.get_building_by_id(building_type_id)
+		if building_data == null and TeamManager.has_method("get_playable_factions"):
+			for fac_any: FactionData in TeamManager.get_playable_factions():
+				if fac_any == null:
+					continue
+				var found_b: BuildingData = fac_any.get_building_by_id(building_type_id)
+				if found_b != null:
+					building_data = found_b
+					break
 	if building_data != null:
 		_sync_turret_from_data(building_data)
 		_sync_defense_and_overclock_from_data(building_data)
@@ -148,6 +164,8 @@ func _ready() -> void:
 			var resolved_ready_units: Array[UnitData] = building_data.resolve_trainable_units()
 			if not resolved_ready_units.is_empty():
 				trainable_unit_data = resolved_ready_units
+		if researchable_upgrades.is_empty() and not building_data.researchable_upgrades.is_empty():
+			researchable_upgrades = building_data.researchable_upgrades.duplicate()
 	if construction_costs.is_empty():
 		if building_data != null:
 			construction_costs = building_data.get_cost_dict()
@@ -313,7 +331,7 @@ func _draw() -> void:
 			draw_circle(Vector2.RIGHT.rotated(ha) * (aura_r - 5.0), 1.8, amber_dot if (hi % 3 == 0) else aura_col)
 
 	if _should_draw_turret_range_ring():
-		var atk_r: float = turret_attack_range + footprint_radius
+		var atk_r: float = get_effective_turret_attack_range() + footprint_radius
 		var tc: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else (Color(0.28, 0.94, 0.96, 1.0) if team == Unit.Team.PLAYER else Color(1.0, 0.38, 0.28, 1.0))
 		var ring_col: Color = Color(tc.r, tc.g, tc.b, 0.34)
 		draw_circle(Vector2.ZERO, atk_r, Color(tc.r, tc.g, tc.b, 0.03))
@@ -521,6 +539,24 @@ func get_turret_recoil() -> float:
 	if turret_component != null:
 		return turret_component.recoil_offset
 	return 0.0
+
+
+func get_effective_turret_attack_range() -> float:
+	var rng: float = maxf(0.0, turret_attack_range)
+	if rng > 0.0 and building_type_id == &"bastion_emplacement":
+		var econ: EconomyManager = _get_economy_manager()
+		if econ != null:
+			rng += econ.get_rail_range_bonus(int(team))
+	return rng
+
+
+func get_effective_turret_damage() -> float:
+	var dmg: float = maxf(0.0, turret_damage)
+	if dmg > 0.0 and building_type_id == &"bastion_emplacement":
+		var econ: EconomyManager = _get_economy_manager()
+		if econ != null:
+			dmg *= econ.get_rail_damage_multiplier(int(team))
+	return dmg
 
 
 func advance_construction(delta: float) -> bool:
@@ -828,7 +864,7 @@ func contains_point(world_point: Vector2) -> bool:
 
 
 func is_command_hub() -> bool:
-	return is_core_hub or (building_data != null and building_data.is_hub())
+	return is_core_hub or building_type_id == &"nexus_vat" or building_type_id == &"foundry_core" or (building_data != null and building_data.is_hub())
 
 
 func is_military_production_building() -> bool:
@@ -1379,7 +1415,7 @@ func get_inspection_data() -> Dictionary:
 		accent = Color(0.36, 0.96, 1.0, 1.0)
 	elif building_type_id == &"capacitor_pylon" or building_type_id == &"logic_monolith":
 		accent = Color(0.220, 0.741, 0.973, 1.0)
-	elif building_type_id == &"foundry_core" or building_type_id == &"silica_smelter" or building_type_id == &"assembly_bay" or building_type_id == &"ballistics_lab" or building_type_id == &"bastion_emplacement":
+	elif building_type_id == &"foundry_core" or building_type_id == &"silica_smelter" or building_type_id == &"assembly_bay" or building_type_id == &"ballistics_lab" or building_type_id == &"bastion_emplacement" or building_type_id == &"siege_gantry":
 		accent = Color(1.0, 0.624, 0.110, 1.0)
 	elif team == Unit.Team.ENEMY:
 		accent = Color(1.0, 0.36, 0.26, 1.0)
@@ -1443,9 +1479,11 @@ func get_inspection_data() -> Dictionary:
 		stats.append({"label": "Construction", "value": "Operational"})
 	elif has_turret:
 		subtitle = "STATIC DEFENSE TURRET" if is_local_owned else "HOSTILE DEFENSE TURRET"
-		var dmg_str: String = "%d (%.2fx Arm)" % [int(round(turret_damage)), turret_bonus_vs_armored] if turret_bonus_vs_armored > 1.0 else "%d" % int(round(turret_damage))
+		var eff_t_dmg: float = get_effective_turret_damage()
+		var eff_t_rng: float = get_effective_turret_attack_range()
+		var dmg_str: String = "%d (%.2fx Arm)" % [int(round(eff_t_dmg)), turret_bonus_vs_armored] if turret_bonus_vs_armored > 1.0 else "%d" % int(round(eff_t_dmg))
 		stats.append({"label": "Damage", "value": dmg_str})
-		stats.append({"label": "Range / Rate", "value": "%dpx / %.2fs" % [int(round(turret_attack_range)), turret_attack_interval]})
+		stats.append({"label": "Range / Rate", "value": "%dpx / %.2fs" % [int(round(eff_t_rng)), turret_attack_interval]})
 		if turret_splash_radius > 0.0:
 			stats.append({"label": "Splash", "value": "%dpx Radius" % int(round(turret_splash_radius))})
 		else:
@@ -1501,6 +1539,10 @@ func get_inspection_data() -> Dictionary:
 		stats.append({"label": "Rally", "value": _get_rally_summary()})
 		if building_type_id == &"assembly_bay":
 			stats.append({"label": "Tech", "value": "Unlocks Ballistics Lab"})
+		elif building_type_id == &"ballistics_lab":
+			stats.append({"label": "Tech", "value": "Unlocks Siege Gantry"})
+		elif building_type_id == &"siege_gantry":
+			stats.append({"label": "Role", "value": "Siege & Heavy Chassis"})
 		else:
 			stats.append({"label": "Role", "value": "Precision & Support"})
 	elif building_type_id == &"silica_condenser" or building_type_id == &"silica_smelter":

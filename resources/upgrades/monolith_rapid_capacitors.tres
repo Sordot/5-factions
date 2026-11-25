@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="UpgradeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/upgrade_data.gd" id="1_upg"]
+
+[resource]
+script = ExtResource("1_upg")
+upgrade_id = &"monolith_rapid_capacitors"
+display_name = "Rapid Capacitors"
+description = "Upgrades Axiom shield bus capacitors across all MONOLITH_OS units and buildings: reduces shield regen delay by 40% and increases shield regen rate by +40%."
+hotkey_label = "I"
+biomass_cost = 80
+silica_cost = 130
+compute_cost = 40
+research_time = 20.0
+modifier_key = &"rapid_capacitors"
+modifier_value = 0.4

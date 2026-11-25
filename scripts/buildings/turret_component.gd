@@ -141,11 +141,23 @@ func distance_to_target_edge(target: Node2D) -> float:
 	return maxf(0.0, center_dist - my_r - other_r)
 
 
+func _get_effective_turret_range() -> float:
+	if owner_building == null:
+		return 0.0
+	return owner_building.get_effective_turret_attack_range()
+
+
+func _get_effective_turret_damage() -> float:
+	if owner_building == null:
+		return 0.0
+	return owner_building.get_effective_turret_damage()
+
+
 func is_in_attack_range(target: Node2D) -> bool:
 	if owner_building == null or target == null or not is_instance_valid(target):
 		return false
 	var dist: float = distance_to_target_edge(target)
-	return dist <= owner_building.turret_attack_range and dist >= owner_building.turret_min_range
+	return dist <= _get_effective_turret_range() and dist >= owner_building.turret_min_range
 
 
 func _get_priority_tier(candidate: Node2D) -> int:
@@ -202,7 +214,7 @@ func _score_candidate(candidate: Node2D, dist: float, max_range: float) -> float
 func _find_best_target() -> Node2D:
 	if owner_building == null or not owner_building.is_inside_tree():
 		return null
-	var max_range: float = owner_building.turret_attack_range
+	var max_range: float = _get_effective_turret_range()
 	var min_range: float = owner_building.turret_min_range
 	var query_r: float = max_range + owner_building.footprint_radius + 20.0
 	var best_target: Node2D = null
@@ -256,7 +268,7 @@ func _is_armored_target(target: Variant) -> bool:
 
 
 func _compute_damage(target: Variant) -> float:
-	var dmg: float = maxf(0.0, owner_building.turret_damage)
+	var dmg: float = maxf(0.0, _get_effective_turret_damage())
 	if owner_building.turret_bonus_vs_armored > 1.0 and _is_armored_target(target):
 		dmg *= owner_building.turret_bonus_vs_armored
 	return dmg
@@ -297,7 +309,7 @@ func _fire_at(target: Node2D) -> void:
 		var tree: SceneTree = owner_building.get_tree()
 		var atk_bldg: Building = owner_building
 		var atk_team: int = int(owner_building.team)
-		var base_dmg: float = owner_building.turret_damage
+		var base_dmg: float = _get_effective_turret_damage()
 		var armor_mult: float = owner_building.turret_bonus_vs_armored
 		var impact_pos: Vector2 = end_pos
 		var on_impact: Callable = func() -> void:

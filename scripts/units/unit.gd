@@ -1328,17 +1328,23 @@ func get_effective_move_speed() -> float:
 func get_effective_attack_damage() -> float:
 	if data == null:
 		return 0.0
-	if is_deployed() and data.deployed_attack_damage > 0.0:
-		return data.deployed_attack_damage
-	return data.attack_damage
+	var dmg: float = data.deployed_attack_damage if (is_deployed() and data.deployed_attack_damage > 0.0) else data.attack_damage
+	if dmg > 0.0 and (data.unit_type_id == &"rail_sentinel" or data.unit_type_id == &"anvil_siege_walker"):
+		var econ: EconomyManager = _get_economy_manager()
+		if econ != null:
+			dmg *= econ.get_rail_damage_multiplier(int(team))
+	return dmg
 
 
 func get_effective_attack_range() -> float:
 	if data == null:
 		return 0.0
-	if is_deployed() and data.deployed_attack_range > 0.0:
-		return data.deployed_attack_range
-	return data.attack_range
+	var rng: float = data.deployed_attack_range if (is_deployed() and data.deployed_attack_range > 0.0) else data.attack_range
+	if rng > 0.0 and (data.unit_type_id == &"rail_sentinel" or data.unit_type_id == &"anvil_siege_walker"):
+		var econ: EconomyManager = _get_economy_manager()
+		if econ != null:
+			rng += econ.get_rail_range_bonus(int(team))
+	return rng
 
 
 func get_effective_min_attack_range() -> float:
@@ -1536,6 +1542,16 @@ func _draw() -> void:
 			draw_arc(Vector2.ZERO, r + 3.0, a0, a0 + 1.15, 10, arc_col, 2.3, true)
 			var crack_dir: Vector2 = Vector2.RIGHT.rotated(a0 + 0.55)
 			draw_line(crack_dir * (r - 1.0), crack_dir * (r + 6.5), arc_col, 1.4, true)
+	if has_status_effect(&"grav_pulse"):
+		# Heavy amber/violet gravity compression chevrons & ring
+		var g_spin: float = -_vfx_anim_time * 3.2
+		var g_pulse: float = 0.72 + 0.28 * sin(_vfx_anim_time * 12.0)
+		draw_circle(Vector2.ZERO, r * 0.86, Color(0.72, 0.36, 0.96, 0.14 * g_pulse))
+		draw_arc(Vector2.ZERO, r + 2.0, 0.0, TAU, 24, Color(1.0, 0.624, 0.110, 0.72 * g_pulse), 1.8, true)
+		for gi: int in range(4):
+			var ga: float = g_spin + float(gi) * (PI * 0.5)
+			var g_dir: Vector2 = Vector2.RIGHT.rotated(ga)
+			draw_line(g_dir * (r + 6.0), g_dir * (r + 1.0), Color(0.84, 0.52, 1.0, 0.90 * g_pulse), 2.0, true)
 
 	# Diegetic Defensive Stance anchor leash ring (when selected) + crisp shield/anchor pip
 	if stance == Stance.DEFENSIVE:

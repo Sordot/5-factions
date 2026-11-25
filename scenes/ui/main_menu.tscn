@@ -99,7 +99,7 @@ text = "5 FACTIONS // SOVEREIGN KERNEL"
 layout_mode = 2
 theme_override_colors/font_color = Color(0.28, 0.94, 0.88, 0.94)
 theme_override_font_sizes/font_size = 12
-text = "TECHNOZEN REAL-TIME STRATEGY  •  MILESTONE 2.8 ENGINE HARDENING  •  BUILD 0.2.8"
+text = "TECHNOZEN REAL-TIME STRATEGY  •  MILESTONE 3.0 FACTION EXPANSION  •  BUILD 0.3.0"
 
 [node name="HeaderRight" type="HBoxContainer" parent="RootMargin/RootVBox/HeaderPanel/HeaderHBox"]
 layout_mode = 2
@@ -135,12 +135,14 @@ size_flags_horizontal = 3
 theme_override_constants/separation = 10
 
 [node name="FactionSectionHeader" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.56, 0.86, 0.94, 0.95)
 theme_override_font_sizes/font_size = 13
-text = "AI LORD FACTION DOSSIERS (1 / 5 ACTIVE)"
+text = "AI LORD FACTION DOSSIERS (2 / 5 ACTIVE)"
 
 [node name="GenesisActiveCard" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_active_faction")
 
@@ -153,6 +155,7 @@ layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="ColorSwatch" type="ColorRect" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/TopRow"]
+unique_name_in_owner = true
 custom_minimum_size = Vector2(10, 44)
 layout_mode = 2
 color = Color(0.2, 0.96, 0.86, 1)
@@ -163,29 +166,34 @@ size_flags_horizontal = 3
 theme_override_constants/separation = 2
 
 [node name="FactionName" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/TopRow/NameVBox"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.96, 1, 1, 1)
 theme_override_font_sizes/font_size = 20
 text = "01 // GENESIS_V2  —  THE VAT-BORN"
 
 [node name="FactionTagline" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/TopRow/NameVBox"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.32, 0.98, 0.86, 0.95)
 theme_override_font_sizes/font_size = 12
 text = "Bio-Synth Swarm  •  1.75x Parallel Batch Cloning  •  Heavy Synthetics Pivot"
 
 [node name="ActiveBadge" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/TopRow"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 4
 theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
 
 [node name="Label" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox/TopRow/ActiveBadge"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.32, 1, 0.74, 1)
 theme_override_font_sizes/font_size = 11
 text = "SELECTED // PLAYABLE"
 
 [node name="FactionDesc" type="Label" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.8, 0.9, 0.94, 0.94)
 theme_override_font_sizes/font_size = 12
@@ -199,6 +207,7 @@ theme_override_font_sizes/font_size = 11
 text = "SIGNATURE UNITS & TECH:"
 
 [node name="BadgeRow" type="HFlowContainer" parent="RootMargin/RootVBox/BodyHBox/FactionColumn/GenesisActiveCard/VBox"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 6
@@ -280,10 +289,10 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 focus_mode = 0
-modulate = Color(0.76, 0.82, 0.9, 0.78)
+modulate = Color(1, 0.76, 0.32, 0.98)
 theme_override_font_sizes/font_size = 11
-text = "02 // AETHER_PRIME — The Radiant Grid
-Solar-Optic Precision  •  LOCKED — IN DEVELOPMENT"
+text = "02 // MONOLITH_OS — The Iron Axiom
+Neo-Brutalist Robotics & Shields  •  PLAYABLE — CLICK TO SELECT"
 clip_text = true
 autowrap_mode = 3
 
@@ -311,7 +320,7 @@ focus_mode = 0
 modulate = Color(0.8, 0.74, 0.9, 0.78)
 theme_override_font_sizes/font_size = 11
 text = "04 // NULL_VECTOR — The Whisper Net
-Stealth & Algorithmic Subversion  •  LOCKED — IN DEVELOPMENT"
+Electronic Warfare & Disruption  •  LOCKED — IN DEVELOPMENT"
 clip_text = true
 autowrap_mode = 3
 

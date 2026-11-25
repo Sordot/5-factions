@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="UpgradeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/upgrade_data.gd" id="1_upg"]
+
+[resource]
+script = ExtResource("1_upg")
+upgrade_id = &"monolith_hyper_velocity_rails"
+display_name = "Hyper-Velocity Rails"
+description = "Supercharges electromagnetic coils on Rail-Sentinels, Anvil Siege-Walkers (Mobile & Deployed), and Bastion Emplacements: +20% weapon damage and +45px attack range."
+hotkey_label = "U"
+biomass_cost = 120
+silica_cost = 180
+compute_cost = 65
+research_time = 24.0
+modifier_key = &"hyper_velocity_rails"
+modifier_value = 0.2

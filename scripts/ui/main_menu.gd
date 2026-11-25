@@ -25,10 +25,64 @@ const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.
 @onready var btn_launch: Button = %BtnLaunch
 @onready var btn_settings: Button = %BtnSettings
 @onready var btn_quit: Button = %BtnQuit
+@onready var faction_section_header: Label = %FactionSectionHeader
+@onready var active_faction_card: PanelContainer = %GenesisActiveCard
+@onready var faction_color_swatch: ColorRect = %ColorSwatch
+@onready var faction_name_label: Label = %FactionName
+@onready var faction_tagline_label: Label = %FactionTagline
+@onready var faction_active_badge: PanelContainer = %ActiveBadge
+@onready var faction_active_badge_label: Label = %Label
+@onready var faction_desc_label: Label = %FactionDesc
+@onready var faction_badge_row: HFlowContainer = %BadgeRow
 @onready var locked_slot_2: Button = %LockedSlot2
 @onready var locked_slot_3: Button = %LockedSlot3
 @onready var locked_slot_4: Button = %LockedSlot4
 @onready var locked_slot_5: Button = %LockedSlot5
+
+const FACTION_DOSSIER_PROFILES: Dictionary = {
+	&"genesis_v2": {
+		"title": "01 // GENESIS_V2  —  THE VAT-BORN",
+		"tagline": "Bio-Synth Swarm  •  1.75x Parallel Batch Cloning  •  Heavy Synthetics Pivot",
+		"desc": "Exponentially scales early-game infantry through Twin-Chamber Cloning Vats (2 units per cycle at 1.75x cost), pivots through Calibration Foundry counters, and closes matches with high-Compute Synthetics.",
+		"accent": Color(0.20, 0.96, 0.86, 1.0),
+		"tagline_color": Color(0.32, 0.98, 0.86, 0.95),
+		"bg_color": Color(0.06, 0.12, 0.16, 0.94),
+		"badge_bg": Color(0.08, 0.18, 0.22, 0.92),
+		"badge_border": Color(0.22, 0.82, 0.84, 0.72),
+		"switch_text": "01 // GENESIS_V2 — The Vat-Born\nBio-Synth Swarm & Batch Cloning  •  PLAYABLE — CLICK TO SELECT",
+		"badges": [
+			"Clone Trooper (x2 Batch)",
+			"Stinger",
+			"Symbiote (Heal Aura)",
+			"Lance-Rig / Signal Jammer",
+			"Goliath Frame",
+			"Arc-Lancer (Colossus Stride)",
+			"Chrysalis Mortar",
+		],
+	},
+	&"monolith_os": {
+		"title": "02 // MONOLITH_OS  —  THE IRON AXIOM",
+		"tagline": "Neo-Brutalist Machine-State  •  3x Silica & +1 Compute Cap  •  Core Overclock & Shields",
+		"desc": "Deploys slow, heavily armored robotics layered with unmitigated regenerating shields. Overclocks production facilities from its Foundry Core and extracts superior Silica and Compute yields.",
+		"accent": Color(1.0, 0.624, 0.110, 1.0),
+		"tagline_color": Color(1.0, 0.74, 0.30, 0.98),
+		"bg_color": Color(0.11, 0.095, 0.075, 0.95),
+		"badge_bg": Color(0.16, 0.125, 0.085, 0.92),
+		"badge_border": Color(1.0, 0.624, 0.110, 0.78),
+		"switch_text": "02 // MONOLITH_OS — The Iron Axiom\nNeo-Brutalist Robotics & Shields  •  PLAYABLE — CLICK TO SELECT",
+		"badges": [
+			"Core Overclock (2x)",
+			"Bulwark / Picket",
+			"Rail-Sentinel / Aegis",
+			"Anvil Siege-Walker (Deploy)",
+			"Monolith Dreadnought",
+			"Null-Grid Projector",
+			"Bastion Emplacement",
+		],
+	},
+}
+
+var _featured_faction_id: StringName = &"genesis_v2"
 
 var _selected_map_path: String = GameConfig.MAP_SKIRMISH_01
 var _player_count: int = 2
@@ -155,12 +209,11 @@ func _ready() -> void:
 	if not AudioManager.mute_changed.is_connected(_on_mute_changed):
 		AudioManager.mute_changed.connect(_on_mute_changed)
 
-	_wire_locked_card(
-		locked_slot_2,
-		"02 // AETHER_PRIME",
-		"Solar-Optic Precision — Long-range prism relays & shield-linked beam arrays that punish clustered swarms from elevated sightlines.",
-		Color(0.56, 0.90, 1.0, 1.0)
-	)
+	if faction_section_header != null:
+		faction_section_header.text = "AI LORD FACTION DOSSIERS (%d / 5 ACTIVE)" % maxi(1, _playable_factions.size())
+
+	if locked_slot_2 != null:
+		locked_slot_2.pressed.connect(_on_playable_switcher_pressed)
 	_wire_locked_card(
 		locked_slot_3,
 		"03 // IRON_CONSENSUS",
@@ -170,7 +223,7 @@ func _ready() -> void:
 	_wire_locked_card(
 		locked_slot_4,
 		"04 // NULL_VECTOR",
-		"Stealth & Algorithmic Subversion — Cloaked infiltrators & sensor-spoofing nodes designed to ambush expansions and disrupt Compute pipelines.",
+		"Electronic Warfare & Disruption — Signal-spoofing arrays & EMP disruptors designed to sever enemy Compute networks.",
 		Color(0.84, 0.66, 1.0, 1.0)
 	)
 	_wire_locked_card(
@@ -195,19 +248,10 @@ func _ready() -> void:
 		locked_slot_2, locked_slot_3, locked_slot_4, locked_slot_5,
 	])
 
-	if dossier_notice_label != null and TeamManager != null and TeamManager.has_method("get_faction_data"):
-		var fac_res: Resource = TeamManager.get_faction_data(GameConfig.selected_faction_id)
-		if fac_res != null:
-			var fac_name: String = String(fac_res.get("display_name"))
-			var fac_tag: String = String(fac_res.get("tagline"))
-			var b_roster: Variant = fac_res.get("building_roster")
-			var u_roster: Variant = fac_res.get("unit_roster")
-			var b_cnt: int = (b_roster as Array).size() if b_roster is Array else 7
-			var u_cnt: int = (u_roster as Array).size() if u_roster is Array else 11
-			dossier_notice_label.text = "%s (%d Structures • %d Units): %s" % [fac_name, b_cnt, u_cnt, fac_tag]
-
 	_clamp_player_count_for_map()
 	_rebuild_preset_options()
+	_featured_faction_id = _get_local_human_faction_id()
+	_apply_featured_faction_dossier(_featured_faction_id, true)
 	_refresh_audio_button()
 	_refresh_ui()
 
@@ -414,6 +458,8 @@ func _on_slot_controller_toggled(slot_idx: int) -> void:
 		# Switch AI -> Human; enforce at most 1 local Human across all slots
 		for i: int in range(_slot_configs.size()):
 			_slot_configs[i]["controller_type"] = 0 if i == slot_idx else 1
+	_featured_faction_id = _get_local_human_faction_id()
+	_apply_featured_faction_dossier(_featured_faction_id, true)
 	_refresh_ui()
 
 
@@ -449,8 +495,150 @@ func _on_slot_faction_changed(slot_idx: int, fac_idx: int) -> void:
 	if fac_idx < 0 or fac_idx >= _playable_factions.size():
 		return
 	AudioManager.play_ui_click()
-	_slot_configs[slot_idx]["faction_id"] = _playable_factions[fac_idx].faction_id
+	var new_fid: StringName = _playable_factions[fac_idx].faction_id
+	_slot_configs[slot_idx]["faction_id"] = new_fid
+	var human_idx: int = _get_local_human_slot_index()
+	if slot_idx == human_idx or (human_idx < 0 and slot_idx == 0):
+		_featured_faction_id = new_fid
+		_apply_featured_faction_dossier(new_fid, true)
 	_refresh_ui()
+
+
+func _get_local_human_slot_index() -> int:
+	for i: int in range(mini(_player_count, _slot_configs.size())):
+		if int(_slot_configs[i]["controller_type"]) == 0:
+			return i
+	return -1
+
+
+func _get_local_human_faction_id() -> StringName:
+	var human_idx: int = _get_local_human_slot_index()
+	if human_idx >= 0 and human_idx < _slot_configs.size():
+		var h_fid: StringName = _slot_configs[human_idx].get("faction_id", &"genesis_v2") as StringName
+		if h_fid != &"":
+			return h_fid
+	if not _slot_configs.is_empty():
+		var s0_fid: StringName = _slot_configs[0].get("faction_id", &"genesis_v2") as StringName
+		if s0_fid != &"":
+			return s0_fid
+	return GameConfig.selected_faction_id if GameConfig != null else &"genesis_v2"
+
+
+func _get_other_playable_faction_id(current_id: StringName) -> StringName:
+	for fdata: FactionData in _playable_factions:
+		if fdata != null and fdata.faction_id != current_id:
+			return fdata.faction_id
+	return &"monolith_os" if current_id == &"genesis_v2" else &"genesis_v2"
+
+
+func _on_playable_switcher_pressed() -> void:
+	AudioManager.play_ui_click()
+	_inspected_locked_btn = null
+	var next_fid: StringName = _get_other_playable_faction_id(_featured_faction_id)
+	_featured_faction_id = next_fid
+	var target_slot: int = _get_local_human_slot_index()
+	if target_slot < 0:
+		target_slot = 0
+	if target_slot < _slot_configs.size():
+		_slot_configs[target_slot]["faction_id"] = next_fid
+	_apply_featured_faction_dossier(next_fid, true)
+	_refresh_ui()
+
+
+func _apply_featured_faction_dossier(faction_id: StringName, update_notice: bool = true) -> void:
+	var key: StringName = faction_id if FACTION_DOSSIER_PROFILES.has(faction_id) else &"genesis_v2"
+	var prof: Dictionary = FACTION_DOSSIER_PROFILES[key] as Dictionary
+	var accent: Color = prof["accent"] as Color
+	var tag_col: Color = prof["tagline_color"] as Color
+	var bg_col: Color = prof["bg_color"] as Color
+	var badge_bg: Color = prof["badge_bg"] as Color
+	var badge_border: Color = prof["badge_border"] as Color
+
+	if active_faction_card != null:
+		var card_sb: StyleBoxFlat = StyleBoxFlat.new()
+		card_sb.content_margin_left = 14.0
+		card_sb.content_margin_top = 12.0
+		card_sb.content_margin_right = 14.0
+		card_sb.content_margin_bottom = 12.0
+		card_sb.bg_color = bg_col
+		card_sb.border_width_left = 2
+		card_sb.border_width_top = 2
+		card_sb.border_width_right = 2
+		card_sb.border_width_bottom = 2
+		card_sb.border_color = accent
+		card_sb.corner_radius_top_left = 6
+		card_sb.corner_radius_top_right = 6
+		card_sb.corner_radius_bottom_right = 6
+		card_sb.corner_radius_bottom_left = 6
+		active_faction_card.add_theme_stylebox_override("panel", card_sb)
+
+	if faction_color_swatch != null:
+		faction_color_swatch.color = accent
+	if faction_name_label != null:
+		faction_name_label.text = String(prof["title"])
+	if faction_tagline_label != null:
+		faction_tagline_label.text = String(prof["tagline"])
+		faction_tagline_label.add_theme_color_override("font_color", tag_col)
+	if faction_desc_label != null:
+		faction_desc_label.text = String(prof["desc"])
+
+	var pill_sb: StyleBoxFlat = StyleBoxFlat.new()
+	pill_sb.content_margin_left = 7.0
+	pill_sb.content_margin_top = 3.0
+	pill_sb.content_margin_right = 7.0
+	pill_sb.content_margin_bottom = 3.0
+	pill_sb.bg_color = badge_bg
+	pill_sb.border_width_left = 1
+	pill_sb.border_width_top = 1
+	pill_sb.border_width_right = 1
+	pill_sb.border_width_bottom = 1
+	pill_sb.border_color = badge_border
+	pill_sb.corner_radius_top_left = 3
+	pill_sb.corner_radius_top_right = 3
+	pill_sb.corner_radius_bottom_right = 3
+	pill_sb.corner_radius_bottom_left = 3
+
+	if faction_active_badge != null:
+		faction_active_badge.add_theme_stylebox_override("panel", pill_sb)
+	if faction_active_badge_label != null:
+		faction_active_badge_label.add_theme_color_override("font_color", accent)
+
+	if faction_badge_row != null:
+		for child: Node in faction_badge_row.get_children():
+			child.queue_free()
+		var badges: Array = prof.get("badges", []) as Array
+		for b_txt: Variant in badges:
+			var p: PanelContainer = PanelContainer.new()
+			p.add_theme_stylebox_override("panel", pill_sb)
+			var l: Label = Label.new()
+			l.add_theme_font_size_override("font_size", 11)
+			l.text = String(b_txt)
+			p.add_child(l)
+			faction_badge_row.add_child(p)
+
+	# Update Slot 2 live playable switcher to display the alternate playable faction
+	var other_fid: StringName = _get_other_playable_faction_id(key)
+	var other_key: StringName = other_fid if FACTION_DOSSIER_PROFILES.has(other_fid) else &"monolith_os"
+	var other_prof: Dictionary = FACTION_DOSSIER_PROFILES[other_key] as Dictionary
+	if locked_slot_2 != null:
+		locked_slot_2.text = String(other_prof["switch_text"])
+		var other_acc: Color = other_prof["accent"] as Color
+		locked_slot_2.modulate = other_acc.lerp(Color.WHITE, 0.16)
+	_refresh_locked_card_highlights()
+
+	if update_notice and dossier_notice_label != null:
+		var fac_res: Resource = TeamManager.get_faction_data(key) if (TeamManager != null and TeamManager.has_method("get_faction_data")) else null
+		if fac_res != null:
+			var fac_name: String = String(fac_res.get("display_name"))
+			var fac_tag: String = String(fac_res.get("tagline"))
+			var b_roster: Variant = fac_res.get("building_roster")
+			var u_roster: Variant = fac_res.get("unit_roster")
+			var b_cnt: int = (b_roster as Array).size() if b_roster is Array else 7
+			var u_cnt: int = (u_roster as Array).size() if u_roster is Array else 7
+			dossier_notice_label.text = "%s (%d Structures • %d Units): %s" % [fac_name, b_cnt, u_cnt, fac_tag]
+		else:
+			dossier_notice_label.text = "%s selected for deployment." % String(prof["title"])
+		dossier_notice_label.modulate = tag_col
 
 
 func _has_active_human() -> bool:
@@ -480,12 +668,13 @@ func _draw() -> void:
 	# Deep Technozen terminal backdrop
 	draw_rect(Rect2(Vector2.ZERO, sz), Color(0.032, 0.048, 0.068, 1.0), true)
 
-	# Subtle radial cyan/emerald bloom behind active dossier
+	# Subtle radial bloom behind active dossier (tinted to active featured faction)
+	var bloom_col: Color = Color(0.95, 0.56, 0.12, 1.0) if _featured_faction_id == &"monolith_os" else Color(0.12, 0.88, 0.84, 1.0)
 	var glow_center: Vector2 = Vector2(sz.x * 0.30, sz.y * 0.42)
 	for i: int in range(5):
 		var r: float = (120.0 + float(i) * 95.0) + sin(_bg_time * 0.8 + float(i)) * 12.0
 		var a: float = 0.035 - float(i) * 0.005
-		draw_circle(glow_center, r, Color(0.12, 0.88, 0.84, maxf(0.005, a)))
+		draw_circle(glow_center, r, Color(bloom_col.r, bloom_col.g, bloom_col.b, maxf(0.005, a)))
 
 	# Subtle animated Y2K orthogonal grid with drifting intersection pulses
 	var grid_step: float = 48.0
@@ -535,9 +724,10 @@ func _wire_locked_card(btn: Button, dossier_name: String, briefing: String, acce
 		_inspected_locked_btn = btn
 		_refresh_locked_card_highlights()
 		if dossier_notice_label != null:
-			var active_name: String = "GENESIS_V2"
+			var active_fid: StringName = _get_local_human_faction_id()
+			var active_name: String = String(active_fid).to_upper()
 			if TeamManager != null and TeamManager.has_method("get_faction_data"):
-				var active_fac: FactionData = TeamManager.get_faction_data(GameConfig.selected_faction_id)
+				var active_fac: FactionData = TeamManager.get_faction_data(active_fid) as FactionData
 				if active_fac != null:
 					active_name = active_fac.short_code if not active_fac.short_code.is_empty() else active_fac.display_name
 			dossier_notice_label.text = "[CLASSIFIED PREVIEW] %s — %s (Locked; %s remains selected for launch.)" % [dossier_name, briefing, active_name]
@@ -547,7 +737,6 @@ func _wire_locked_card(btn: Button, dossier_name: String, briefing: String, acce
 
 func _refresh_locked_card_highlights() -> void:
 	var cards: Array = [
-		{"btn": locked_slot_2, "idle": Color(0.76, 0.82, 0.90, 0.78), "hi": Color(0.68, 0.96, 1.0, 1.0)},
 		{"btn": locked_slot_3, "idle": Color(0.84, 0.78, 0.72, 0.78), "hi": Color(1.0, 0.84, 0.56, 1.0)},
 		{"btn": locked_slot_4, "idle": Color(0.80, 0.74, 0.90, 0.78), "hi": Color(0.92, 0.78, 1.0, 1.0)},
 		{"btn": locked_slot_5, "idle": Color(0.72, 0.86, 0.78, 0.78), "hi": Color(0.56, 1.0, 0.80, 1.0)},
@@ -676,7 +865,13 @@ func _refresh_ui() -> void:
 			mut_parts.append("Fast Build")
 		var mut_suffix: String = ("  •  " + ", ".join(mut_parts)) if not mut_parts.is_empty() else ""
 		var matchup_str: String = _build_alliance_summary_text()
-		var mode_tag: String = "AI SPECTATOR" if is_spec else ("PASSIVE SANDBOX" if not _aggro_ai_enabled else "GENESIS_V2")
+		var local_fid: StringName = _get_local_human_faction_id()
+		var local_fac_label: String = String(local_fid).to_upper()
+		if TeamManager != null and TeamManager.has_method("get_faction_data"):
+			var lf_data: FactionData = TeamManager.get_faction_data(local_fid) as FactionData
+			if lf_data != null and not lf_data.short_code.is_empty():
+				local_fac_label = lf_data.short_code
+		var mode_tag: String = "AI SPECTATOR" if is_spec else ("PASSIVE SANDBOX (%s)" % local_fac_label if not _aggro_ai_enabled else local_fac_label)
 		summary_label.text = "%s  •  %s\nTEAMS: %s\nRES: %s%s" % [mode_tag, map_name, matchup_str, res_str, mut_suffix]
 	_suppress_callbacks = false
 
@@ -688,8 +883,14 @@ func _build_alliance_summary_text() -> String:
 		var ally: int = int(cfg["alliance_id"])
 		if not groups.has(ally):
 			groups[ally] = PackedStringArray()
-		var tag: String = ("P%d" % (i + 1)) if int(cfg["controller_type"]) == 0 else ("AI%d" % (i + 1))
-		(groups[ally] as PackedStringArray).append(tag)
+		var base_tag: String = ("P%d" % (i + 1)) if int(cfg["controller_type"]) == 0 else ("AI%d" % (i + 1))
+		var sfid: StringName = cfg.get("faction_id", &"genesis_v2") as StringName
+		var f_short: String = String(sfid).to_upper()
+		if TeamManager != null and TeamManager.has_method("get_faction_data"):
+			var fd: FactionData = TeamManager.get_faction_data(sfid) as FactionData
+			if fd != null and not fd.short_code.is_empty():
+				f_short = fd.short_code
+		(groups[ally] as PackedStringArray).append("%s:%s" % [base_tag, f_short])
 	var keys: Array = groups.keys()
 	keys.sort()
 	var sides: PackedStringArray = PackedStringArray()
@@ -704,6 +905,7 @@ func _on_launch_pressed() -> void:
 		AudioManager.play_error()
 		return
 	AudioManager.play_sfx(&"build_complete", -3.0, 0.0)
+	var primary_faction_id: StringName = _get_local_human_faction_id()
 	GameConfig.set_lobby_config(
 		_selected_map_path,
 		_player_count,
@@ -711,7 +913,7 @@ func _on_launch_pressed() -> void:
 		_slot_configs,
 		_aggro_ai_enabled,
 		_resource_preset,
-		&"genesis_v2",
+		primary_faction_id,
 		_mutator_high_yield,
 		_mutator_no_fog,
 		_mutator_fast_build

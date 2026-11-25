@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="AbilityData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ability_data.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+ability_id = &"kinetic_barrier"
+display_name = "Kinetic Barrier"
+hotkey_label = "Q"
+cooldown_duration = 16.0
+cast_range = 0.0
+target_type = 2
+damage_or_value = 180.0
+aoe_radius = 44.0
+effect_duration = 7.0
+move_speed_modifier = 0.0
+attack_speed_modifier = 0.0
+effect_color = Color(0.22, 0.741, 0.973, 0.98)
+cast_on_all_ready = true
+allow_autocast = true
+default_autocast = false
+description = "Engages a +180 temporary hexagonal Barrier for 7.0s and immediately restores +40 native shields. Right-click to toggle Auto-Cast under heavy fire."

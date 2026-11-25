@@ -461,13 +461,25 @@ func get_goliath_extra_damage_reduction(team: int) -> float:
 	return upgrade_manager.get_goliath_extra_damage_reduction(team)
 
 
-func get_shield_regen_delay_multiplier(_team: int) -> float:
-	return 1.0
+func get_shield_regen_delay_multiplier(team: int) -> float:
+	return upgrade_manager.get_shield_regen_delay_multiplier(team)
 
 
-func get_shield_regen_rate_multiplier(_team: int) -> float:
-	return 1.0
+func get_shield_regen_rate_multiplier(team: int) -> float:
+	return upgrade_manager.get_shield_regen_rate_multiplier(team)
 
 
-func get_bonus_armor(_team: int) -> float:
-	return 0.0
+func get_bonus_armor(team: int) -> float:
+	return upgrade_manager.get_bonus_armor(team)
+
+
+func has_hyper_velocity_rails(team: int) -> bool:
+	return upgrade_manager.has_hyper_velocity_rails(team)
+
+
+func get_rail_damage_multiplier(team: int) -> float:
+	return upgrade_manager.get_rail_damage_multiplier(team)
+
+
+func get_rail_range_bonus(team: int) -> float:
+	return upgrade_manager.get_rail_range_bonus(team)

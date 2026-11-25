@@ -5,6 +5,8 @@ enum EffectStyle {
 	OFFENSIVE_AOE,
 	SELF_PULSE,
 	SEISMIC_SLAM,
+	HEX_BARRIER,
+	GRAV_PULSE,
 }
 
 @export var duration: float = 0.35
@@ -69,6 +71,28 @@ func setup_seismic_slam(center_world: Vector2, radius: float, effect_color: Colo
 	queue_redraw()
 
 
+func setup_hex_barrier(center_world: Vector2, radius: float, effect_color: Color = Color(0.220, 0.741, 0.973, 0.98)) -> void:
+	_style = EffectStyle.HEX_BARRIER
+	_from_world = center_world
+	_to_world = center_world
+	_radius = maxf(22.0, radius)
+	_color = effect_color
+	duration = 0.46
+	_elapsed = 0.0
+	queue_redraw()
+
+
+func setup_grav_pulse(from_world: Vector2, target_world: Vector2, radius: float, effect_color: Color = Color(1.0, 0.624, 0.110, 0.98)) -> void:
+	_style = EffectStyle.GRAV_PULSE
+	_from_world = from_world
+	_to_world = target_world
+	_radius = maxf(32.0, radius)
+	_color = effect_color
+	duration = 0.52
+	_elapsed = 0.0
+	queue_redraw()
+
+
 func _process(delta: float) -> void:
 	_elapsed += delta
 	if _elapsed >= duration:
@@ -111,6 +135,42 @@ func _draw() -> void:
 			var p_in: Vector2 = target_local + radial * maxf(10.0, inner_r * 0.72)
 			var p_out: Vector2 = target_local + radial * outer_r
 			draw_line(p_in, p_out, Color(1.0, 0.86, 0.54, fade * 0.78), 2.2, true)
+	elif _style == EffectStyle.HEX_BARRIER:
+		# Crisp Neo-Brutalist hexagonal cyan/amber kinetic barrier lock-in pulse
+		var hex_r: float = lerpf(_radius * 0.52, _radius * 1.15, sqrt(t))
+		var inner_hex_r: float = lerpf(_radius * 0.28, _radius * 0.84, t)
+		var hex_pts: PackedVector2Array = PackedVector2Array()
+		var inner_pts: PackedVector2Array = PackedVector2Array()
+		for hi: int in range(6):
+			var ha: float = float(hi) * (TAU / 6.0) + PI / 6.0
+			hex_pts.append(target_local + Vector2.RIGHT.rotated(ha) * hex_r)
+			inner_pts.append(target_local + Vector2.RIGHT.rotated(ha) * inner_hex_r)
+		if hex_r > 2.0:
+			draw_colored_polygon(hex_pts, Color(_color.r, _color.g, _color.b, fade * 0.22))
+		draw_polyline(hex_pts + PackedVector2Array([hex_pts[0]]), Color(_color.r, _color.g, _color.b, fade * 0.98), 3.2, true)
+		draw_polyline(inner_pts + PackedVector2Array([inner_pts[0]]), Color(1.0, 0.624, 0.110, fade * 0.85), 1.8, true)
+		for hi2: int in range(6):
+			draw_circle(hex_pts[hi2], 2.4, Color(0.86, 0.98, 1.0, fade * 0.95))
+	elif _style == EffectStyle.GRAV_PULSE:
+		# Amber-violet halftone gravity compression blast
+		if t < 0.35:
+			var beam_a: float = (1.0 - (t / 0.35)) * 0.92
+			draw_line(to_local(_from_world), target_local, Color(0.76, 0.44, 1.0, beam_a), 3.6, true)
+			draw_line(to_local(_from_world), target_local, Color(1.0, 0.624, 0.110, beam_a * 0.85), 1.6, true)
+		var wave_r: float = lerpf(_radius * 0.22, _radius, sqrt(t))
+		var collapse_r: float = lerpf(_radius * 0.96, _radius * 0.28, t)
+		draw_circle(target_local, wave_r, Color(0.58, 0.28, 0.92, fade * 0.18))
+		draw_arc(target_local, wave_r, 0.0, TAU, 44, Color(1.0, 0.624, 0.110, fade * 0.96), 3.2, true)
+		draw_arc(target_local, collapse_r, 0.0, TAU, 36, Color(0.78, 0.48, 1.0, fade * 0.90), 2.4, true)
+		draw_arc(target_local, _radius, 0.0, TAU, 44, Color(_color.r, _color.g, _color.b, fade * 0.44), 1.5, true)
+		# Halftone gravity grid ticks
+		for gi: int in range(16):
+			var ga: float = float(gi) * (TAU / 16.0) + t * 0.6
+			var g_dir: Vector2 = Vector2.RIGHT.rotated(ga)
+			var tick_col: Color = Color(1.0, 0.624, 0.110, fade * 0.84) if (gi % 2 == 0) else Color(0.78, 0.48, 1.0, fade * 0.80)
+			draw_circle(target_local + g_dir * (wave_r * 0.82), 2.2, tick_col)
+			if gi % 2 == 0:
+				draw_line(target_local + g_dir * _radius, target_local + g_dir * maxf(12.0, collapse_r), tick_col, 1.5, true)
 	else:
 		var pulse_r: float = lerpf(8.0, _radius, t)
 		var ring_col: Color = _color

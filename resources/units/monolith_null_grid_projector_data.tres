@@ -1,0 +1,45 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/monolith_grav_pulse.tres" id="2_ab_grav"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"null_grid_projector"
+display_name = "Null-Grid Projector"
+max_hp = 210.0
+max_shield = 120.0
+shield_regen_rate = 12.0
+shield_regen_delay = 6.0
+move_speed = 175.0
+acceleration = 1450.0
+turn_speed = 11.0
+selection_radius = 25.0
+collision_radius = 19.0
+attack_damage = 18.0
+attack_range = 240.0
+aggro_range = 310.0
+vision_range = 420.0
+attack_cooldown = 1.4
+attack_windup = 0.09
+is_armored = false
+bonus_vs_armored = 0.0
+damage_reduction = 0.14
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_ab_grav")])
+bandwidth_cost = 3
+biomass_cost = 95
+silica_cost = 135
+compute_cost = 55
+salvage_silica = 40
+salvage_compute = 20
+build_time = 10.5
+train_time = 10.5
+unit_scene_path = "res://scenes/units/monolith_null_grid_projector.tscn"
+unit_tags = Array[StringName]([&"mechanical", &"support", &"control", &"counter"])
+weapon_tracer_style = &"arc_tether"
+weapon_tracer_color = Color(0.76, 0.44, 1, 0.96)
+weapon_tracer_width = 2.4
+weapon_sfx_id = &"weapon_mono_tether"
+audio_bark_class = &"counter"
+minimap_icon_shape = &"dot"
+role_tags_display = "Area Control • Grav-Pulse Field"

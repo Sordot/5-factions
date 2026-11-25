@@ -161,13 +161,14 @@ func _draw() -> void:
 			if t < 0.38:
 				var mf_h: float = 1.0 - (t / 0.38)
 				var flash_r: float = 7.5 * mf_h
-				var box: PackedVector2Array = PackedVector2Array([
-					p0 + dir * (flash_r * 1.35) + perp * (flash_r * 0.45),
-					p0 + dir * (flash_r * 1.35) - perp * (flash_r * 0.45),
-					p0 - dir * (flash_r * 0.25) - perp * (flash_r * 0.85),
-					p0 - dir * (flash_r * 0.25) + perp * (flash_r * 0.85),
-				])
-				draw_colored_polygon(box, Color(1.0, 0.76, 0.24, mf_h * 0.92))
+				if flash_r > 0.8:
+					var box: PackedVector2Array = PackedVector2Array([
+						p0 + dir * (flash_r * 1.35) + perp * (flash_r * 0.45),
+						p0 + dir * (flash_r * 1.35) - perp * (flash_r * 0.45),
+						p0 - dir * (flash_r * 0.25) - perp * (flash_r * 0.85),
+						p0 - dir * (flash_r * 0.25) + perp * (flash_r * 0.85),
+					])
+					draw_colored_polygon(box, Color(1.0, 0.76, 0.24, mf_h * 0.92))
 			draw_circle(p1, lerpf(8.5, 2.2, t), draw_col)
 			draw_circle(p1, lerpf(4.2, 1.0, t), Color(0.98, 0.97, 0.94, alpha))
 

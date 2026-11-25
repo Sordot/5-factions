@@ -384,7 +384,10 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 		shot_col.a = maxf(base_weapon_col.a, 0.94)
 
 	if AudioManager != null and _is_pos_audible(owner_unit, tracer_origin, tracer_end):
-		AudioManager.play_weapon_for_unit_data(owner_unit.data, owner_unit.global_position)
+		if owner_unit.is_deployed() and tracer_style == &"mortar" and owner_unit.data != null and owner_unit.data.has_tag(&"mechanical"):
+			AudioManager.play_sfx(&"weapon_mono_siege", -3.0, 0.04, owner_unit.global_position, true)
+		else:
+			AudioManager.play_weapon_for_unit_data(owner_unit.data, owner_unit.global_position)
 		if AudioManager.has_method("notify_combat_activity"):
 			AudioManager.call("notify_combat_activity", 0.35)
 

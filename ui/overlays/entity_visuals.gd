@@ -10,6 +10,14 @@ enum Mode {
 	BUILDING,
 }
 
+const MONO_INK: Color = Color(0.04, 0.05, 0.07, 0.96)
+const MONO_SHADOW: Color = Color(0.04, 0.05, 0.07, 0.85)
+const MONO_CONCRETE_DARK: Color = Color(0.169, 0.180, 0.200, 0.98) # #2B2E33
+const MONO_CONCRETE_MID: Color = Color(0.227, 0.243, 0.271, 0.98)  # #3A3E45
+const MONO_OFFWHITE: Color = Color(0.949, 0.937, 0.914, 0.98)      # #F2EFE9
+const MONO_AMBER: Color = Color(1.0, 0.624, 0.110, 1.0)            # #FF9F1C
+const MONO_SHIELD_CYAN: Color = Color(0.220, 0.741, 0.973, 1.0)    # #38BDF8
+
 var mode: Mode = Mode.UNIT
 var entity_type_id: StringName = &""
 var team: int = 0
@@ -51,6 +59,9 @@ func _process(delta: float) -> void:
 			or entity_type_id == &"goliath_frame"
 			or entity_type_id == &"clone_trooper"
 			or entity_type_id == &"aegis_relay"
+			or entity_type_id == &"monolith_dreadnought"
+			or entity_type_id == &"null_grid_projector"
+			or entity_type_id == &"anvil_siege_walker"
 			or _owner_unit.has_status_effect(&"adrenal_surge")
 		):
 			queue_redraw()
@@ -922,7 +933,7 @@ func _get_building_outer_poly(type_id: StringName, radius: float) -> PackedVecto
 				Vector2(-r * 0.92, -r * 0.92), Vector2(r * 0.92, -r * 0.92),
 				Vector2(r * 0.92, r * 0.92), Vector2(-r * 0.92, r * 0.92),
 			])
-		&"foundry_core", &"capacitor_pylon", &"silica_smelter", &"logic_monolith", &"assembly_bay", &"ballistics_lab", &"bastion_emplacement":
+		&"foundry_core", &"capacitor_pylon", &"silica_smelter", &"logic_monolith", &"assembly_bay", &"ballistics_lab", &"bastion_emplacement", &"siege_gantry":
 			var e_m: float = r * 0.96
 			var ch_m: float = r * 0.24
 			return PackedVector2Array([
@@ -966,14 +977,6 @@ func _draw_closed_outline(poly: PackedVector2Array, outline_col: Color, width: f
 # MONOLITH_OS — NEO-BRUTALIST HALFTONE PROCEDURAL VISUALS
 # =============================================================================
 
-const MONO_INK: Color = Color(0.04, 0.05, 0.07, 0.96)
-const MONO_SHADOW: Color = Color(0.04, 0.05, 0.07, 0.85)
-const MONO_CONCRETE_DARK: Color = Color(0.169, 0.180, 0.200, 0.98) # #2B2E33
-const MONO_CONCRETE_MID: Color = Color(0.227, 0.243, 0.271, 0.98)  # #3A3E45
-const MONO_OFFWHITE: Color = Color(0.949, 0.937, 0.914, 0.98)      # #F2EFE9
-const MONO_AMBER: Color = Color(1.0, 0.624, 0.110, 1.0)            # #FF9F1C
-const MONO_SHIELD_CYAN: Color = Color(0.220, 0.741, 0.973, 1.0)    # #38BDF8
-
 
 func _is_monolith_unit(type_id: StringName) -> bool:
 	return (
@@ -984,6 +987,9 @@ func _is_monolith_unit(type_id: StringName) -> bool:
 		or type_id == &"picket_drone"
 		or type_id == &"rail_sentinel"
 		or type_id == &"aegis_relay"
+		or type_id == &"anvil_siege_walker"
+		or type_id == &"monolith_dreadnought"
+		or type_id == &"null_grid_projector"
 	)
 
 
@@ -996,6 +1002,7 @@ func _is_monolith_building(type_id: StringName) -> bool:
 		or type_id == &"assembly_bay"
 		or type_id == &"ballistics_lab"
 		or type_id == &"bastion_emplacement"
+		or type_id == &"siege_gantry"
 	)
 
 
@@ -1232,6 +1239,109 @@ func _draw_monolith_unit_silhouette(p: Dictionary) -> void:
 			draw_line(Vector2(-7, -11), Vector2(7, -11), team_col, 2.6, true)
 			draw_line(Vector2(-7, 11), Vector2(7, 11), team_col, 2.6, true)
 
+		&"anvil_siege_walker":
+			# Quadruped Deploy/Anchor siege artillery walker with splayed hydraulic legs & elevating siege cannon
+			var dep_prog: float = _owner_unit.get_deploy_progress() if _owner_unit != null else 0.0
+			var leg_spread: float = lerpf(16.0, 25.5, dep_prog)
+			var leg_w: float = lerpf(4.4, 5.6, dep_prog)
+			# 4 heavy articulated quadruped legs (splay outward as deploy_progress -> 1.0)
+			for li: int in range(4):
+				var base_a: float = PI * 0.25 + float(li) * (PI * 0.5)
+				var l_dir: Vector2 = Vector2.RIGHT.rotated(base_a)
+				var knee: Vector2 = l_dir * lerpf(11.0, 15.5, dep_prog)
+				var foot: Vector2 = l_dir * leg_spread
+				draw_line(Vector2.ZERO, knee, MONO_INK, leg_w + 1.8, true)
+				draw_line(knee, foot, MONO_INK, leg_w, true)
+				draw_line(Vector2.ZERO, foot, MONO_OFFWHITE.lerp(slab_base, 0.35), 2.2, true)
+				var pad_sz: float = lerpf(3.0, 4.6, dep_prog)
+				draw_rect(Rect2(foot - Vector2(pad_sz, pad_sz), Vector2(pad_sz * 2.0, pad_sz * 2.0)), MONO_INK, true)
+				draw_rect(Rect2(foot - Vector2(pad_sz * 0.65, pad_sz * 0.65), Vector2(pad_sz * 1.3, pad_sz * 1.3)), MONO_AMBER if dep_prog > 0.5 else team_col, true)
+			# Heavy hexagonal-chamfered armored siege chassis slab
+			_draw_brutalist_slab(self, Rect2(-18, -15, 34, 30), slab_base, MONO_INK, Vector2(3.4, 3.4), 6.0, MONO_OFFWHITE)
+			_draw_halftone_dots(self, Rect2(-16, -12, 16, 24), 6.5, 1.4, Color(0.04, 0.05, 0.07, 0.52), 2.5)
+			# Team dorsal flank stripes
+			draw_rect(Rect2(-14, -13.5, 22, 3.8), team_col, true)
+			draw_rect(Rect2(-14, 9.7, 22, 3.8), team_col, true)
+			# Turret breech housing
+			_draw_brutalist_slab(self, Rect2(-10, -9, 20, 18), MONO_OFFWHITE.lerp(slab_base, 0.26), MONO_INK, Vector2(1.8, 1.8), 3.5, MONO_AMBER)
+			# Siege barrel: compact twin autocannon when mobile -> elongated massive heavy mortar/howitzer barrel when deployed
+			var barrel_len: float = lerpf(23.0, 35.0, dep_prog)
+			var barrel_thick: float = lerpf(6.5, 10.5, dep_prog)
+			draw_rect(Rect2(6.0, -barrel_thick * 0.5, barrel_len - 4.0, barrel_thick), MONO_INK, true)
+			draw_line(Vector2(7.0, 0.0), Vector2(barrel_len + 1.0, 0.0), MONO_OFFWHITE, barrel_thick * 0.50, true)
+			draw_line(Vector2(6.0, 0.0), Vector2(barrel_len - 2.0, 0.0), MONO_AMBER if dep_prog > 0.5 else MONO_SHIELD_CYAN, 2.2, true)
+			# Heavy muzzle brake collar
+			draw_rect(Rect2(barrel_len - 5.0, -barrel_thick * 0.68, 5.0, barrel_thick * 1.36), MONO_AMBER, true)
+			draw_rect(Rect2(barrel_len - 5.0, -barrel_thick * 0.68, 5.0, barrel_thick * 1.36), MONO_INK, false, 1.5)
+			# Reactor / Siege-Lock beacon
+			var lock_col: Color = Color(MONO_AMBER.r, MONO_AMBER.g, MONO_AMBER.b, 0.78 + pulse * 0.22) if dep_prog > 0.5 else MONO_SHIELD_CYAN
+			draw_rect(Rect2(-5.5, -4.5, 9.0, 9.0), slab_dark, true)
+			draw_rect(Rect2(-3.5, -2.5, 5.0, 5.0), lock_col, true)
+
+		&"monolith_dreadnought":
+			# Colossal frontline fortress-mech with dual heavy arm cannons & pulsing Kinetic Barrier hex halo
+			var barrier_amt: float = _owner_unit.get_shield_amount() if _owner_unit != null else 0.0
+			# Twin colossal shoulder/arm autocannons
+			draw_rect(Rect2(4, -22.5, 22, 7.5), MONO_INK, true)
+			draw_rect(Rect2(4, 15.0, 22, 7.5), MONO_INK, true)
+			draw_line(Vector2(7, -18.8), Vector2(25, -18.8), MONO_OFFWHITE, 2.6, true)
+			draw_line(Vector2(7, 18.8), Vector2(25, 18.8), MONO_OFFWHITE, 2.6, true)
+			draw_line(Vector2(21, -22.5), Vector2(21, -15.0), MONO_AMBER, 2.2, true)
+			draw_line(Vector2(21, 15.0), Vector2(21, 22.5), MONO_AMBER, 2.2, true)
+			# Massive main monolithic fortress hull
+			_draw_brutalist_slab(self, Rect2(-22, -20, 40, 40), slab_base, MONO_INK, Vector2(4.2, 4.2), 7.0, MONO_OFFWHITE)
+			# Stepped upper fortress carapace + forward bastion prow
+			_draw_brutalist_slab(self, Rect2(-15, -15, 28, 30), MONO_OFFWHITE.lerp(slab_base, 0.30), MONO_INK, Vector2(2.0, 2.0), 4.5, MONO_AMBER)
+			_draw_brutalist_slab(self, Rect2(10, -16, 10, 32), MONO_OFFWHITE.lerp(team_col, 0.14), MONO_INK, Vector2(1.8, 1.8), 3.0, MONO_AMBER)
+			# Halftone rear heat-sink band
+			_draw_halftone_dots(self, Rect2(-20, -15, 14, 30), 6.5, 1.5, Color(0.04, 0.05, 0.07, 0.56), 2.5)
+			# Bold team-color shoulder plates + glowing cyan reactor + amber visor
+			draw_rect(Rect2(-18, -18.5, 24, 5.2), team_col, true)
+			draw_rect(Rect2(-18, 13.3, 24, 5.2), team_col, true)
+			draw_rect(Rect2(-6, -7.5, 12, 15), slab_dark, true)
+			draw_rect(Rect2(-3.5, -5.0, 7, 10), MONO_SHIELD_CYAN, true)
+			draw_rect(Rect2(13, -7.0, 3.8, 14.0), MONO_AMBER, true)
+			# Pulsing hexagonal Kinetic Barrier halo when temporary barrier is active
+			if barrier_amt > 0.0:
+				var hex_r: float = 28.5 + pulse * 2.2
+				var hex_pts: PackedVector2Array = PackedVector2Array()
+				for hi: int in range(6):
+					var ha: float = float(hi) * (TAU / 6.0) + _anim_time * 0.45
+					hex_pts.append(Vector2.RIGHT.rotated(ha) * hex_r)
+				draw_colored_polygon(hex_pts, Color(MONO_SHIELD_CYAN.r, MONO_SHIELD_CYAN.g, MONO_SHIELD_CYAN.b, 0.14 + pulse * 0.08))
+				_draw_closed_outline(hex_pts, Color(MONO_SHIELD_CYAN.r, MONO_SHIELD_CYAN.g, MONO_SHIELD_CYAN.b, 0.85 + pulse * 0.15), 2.4)
+				for hi2: int in range(6):
+					draw_circle(hex_pts[hi2], 2.2, MONO_AMBER)
+
+		&"null_grid_projector":
+			# Angular grav-control dish/monolith walker with rotating amber-violet grav core
+			var grav_violet: Color = Color(0.74, 0.40, 1.0, 1.0)
+			# Rear twin stabilizer pylons
+			_draw_brutalist_slab(self, Rect2(-18, -16, 20, 9), slab_dark, MONO_INK, Vector2(2.4, 2.4), 3.0, team_col)
+			_draw_brutalist_slab(self, Rect2(-18, 7, 20, 9), slab_dark, MONO_INK, Vector2(2.4, 2.4), 3.0, team_col)
+			# Central brutalist chassis core
+			_draw_brutalist_slab(self, Rect2(-14, -12, 26, 24), slab_base, MONO_INK, Vector2(3.0, 3.0), 5.0, MONO_OFFWHITE)
+			_draw_halftone_dots(self, Rect2(-12, -10, 14, 20), 6.0, 1.3, Color(0.04, 0.05, 0.07, 0.50), 2.5)
+			# Forward parabolic grav-projector dish/prongs
+			var dish: PackedVector2Array = PackedVector2Array([
+				Vector2(6, -15), Vector2(18, -11), Vector2(15, -5),
+				Vector2(15, 5), Vector2(18, 11), Vector2(6, 15),
+				Vector2(2, 9), Vector2(2, -9),
+			])
+			_poly_outlined(dish, MONO_OFFWHITE.lerp(slab_base, 0.22), MONO_INK, 2.2)
+			draw_line(Vector2(-14, -11), Vector2(2, -11), team_col, 2.8, true)
+			draw_line(Vector2(-14, 11), Vector2(2, 11), team_col, 2.8, true)
+			# Rotating amber-violet gravity prism core
+			var rot_a: float = _anim_time * 2.6
+			var core_pts: PackedVector2Array = PackedVector2Array()
+			for ci: int in range(4):
+				var ca: float = rot_a + float(ci) * (PI * 0.5)
+				core_pts.append(Vector2(6.0, 0.0) + Vector2.RIGHT.rotated(ca) * (6.2 + pulse * 0.9))
+			draw_arc(Vector2(6.0, 0.0), 10.5 + pulse * 1.4, rot_a, rot_a + PI * 1.15, 16, Color(grav_violet.r, grav_violet.g, grav_violet.b, 0.80), 1.8, true)
+			draw_arc(Vector2(6.0, 0.0), 10.5 + pulse * 1.4, rot_a + PI, rot_a + PI * 1.65, 12, Color(MONO_AMBER.r, MONO_AMBER.g, MONO_AMBER.b, 0.85), 1.8, true)
+			_poly_outlined(core_pts, grav_violet, MONO_AMBER, 1.6)
+			draw_circle(Vector2(6.0, 0.0), 2.4, MONO_OFFWHITE)
+
 
 func _draw_monolith_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> void:
 	var team_col: Color = _get_monolith_team_color(p)
@@ -1390,3 +1500,40 @@ func _draw_monolith_building_completed(hull_poly: PackedVector2Array, p: Diction
 			draw_circle(Vector2.ZERO, 15.5, slab_dark)
 			draw_arc(Vector2.ZERO, 15.5, 0.0, TAU, 24, MONO_AMBER, 2.0, true)
 			_draw_team_corner_brackets(self, Rect2(-half + 3, -half + 3, half * 2.0 - 6, half * 2.0 - 6), team_col, 8.5, 2.4)
+
+		&"siege_gantry":
+			# Massive Tier-2 heavy robotics mega-bay (90x90) with 4 amber buttresses & twin crane bridges
+			var main_rect: Rect2 = Rect2(-half, -half, half * 2.0, half * 2.0)
+			_draw_brutalist_slab(self, main_rect, slab_base, MONO_INK, Vector2(4.6, 4.6), 10.0, MONO_AMBER if is_active_prod else MONO_OFFWHITE)
+			# Heavy recessed mega-assembly pit + halftone concrete apron
+			draw_rect(Rect2(-30, -28, 60, 56), slab_dark, true)
+			_draw_halftone_dots(self, Rect2(-28, -26, 56, 52), 9.5, 1.5, Color(0.95, 0.94, 0.91, 0.22), 4.0)
+			# 4 heavy amber-capped corner gantry buttresses
+			for butt: Vector2 in [Vector2(-40, -40), Vector2(24, -40), Vector2(24, 24), Vector2(-40, 24)]:
+				_draw_brutalist_slab(self, Rect2(butt, Vector2(16, 16)), slab_dark, MONO_INK, Vector2(1.6, 1.6), 3.0, MONO_AMBER)
+				draw_rect(Rect2(butt + Vector2(4.5, 4.5), Vector2(7, 7)), MONO_AMBER if is_active_prod else Color(0.42, 0.46, 0.52, 0.8), true)
+			# Twin heavy vertical crane track rails
+			draw_rect(Rect2(-35, -30, 8, 60), MONO_OFFWHITE.lerp(slab_base, 0.30), true)
+			draw_rect(Rect2(27, -30, 8, 60), MONO_OFFWHITE.lerp(slab_base, 0.30), true)
+			draw_rect(Rect2(-35, -30, 8, 60), MONO_INK, false, 1.8)
+			draw_rect(Rect2(27, -30, 8, 60), MONO_INK, false, 1.8)
+			# Twin parallel overhead crane bridges (slide counter-phase while producing)
+			var bridge_a_y: float = -12.0 + (sin(_anim_time * 2.2) * 7.5 if is_active_prod else 0.0)
+			var bridge_b_y: float = 12.0 - (sin(_anim_time * 2.2) * 7.5 if is_active_prod else 0.0)
+			draw_rect(Rect2(-34, bridge_a_y - 3.8, 68, 7.6), MONO_OFFWHITE, true)
+			draw_rect(Rect2(-34, bridge_a_y - 3.8, 68, 7.6), MONO_INK, false, 1.8)
+			draw_rect(Rect2(-34, bridge_b_y - 3.8, 68, 7.6), MONO_OFFWHITE, true)
+			draw_rect(Rect2(-34, bridge_b_y - 3.8, 68, 7.6), MONO_INK, false, 1.8)
+			# Central chassis fabrication crucible
+			if is_active_prod:
+				draw_rect(Rect2(-15, -15, 30, 30), Color(MONO_AMBER.r, MONO_AMBER.g, MONO_AMBER.b, 0.64 + active_pulse * 0.30), true)
+				draw_rect(Rect2(-15, -15, 30, 30), MONO_OFFWHITE, false, 1.8)
+				draw_circle(Vector2(0.0, 0.0), 6.5 + active_pulse * 2.2, MONO_SHIELD_CYAN)
+				draw_circle(Vector2(0.0, bridge_a_y), 3.4, MONO_AMBER)
+				draw_circle(Vector2(0.0, bridge_b_y), 3.4, MONO_AMBER)
+				_draw_active_conduit_sparks(MONO_AMBER, 28.0)
+			else:
+				draw_rect(Rect2(-15, -15, 30, 30), Color(0.22, 0.25, 0.30, 0.80), true)
+				draw_rect(Rect2(-15, -15, 30, 30), MONO_INK, false, 1.6)
+				draw_circle(Vector2(0.0, 0.0), 5.0, Color(0.32, 0.40, 0.48, 0.72))
+			_draw_team_corner_brackets(self, Rect2(-half + 3, -half + 3, half * 2.0 - 6, half * 2.0 - 6), team_col, 11.0, 2.6)

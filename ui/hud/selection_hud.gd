@@ -634,27 +634,31 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 
 
 func _shorten_unit_name(full_name: String) -> String:
-	return full_name.replace("Worker Drone", "Worker").replace("Systems Engineer", "Engineer").replace("Silica Harvester", "Harvester").replace("Recon Scout", "Scout").replace("Test Unit", "Infantry").replace("Clone Trooper", "Clone").replace("Signal Jammer", "Jammer").replace("Goliath Frame", "Goliath").replace("Chrysalis Mortar", "Mortar").replace("Batch Efficiency", "Batch Eff.").replace("Adrenal Potency", "Adrenal Pot.").replace("Compute Overdrive", "Overdrive")
+	return full_name.replace("Worker Drone", "Worker").replace("Systems Engineer", "Engineer").replace("Silica Harvester", "Harvester").replace("Recon Scout", "Scout").replace("Test Unit", "Infantry").replace("Clone Trooper", "Clone").replace("Signal Jammer", "Jammer").replace("Goliath Frame", "Goliath").replace("Chrysalis Mortar", "Mortar").replace("Batch Efficiency", "Batch Eff.").replace("Adrenal Potency", "Adrenal Pot.").replace("Compute Overdrive", "Overdrive").replace("Anvil Siege-Walker", "Anvil").replace("Monolith Dreadnought", "Dreadnought").replace("Null-Grid Projector", "Null-Grid").replace("Hardened Plating", "Plating").replace("Rapid Capacitors", "Capacitors").replace("Hyper-Velocity Rails", "HV Rails")
 
 
 func _build_unit_class_traits_label(u_data: UnitData) -> String:
 	if u_data == null:
 		return ""
 	var tags: PackedStringArray = PackedStringArray()
-	if u_data.unit_type_id == &"goliath_frame" or u_data.unit_type_id == &"arc_lancer":
-		tags.append("Heavy Synthetic")
+	if u_data.unit_type_id == &"goliath_frame" or u_data.unit_type_id == &"arc_lancer" or u_data.unit_type_id == &"monolith_dreadnought" or u_data.unit_type_id == &"anvil_siege_walker":
+		tags.append("Heavy Chassis")
 	elif u_data.is_armored:
 		tags.append("Armored")
 	else:
 		tags.append("Light")
 
+	if u_data.can_deploy:
+		tags.append("Deployable")
+	if u_data.max_shield > 0.0:
+		tags.append("Shielded")
 	if u_data.bonus_vs_armored > 0.0:
 		tags.append("+vs Armored")
-	if u_data.aoe_attack_radius > 0.0:
+	if u_data.aoe_attack_radius > 0.0 or u_data.deployed_aoe_radius > 0.0:
 		tags.append("AoE Splash")
 	if u_data.line_pierce_width > 0.0:
 		tags.append("Line Pierce")
-	if u_data.min_attack_range > 0.0:
+	if u_data.min_attack_range > 0.0 or u_data.deployed_min_attack_range > 0.0:
 		tags.append("Min Range")
 	if u_data.heal_aura_rate > 0.0:
 		tags.append("Heal Aura")
@@ -1018,7 +1022,13 @@ func _refresh_building_action_buttons(building: Building) -> void:
 			var oc_prefix: String = ("[%s] " % k_oc) if not k_oc.is_empty() else ""
 			var any_ready: bool = false
 			var min_cd: float = INF
-			var hub_list: Array[Building] = _selected_buildings if not _selected_buildings.is_empty() else [building]
+			var hub_list: Array[Building] = []
+			if not _selected_buildings.is_empty():
+				for sb: Variant in _selected_buildings:
+					if sb is Building and is_instance_valid(sb):
+						hub_list.append(sb as Building)
+			else:
+				hub_list.append(building)
 			for hb: Building in hub_list:
 				if is_instance_valid(hb) and not hb.is_destroyed and hb.has_overclock_ability():
 					if hb.can_cast_overclock():
@@ -1434,10 +1444,11 @@ func _rebuild_ability_buttons(active_group: Dictionary) -> void:
 	var supports_auto_repair: bool = data.can_gather or data.can_staff_compute or data.unit_type_id == &"worker" or data.unit_type_id == &"engineer"
 	var supports_deploy: bool = data.can_deploy
 	var total_slots: int = valid_count + (1 if supports_auto_repair else 0) + (1 if supports_deploy else 0)
-	var use_grid_4x2: bool = total_slots > 4
-	ability_row.columns = 4 if use_grid_4x2 else 2
-	var ab_min_size: Vector2 = Vector2(114.0, 27.0) if use_grid_4x2 else Vector2(214.0, 29.0)
-	var ab_font_size: int = 10 if use_grid_4x2 else 11
+	var use_grid_5x2: bool = total_slots > 8
+	var use_grid_4x2: bool = total_slots > 4 and not use_grid_5x2
+	ability_row.columns = 5 if use_grid_5x2 else (4 if use_grid_4x2 else 2)
+	var ab_min_size: Vector2 = Vector2(92.0, 26.0) if use_grid_5x2 else (Vector2(114.0, 27.0) if use_grid_4x2 else Vector2(214.0, 29.0))
+	var ab_font_size: int = 9 if use_grid_5x2 else (10 if use_grid_4x2 else 11)
 
 	for ability: AbilityData in data.abilities:
 		if ability == null:
@@ -1731,7 +1742,7 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 	if ability.target_type == AbilityData.TargetType.BUILD_PLACEMENT and ability.building_to_build != null:
 		var b_data: BuildingData = ability.building_to_build
 		var cost_text: String = b_data.get_cost_label()
-		var short_b: String = ability.display_name.replace("Silica Condenser", "Condenser").replace("Wetware Mainframe", "Mainframe").replace("Synapse Pylon", "Pylon").replace("Calibration Foundry", "Foundry").replace("Synthetics Fabricator", "Fabricator").replace("Silica Smelter", "Smelter").replace("Logic Monolith", "Monolith").replace("Capacitor Pylon", "Cap Pylon").replace("Bastion Emplacement", "Bastion").replace("Ballistics Lab", "Ballistics")
+		var short_b: String = ability.display_name.replace("Silica Condenser", "Condenser").replace("Wetware Mainframe", "Mainframe").replace("Synapse Pylon", "Pylon").replace("Calibration Foundry", "Foundry").replace("Synthetics Fabricator", "Fabricator").replace("Silica Smelter", "Smelter").replace("Logic Monolith", "Monolith").replace("Capacitor Pylon", "Cap Pylon").replace("Bastion Emplacement", "Bastion").replace("Ballistics Lab", "Ballistics").replace("Siege Gantry", "Gantry").replace("Foundry Core", "Core").replace("Assembly Bay", "Assembly")
 		var can_afford: bool = true
 		var has_prereq: bool = true
 		if _economy_manager == null:
