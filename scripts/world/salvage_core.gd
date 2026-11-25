@@ -21,6 +21,7 @@ var remaining_lifetime: float = DEFAULT_LIFETIME
 var extraction_progress: float = 0.0
 var is_claimed: bool = false
 var is_selected: bool = false
+var is_hovered: bool = false
 var source_unit_name: String = ""
 
 var _anim_time: float = 0.0
@@ -70,6 +71,13 @@ func set_selected(selected: bool) -> void:
 	if is_selected == selected:
 		return
 	is_selected = selected
+	queue_redraw()
+
+
+func set_hovered(hovered: bool) -> void:
+	if is_hovered == hovered:
+		return
+	is_hovered = hovered
 	queue_redraw()
 
 
@@ -220,6 +228,17 @@ func _draw() -> void:
 
 	if is_selected:
 		draw_arc(Vector2.ZERO, r + 11.0, 0.0, TAU, 28, Color(0.32, 0.98, 1.0, 0.92), 1.8, true)
+	if is_hovered:
+		var zoom_x: float = 1.0
+		if is_inside_tree():
+			var cam: Camera2D = get_viewport().get_camera_2d()
+			if cam != null:
+				zoom_x = maxf(0.25, cam.zoom.x)
+		var h_r: float = r + (14.5 if is_selected else 11.0)
+		var h_col: Color = Color(0.961, 0.620, 0.043, 0.42 if is_selected else 0.68)
+		if not is_selected:
+			draw_circle(Vector2.ZERO, h_r, Color(h_col.r, h_col.g, h_col.b, 0.08))
+		draw_arc(Vector2.ZERO, h_r, 0.0, TAU, 28, h_col, 1.4 / zoom_x, true)
 
 	# Radial decay ring
 	draw_arc(Vector2.ZERO, r + 6.5, -PI * 0.5, -PI * 0.5 + TAU * life_ratio, 28, Color(amber.r, amber.g, amber.b, 0.78 * flicker_alpha), 2.0, true)

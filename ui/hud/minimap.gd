@@ -298,19 +298,30 @@ func _on_map_viewport_draw() -> void:
 		map_viewport.draw_colored_polygon(mini_poly, Color(0.24, 0.32, 0.40, 0.96))
 		map_viewport.draw_polyline(mini_poly + PackedVector2Array([mini_poly[0]]), Color(0.36, 0.62, 0.72, 0.65), 1.0)
 
-	# 2.25. Destructible Barricades (amber/slate hashed blocks).
+	# 2.25. Destructible Barricades (distinct hashed amber/slate rectangular block matching orientation).
 	for node: Node in get_tree().get_nodes_in_group("destructible_barricades"):
 		if not is_instance_valid(node) or bool(node.get("is_destroyed")) or not node.has_method("get_world_polygon"):
 			continue
 		var bar_poly: PackedVector2Array = node.call("get_world_polygon")
-		if bar_poly.size() < 3:
+		if bar_poly.size() < 4:
 			continue
 		var mini_bar: PackedVector2Array = PackedVector2Array()
 		mini_bar.resize(bar_poly.size())
 		for bi: int in range(bar_poly.size()):
 			mini_bar[bi] = _world_to_minimap(bar_poly[bi])
-		map_viewport.draw_colored_polygon(mini_bar, Color(0.46, 0.36, 0.20, 0.96))
-		map_viewport.draw_polyline(mini_bar + PackedVector2Array([mini_bar[0]]), Color(1.0, 0.78, 0.28, 0.92), 1.3)
+		map_viewport.draw_colored_polygon(mini_bar, Color(0.32, 0.30, 0.24, 0.96))
+		# Diagonal amber hash stripes across the barricade quad
+		var top_a: Vector2 = mini_bar[0]
+		var top_b: Vector2 = mini_bar[1]
+		var bot_b: Vector2 = mini_bar[2]
+		var bot_a: Vector2 = mini_bar[3]
+		var hash_col: Color = Color(0.98, 0.72, 0.20, 0.92)
+		for hi: int in range(1, 4):
+			var frac: float = float(hi) / 4.0
+			var p_top: Vector2 = top_a.lerp(top_b, frac)
+			var p_bot: Vector2 = bot_a.lerp(bot_b, clampf(frac - 0.18, 0.0, 1.0))
+			map_viewport.draw_line(p_top, p_bot, hash_col, 1.1)
+		map_viewport.draw_polyline(mini_bar + PackedVector2Array([mini_bar[0]]), Color(1.0, 0.78, 0.28, 0.96), 1.3)
 
 	# 2.5. Map landmarks (subtle Technozen geometric pips).
 	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
@@ -356,7 +367,7 @@ func _on_map_viewport_draw() -> void:
 		else:
 			map_viewport.draw_circle(p, 2.2, Color(0.24, 0.94, 0.56, 0.92))
 
-	# 4. Central Data Hyper-Uplink (pulsing Technozen diamond).
+	# 4. Central Data Hyper-Uplink (crisp concentric gold/white beacon ring + diamond core).
 	var pulse: float = 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.0045)
 	for node: Node in get_tree().get_nodes_in_group("hyper_uplinks"):
 		if not (node is HyperUplink) or not is_instance_valid(node):
@@ -364,16 +375,16 @@ func _on_map_viewport_draw() -> void:
 		var uplink: HyperUplink = node
 		var up: Vector2 = _world_to_minimap(uplink.global_position)
 		var live_vis: bool = _fog_system == null or not _fog_system.fog_enabled or _fog_system.is_world_pos_visible(uplink.global_position)
-		var u_col: Color = Color(0.66, 0.78, 0.88, 0.90)
+		var u_col: Color = Color(1.0, 0.84, 0.30, 0.96)
 		if live_vis:
 			if uplink.is_contested:
 				u_col = Color(1.0, 0.80, 0.24, 1.0)
 			elif uplink.controlling_team >= 0:
 				u_col = TeamManager.get_team_color(uplink.controlling_team) if TeamManager != null else (Color(0.18, 0.98, 0.90, 1.0) if uplink.controlling_team == int(Unit.Team.PLAYER) else Color(1.0, 0.34, 0.28, 1.0))
 		var scale_x: float = rect.size.x / maxf(1.0, arena_bounds.size.x)
-		map_viewport.draw_arc(up, maxf(6.5, uplink.capture_radius * scale_x), 0.0, TAU, 24, Color(u_col.r, u_col.g, u_col.b, 0.55 + pulse * 0.25), 1.2)
-		map_viewport.draw_arc(up, lerpf(4.2, 8.2, pulse), 0.0, TAU, 16, Color(u_col.r, u_col.g, u_col.b, (1.0 - pulse) * 0.72), 1.1)
-		var dr: float = 4.0 + pulse * 0.8
+		map_viewport.draw_arc(up, maxf(7.5, uplink.capture_radius * scale_x), 0.0, TAU, 24, Color(1.0, 0.86, 0.34, 0.58 + pulse * 0.26), 1.3)
+		map_viewport.draw_arc(up, lerpf(4.8, 9.2, pulse), 0.0, TAU, 18, Color(0.98, 0.99, 1.0, (1.0 - pulse) * 0.78), 1.1)
+		var dr: float = 4.0 + pulse * 0.6
 		var diamond: PackedVector2Array = PackedVector2Array([
 			up + Vector2(0.0, -dr),
 			up + Vector2(dr, 0.0),
@@ -381,13 +392,13 @@ func _on_map_viewport_draw() -> void:
 			up + Vector2(-dr, 0.0),
 		])
 		map_viewport.draw_colored_polygon(diamond, u_col)
-		map_viewport.draw_polyline(diamond + PackedVector2Array([diamond[0]]), Color(0.95, 1.0, 1.0, 0.94), 1.1)
+		map_viewport.draw_polyline(diamond + PackedVector2Array([diamond[0]]), Color(0.98, 1.0, 1.0, 0.96), 1.2)
 
 	# 5. Fog of War shroud overlay over terrain/landmarks/resources/uplink.
 	if _fog_system != null and _fog_system.fog_enabled and _fog_system.fog_texture != null:
 		map_viewport.draw_texture_rect(_fog_system.fog_texture, rect, false)
 
-	# 5.5. Salvage Cores (pulsing amber/cyan diamonds when explored/visible).
+	# 5.5. Salvage Cores (pulsing 4.0px amber/cyan diamonds when explored/visible).
 	for node: Node in get_tree().get_nodes_in_group("salvage_cores"):
 		if not is_instance_valid(node) or not (node is Node2D) or bool(node.get("is_claimed")):
 			continue
@@ -395,17 +406,17 @@ func _on_map_viewport_draw() -> void:
 		if _fog_system != null and _fog_system.fog_enabled and not _fog_system.is_world_pos_explored(sc.global_position):
 			continue
 		var sp: Vector2 = _world_to_minimap(sc.global_position)
-		var sr: float = 2.6 + pulse * 0.9
+		var sr: float = 3.4 + pulse * 1.1
 		var s_dia: PackedVector2Array = PackedVector2Array([
 			sp + Vector2(0.0, -sr),
 			sp + Vector2(sr, 0.0),
 			sp + Vector2(0.0, sr),
 			sp + Vector2(-sr, 0.0),
 		])
-		map_viewport.draw_colored_polygon(s_dia, Color(1.0, 0.80, 0.26, 0.96))
-		map_viewport.draw_polyline(s_dia + PackedVector2Array([s_dia[0]]), Color(0.32, 0.96, 1.0, 0.95), 1.0)
+		map_viewport.draw_colored_polygon(s_dia, Color(1.0, 0.78, 0.24, 0.96))
+		map_viewport.draw_polyline(s_dia + PackedVector2Array([s_dia[0]]), Color(0.32, 0.96, 1.0, 0.96), 1.1)
 
-	# 6. Buildings (Team-colored via TeamManager; Enemy hidden until spotted).
+	# 6. Buildings (Command Hubs = 7x7 bordered square; Standard = 4.5x4.5 solid square).
 	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not (node is Building) or not is_instance_valid(node):
@@ -417,13 +428,19 @@ func _on_map_viewport_draw() -> void:
 		if is_hostile_b and not b.visible:
 			continue
 		var bp: Vector2 = _world_to_minimap(b.global_position)
-		var sz: float = 6.5 if (b.is_core_hub or b.building_type_id == &"nexus_vat") else 4.6
+		var is_hub: bool = b.is_core_hub or b.building_type_id == &"nexus_vat"
+		var sz: float = 7.0 if is_hub else 4.5
 		var col: Color = TeamManager.get_team_color(int(b.team)) if TeamManager != null else (Color(0.22, 0.96, 0.88, 1.0) if b.team == Unit.Team.PLAYER else Color(1.0, 0.32, 0.26, 0.95))
 		if is_hostile_b and _fog_system != null and _fog_system.fog_enabled and not _fog_system.is_world_pos_visible(b.global_position):
 			col.a = 0.62
-		map_viewport.draw_rect(Rect2(bp - Vector2(sz * 0.5, sz * 0.5), Vector2(sz, sz)), col, true)
+		var b_rect: Rect2 = Rect2(bp - Vector2(sz * 0.5, sz * 0.5), Vector2(sz, sz))
+		map_viewport.draw_rect(b_rect, col, true)
+		if is_hub:
+			map_viewport.draw_rect(b_rect.grow(0.5), Color(0.96, 0.99, 1.0, 0.92 * col.a), false, 1.1)
+		else:
+			map_viewport.draw_rect(b_rect, Color(0.03, 0.06, 0.10, 0.75 * col.a), false, 0.9)
 
-	# 8. Units (Team-colored via TeamManager; Visible Hostiles only).
+	# 8. Units (Heavy = 5.5px upward triangle; Infantry/Support = 2.6px dot; Workers = compact 2.0px dot).
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if not (node is Unit) or not is_instance_valid(node):
 			continue
@@ -434,13 +451,28 @@ func _on_map_viewport_draw() -> void:
 		if is_hostile_u and not u.visible:
 			continue
 		var upos: Vector2 = _world_to_minimap(u.global_position)
+		var uid: StringName = u.get_unit_type_id()
 		var ucol: Color = TeamManager.get_team_color(int(u.team)) if TeamManager != null else (Color(0.26, 0.96, 1.0, 1.0) if u.team == Unit.Team.PLAYER else Color(1.0, 0.30, 0.24, 1.0))
+		var is_worker: bool = (uid == &"worker" or uid == &"silica_harvester")
+		var is_heavy: bool = (uid == &"goliath_frame" or uid == &"arc_lancer" or uid == &"chrysalis_mortar")
 		if viewer_team >= 0 and int(u.team) == viewer_team:
-			if u.get_unit_type_id() == &"worker" or u.get_unit_type_id() == &"silica_harvester":
-				ucol = Color(0.32, 0.98, 0.60, 1.0)
-			elif u.get_unit_type_id() == &"stinger":
+			if is_worker:
+				ucol = Color(0.32, 0.94, 0.62, 0.88)
+			elif uid == &"stinger":
 				ucol = Color(0.98, 0.86, 0.32, 1.0)
-		map_viewport.draw_circle(upos, 2.3, ucol)
+		if is_heavy:
+			var half_b: float = 2.85
+			var tri: PackedVector2Array = PackedVector2Array([
+				upos + Vector2(0.0, -3.2),
+				upos + Vector2(half_b, 2.3),
+				upos + Vector2(-half_b, 2.3),
+			])
+			map_viewport.draw_colored_polygon(tri, ucol)
+			map_viewport.draw_polyline(tri + PackedVector2Array([tri[0]]), Color(0.03, 0.05, 0.08, 0.92), 1.0)
+		elif is_worker:
+			map_viewport.draw_circle(upos, 1.9, ucol)
+		else:
+			map_viewport.draw_circle(upos, 2.55, ucol)
 
 	# 9. Minimap command ping ripple.
 	if _ping_timer > 0.0:

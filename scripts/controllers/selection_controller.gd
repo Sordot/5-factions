@@ -5,6 +5,7 @@ const COMMAND_ROUTER_SCRIPT: GDScript = preload("res://scripts/controllers/comma
 const RALLY_POINT_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/rally_point_overlay.gd")
 const COMMAND_QUEUE_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/command_queue_overlay.gd")
 const DOUBLE_TAP_WINDOW_MS: int = 350
+const MILITARY_PRODUCTION_IDS: Array = [&"cloning_vat", &"calibration_foundry", &"synthetics_fabricator"]
 
 signal selection_updated(selected_count: int)
 signal selection_changed(selected_units: Array[Unit], subgroups: Array[Dictionary], active_subgroup_index: int)
@@ -17,6 +18,7 @@ signal patrol_targeting_changed(active: bool)
 signal attack_move_targeting_changed(active: bool)
 signal idle_workers_changed(idle_workers: Array[Unit])
 signal idle_workers_updated(count: int)
+signal idle_production_updated(count: int)
 signal army_count_updated(count: int)
 signal hud_toast_requested(message: String)
 
@@ -43,6 +45,7 @@ var active_targeting_ability: AbilityData = null
 var is_patrol_targeting: bool = false
 var is_attack_move_targeting: bool = false
 var idle_worker_count: int = 0
+var idle_production_count: int = 0
 var army_unit_count: int = 0
 
 var _is_dragging: bool = false
@@ -50,6 +53,7 @@ var _drag_box_active: bool = false
 var _drag_start_world: Vector2 = Vector2.ZERO
 var _drag_start_screen: Vector2 = Vector2.ZERO
 var _marquee_preview_entities: Array[Node] = []
+var _hovered_entity: Node = null
 var _last_recall_group: int = -1
 var _last_recall_time_ms: int = 0
 var _last_army_select_ms: int = 0
@@ -61,6 +65,9 @@ var _click_was_double_click: bool = false
 var _click_ctrl_pressed: bool = false
 var _tracked_death_units: Array[Unit] = []
 var _idle_cycle_index: int = -1
+var _idle_prod_cycle_index: int = -1
+var _last_idle_prod_click_ms: int = 0
+var _last_idle_prod_building: Building = null
 var _idle_refresh_timer: float = 0.0
 var _last_idle_ids: PackedInt64Array = PackedInt64Array()
 var _amove_preview_timer: float = 0.0
@@ -101,6 +108,7 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	_clear_marquee_preview()
+	_set_hovered_entity(null)
 	if SettingsManager != null and SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.disconnect(_on_settings_changed)
 	_clear_custom_cursor()
@@ -134,6 +142,7 @@ func _process(delta: float) -> void:
 
 	if _is_dragging:
 		_update_active_drag_marquee()
+	_update_hover_target()
 
 	if _amove_preview_timer > 0.0:
 		_amove_preview_timer = maxf(0.0, _amove_preview_timer - delta)
@@ -262,6 +271,19 @@ func _unhandled_input(event: InputEvent) -> void:
 				allow_idle_hotkey = false
 		if allow_idle_hotkey:
 			if select_next_idle_worker(true) != null or event is InputEventMouseButton:
+				get_viewport().set_input_as_handled()
+			return
+
+	if event.is_action_pressed("cmd_select_idle_production") and not event.is_echo():
+		var allow_prod_hotkey: bool = true
+		var shift_prod: bool = Input.is_key_pressed(KEY_SHIFT)
+		if event is InputEventKey:
+			var prod_k: InputEventKey = event
+			if prod_k.ctrl_pressed or prod_k.alt_pressed:
+				allow_prod_hotkey = false
+			shift_prod = shift_prod or prod_k.shift_pressed
+		if allow_prod_hotkey:
+			if select_next_idle_production(true, shift_prod) > 0 or event is InputEventMouseButton:
 				get_viewport().set_input_as_handled()
 			return
 
@@ -857,6 +879,87 @@ func select_all_army(allow_double_tap_center: bool = true) -> int:
 	return army.size()
 
 
+func get_idle_production_buildings() -> Array[Building]:
+	var idle_list: Array[Building] = []
+	if not is_inside_tree():
+		return idle_list
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		return idle_list
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node) or not (node is Building):
+			continue
+		var b: Building = node as Building
+		if b.is_destroyed or b.is_queued_for_deletion() or not b.is_constructed or b.is_salvaging:
+			continue
+		if int(b.team) != local_team:
+			continue
+		if not MILITARY_PRODUCTION_IDS.has(b.building_type_id):
+			continue
+		if b.production_component == null or b.production_component.get_queue_size() > 0:
+			continue
+		idle_list.append(b)
+	idle_list.sort_custom(func(a: Building, b: Building) -> bool:
+		return a.get_instance_id() < b.get_instance_id()
+	)
+	return idle_list
+
+
+func select_next_idle_production(allow_center_on_repeat: bool = true, select_all: bool = false) -> int:
+	var idle_list: Array[Building] = get_idle_production_buildings()
+	if idle_list.is_empty():
+		_idle_prod_cycle_index = -1
+		_last_idle_prod_building = null
+		_refresh_idle_workers(false)
+		return 0
+
+	cancel_ability_targeting()
+	cancel_attack_move_targeting()
+	cancel_patrol_targeting()
+	_set_selected_units([])
+
+	if select_all:
+		_set_selected_buildings(idle_list)
+		return idle_list.size()
+
+	var now_ms: int = Time.get_ticks_msec()
+	var is_rapid_repeat: bool = (
+		allow_center_on_repeat
+		and _last_idle_prod_building != null
+		and is_instance_valid(_last_idle_prod_building)
+		and selected_buildings.size() == 1
+		and selected_buildings[0] == _last_idle_prod_building
+		and (now_ms - _last_idle_prod_click_ms) <= DOUBLE_TAP_WINDOW_MS
+	)
+	if is_rapid_repeat:
+		var cam_rep: RTSCamera = _get_rts_camera()
+		if cam_rep != null:
+			cam_rep.smooth_center_on(_last_idle_prod_building.global_position)
+		_last_idle_prod_click_ms = 0
+		return 1
+
+	var next_idx: int = (_idle_prod_cycle_index + 1) % idle_list.size()
+	if selected_buildings.size() == 1 and is_instance_valid(selected_buildings[0]):
+		var cur_idx: int = idle_list.find(selected_buildings[0])
+		if cur_idx >= 0:
+			next_idx = (cur_idx + 1) % idle_list.size()
+
+	_idle_prod_cycle_index = next_idx
+	var chosen: Building = idle_list[next_idx]
+	_last_idle_prod_building = chosen
+	_last_idle_prod_click_ms = now_ms
+	_set_selected_buildings([chosen])
+
+	if allow_center_on_repeat and idle_list.size() == 1:
+		var cam_one: RTSCamera = _get_rts_camera()
+		if cam_one != null:
+			var vp_size: Vector2 = get_viewport_rect().size / cam_one.zoom
+			var inner_rect: Rect2 = Rect2(cam_one.global_position - vp_size * 0.5, vp_size).grow(-64.0)
+			if not inner_rect.has_point(chosen.global_position):
+				cam_one.smooth_center_on(chosen.global_position)
+	return 1
+
+
 func _refresh_idle_workers(force_emit: bool = false) -> void:
 	var idle_list: Array[Unit] = get_idle_workers()
 	var ids: PackedInt64Array = PackedInt64Array()
@@ -868,6 +971,11 @@ func _refresh_idle_workers(force_emit: bool = false) -> void:
 	if force_emit or cur_army_count != army_unit_count:
 		army_unit_count = cur_army_count
 		army_count_updated.emit(army_unit_count)
+
+	var cur_idle_prod: int = get_idle_production_buildings().size()
+	if force_emit or cur_idle_prod != idle_production_count:
+		idle_production_count = cur_idle_prod
+		idle_production_updated.emit(idle_production_count)
 
 	if not force_emit and ids == _last_idle_ids and idle_worker_count == idle_list.size():
 		return
@@ -1648,22 +1756,56 @@ func _on_selected_building_destroyed(dead_b: Building) -> void:
 		_set_selected_buildings(rem)
 
 
-func queue_unit_distributed(unit_data: UnitData) -> bool:
+func queue_unit_distributed(unit_data: UnitData, play_audio: bool = true) -> bool:
 	if unit_data == null:
 		return false
+	var candidates: Array[Building] = _collect_compatible_production_buildings(unit_data, null)
+	if candidates.is_empty():
+		return false
+	var best: Building = _pick_shortest_queue_building(candidates)
+	return best.queue_unit_data(unit_data, null, play_audio)
+
+
+func queue_unit_distributed_batch(unit_data: UnitData, count: int, fallback_building: Building = null) -> int:
+	if unit_data == null or count <= 0:
+		return 0
+	var candidates: Array[Building] = _collect_compatible_production_buildings(unit_data, fallback_building)
+	if candidates.is_empty():
+		return 0
+	var queued: int = 0
+	for _i: int in range(count):
+		var best: Building = _pick_shortest_queue_building(candidates)
+		if best == null or best.production_component == null or best.production_component.is_queue_full():
+			break
+		if best.queue_unit_data(unit_data, null, false):
+			queued += 1
+		else:
+			if queued == 0:
+				# Surface the normal insufficient resource/bandwidth toast once when 0 could be queued
+				best.queue_unit_data(unit_data, null, true)
+			break
+	if queued > 0 and AudioManager != null:
+		AudioManager.play_ui_click()
+	return queued
+
+
+func _collect_compatible_production_buildings(unit_data: UnitData, fallback_building: Building) -> Array[Building]:
 	var candidates: Array[Building] = []
 	var local_t: Unit.Team = _get_local_human_team_enum()
 	for b: Building in selected_buildings:
-		if is_instance_valid(b) and not b.is_destroyed and b.is_constructed and b.team == local_t:
+		if is_instance_valid(b) and not b.is_destroyed and b.is_constructed and not b.is_salvaging and b.team == local_t:
 			if b.trainable_unit_data.has(unit_data):
 				candidates.append(b)
 	if candidates.is_empty() and selected_building != null and is_instance_valid(selected_building):
-		if selected_building.trainable_unit_data.has(unit_data):
+		if not selected_building.is_destroyed and selected_building.is_constructed and not selected_building.is_salvaging and selected_building.trainable_unit_data.has(unit_data):
 			candidates.append(selected_building)
-	if candidates.is_empty():
-		return false
+	if candidates.is_empty() and fallback_building != null and is_instance_valid(fallback_building):
+		if not fallback_building.is_destroyed and fallback_building.is_constructed and not fallback_building.is_salvaging and fallback_building.trainable_unit_data.has(unit_data):
+			candidates.append(fallback_building)
+	return candidates
 
-	# Choose the capable building with the shortest active queue (breaking ties by fewest remaining seconds).
+
+func _pick_shortest_queue_building(candidates: Array[Building]) -> Building:
 	var best: Building = null
 	var best_score: float = INF
 	for b: Building in candidates:
@@ -1678,11 +1820,9 @@ func queue_unit_distributed(unit_data: UnitData) -> bool:
 		if score < best_score:
 			best_score = score
 			best = b
-
-	if best == null:
-		# All queues full; fallback to first candidate so standard error/feedback still runs.
+	if best == null and not candidates.is_empty():
 		best = candidates[0]
-	return best.queue_unit_data(unit_data)
+	return best
 
 
 func eject_engineers_from_selected_buildings() -> void:
@@ -2101,6 +2241,71 @@ func _is_hovering_repairable_target() -> bool:
 			if is_instance_valid(u) and u.can_repair_target(hovered_b):
 				return true
 	return false
+
+
+func _update_hover_target() -> void:
+	if _hovered_entity != null and not is_instance_valid(_hovered_entity):
+		_hovered_entity = null
+	if command_router == null or _is_dragging or _is_any_modal_open():
+		_set_hovered_entity(null)
+		return
+	var vp: Viewport = get_viewport()
+	if vp != null:
+		var ui_ctrl: Control = vp.gui_get_hovered_control()
+		if ui_ctrl != null and ui_ctrl.mouse_filter != Control.MOUSE_FILTER_IGNORE:
+			_set_hovered_entity(null)
+			return
+	var world_pt: Vector2 = get_global_mouse_position()
+	_set_hovered_entity(_find_top_hover_entity(world_pt))
+
+
+func _set_hovered_entity(next_entity: Node) -> void:
+	if _hovered_entity == next_entity:
+		return
+	if _hovered_entity != null and is_instance_valid(_hovered_entity) and _hovered_entity.has_method("set_hovered"):
+		_hovered_entity.call("set_hovered", false)
+	_hovered_entity = next_entity
+	if _hovered_entity != null and is_instance_valid(_hovered_entity) and _hovered_entity.has_method("set_hovered"):
+		_hovered_entity.call("set_hovered", true)
+
+
+func _find_top_hover_entity(world_point: Vector2) -> Node:
+	if command_router == null:
+		return null
+	var is_spec: bool = TeamManager != null and TeamManager.is_spectator_mode()
+	if is_spec:
+		var su: Unit = command_router.find_any_unit_at_point(world_point)
+		if su != null:
+			return su
+		var sb: Building = command_router.find_any_building_at_point(world_point)
+		if sb != null:
+			return sb
+	else:
+		var local_t: Unit.Team = _get_local_human_team_enum()
+		var local_int: int = int(local_t)
+		var fu: Unit = command_router.find_unit_at_point(world_point, local_t)
+		if fu != null:
+			return fu
+		var eu: Unit = command_router.find_hostile_unit_at_point(world_point, local_int)
+		if eu != null:
+			return eu
+		var fb: Building = command_router.find_building_at_point(world_point, local_t)
+		if fb != null:
+			return fb
+		var eb: Building = command_router.find_hostile_building_at_point(world_point, local_int)
+		if eb != null:
+			return eb
+
+	var bar: Node2D = command_router.find_barricade_at_point(world_point)
+	if bar != null:
+		return bar
+	var salv: Node2D = command_router.find_salvage_core_at_point(world_point)
+	if salv != null:
+		return salv
+	var res: ResourceNode = command_router.find_resource_node_at_point(world_point)
+	if res != null:
+		return res
+	return null
 
 
 func _update_command_cursor() -> void:

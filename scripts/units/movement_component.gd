@@ -3,6 +3,9 @@ extends Node
 
 const SETTLE_PROXIMITY_RADIUS: float = 160.0
 const SETTLE_NO_PROGRESS_TIME: float = 0.45
+const SOFT_SETTLE_SAMPLE_WINDOW: float = 0.25
+const SOFT_SETTLE_MAX_DISP_PX: float = 8.0
+const SOFT_SETTLE_CONFIRM_TIME: float = 0.30
 
 var last_nav_target: Vector2 = Vector2.INF
 var wants_nav_movement: bool = false
@@ -10,6 +13,10 @@ var desired_move_velocity: Vector2 = Vector2.ZERO
 
 var _no_progress_timer: float = 0.0
 var _best_dist_to_goal: float = INF
+var _settle_timer: float = 0.0
+var _settle_sample_pos: Vector2 = Vector2.ZERO
+var _settle_sample_timer: float = 0.0
+var _settle_low_motion: bool = false
 var _stuck_sample_pos: Vector2 = Vector2.ZERO
 var _stuck_sample_timer: float = 0.0
 var _stuck_accum_time: float = 0.0
@@ -26,6 +33,7 @@ func initialize_for_unit(owner_unit: Unit) -> void:
 	if owner_unit == null:
 		return
 	_stuck_sample_pos = owner_unit.global_position
+	_settle_sample_pos = owner_unit.global_position
 	_stuck_side_sign = 1.0 if (owner_unit.get_instance_id() % 2) == 0 else -1.0
 
 
@@ -81,6 +89,10 @@ func clear_cached_approach_point() -> void:
 func reset_progress_tracker(owner_unit: Unit) -> void:
 	_no_progress_timer = 0.0
 	_best_dist_to_goal = INF
+	_settle_timer = 0.0
+	_settle_sample_pos = owner_unit.global_position if owner_unit != null else Vector2.ZERO
+	_settle_sample_timer = 0.0
+	_settle_low_motion = false
 	_stuck_sample_pos = owner_unit.global_position if owner_unit != null else Vector2.ZERO
 	_stuck_sample_timer = 0.0
 	_stuck_accum_time = 0.0
@@ -94,13 +106,57 @@ func should_settle_at_destination(owner_unit: Unit, goal_pos: Vector2, delta: fl
 	var dist_to_goal: float = owner_unit.global_position.distance_to(goal_pos)
 	var arrive_dist: float = owner_unit.nav_agent.target_desired_distance + (14.0 if not owner_unit.command_queue.is_empty() else 0.0)
 	if dist_to_goal <= arrive_dist or owner_unit.nav_agent.is_navigation_finished():
+		_settle_timer = 0.0
 		return true
+
+	# Phase C.3: Soft-settling for shared Move destinations when settled allies occupy the goal center.
+	if owner_unit.command_state == Unit.CommandState.MOVING:
+		var unit_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 16.0
+		var settle_band: float = maxf(arrive_dist * 2.5, unit_r * 3.5)
+		if dist_to_goal <= settle_band:
+			_settle_sample_timer += delta
+			if _settle_sample_timer >= SOFT_SETTLE_SAMPLE_WINDOW:
+				var disp: float = owner_unit.global_position.distance_to(_settle_sample_pos)
+				_settle_low_motion = disp < SOFT_SETTLE_MAX_DISP_PX
+				_settle_sample_pos = owner_unit.global_position
+				_settle_sample_timer = 0.0
+			if _settle_low_motion and _has_settled_ally_near_goal(owner_unit, goal_pos, maxf(unit_r * 2.8, 36.0)):
+				_settle_timer += delta
+				if _settle_timer >= SOFT_SETTLE_CONFIRM_TIME:
+					stop_navigation(owner_unit)
+					return true
+			else:
+				_settle_timer = maxf(0.0, _settle_timer - delta * 2.0)
+		else:
+			_settle_timer = 0.0
+			_settle_sample_timer = 0.0
+			_settle_sample_pos = owner_unit.global_position
+			_settle_low_motion = false
+
 	if dist_to_goal < _best_dist_to_goal - 4.0:
 		_best_dist_to_goal = dist_to_goal
 		_no_progress_timer = 0.0
 	elif dist_to_goal <= SETTLE_PROXIMITY_RADIUS:
 		_no_progress_timer += delta
 		if _no_progress_timer >= SETTLE_NO_PROGRESS_TIME:
+			return true
+	return false
+
+
+func _has_settled_ally_near_goal(owner_unit: Unit, goal_pos: Vector2, radius: float) -> bool:
+	if owner_unit == null or not owner_unit.is_inside_tree():
+		return false
+	var candidates: Array = SpatialGrid.query_units_in_radius(goal_pos, radius, int(owner_unit.team)) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+	var r_sq: float = radius * radius
+	for node: Variant in candidates:
+		if not is_instance_valid(node) or not (node is Unit) or node == owner_unit:
+			continue
+		var other: Unit = node as Unit
+		if other.is_dead or other.is_staffed or other.team != owner_unit.team:
+			continue
+		if other.command_state != Unit.CommandState.IDLE and other.command_state != Unit.CommandState.HOLD_POSITION:
+			continue
+		if other.global_position.distance_squared_to(goal_pos) <= r_sq:
 			return true
 	return false
 
@@ -649,7 +705,7 @@ func _check_post_slide_settling(owner_unit: Unit) -> void:
 		var collider: Object = owner_unit.get_slide_collision(i).get_collider()
 		if collider is Unit:
 			var other: Unit = collider
-			if other.team == owner_unit.team and other.command_state == Unit.CommandState.IDLE:
+			if other.team == owner_unit.team and (other.command_state == Unit.CommandState.IDLE or other.command_state == Unit.CommandState.HOLD_POSITION):
 				wants_nav_movement = false
 				reset_progress_tracker(owner_unit)
 				owner_unit.advance_command_queue()

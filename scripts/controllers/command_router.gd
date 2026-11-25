@@ -2,6 +2,7 @@ class_name CommandRouter
 extends Node
 
 const MOVE_MARKER_SCRIPT: GDScript = preload("res://ui/overlays/move_marker.gd")
+const COMBAT_VFX_SCRIPT: GDScript = preload("res://ui/overlays/combat_vfx.gd")
 const DEFAULT_UNIT_RADIUS: float = 16.0
 const RING_SPACING_MULTIPLIER: float = 2.6
 const VENT_SNAP_RADIUS: float = 64.0
@@ -315,6 +316,7 @@ func _handle_multi_building_rally_right_click(buildings: Array[Building], world_
 		if AudioManager != null:
 			AudioManager.play_sfx(&"order_gather", -4.5, 0.04)
 		spawn_move_marker(clicked_res.global_position, MoveMarker.MarkerStyle.GATHER)
+		_spawn_rally_ripple(clicked_res.global_position, Color(0.204, 0.827, 0.600, 1.0))
 		return
 
 	if clicked_friendly_unit != null:
@@ -323,6 +325,7 @@ func _handle_multi_building_rally_right_click(buildings: Array[Building], world_
 		if AudioManager != null:
 			AudioManager.play_sfx(&"order_move", -4.0, 0.05)
 		spawn_move_marker(clicked_friendly_unit.global_position, MoveMarker.MarkerStyle.INTERACT)
+		_spawn_rally_ripple(clicked_friendly_unit.global_position, Color(0.220, 0.741, 0.973, 1.0))
 		return
 
 	if clicked_res != null and not clicked_res.is_vent:
@@ -331,6 +334,7 @@ func _handle_multi_building_rally_right_click(buildings: Array[Building], world_
 		if AudioManager != null:
 			AudioManager.play_sfx(&"order_gather", -4.5, 0.04)
 		spawn_move_marker(clicked_res.global_position, MoveMarker.MarkerStyle.GATHER)
+		_spawn_rally_ripple(clicked_res.global_position, Color(0.204, 0.827, 0.600, 1.0))
 		return
 
 	var clicked_friendly_building: Building = find_building_at_point(world_pos, local_t)
@@ -344,6 +348,7 @@ func _handle_multi_building_rally_right_click(buildings: Array[Building], world_
 			if AudioManager != null:
 				AudioManager.play_sfx(&"order_gather", -4.5, 0.04)
 			spawn_move_marker(clicked_friendly_building.global_position, MoveMarker.MarkerStyle.INTERACT)
+			_spawn_rally_ripple(clicked_friendly_building.global_position, Color(0.204, 0.827, 0.600, 1.0))
 			return
 
 	for b: Building in buildings:
@@ -351,6 +356,19 @@ func _handle_multi_building_rally_right_click(buildings: Array[Building], world_
 	if AudioManager != null:
 		AudioManager.play_sfx(&"order_move", -4.5, 0.04)
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.MOVE)
+	_spawn_rally_ripple(world_pos, Color(0.220, 0.741, 0.973, 1.0))
+
+
+func _spawn_rally_ripple(target_pos: Vector2, col: Color) -> void:
+	var host: Node = get_tree().current_scene
+	if host == null:
+		host = get_parent()
+	if host == null:
+		return
+	var fx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
+	fx.z_index = 59
+	host.add_child(fx)
+	fx.call("setup_rally_ripple", target_pos, col)
 
 
 func _handle_building_rally_right_click(building: Building, world_pos: Vector2) -> void:

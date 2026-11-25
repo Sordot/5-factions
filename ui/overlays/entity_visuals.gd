@@ -41,9 +41,11 @@ func _process(delta: float) -> void:
 			return
 		entity_type_id = _owner_unit.get_unit_type_id()
 		team = int(_owner_unit.team)
-		# Redraw animated units (pulses, overdrive, adrenal flashes, striders)
+		# Redraw animated units (pulses, overdrive, adrenal flashes, striders, hover & spawn anim)
 		if (
-			entity_type_id == &"symbiote"
+			_owner_unit.is_hovered
+			or _owner_unit.spawn_anim_timer > 0.0
+			or entity_type_id == &"symbiote"
 			or entity_type_id == &"signal_jammer"
 			or entity_type_id == &"arc_lancer"
 			or entity_type_id == &"goliath_frame"
@@ -88,11 +90,70 @@ func _get_palette() -> Dictionary:
 
 func _draw() -> void:
 	var p: Dictionary = _get_palette()
+	_draw_hover_ring()
 	_draw_marquee_preview_ring()
 	if mode == Mode.UNIT:
 		_draw_unit_silhouette(p)
+		_draw_unit_spawn_flash(p)
 	else:
 		_draw_building_silhouette(p)
+
+
+func _get_zoom_invariant_width(base_px: float) -> float:
+	if is_inside_tree():
+		var cam: Camera2D = get_viewport().get_camera_2d()
+		if cam != null:
+			return base_px / maxf(0.25, cam.zoom.x)
+	return base_px
+
+
+func _is_entity_hostile(entity_team: int) -> bool:
+	var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	if viewer < 0:
+		return false
+	if TeamManager != null:
+		return TeamManager.are_enemies(viewer, entity_team)
+	return entity_team != int(Unit.Team.PLAYER)
+
+
+func _draw_hover_ring() -> void:
+	var pulse_a: float = 0.86 + 0.14 * sin(_anim_time * 5.2)
+	var line_w: float = _get_zoom_invariant_width(1.4)
+	if mode == Mode.UNIT:
+		if _owner_unit == null or not is_instance_valid(_owner_unit) or _owner_unit.is_dead:
+			return
+		if not _owner_unit.is_hovered or _owner_unit.is_marquee_highlighted:
+			return
+		var is_hostile: bool = _is_entity_hostile(int(_owner_unit.team))
+		var base_col: Color = Color(1.0, 0.302, 0.427, 0.65) if is_hostile else Color(0.220, 0.741, 0.973, 0.55)
+		var r: float = _owner_unit.get_selection_radius() + (4.5 if _owner_unit.is_selected else 1.5)
+		var alpha: float = (base_col.a * 0.58 if _owner_unit.is_selected else base_col.a) * pulse_a
+		if not _owner_unit.is_selected:
+			draw_circle(Vector2.ZERO, r, Color(base_col.r, base_col.g, base_col.b, 0.08 * pulse_a))
+		draw_arc(Vector2.ZERO, r, 0.0, TAU, 28, Color(base_col.r, base_col.g, base_col.b, alpha), line_w, true)
+	else:
+		if _owner_building == null or not is_instance_valid(_owner_building) or _owner_building.is_destroyed:
+			return
+		if not _owner_building.is_hovered or _owner_building.is_marquee_highlighted:
+			return
+		var is_hostile_b: bool = _is_entity_hostile(int(_owner_building.team))
+		var base_col_b: Color = Color(1.0, 0.302, 0.427, 0.65) if is_hostile_b else Color(0.220, 0.741, 0.973, 0.55)
+		var r_b: float = maxf(_owner_building.selection_radius, _owner_building.footprint_radius + 6.0) + (5.0 if _owner_building.is_selected else 0.0)
+		var alpha_b: float = (base_col_b.a * 0.58 if _owner_building.is_selected else base_col_b.a) * pulse_a
+		if not _owner_building.is_selected:
+			draw_circle(Vector2.ZERO, r_b, Color(base_col_b.r, base_col_b.g, base_col_b.b, 0.07 * pulse_a))
+		draw_arc(Vector2.ZERO, r_b, 0.0, TAU, 36, Color(base_col_b.r, base_col_b.g, base_col_b.b, alpha_b), line_w, true)
+
+
+func _draw_unit_spawn_flash(p: Dictionary) -> void:
+	if _owner_unit == null or not is_instance_valid(_owner_unit) or _owner_unit.spawn_anim_timer <= 0.0:
+		return
+	var frac: float = clampf(_owner_unit.spawn_anim_timer / Unit.SPAWN_ANIM_DURATION, 0.0, 1.0)
+	var base_r: float = _owner_unit.data.collision_radius if _owner_unit.data != null else 15.0
+	var rim_r: float = base_r * lerpf(1.38, 0.92, frac)
+	var flash_col: Color = p["core"] if team != 0 else Color(0.24, 0.98, 0.88, 1.0)
+	draw_circle(Vector2.ZERO, base_r * 1.05, Color(flash_col.r, flash_col.g, flash_col.b, frac * 0.34))
+	draw_arc(Vector2.ZERO, rim_r, 0.0, TAU, 24, Color(0.86, 1.0, 0.98, frac * 0.85), 2.4 * frac + 0.8, true)
 
 
 func _draw_marquee_preview_ring() -> void:
@@ -456,7 +517,10 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 	var core_alt: Color = p["core_alt"]
 	var outline: Color = p["outline"]
 	var pulse: float = 0.5 + 0.5 * sin(_anim_time * 3.4)
+	var active_pulse: float = 0.5 + 0.5 * sin(_anim_time * TAU * 2.2)
 	var is_training: bool = _owner_building.get_training_queue_size() > 0
+	var is_active_prod: bool = _owner_building.is_actively_producing()
+	var standby_slate: Color = Color(0.28, 0.42, 0.50, 0.72)
 
 	# Subtle Technozen circuit grounding pad under completed structures
 	if SettingsManager == null or SettingsManager.battle_scars_enabled:
@@ -528,21 +592,26 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 		&"wetware_mainframe":
 			# Brutalist server monolith with glowing neural-grid circuit lines & staffing indicator pips
 			var cmp_col: Color = Color(0.28, 0.88, 1.0, 1.0) if team == 0 else core
-			_poly_outlined(hull_poly, shell_hi, cmp_col, 2.2)
+			var mf_border: Color = cmp_col if is_active_prod else standby_slate.lerp(cmp_col, 0.45)
+			_poly_outlined(hull_poly, shell_hi, mf_border, 2.2)
 			draw_rect(Rect2(-24, -24, 48, 48), deck, true)
-			# Neural-grid circuit lines
+			# Neural-grid circuit lines (cool dimmed standby when idle, 2.2Hz glowing pulse when active)
 			var staffed: int = _owner_building.get_assigned_engineer_count()
-			var grid_alpha: float = 0.32 if staffed == 0 else (0.58 + pulse * 0.38)
-			var g_col: Color = Color(cmp_col.r, cmp_col.g, cmp_col.b, grid_alpha)
+			var g_col: Color = Color(cmp_col.r, cmp_col.g, cmp_col.b, 0.62 + active_pulse * 0.36) if is_active_prod else Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.42)
 			for gx: float in [-16.0, -6.0, 6.0, 16.0]:
-				draw_line(Vector2(gx, -21), Vector2(gx, 14), g_col, 1.6)
+				draw_line(Vector2(gx, -21), Vector2(gx, 14), g_col, 1.8 if is_active_prod else 1.4)
 			for gy: float in [-16.0, -4.0, 8.0]:
-				draw_line(Vector2(-21, gy), Vector2(21, gy), g_col, 1.6)
+				draw_line(Vector2(-21, gy), Vector2(21, gy), g_col, 1.8 if is_active_prod else 1.4)
 			# Central compute processor diamond
 			var cpu: PackedVector2Array = PackedVector2Array([
 				Vector2(0, -11), Vector2(11, 0), Vector2(0, 11), Vector2(-11, 0),
 			])
-			draw_colored_polygon(cpu, Color(cmp_col.r, cmp_col.g, cmp_col.b, 0.45 + float(staffed) * 0.25))
+			if is_active_prod:
+				draw_colored_polygon(cpu, Color(cmp_col.r, cmp_col.g, cmp_col.b, 0.68 + active_pulse * 0.30))
+				draw_circle(Vector2.ZERO, 4.0 + active_pulse * 1.4, Color(0.90, 1.0, 1.0, 0.82))
+				_draw_active_conduit_sparks(cmp_col, 22.0)
+			else:
+				draw_colored_polygon(cpu, Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.45))
 			# Crisp staffing indicator pips (0/2, 1/2, 2/2)
 			var slots: int = maxi(1, _owner_building.max_staff_slots)
 			for s: int in range(slots):
@@ -550,51 +619,70 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 				var pip_rect: Rect2 = Rect2(px - 5.5, 16.5, 11.0, 6.0)
 				var filled: bool = s < staffed
 				draw_rect(pip_rect, cmp_col if filled else Color(0.14, 0.20, 0.26, 0.95), true)
-				draw_rect(pip_rect, cmp_col, false, 1.2)
+				draw_rect(pip_rect, mf_border, false, 1.2)
 
 		&"cloning_vat":
-			# Twin-chambered translucent bio-tank with animated dual-pulse indicators while training
+			# Twin-chambered translucent bio-tank: unmistakable active pulse + rising sparks vs cool dimmed standby
 			var vat_col: Color = Color(0.22, 0.96, 0.76, 1.0) if team == 0 else core
-			_poly_outlined(hull_poly, shell_hi, vat_col, 2.4)
+			var vat_border: Color = vat_col if is_active_prod else standby_slate.lerp(vat_col, 0.45)
+			_poly_outlined(hull_poly, shell_hi, vat_border, 2.4)
 			draw_colored_polygon(_scale_poly(hull_poly, 0.76), deck)
 			# Twin translucent bio-chambers
 			var chamber_l: Rect2 = Rect2(-26, -20, 20, 40)
 			var chamber_r: Rect2 = Rect2(6, -20, 20, 40)
-			var glow_a: float = (0.62 + pulse * 0.36) if is_training else 0.72
-			draw_rect(chamber_l, Color(vat_col.r, vat_col.g, vat_col.b, glow_a * 0.75), true)
-			draw_rect(chamber_r, Color(vat_col.r, vat_col.g, vat_col.b, glow_a * 0.75), true)
-			draw_rect(chamber_l, shell_hi, false, 1.6)
-			draw_rect(chamber_r, shell_hi, false, 1.6)
-			# Inner vat spine bridge
-			draw_rect(Rect2(-6, -10, 12, 20), trim, true)
-			if is_training:
-				var wave_y: float = lerpf(16.0, -16.0, fmod(_anim_time * 1.4, 1.0))
+			if is_active_prod:
+				var glow_a: float = 0.62 + active_pulse * 0.36
+				draw_rect(chamber_l, Color(vat_col.r, vat_col.g, vat_col.b, glow_a * 0.82), true)
+				draw_rect(chamber_r, Color(vat_col.r, vat_col.g, vat_col.b, glow_a * 0.82), true)
+				draw_rect(chamber_l, shell_hi, false, 1.6)
+				draw_rect(chamber_r, shell_hi, false, 1.6)
+				draw_rect(Rect2(-6, -10, 12, 20), trim, true)
+				draw_line(Vector2(-6, 0), Vector2(6, 0), Color(0.88, 1.0, 0.96, 0.65 + active_pulse * 0.35), 2.4, true)
+				var wave_y: float = lerpf(16.0, -16.0, fmod(_anim_time * 1.5, 1.0))
 				draw_line(Vector2(-24, wave_y), Vector2(-8, wave_y), Color(0.92, 1.0, 0.96, 0.95), 2.4)
 				draw_line(Vector2(8, -wave_y), Vector2(24, -wave_y), Color(0.92, 1.0, 0.96, 0.95), 2.4)
-				draw_circle(Vector2(-16, 0), 4.0 + pulse * 2.5, Color(0.9, 1.0, 0.96, 0.45))
-				draw_circle(Vector2(16, 0), 4.0 + pulse * 2.5, Color(0.9, 1.0, 0.96, 0.45))
+				draw_circle(Vector2(-16, 0), 4.2 + active_pulse * 2.4, Color(0.9, 1.0, 0.96, 0.52))
+				draw_circle(Vector2(16, 0), 4.2 + active_pulse * 2.4, Color(0.9, 1.0, 0.96, 0.52))
+				_draw_active_conduit_sparks(vat_col, 24.0)
 			else:
-				draw_circle(Vector2(-16, 0), 4.5, Color(0.86, 1.0, 0.95, 0.55))
-				draw_circle(Vector2(16, 0), 4.5, Color(0.86, 1.0, 0.95, 0.55))
+				var idle_tank: Color = standby_slate.lerp(vat_col, 0.25)
+				draw_rect(chamber_l, Color(idle_tank.r, idle_tank.g, idle_tank.b, 0.44), true)
+				draw_rect(chamber_r, Color(idle_tank.r, idle_tank.g, idle_tank.b, 0.44), true)
+				draw_rect(chamber_l, Color(trim.r, trim.g, trim.b, 0.72), false, 1.4)
+				draw_rect(chamber_r, Color(trim.r, trim.g, trim.b, 0.72), false, 1.4)
+				draw_rect(Rect2(-6, -10, 12, 20), trim, true)
+				draw_circle(Vector2(-16, 0), 3.6, Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.42))
+				draw_circle(Vector2(16, 0), 3.6, Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.42))
 
 		&"calibration_foundry":
-			# Angular industrial chassis bay with gantry arms
+			# Angular industrial chassis bay with gantry arms (glowing forged bay + sparks when active vs dim standby)
 			var fnd_col: Color = Color(0.98, 0.68, 0.26, 1.0) if team == 0 else core_alt
-			_poly_outlined(hull_poly, shell, fnd_col, 2.4)
+			var fnd_border: Color = fnd_col if is_active_prod else standby_slate.lerp(fnd_col, 0.45)
+			_poly_outlined(hull_poly, shell, fnd_border, 2.4)
 			draw_colored_polygon(_scale_poly(hull_poly, 0.76), deck)
 			# Twin industrial gantry rails
 			draw_rect(Rect2(-27, -28, 9, 56), trim, true)
 			draw_rect(Rect2(18, -28, 9, 56), trim, true)
-			# Articulated cross-gantry bridge (slides gently when training)
-			var bridge_y: float = sin(_anim_time * 2.4) * 10.0 if is_training else 0.0
-			draw_rect(Rect2(-26, bridge_y - 4, 52, 8), shell_hi, true)
-			draw_rect(Rect2(-11, -13, 22, 26), Color(fnd_col.r, fnd_col.g, fnd_col.b, 0.85), true)
-			draw_rect(Rect2(-11, -13, 22, 26), shell_hi, false, 1.5)
+			if is_active_prod:
+				var bridge_y: float = sin(_anim_time * 2.6) * 10.0
+				draw_line(Vector2(-22.5, -24), Vector2(-22.5, 24), Color(fnd_col.r, fnd_col.g, fnd_col.b, 0.55 + active_pulse * 0.42), 2.2, true)
+				draw_line(Vector2(22.5, -24), Vector2(22.5, 24), Color(fnd_col.r, fnd_col.g, fnd_col.b, 0.55 + active_pulse * 0.42), 2.2, true)
+				draw_rect(Rect2(-26, bridge_y - 4, 52, 8), shell_hi, true)
+				draw_rect(Rect2(-11, -13, 22, 26), Color(fnd_col.r, fnd_col.g, fnd_col.b, 0.74 + active_pulse * 0.26), true)
+				draw_rect(Rect2(-11, -13, 22, 26), Color(1.0, 0.96, 0.84, 0.92), false, 1.6)
+				draw_circle(Vector2(0.0, bridge_y), 3.6 + active_pulse * 1.4, Color(1.0, 0.95, 0.80, 0.88))
+				_draw_active_conduit_sparks(fnd_col, 24.0)
+			else:
+				var idle_bay: Color = standby_slate.lerp(fnd_col, 0.22)
+				draw_rect(Rect2(-26, -4, 52, 8), Color(trim.r, trim.g, trim.b, 0.85), true)
+				draw_rect(Rect2(-11, -13, 22, 26), Color(idle_bay.r, idle_bay.g, idle_bay.b, 0.45), true)
+				draw_rect(Rect2(-11, -13, 22, 26), Color(trim.r, trim.g, trim.b, 0.72), false, 1.3)
 
 		&"synthetics_fabricator":
 			# Heavy reinforced mega-bay with glowing high-Compute capacitor coils
 			var fab_col: Color = Color(0.32, 0.96, 1.0, 1.0) if team == 0 else core
-			_poly_outlined(hull_poly, shell_hi, fab_col, 2.6)
+			var fab_border: Color = fab_col if is_active_prod else standby_slate.lerp(fab_col, 0.45)
+			_poly_outlined(hull_poly, shell_hi, fab_border, 2.6)
 			draw_colored_polygon(_scale_poly(hull_poly, 0.78), deck)
 			# 4 corner high-Compute capacitor coils
 			var coil_pts: PackedVector2Array = PackedVector2Array([
@@ -602,15 +690,27 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 			])
 			for cp: Vector2 in coil_pts:
 				draw_circle(cp, 8.5, trim)
-				draw_circle(cp, 5.0 + pulse * 1.2, fab_col)
-				draw_line(cp, cp.normalized() * 14.0, Color(fab_col.r, fab_col.g, fab_col.b, 0.75), 2.0, true)
+				if is_active_prod:
+					draw_circle(cp, 5.2 + active_pulse * 1.6, fab_col)
+					draw_line(cp, cp.normalized() * 14.0, Color(fab_col.r, fab_col.g, fab_col.b, 0.65 + active_pulse * 0.35), 2.4, true)
+				else:
+					draw_circle(cp, 4.4, Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.48))
+					draw_line(cp, cp.normalized() * 14.0, Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.38), 1.6, true)
 			# Central mega-bay assembly ring
 			draw_circle(Vector2.ZERO, 20.0, Color(0.08, 0.16, 0.24, 1.0))
-			draw_arc(Vector2.ZERO, 20.0, 0.0, TAU, 32, fab_col, 2.2, true)
-			var spin: float = _anim_time * (2.6 if is_training else 0.9)
-			draw_arc(Vector2.ZERO, 13.5, spin, spin + PI * 0.75, 16, Color(0.92, 1.0, 1.0, 0.9), 2.4, true)
-			draw_arc(Vector2.ZERO, 13.5, spin + PI, spin + PI * 1.75, 16, Color(0.92, 1.0, 1.0, 0.9), 2.4, true)
-			draw_circle(Vector2.ZERO, 6.8 + pulse * 1.4, fab_col)
+			if is_active_prod:
+				draw_arc(Vector2.ZERO, 20.0, 0.0, TAU, 32, fab_col, 2.4, true)
+				var spin: float = _anim_time * 3.0
+				draw_arc(Vector2.ZERO, 13.5, spin, spin + PI * 0.75, 16, Color(0.92, 1.0, 1.0, 0.94), 2.5, true)
+				draw_arc(Vector2.ZERO, 13.5, spin + PI, spin + PI * 1.75, 16, Color(0.92, 1.0, 1.0, 0.94), 2.5, true)
+				draw_circle(Vector2.ZERO, 6.8 + active_pulse * 2.0, fab_col)
+				draw_circle(Vector2.ZERO, 3.6, Color(0.94, 1.0, 1.0, 0.90))
+				_draw_active_conduit_sparks(fab_col, 28.0)
+			else:
+				draw_arc(Vector2.ZERO, 20.0, 0.0, TAU, 32, Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.52), 1.8, true)
+				draw_arc(Vector2.ZERO, 13.5, 0.4, 0.4 + PI * 0.75, 16, Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.42), 1.8, true)
+				draw_arc(Vector2.ZERO, 13.5, 0.4 + PI, 0.4 + PI * 1.75, 16, Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.42), 1.8, true)
+				draw_circle(Vector2.ZERO, 5.4, Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.45))
 
 		&"defense_turret":
 			# Armored Sentry Pylon bastion base with corner stabilizer lugs & turret ring
@@ -633,7 +733,25 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 	if _owner_building.has_turret:
 		_draw_building_turret_overlay(p)
 
+	if _owner_building.completion_flash_timer > 0.0:
+		var cf: float = clampf(_owner_building.completion_flash_timer / Building.COMPLETION_FLASH_DURATION, 0.0, 1.0)
+		_draw_closed_outline(_scale_poly(hull_poly, 1.0 + (1.0 - cf) * 0.10), Color(0.90, 1.0, 0.98, cf * 0.95), 3.0)
+
 	_draw_hub_saturation_badge()
+
+
+func _draw_active_conduit_sparks(col: Color, spread_r: float) -> void:
+	# Lightweight rising vector telemetry sparks (zero particle nodes)
+	for i: int in range(4):
+		var phase: float = fmod(_anim_time * 0.95 + float(i) * 0.25, 1.0)
+		var fade: float = sin(phase * PI)
+		if fade <= 0.05:
+			continue
+		var lane_x: float = (float(i) - 1.5) * (spread_r * 0.56) + sin(_anim_time * 3.0 + float(i) * 1.9) * 2.5
+		var y_pos: float = lerpf(spread_r * 0.45, -spread_r * 0.85, phase)
+		var spark_col: Color = Color(col.r, col.g, col.b, fade * 0.85)
+		draw_circle(Vector2(lane_x, y_pos), 1.8 * fade + 0.6, spark_col)
+		draw_line(Vector2(lane_x, y_pos + 1.5), Vector2(lane_x, y_pos + 5.5 * fade), Color(0.92, 1.0, 0.98, fade * 0.62), 1.1, true)
 
 
 func _draw_hub_saturation_badge() -> void:

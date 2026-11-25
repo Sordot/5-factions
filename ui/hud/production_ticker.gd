@@ -159,6 +159,7 @@ func _ensure_row_count(target_count: int) -> void:
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = Vector2(204.0, 32.0)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.tooltip_text = "LMB: Select  •  Double-Click: Focus  •  RMB: Cancel"
 		btn.add_to_group("blocks_edge_pan")
 
 		var margin: MarginContainer = MarginContainer.new()
@@ -215,6 +216,13 @@ func _ensure_row_count(target_count: int) -> void:
 		btn.pressed.connect(func() -> void:
 			_on_row_clicked(captured_idx)
 		)
+		btn.gui_input.connect(func(ev: InputEvent) -> void:
+			if ev is InputEventMouseButton:
+				var mb: InputEventMouseButton = ev as InputEventMouseButton
+				if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+					_on_row_right_clicked(captured_idx)
+					btn.accept_event()
+		)
 
 		rows_container.add_child(btn)
 		_row_widgets.append({
@@ -250,6 +258,18 @@ func _on_row_clicked(row_index: int) -> void:
 	_last_click_ms = now_ms
 
 	_selection_controller.select_single_entity(b, is_double)
+
+
+func _on_row_right_clicked(row_index: int) -> void:
+	if row_index < 0 or row_index >= _row_widgets.size():
+		return
+	var b: Building = _row_widgets[row_index].get("building", null) as Building
+	if b == null or not is_instance_valid(b) or b.is_destroyed:
+		return
+	if b.cancel_last_queued():
+		if AudioManager != null:
+			AudioManager.play_sfx(&"ui_click", -5.5, 0.04)
+		_refresh_ticker()
 
 
 func _shorten_name(full_name: String) -> String:

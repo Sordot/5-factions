@@ -24,6 +24,7 @@ signal depleted(node: ResourceNode)
 
 var occupied_by_building: Building = null
 var is_inspected: bool = false
+var is_hovered: bool = false
 var _pulse_timer: float = 0.0
 var _is_highlighted: bool = false
 var _assigned_workers: Array[Unit] = []
@@ -70,7 +71,7 @@ func _process(delta: float) -> void:
 
 func _refresh_saturation_badge_state() -> void:
 	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
-	var should_show: bool = is_inspected or _is_highlighted
+	var should_show: bool = is_inspected or _is_highlighted or is_hovered
 	if not should_show and is_inside_tree():
 		var mouse_world: Vector2 = get_global_mouse_position()
 		var hover_r: float = interaction_radius + 10.0
@@ -95,7 +96,28 @@ func _refresh_saturation_badge_state() -> void:
 		queue_redraw()
 
 
+func set_hovered(hovered: bool) -> void:
+	if is_hovered == hovered:
+		return
+	is_hovered = hovered
+	if not is_vent and not is_depleted():
+		_refresh_saturation_badge_state()
+	queue_redraw()
+
+
 func _draw() -> void:
+	if is_hovered and not is_depleted():
+		var zoom_x: float = 1.0
+		if is_inside_tree():
+			var cam: Camera2D = get_viewport().get_camera_2d()
+			if cam != null:
+				zoom_x = maxf(0.25, cam.zoom.x)
+		var ring_r: float = interaction_radius + (5.0 if is_inspected else 2.5)
+		var h_col: Color = Color(0.204, 0.827, 0.600, 0.36 if is_inspected else 0.62)
+		if not is_inspected:
+			draw_circle(Vector2.ZERO, ring_r, Color(h_col.r, h_col.g, h_col.b, 0.08))
+		draw_arc(Vector2.ZERO, ring_r, 0.0, TAU, 32, h_col, 1.4 / zoom_x, true)
+
 	if not _show_saturation_badge or is_vent or is_depleted():
 		return
 	var assigned: int = maxi(0, _cached_badge_assigned)

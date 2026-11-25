@@ -48,6 +48,7 @@ const UI_SFX_IDS: Array = [
 	&"upgrade_complete",
 	&"unit_ready",
 	&"error_insufficient",
+	&"bandwidth_near_cap",
 	&"alert_under_attack",
 	&"alert_uplink",
 	&"alert_complete",
@@ -96,6 +97,7 @@ var _cooldowns_ms: Dictionary = {
 	&"upgrade_complete": 180,
 	&"unit_ready": 90,
 	&"error_insufficient": 160,
+	&"bandwidth_near_cap": 1000,
 	&"weapon_rifle": 75,
 	&"weapon_slash": 80,
 	&"weapon_rail": 90,
@@ -592,6 +594,10 @@ func play_error() -> void:
 	play_sfx(&"error_insufficient", -2.0, 0.0)
 
 
+func play_bandwidth_near_cap_warning() -> void:
+	play_sfx(&"bandwidth_near_cap", -6.0, 0.01)
+
+
 func play_slider_preview(channel: StringName) -> void:
 	match channel:
 		&"sfx":
@@ -713,6 +719,7 @@ func _generate_procedural_library() -> void:
 	_streams[&"upgrade_complete"] = _synth_chord_swell(PackedFloat32Array([440.0, 554.37, 659.25, 880.0]), 0.42, 0.26)
 	_streams[&"unit_ready"] = _synth_chime(PackedFloat32Array([622.25, 932.33]), 0.065, 0.23)
 	_streams[&"error_insufficient"] = _synth_error_buzz()
+	_streams[&"bandwidth_near_cap"] = _synth_chime(PackedFloat32Array([587.33, 523.25]), 0.075, 0.19)
 
 	# Combat & Ability SFX
 	_streams[&"weapon_rifle"] = _synth_rifle_burst()

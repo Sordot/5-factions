@@ -21,6 +21,7 @@ const TECH_TREE_SCENE_PATH: String = "res://scenes/ui/tech_tree_overlay.tscn"
 @onready var match_timer_label: Label = %MatchTimerLabel
 @onready var btn_audio_mute: Button = %BtnAudioMute
 @onready var btn_idle_workers: Button = %BtnIdleWorkers
+@onready var btn_idle_production: Button = %BtnIdleProduction
 @onready var btn_select_army: Button = %BtnSelectArmy
 @onready var btn_tech_tree: Button = %BtnTechTree
 @onready var btn_speed_05: Button = %BtnSpeed05
@@ -39,6 +40,9 @@ var _flash_timers: Dictionary = {}
 var _alert_timer: float = 0.0
 var _hud_poll_timer: float = 0.0
 var _bandwidth_capped: bool = false
+var _bandwidth_near_cap: bool = false
+var _bw_near_cap_armed: bool = true
+var _bw_near_cap_cooldown: float = 0.0
 var _bw_pulse_time: float = 0.0
 
 
@@ -62,6 +66,10 @@ func _ready() -> void:
 	if btn_idle_workers != null:
 		btn_idle_workers.add_to_group("blocks_edge_pan")
 		btn_idle_workers.pressed.connect(_on_idle_workers_pressed)
+	if btn_idle_production != null:
+		btn_idle_production.add_to_group("blocks_edge_pan")
+		btn_idle_production.pressed.connect(_on_idle_production_pressed)
+		btn_idle_production.tooltip_text = "Click: Cycle Idle Production • Double-Click: Center • Shift+Click: Select All"
 	if btn_select_army != null:
 		btn_select_army.add_to_group("blocks_edge_pan")
 		btn_select_army.pressed.connect(_on_select_army_pressed)
@@ -89,6 +97,7 @@ func _ready() -> void:
 	_refresh_audio_button()
 	_refresh_speed_buttons()
 	_on_idle_workers_updated(0)
+	_on_idle_production_updated(0)
 	_on_army_count_updated(0)
 
 
@@ -162,6 +171,8 @@ func _apply_spectator_layout() -> void:
 		top_left_spectator_anchor.visible = is_spec
 	if btn_idle_workers != null:
 		btn_idle_workers.visible = not is_spec
+	if btn_idle_production != null and is_spec:
+		btn_idle_production.visible = false
 	if btn_select_army != null:
 		btn_select_army.visible = not is_spec
 	_refresh_spectator_fog_button()
@@ -197,8 +208,10 @@ func _connect_camera_toasts() -> void:
 
 func _on_keybind_changed(_action_name: StringName) -> void:
 	var count: int = _selection_controller.idle_worker_count if _selection_controller != null else 0
+	var prod_c: int = _selection_controller.idle_production_count if _selection_controller != null else 0
 	var army_c: int = _selection_controller.army_unit_count if _selection_controller != null else 0
 	_on_idle_workers_updated(count)
+	_on_idle_production_updated(prod_c)
 	_on_army_count_updated(army_c)
 	_refresh_tech_button_label()
 	_refresh_aggro_badge()
@@ -227,10 +240,17 @@ func _process(delta: float) -> void:
 		_hud_poll_timer = 0.0
 		_refresh_income_rates_and_timer()
 
-	if _bandwidth_capped and bandwidth_value_label != null and not _flash_timers.has(&"bandwidth"):
+	if _bw_near_cap_cooldown > 0.0:
+		_bw_near_cap_cooldown = maxf(0.0, _bw_near_cap_cooldown - delta)
+
+	if (_bandwidth_capped or _bandwidth_near_cap) and bandwidth_value_label != null and not _flash_timers.has(&"bandwidth"):
 		_bw_pulse_time += delta
-		var pulse: float = 0.5 + 0.5 * sin(_bw_pulse_time * 5.2)
-		bandwidth_value_label.modulate = Color(1.0, 0.72, 0.28, 1.0).lerp(Color(1.0, 0.34, 0.28, 1.0), pulse)
+		if _bandwidth_capped:
+			var pulse_c: float = 0.5 + 0.5 * sin(_bw_pulse_time * 5.2)
+			bandwidth_value_label.modulate = Color(1.0, 0.72, 0.28, 1.0).lerp(Color(1.0, 0.30, 0.34, 1.0), pulse_c)
+		else:
+			var pulse_n: float = 0.5 + 0.5 * sin(_bw_pulse_time * 3.4)
+			bandwidth_value_label.modulate = Color(0.98, 0.86, 0.52, 1.0).lerp(Color(0.961, 0.620, 0.043, 1.0), pulse_n)
 
 	if _alert_timer > 0.0:
 		_alert_timer = maxf(0.0, _alert_timer - delta)
@@ -350,11 +370,14 @@ func _connect_selection_controller() -> void:
 		return
 	if not _selection_controller.idle_workers_updated.is_connected(_on_idle_workers_updated):
 		_selection_controller.idle_workers_updated.connect(_on_idle_workers_updated)
+	if _selection_controller.has_signal("idle_production_updated") and not _selection_controller.idle_production_updated.is_connected(_on_idle_production_updated):
+		_selection_controller.idle_production_updated.connect(_on_idle_production_updated)
 	if not _selection_controller.army_count_updated.is_connected(_on_army_count_updated):
 		_selection_controller.army_count_updated.connect(_on_army_count_updated)
 	if _selection_controller.has_signal("hud_toast_requested") and not _selection_controller.hud_toast_requested.is_connected(_on_hud_toast):
 		_selection_controller.hud_toast_requested.connect(_on_hud_toast)
 	_on_idle_workers_updated(_selection_controller.idle_worker_count)
+	_on_idle_production_updated(_selection_controller.idle_production_count)
 	_on_army_count_updated(_selection_controller.army_unit_count)
 	_refresh_tech_button_label()
 
@@ -380,6 +403,25 @@ func _on_idle_workers_pressed() -> void:
 		_connect_selection_controller()
 	if _selection_controller != null:
 		_selection_controller.select_next_idle_worker(true)
+
+
+func _on_idle_production_pressed() -> void:
+	if _selection_controller == null:
+		_connect_selection_controller()
+	if _selection_controller != null:
+		_selection_controller.select_next_idle_production(true, Input.is_key_pressed(KEY_SHIFT))
+
+
+func _on_idle_production_updated(count: int) -> void:
+	if btn_idle_production == null:
+		return
+	var is_spec: bool = TeamManager != null and TeamManager.is_spectator_mode()
+	btn_idle_production.visible = (count > 0 and not is_spec)
+	if count <= 0:
+		return
+	var hk: String = SettingsManager.get_action_display_label(&"cmd_select_idle_production", true) if SettingsManager != null else ";"
+	btn_idle_production.text = ("IDLE PROD: %d [%s]" % [count, hk]) if not hk.is_empty() else ("IDLE PROD: %d" % count)
+	btn_idle_production.modulate = Color(0.98, 0.78, 0.30, 1.0)
 
 
 func _on_idle_workers_updated(count: int) -> void:
@@ -475,11 +517,28 @@ func _on_resources_changed(team: int, resources: Dictionary) -> void:
 func _on_bandwidth_changed(team: int, used: int, cap: int) -> void:
 	if team != int(tracked_team):
 		return
-	_bandwidth_capped = (cap > 0 and used >= cap)
+	var is_capped: bool = (cap > 0 and used >= cap)
+	var is_near_cap: bool = (cap > 0 and used >= cap - 2 and used < cap)
+	_bandwidth_capped = is_capped
+	_bandwidth_near_cap = is_near_cap
+
+	if is_near_cap:
+		if _bw_near_cap_armed and _bw_near_cap_cooldown <= 0.0:
+			if AudioManager != null and AudioManager.has_method("play_bandwidth_near_cap_warning"):
+				AudioManager.play_bandwidth_near_cap_warning()
+			_bw_near_cap_cooldown = 20.0
+		_bw_near_cap_armed = false
+	elif is_capped:
+		_bw_near_cap_armed = false
+	else:
+		_bw_near_cap_armed = true
+
 	if bandwidth_value_label != null:
 		bandwidth_value_label.text = "%d / %d" % [used, cap]
 		if _bandwidth_capped:
-			bandwidth_value_label.modulate = Color(1.0, 0.48, 0.30, 1.0)
+			bandwidth_value_label.modulate = Color(1.0, 0.34, 0.34, 1.0)
+		elif _bandwidth_near_cap:
+			bandwidth_value_label.modulate = Color(0.961, 0.620, 0.043, 1.0)
 		else:
 			_bw_pulse_time = 0.0
 			bandwidth_value_label.modulate = Color(0.74, 0.96, 1.0, 1.0)

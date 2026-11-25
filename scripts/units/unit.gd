@@ -45,6 +45,7 @@ const AUTO_RETARGET_INTERVAL: float = 0.25
 const VETERANCY_THRESHOLDS: Array = [0, 3, 6, 10]
 const VETERANCY_NAMES: Array = ["Standard", "Veteran", "Elite", "Apex"]
 const HIT_FLASH_DURATION: float = 0.08
+const SPAWN_ANIM_DURATION: float = 0.25
 const HEALTH_BAR_WIDTH: float = 36.0
 const GATHER_BAR_WIDTH: float = 32.0
 
@@ -77,7 +78,9 @@ signal stance_changed(unit: Unit, new_stance: Stance)
 @onready var gather_bar_fill: ColorRect = get_node_or_null("GatherBar/Fill") as ColorRect
 
 var is_selected: bool = false
+var is_hovered: bool = false
 var is_marquee_highlighted: bool = false
+var spawn_anim_timer: float = 0.0
 var is_dead: bool = false
 var is_staffed: bool = false
 var current_hp: float = 100.0
@@ -235,6 +238,23 @@ func set_marquee_highlighted(active: bool) -> void:
 	if _entity_visuals != null and is_instance_valid(_entity_visuals):
 		_entity_visuals.queue_redraw()
 	queue_redraw()
+
+
+func set_hovered(hovered: bool) -> void:
+	if is_hovered == hovered:
+		return
+	is_hovered = hovered
+	if _entity_visuals != null and is_instance_valid(_entity_visuals):
+		_entity_visuals.queue_redraw()
+	queue_redraw()
+
+
+func trigger_spawn_animation() -> void:
+	spawn_anim_timer = SPAWN_ANIM_DURATION
+	if is_node_ready() and body_visual != null:
+		body_visual.scale = Vector2(0.72, 0.72)
+	if _entity_visuals != null and is_instance_valid(_entity_visuals):
+		_entity_visuals.queue_redraw()
 
 
 func get_selection_radius() -> float:
@@ -1261,6 +1281,17 @@ func _physics_process(delta: float) -> void:
 		_hit_flash_timer = maxf(0.0, _hit_flash_timer - delta)
 		if _hit_flash_timer <= 0.0:
 			body_visual.modulate = Color.WHITE
+
+	if spawn_anim_timer > 0.0:
+		spawn_anim_timer = maxf(0.0, spawn_anim_timer - delta)
+		if body_visual != null:
+			if spawn_anim_timer <= 0.0:
+				body_visual.scale = Vector2.ONE
+			else:
+				var u_spawn: float = clampf(1.0 - (spawn_anim_timer / SPAWN_ANIM_DURATION), 0.0, 1.0)
+				var ease_out: float = 1.0 - pow(1.0 - u_spawn, 3.0)
+				var s_val: float = lerpf(0.72, 1.0, ease_out)
+				body_visual.scale = Vector2(s_val, s_val)
 
 	if get_unit_type_id() == &"stinger":
 		_update_stinger_trail(delta)

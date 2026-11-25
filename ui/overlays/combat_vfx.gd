@@ -10,6 +10,8 @@ enum VFXMode {
 	RANK_UP_PULSE,
 	REPAIR_BEAM,
 	FLOATING_TEXT,
+	BUILDING_COMPLETE,
+	RALLY_RIPPLE,
 }
 
 var _mode: VFXMode = VFXMode.DEATH_BURST
@@ -137,6 +139,26 @@ func setup_floating_text(world_pos: Vector2, text_str: String, vfx_color: Color 
 	queue_redraw()
 
 
+func setup_building_complete(world_pos: Vector2, footprint_radius: float, vfx_color: Color = Color(0.24, 0.96, 0.88, 1.0)) -> void:
+	_mode = VFXMode.BUILDING_COMPLETE
+	_target_world = world_pos
+	_radius = maxf(24.0, footprint_radius)
+	_color = vfx_color
+	_duration = 0.36
+	_elapsed = 0.0
+	queue_redraw()
+
+
+func setup_rally_ripple(world_pos: Vector2, vfx_color: Color = Color(0.22, 0.92, 1.0, 1.0)) -> void:
+	_mode = VFXMode.RALLY_RIPPLE
+	_target_world = world_pos
+	_radius = 30.0
+	_color = vfx_color
+	_duration = 0.35
+	_elapsed = 0.0
+	queue_redraw()
+
+
 func _process(delta: float) -> void:
 	_elapsed += delta
 	if _mode == VFXMode.MORTAR_SHELL:
@@ -191,6 +213,10 @@ func _draw() -> void:
 			_draw_repair_beam()
 		VFXMode.FLOATING_TEXT:
 			_draw_floating_text()
+		VFXMode.BUILDING_COMPLETE:
+			_draw_building_complete()
+		VFXMode.RALLY_RIPPLE:
+			_draw_rally_ripple()
 
 
 func _draw_mortar_shell() -> void:
@@ -387,6 +413,44 @@ func _draw_floating_text() -> void:
 	draw_rect(Rect2(box_pos, Vector2(sz.x + 14.0, sz.y + 8.0)), Color(0.03, 0.06, 0.10, 0.82 * fade), true)
 	draw_rect(Rect2(box_pos, Vector2(sz.x + 14.0, sz.y + 8.0)), Color(_color.r, _color.g, _color.b, 0.88 * fade), false, 1.2)
 	draw_string(font, box_pos + Vector2(7.0, sz.y + 1.0), _label_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(_color.r, _color.g, _color.b, fade))
+
+
+func _draw_building_complete() -> void:
+	var t: float = clampf(_elapsed / maxf(0.01, _duration), 0.0, 1.0)
+	var ease_out: float = 1.0 - pow(1.0 - t, 3.0)
+	var fade: float = 1.0 - t
+	var p: Vector2 = to_local(_target_world)
+
+	# Expanding crisp perimeter pulse ring
+	var outer_r: float = lerpf(_radius * 0.92, _radius * 1.48, ease_out)
+	draw_arc(p, outer_r, 0.0, TAU, 36, Color(_color.r, _color.g, _color.b, fade * 0.92), 2.4 * fade + 0.8, true)
+
+	# Brief 0.22s bright Technozen frame flash around footprint
+	if _elapsed < 0.22:
+		var ft: float = 1.0 - (_elapsed / 0.22)
+		var frame_r: float = _radius * (1.0 + (1.0 - ft) * 0.10)
+		draw_circle(p, frame_r * 0.92, Color(_color.r, _color.g, _color.b, ft * 0.22))
+		draw_arc(p, frame_r, 0.0, TAU, 32, Color(0.92, 1.0, 0.98, ft * 0.90), 2.6, true)
+
+
+func _draw_rally_ripple() -> void:
+	var t: float = clampf(_elapsed / maxf(0.01, _duration), 0.0, 1.0)
+	var ease_out: float = 1.0 - pow(1.0 - t, 2.4)
+	var fade: float = 1.0 - t
+	var p: Vector2 = to_local(_target_world)
+
+	# Primary expanding concentric ripple
+	var r1: float = lerpf(8.0, _radius * 1.25, ease_out)
+	draw_arc(p, r1, 0.0, TAU, 28, Color(_color.r, _color.g, _color.b, fade * 0.92), 2.0, true)
+	# Secondary trailing inner ripple
+	var t2: float = clampf((t - 0.16) / 0.84, 0.0, 1.0)
+	if t2 > 0.0:
+		var r2: float = lerpf(6.0, _radius * 0.88, 1.0 - pow(1.0 - t2, 2.0))
+		draw_arc(p, r2, 0.0, TAU, 24, Color(0.92, 1.0, 0.98, (1.0 - t2) * 0.72), 1.4, true)
+	# Crisp cardinal tick pips expanding outward
+	for i: int in range(4):
+		var dir: Vector2 = Vector2.RIGHT.rotated(float(i) * PI * 0.5)
+		draw_line(p + dir * (r1 - 3.0), p + dir * (r1 + 4.5), Color(_color.r, _color.g, _color.b, fade * 0.85), 1.5, true)
 
 
 func _draw_dashed_circle(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:

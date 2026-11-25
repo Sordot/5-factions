@@ -112,10 +112,10 @@ func can_queue_unit(owner_building: Building, unit_data: UnitData, unit_scene_ov
 	return econ.has_bandwidth(owner_building.team, int(info["bandwidth_cost"]))
 
 
-func enqueue_unit(owner_building: Building, unit_data: UnitData, unit_scene_override: PackedScene = null) -> bool:
+func enqueue_unit(owner_building: Building, unit_data: UnitData, unit_scene_override: PackedScene = null, play_audio: bool = true) -> bool:
 	var econ: EconomyManager = _get_economy_manager(owner_building)
 	if not can_queue_unit(owner_building, unit_data, unit_scene_override):
-		if owner_building != null and owner_building.team == Unit.Team.PLAYER and econ != null and unit_data != null and not is_queue_full():
+		if play_audio and owner_building != null and owner_building.team == Unit.Team.PLAYER and econ != null and unit_data != null and not is_queue_full():
 			var fail_info: Dictionary = get_effective_unit_batch_info(owner_building, unit_data)
 			var missing: StringName = econ.find_missing_resource(owner_building.team, fail_info["costs"], int(fail_info["bandwidth_cost"]))
 			if missing != &"":
@@ -141,7 +141,7 @@ func enqueue_unit(owner_building: Building, unit_data: UnitData, unit_scene_over
 		"batch_count": int(info["batch_count"]),
 		"duration": float(info["duration"]),
 	})
-	if owner_building.team == Unit.Team.PLAYER and AudioManager != null:
+	if play_audio and owner_building.team == Unit.Team.PLAYER and AudioManager != null:
 		AudioManager.play_ui_click()
 	_emit_queue_changed()
 	return true
@@ -212,6 +212,12 @@ func cancel_queue_item(owner_building: Building, index: int) -> bool:
 
 	_emit_queue_changed()
 	return true
+
+
+func cancel_last_queued(owner_building: Building) -> bool:
+	if _queue.is_empty():
+		return false
+	return cancel_queue_item(owner_building, _queue.size() - 1)
 
 
 func cancel_all_and_refund(owner_building: Building) -> void:
@@ -327,6 +333,7 @@ func _spawn_unit_batch(owner_building: Building, unit_scene: PackedScene, batch_
 			lateral_offset = perp * (centered * spacing)
 		unit.global_position = base_exit_pos + lateral_offset
 		units_container.add_child(unit)
+		unit.trigger_spawn_animation()
 		spawned.append(unit)
 
 	return spawned

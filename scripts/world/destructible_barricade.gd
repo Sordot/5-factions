@@ -16,6 +16,7 @@ signal destroyed(barricade: Node)
 var current_hp: float = 650.0
 var is_destroyed: bool = false
 var is_selected: bool = false
+var is_hovered: bool = false
 
 var _hit_flash_timer: float = 0.0
 var _collision_shape: CollisionShape2D = null
@@ -62,6 +63,13 @@ func set_selected(selected: bool) -> void:
 	if is_selected == selected:
 		return
 	is_selected = selected
+	queue_redraw()
+
+
+func set_hovered(hovered: bool) -> void:
+	if is_hovered == hovered:
+		return
+	is_hovered = hovered
 	queue_redraw()
 
 
@@ -193,10 +201,21 @@ func _draw() -> void:
 	# Drop shadow
 	draw_rect(Rect2(-half + Vector2(4.0, 5.0), footprint_size), Color(0.02, 0.03, 0.05, 0.48), true)
 
-	# Selection outline
+	# Selection / Hover pre-highlight outline
 	if is_selected:
 		draw_rect(rect.grow(5.0), Color(1.0, 0.78, 0.30, 0.16), true)
 		draw_rect(rect.grow(5.0), Color(1.0, 0.80, 0.30, 0.92), false, 1.8)
+	if is_hovered and not is_destroyed:
+		var zoom_x: float = 1.0
+		if is_inside_tree():
+			var cam: Camera2D = get_viewport().get_camera_2d()
+			if cam != null:
+				zoom_x = maxf(0.25, cam.zoom.x)
+		var h_rect: Rect2 = rect.grow(8.0 if is_selected else 5.0)
+		var h_col: Color = Color(0.961, 0.620, 0.043, 0.38 if is_selected else 0.64)
+		if not is_selected:
+			draw_rect(h_rect, Color(h_col.r, h_col.g, h_col.b, 0.09), true)
+		draw_rect(h_rect, h_col, false, 1.4 / zoom_x)
 
 	# Reinforced slate armor plating
 	var base_col: Color = Color(0.95, 0.96, 1.0, 1.0) if flash else Color(0.28, 0.34, 0.40, 0.98)

@@ -28,6 +28,7 @@ const KEYBIND_DEFS: Array = [
 	{"action": &"cmd_hold", "label": "Hold Position", "default_key": KEY_H, "category": "Unit Commands"},
 	{"action": &"cmd_patrol", "label": "Patrol", "default_key": KEY_P, "category": "Unit Commands"},
 	{"action": &"cmd_select_idle_worker", "label": "Select Idle Worker", "default_key": KEY_QUOTELEFT, "category": "Abilities & Selection"},
+	{"action": &"cmd_select_idle_production", "label": "Select Idle Production", "default_key": KEY_SEMICOLON, "category": "Abilities & Selection"},
 	{"action": &"cmd_select_all_army", "label": "Select All Army", "default_key": KEY_F9, "category": "Abilities & Selection"},
 	{"action": &"cmd_toggle_smart_box_select", "label": "Toggle Combat-Only Box Select", "default_key": KEY_B, "category": "Abilities & Selection"},
 	{"action": &"ui_cycle_subgroup", "label": "Cycle Subgroup", "default_key": KEY_TAB, "category": "Abilities & Selection"},
@@ -629,6 +630,10 @@ func format_keycode(keycode: int, compact: bool = false) -> String:
 			return "["
 		KEY_BRACKETRIGHT:
 			return "]"
+		KEY_SEMICOLON:
+			return ";"
+		KEY_PERIOD:
+			return "."
 		KEY_NONE:
 			return "" if compact else "Unbound"
 	return OS.get_keycode_string(keycode as Key)

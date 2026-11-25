@@ -750,7 +750,22 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 		var captured_slot: int = i
 		var captured_u: UnitData = u_data
 		train_btn.pressed.connect(func() -> void:
-			if _selection_controller != null and _selected_buildings.size() > 1:
+			var shift_batch: bool = Input.is_key_pressed(KEY_SHIFT)
+			if shift_batch:
+				if _selection_controller != null:
+					_selection_controller.queue_unit_distributed_batch(captured_u, 5, captured_b)
+				elif is_instance_valid(captured_b):
+					var q_cnt: int = 0
+					for _k: int in range(5):
+						if captured_b.queue_unit_training(captured_slot, false):
+							q_cnt += 1
+						else:
+							if q_cnt == 0:
+								captured_b.queue_unit_training(captured_slot, true)
+							break
+					if q_cnt > 0 and AudioManager != null:
+						AudioManager.play_ui_click()
+			elif _selection_controller != null and _selected_buildings.size() > 1:
 				_selection_controller.queue_unit_distributed(captured_u)
 			elif is_instance_valid(captured_b):
 				captured_b.queue_unit_training(captured_slot)
@@ -770,6 +785,7 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 				var mult_val: float = float(b_info["cost_multiplier"])
 				var eff_note: String = " (Batch Efficiency Active)" if mult_val <= 1.55 else " (1.75x Batch Cost)"
 				desc = "Parallel Batch Cloning: spawns %d %ss simultaneously for %.2fx single-unit cost%s." % [b_cnt, captured_u.display_name, mult_val, eff_note]
+			desc += "\n[Shift+Click: Queue x5]"
 			command_tooltip.show_tooltip(
 				("Clone %s (x%d)" % [captured_u.display_name, b_cnt]) if b_cnt > 1 else ("Train %s" % captured_u.display_name),
 				"",

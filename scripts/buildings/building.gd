@@ -9,6 +9,7 @@ const HEALTH_BAR_WIDTH: float = 76.0
 const CONSTRUCT_BAR_WIDTH: float = 68.0
 const DEPOSIT_PULSE_DURATION: float = 0.25
 const HIT_FLASH_DURATION: float = 0.08
+const COMPLETION_FLASH_DURATION: float = 0.22
 const SALVAGE_DURATION: float = 4.0
 const DEFAULT_BUILDING_COSTS: Dictionary = {
 	&"nexus_vat": {"biomass": 400, "silica": 100, "compute": 0},
@@ -76,7 +77,9 @@ signal rally_changed(building: Building)
 
 var current_hp: float = 1500.0
 var is_selected: bool = false
+var is_hovered: bool = false
 var is_marquee_highlighted: bool = false
+var completion_flash_timer: float = 0.0
 var is_destroyed: bool = false
 var has_been_spotted: bool = false
 var construction_progress: float = 1.0
@@ -184,6 +187,9 @@ func _process(delta: float) -> void:
 		_hit_flash_timer = maxf(0.0, _hit_flash_timer - delta)
 		if _hit_flash_timer <= 0.0:
 			_update_construction_visuals()
+
+	if completion_flash_timer > 0.0:
+		completion_flash_timer = maxf(0.0, completion_flash_timer - delta)
 
 	if _deposit_pulse_timer > 0.0:
 		_deposit_pulse_timer = maxf(0.0, _deposit_pulse_timer - delta)
@@ -429,6 +435,13 @@ func _complete_construction() -> void:
 	_update_health_bar()
 	_update_staff_slot_visuals()
 	pulse_deposit_feedback()
+	completion_flash_timer = COMPLETION_FLASH_DURATION
+	if get_parent() != null:
+		var vfx_col: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else Color(0.24, 0.96, 0.88, 1.0)
+		var cfx: Node2D = COMBAT_VFX_SCRIPT.new() as Node2D
+		cfx.z_index = 54
+		get_parent().add_child(cfx)
+		cfx.call("setup_building_complete", global_position, footprint_radius, vfx_col)
 	_register_with_economy()
 	var econ_done: EconomyManager = _get_economy_manager()
 	if econ_done != null:
@@ -466,6 +479,25 @@ func set_marquee_highlighted(active: bool) -> void:
 	if _entity_visuals != null and is_instance_valid(_entity_visuals):
 		_entity_visuals.queue_redraw()
 	queue_redraw()
+
+
+func set_hovered(hovered: bool) -> void:
+	if is_hovered == hovered:
+		return
+	is_hovered = hovered
+	if _entity_visuals != null and is_instance_valid(_entity_visuals):
+		_entity_visuals.queue_redraw()
+	queue_redraw()
+
+
+func is_actively_producing() -> bool:
+	if is_destroyed or not is_constructed or is_salvaging:
+		return false
+	if production_component != null and production_component.get_queue_size() > 0:
+		return true
+	if max_staff_slots > 0 and get_assigned_engineer_count() > 0:
+		return true
+	return false
 
 
 func set_rally_position(world_pos: Vector2) -> void:
@@ -736,11 +768,11 @@ func can_train_unit(slot_index: int) -> bool:
 	return production_component.can_queue_unit(self, trainable_unit_data[slot_index], scene_override)
 
 
-func queue_unit_training(slot_index: int) -> bool:
+func queue_unit_training(slot_index: int, play_audio: bool = true) -> bool:
 	if production_component == null or slot_index < 0 or slot_index >= trainable_unit_data.size():
 		return false
 	var scene_override: PackedScene = trainable_unit_scenes[slot_index] if slot_index < trainable_unit_scenes.size() else null
-	return production_component.enqueue_unit(self, trainable_unit_data[slot_index], scene_override)
+	return production_component.enqueue_unit(self, trainable_unit_data[slot_index], scene_override, play_audio)
 
 
 func can_train_unit_data(unit_data: UnitData, scene_override: PackedScene = null) -> bool:
@@ -749,10 +781,10 @@ func can_train_unit_data(unit_data: UnitData, scene_override: PackedScene = null
 	return production_component.can_queue_unit(self, unit_data, scene_override)
 
 
-func queue_unit_data(unit_data: UnitData, scene_override: PackedScene = null) -> bool:
+func queue_unit_data(unit_data: UnitData, scene_override: PackedScene = null, play_audio: bool = true) -> bool:
 	if production_component == null or unit_data == null:
 		return false
-	return production_component.enqueue_unit(self, unit_data, scene_override)
+	return production_component.enqueue_unit(self, unit_data, scene_override, play_audio)
 
 
 func can_research_upgrade(upgrade_index: int) -> bool:
@@ -790,6 +822,12 @@ func cancel_queued_unit(queue_index: int) -> bool:
 	if production_component == null:
 		return false
 	return production_component.cancel_queue_item(self, queue_index)
+
+
+func cancel_last_queued() -> bool:
+	if production_component == null:
+		return false
+	return production_component.cancel_last_queued(self)
 
 
 func get_training_queue_size() -> int:
