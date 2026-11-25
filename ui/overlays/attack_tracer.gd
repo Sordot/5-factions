@@ -7,6 +7,9 @@ enum TracerStyle {
 	ARC_LANCE = 2,
 	TWIN_SLUG = 3,
 	ARC_SHELL = 4,
+	HEAVY_SLUG = 5,
+	RAIL_LANCE = 6,
+	ARC_TETHER = 7,
 }
 
 @export var color: Color = Color(0.35, 0.98, 0.92, 0.95)
@@ -141,6 +144,69 @@ func _draw() -> void:
 					var mf_g: float = 1.0 - (t / 0.40)
 					draw_circle(s0, 4.8 * mf_g, Color(1.0, 0.88, 0.58, mf_g * 0.88))
 			draw_circle(p1, lerpf(7.0, 2.0, t), draw_col)
+
+		TracerStyle.HEAVY_SLUG:
+			# MONOLITH_OS thick amber/off-white high-impact twin-slug tracer with chunky brutalist muzzle flash
+			var h_offset: float = 4.2
+			var head_hs: float = clampf(t * 2.2, 0.30, 1.0)
+			var tail_hs: float = clampf(head_hs - 0.52, 0.0, 0.90)
+			for s: float in [-1.0, 1.0]:
+				var hs0: Vector2 = p0 + perp * (s * h_offset)
+				var hs1: Vector2 = p1 + perp * (s * h_offset * 0.45)
+				var hb0: Vector2 = hs0.lerp(hs1, tail_hs)
+				var hb1: Vector2 = hs0.lerp(hs1, head_hs)
+				draw_line(hb0, hb1, Color(0.06, 0.07, 0.09, alpha * 0.72), line_width * 1.9, true)
+				draw_line(hb0, hb1, draw_col, line_width * 1.25, true)
+				draw_line(hb0, hb1, Color(0.96, 0.95, 0.91, alpha * 0.96), maxf(1.4, line_width * 0.50), true)
+			if t < 0.38:
+				var mf_h: float = 1.0 - (t / 0.38)
+				var flash_r: float = 7.5 * mf_h
+				var box: PackedVector2Array = PackedVector2Array([
+					p0 + dir * (flash_r * 1.35) + perp * (flash_r * 0.45),
+					p0 + dir * (flash_r * 1.35) - perp * (flash_r * 0.45),
+					p0 - dir * (flash_r * 0.25) - perp * (flash_r * 0.85),
+					p0 - dir * (flash_r * 0.25) + perp * (flash_r * 0.85),
+				])
+				draw_colored_polygon(box, Color(1.0, 0.76, 0.24, mf_h * 0.92))
+			draw_circle(p1, lerpf(8.5, 2.2, t), draw_col)
+			draw_circle(p1, lerpf(4.2, 1.0, t), Color(0.98, 0.97, 0.94, alpha))
+
+		TracerStyle.RAIL_LANCE:
+			# MONOLITH_OS Rail-Sentinel stark white-core / Hazard Amber halo lingering rail lance (0.18s)
+			var rail_w: float = line_width * lerpf(1.35, 0.42, t)
+			draw_line(p0, p1, Color(1.0, 0.624, 0.110, alpha * 0.36), rail_w * 2.8, true)
+			draw_line(p0, p1, draw_col, rail_w * 1.25, true)
+			draw_line(p0, p1, Color(0.98, 0.98, 0.96, alpha * 0.98), maxf(1.6, rail_w * 0.55), true)
+			# Crisp brutalist shock-bars along the pierce vector
+			for k: int in range(1, 5):
+				var frac: float = float(k) * 0.20 + t * 0.05
+				if frac < 0.96:
+					var mp: Vector2 = p0.lerp(p1, frac)
+					var bar_half: float = (7.5 + float(k) * 1.2) * fade
+					draw_line(mp - perp * bar_half, mp + perp * bar_half, Color(1.0, 0.72, 0.22, alpha * 0.82), 1.8, true)
+			if t < 0.45:
+				var mf_r: float = 1.0 - (t / 0.45)
+				draw_circle(p0, 7.2 * mf_r, Color(0.98, 0.96, 0.90, mf_r * 0.92))
+			draw_circle(p1, lerpf(9.5, 2.0, t), Color(1.0, 0.68, 0.18, alpha))
+
+		TracerStyle.ARC_TETHER:
+			# MONOLITH_OS Picket Drone crisp jagged amber-cyan suppressive arc
+			var segs: int = 7
+			var pts_arc: PackedVector2Array = PackedVector2Array()
+			pts_arc.resize(segs + 1)
+			pts_arc[0] = p0
+			pts_arc[segs] = p1
+			var phase_seed: float = floor(_elapsed * 45.0)
+			for i: int in range(1, segs):
+				var u_arc: float = float(i) / float(segs)
+				var base_pt: Vector2 = p0.lerp(p1, u_arc)
+				var zig: float = (1.0 if ((i + int(phase_seed)) % 2 == 0) else -1.0) * (5.2 * sin(u_arc * PI))
+				pts_arc[i] = base_pt + perp * zig
+			var cyan_halo: Color = Color(0.220, 0.741, 0.973, alpha * 0.62)
+			draw_polyline(pts_arc, cyan_halo, line_width * 2.1, true)
+			draw_polyline(pts_arc, draw_col, line_width, true)
+			draw_polyline(pts_arc, Color(0.95, 0.99, 1.0, alpha * 0.90), maxf(1.0, line_width * 0.42), true)
+			draw_circle(p1, lerpf(6.5, 1.8, t), cyan_halo)
 
 		_:
 			# PULSE_BOLT (Clone Trooper / standard): brief muzzle flash + crisp tapering energy bolt

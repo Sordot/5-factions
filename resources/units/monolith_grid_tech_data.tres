@@ -1,0 +1,40 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"grid_tech"
+display_name = "Grid-Tech"
+max_hp = 85.0
+max_shield = 25.0
+shield_regen_rate = 6.0
+shield_regen_delay = 6.0
+move_speed = 215.0
+acceleration = 1750.0
+turn_speed = 15.0
+selection_radius = 18.0
+collision_radius = 13.0
+attack_damage = 0.0
+attack_range = 0.0
+aggro_range = 0.0
+vision_range = 320.0
+attack_cooldown = 1.0
+damage_reduction = 0.10
+bandwidth_cost = 1
+can_gather = false
+can_staff_compute = true
+biomass_cost = 50
+silica_cost = 45
+compute_cost = 0
+build_time = 5.0
+train_time = 5.0
+unit_scene_path = "res://scenes/units/monolith_grid_tech.tscn"
+unit_tags = Array[StringName]([&"engineer", &"mechanical"])
+weapon_tracer_style = &"pulse"
+weapon_tracer_color = Color(0.22, 0.741, 0.973, 0.95)
+weapon_tracer_width = 2.0
+weapon_sfx_id = &"weapon_mono_tether"
+audio_bark_class = &"worker"
+minimap_icon_shape = &"worker"
+role_tags_display = "Compute Staff • Salvage • Field Repair"

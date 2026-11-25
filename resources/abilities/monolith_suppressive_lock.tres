@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="AbilityData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ability_data.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+ability_id = &"monolith_suppressive_lock"
+display_name = "Suppressive Lock"
+hotkey_label = "Q"
+cooldown_duration = 10.0
+cast_range = 230.0
+target_type = 0
+damage_or_value = 12.0
+aoe_radius = 65.0
+effect_duration = 3.5
+move_speed_modifier = -0.4
+attack_speed_modifier = -0.25
+effect_color = Color(1, 0.624, 0.11, 0.95)
+cast_on_all_ready = false
+allow_autocast = true
+default_autocast = true
+description = "Blasts a 65px area (range 230) dealing 12 damage and pinning enemies with -40% move speed and -25% attack speed for 3.5s. Right-click to toggle Auto-Cast."

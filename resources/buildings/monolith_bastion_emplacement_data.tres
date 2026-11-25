@@ -1,0 +1,47 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"bastion_emplacement"
+display_name = "Bastion Emplacement"
+scene_path = "res://scenes/buildings/monolith_bastion_emplacement.tscn"
+biomass_cost = 80
+silica_cost = 110
+compute_cost = 0
+build_time = 6.0
+footprint_size = Vector2(64, 64)
+max_hp = 650.0
+max_shield = 110.0
+shield_regen_rate = 10.0
+shield_regen_delay = 7.0
+damage_reduction = 0.25
+vision_range = 380.0
+bandwidth_provided = 0
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+accepted_dropoff_resources = Array[StringName]([])
+requires_vent = false
+max_staff_slots = 0
+can_set_rally = false
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &"assembly_bay"
+prerequisite_building_ids = Array[StringName]([&"assembly_bay"])
+is_core_hub = false
+is_command_hub = false
+is_military_production = false
+is_supply_provider = false
+tech_tier = 1
+audio_select_class = &"defense"
+tech_tree_summary = "Heavy Static AP Cannon • 44 Dmg (1.35x Armored) • 310px Range"
+has_turret = true
+turret_damage = 44.0
+turret_attack_interval = 1.85
+turret_attack_range = 310.0
+turret_min_range = 0.0
+turret_splash_radius = 0.0
+turret_bonus_vs_armored = 1.35
+turret_tracer_style = &"heavy_slug"
+turret_turn_speed = 6.5

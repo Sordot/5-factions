@@ -15,6 +15,7 @@ signal control_groups_changed(summary: Dictionary)
 signal ability_targeting_changed(active_ability: AbilityData)
 signal patrol_targeting_changed(active: bool)
 signal attack_move_targeting_changed(active: bool)
+signal overclock_targeting_changed(active: bool)
 signal idle_workers_changed(idle_workers: Array[Unit])
 signal idle_workers_updated(count: int)
 signal idle_production_updated(count: int)
@@ -43,6 +44,7 @@ var control_groups: Dictionary = {}
 var active_targeting_ability: AbilityData = null
 var is_patrol_targeting: bool = false
 var is_attack_move_targeting: bool = false
+var is_overclock_targeting: bool = false
 var idle_worker_count: int = 0
 var idle_production_count: int = 0
 var army_unit_count: int = 0
@@ -166,7 +168,18 @@ func _process(delta: float) -> void:
 				_set_inspected_entity(null)
 
 	if active_targeting_ability == null or command_router == null:
+		if is_overclock_targeting:
+			var oc_hub: Building = find_ready_overclock_hub()
+			if oc_hub == null or command_router == null:
+				cancel_overclock_targeting()
+			elif ability_reticle != null:
+				var oc_cursor: Vector2 = get_global_mouse_position()
+				var oc_b: Building = command_router.find_building_at_point(oc_cursor, _get_local_human_team_enum())
+				var oc_valid: bool = oc_b != null and oc_b.is_valid_overclock_target(int(oc_hub.team))
+				ability_reticle.set_overclock_targeting(oc_cursor, oc_b if oc_valid else null, oc_valid)
+			return
 		if ability_reticle != null:
+			ability_reticle.clear_overclock_targeting()
 			if is_attack_move_targeting:
 				ability_reticle.set_command_mode_reticle(&"attack_move", get_global_mouse_position())
 			elif is_patrol_targeting:
@@ -258,6 +271,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			cancel_ability_targeting()
 			get_viewport().set_input_as_handled()
 			return
+		if is_overclock_targeting:
+			cancel_overclock_targeting()
+			get_viewport().set_input_as_handled()
+			return
 		if is_attack_move_targeting:
 			cancel_attack_move_targeting()
 			get_viewport().set_input_as_handled()
@@ -333,6 +350,24 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_e", "E"):
 		return
+	if event.is_action_pressed("cmd_ability_e") and not event.is_echo():
+		var allow_e_key: bool = true
+		if event is InputEventKey:
+			var e_key: InputEventKey = event
+			if e_key.ctrl_pressed or e_key.alt_pressed:
+				allow_e_key = false
+		if allow_e_key:
+			if not selected_units.is_empty():
+				if toggle_deploy_active_subgroup():
+					get_viewport().set_input_as_handled()
+					return
+			elif has_selected_overclock_hub():
+				if is_overclock_targeting:
+					cancel_overclock_targeting()
+				elif not begin_overclock_targeting() and AudioManager != null:
+					AudioManager.play_error()
+				get_viewport().set_input_as_handled()
+				return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_r", "R"):
 		return
 	if _try_handle_ability_hotkey_event(event, "cmd_ability_t", "T"):
@@ -435,6 +470,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					confirm_ability_target_at(get_global_mouse_position(), mouse_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT))
 					get_viewport().set_input_as_handled()
 					return
+				if is_overclock_targeting:
+					confirm_overclock_target_at(get_global_mouse_position())
+					get_viewport().set_input_as_handled()
+					return
 				if is_attack_move_targeting:
 					var shift_amove: bool = mouse_event.shift_pressed or Input.is_key_pressed(KEY_SHIFT)
 					confirm_attack_move_target_at(get_global_mouse_position(), shift_amove)
@@ -467,6 +506,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				cancel_ability_targeting()
 				get_viewport().set_input_as_handled()
 				return
+			if is_overclock_targeting:
+				cancel_overclock_targeting()
+				get_viewport().set_input_as_handled()
+				return
 			if is_attack_move_targeting:
 				cancel_attack_move_targeting()
 				get_viewport().set_input_as_handled()
@@ -483,6 +526,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func clear_selection() -> void:
 	cancel_ability_targeting()
+	cancel_overclock_targeting()
 	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
 	_set_selected_buildings([])
@@ -492,6 +536,7 @@ func clear_selection() -> void:
 
 func select_in_world_rect(world_rect: Rect2) -> void:
 	cancel_ability_targeting()
+	cancel_overclock_targeting()
 	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
 	_select_in_rect(world_rect, false)
@@ -499,6 +544,7 @@ func select_in_world_rect(world_rect: Rect2) -> void:
 
 func select_at_world_point(world_point: Vector2) -> void:
 	cancel_ability_targeting()
+	cancel_overclock_targeting()
 	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
 	_select_at_point(world_point, false)
@@ -508,6 +554,7 @@ func select_single_entity(entity: Node, focus_camera: bool = false) -> void:
 	if entity == null or not is_instance_valid(entity):
 		return
 	cancel_ability_targeting()
+	cancel_overclock_targeting()
 	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
 	if entity is Building:
@@ -619,6 +666,7 @@ func request_ability_slot(ability: AbilityData, shift_queued: bool = false) -> b
 			return false
 		if command_router.find_closest_builder(subgroup_units, get_global_mouse_position()) == null:
 			return false
+		cancel_overclock_targeting()
 		cancel_attack_move_targeting()
 		cancel_patrol_targeting()
 		active_targeting_ability = ability
@@ -637,6 +685,7 @@ func request_ability_slot(ability: AbilityData, shift_queued: bool = false) -> b
 		cancel_ability_targeting()
 		return command_router.issue_ability_order(subgroup_units, ability, get_global_mouse_position(), null, shift_queued)
 
+	cancel_overclock_targeting()
 	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
 	active_targeting_ability = ability
@@ -690,6 +739,7 @@ func begin_attack_move_targeting() -> void:
 	if not _has_selected_combat_capable_unit():
 		return
 	cancel_ability_targeting()
+	cancel_overclock_targeting()
 	cancel_patrol_targeting()
 	is_attack_move_targeting = true
 	_update_command_cursor()
@@ -722,6 +772,7 @@ func begin_patrol_targeting() -> void:
 	if selected_units.is_empty():
 		return
 	cancel_ability_targeting()
+	cancel_overclock_targeting()
 	cancel_attack_move_targeting()
 	is_patrol_targeting = true
 	_update_command_cursor()
@@ -753,9 +804,100 @@ func confirm_patrol_target_at(world_pos: Vector2, shift_queued: bool = false) ->
 
 func reset_command_cursors() -> void:
 	cancel_ability_targeting()
+	cancel_overclock_targeting()
 	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
 	_clear_custom_cursor()
+
+
+func has_selected_overclock_hub() -> bool:
+	var local_t: Unit.Team = _get_local_human_team_enum()
+	for b: Building in selected_buildings:
+		if is_instance_valid(b) and not b.is_destroyed and b.is_constructed and b.team == local_t and b.has_overclock_ability():
+			return true
+	if selected_building != null and is_instance_valid(selected_building):
+		if not selected_building.is_destroyed and selected_building.is_constructed and selected_building.team == local_t and selected_building.has_overclock_ability():
+			return true
+	return false
+
+
+func find_ready_overclock_hub() -> Building:
+	var local_t: Unit.Team = _get_local_human_team_enum()
+	for b: Building in selected_buildings:
+		if is_instance_valid(b) and b.team == local_t and b.can_cast_overclock():
+			return b
+	if selected_building != null and is_instance_valid(selected_building):
+		if selected_building.team == local_t and selected_building.can_cast_overclock():
+			return selected_building
+	return null
+
+
+func begin_overclock_targeting() -> bool:
+	_prune_invalid_units()
+	var hub: Building = find_ready_overclock_hub()
+	if hub == null:
+		return false
+	cancel_ability_targeting()
+	cancel_attack_move_targeting()
+	cancel_patrol_targeting()
+	is_overclock_targeting = true
+	_update_command_cursor()
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	overclock_targeting_changed.emit(true)
+	return true
+
+
+func cancel_overclock_targeting() -> void:
+	if not is_overclock_targeting:
+		return
+	is_overclock_targeting = false
+	if ability_reticle != null:
+		ability_reticle.clear_overclock_targeting()
+	_update_command_cursor()
+	overclock_targeting_changed.emit(false)
+
+
+func confirm_overclock_target_at(world_pos: Vector2) -> bool:
+	if not is_overclock_targeting or command_router == null:
+		return false
+	var hub: Building = find_ready_overclock_hub()
+	if hub == null:
+		cancel_overclock_targeting()
+		return false
+	var target_b: Building = command_router.find_building_at_point(world_pos, _get_local_human_team_enum())
+	if target_b == null or not target_b.is_valid_overclock_target(int(hub.team)):
+		if AudioManager != null:
+			AudioManager.play_error()
+		return false
+	var cast_ok: bool = hub.cast_overclock_on(target_b)
+	if cast_ok:
+		command_router.spawn_move_marker(target_b.global_position, MoveMarker.MarkerStyle.INTERACT)
+		cancel_overclock_targeting()
+	return cast_ok
+
+
+func toggle_deploy_active_subgroup() -> bool:
+	_prune_invalid_units()
+	var subgroup_units: Array[Unit] = get_active_subgroup_units()
+	var deployables: Array[Unit] = []
+	var has_mobile_or_undeploying: bool = false
+	for u: Unit in subgroup_units:
+		if is_instance_valid(u) and u.can_toggle_deploy():
+			deployables.append(u)
+			if u.deploy_state == Unit.DeployState.MOBILE or u.deploy_state == Unit.DeployState.UNDEPLOYING:
+				has_mobile_or_undeploying = true
+	if deployables.is_empty():
+		return false
+	if has_mobile_or_undeploying:
+		for u: Unit in deployables:
+			if u.deploy_state == Unit.DeployState.MOBILE or u.deploy_state == Unit.DeployState.UNDEPLOYING:
+				u.request_deploy()
+	else:
+		for u: Unit in deployables:
+			if u.deploy_state == Unit.DeployState.DEPLOYED or u.deploy_state == Unit.DeployState.DEPLOYING:
+				u.request_undeploy()
+	return true
 
 
 func issue_right_click_at(world_point: Vector2, shift_queued: bool = false) -> void:
@@ -944,6 +1086,7 @@ func select_next_idle_production(allow_center_on_repeat: bool = true, select_all
 		return 0
 
 	cancel_ability_targeting()
+	cancel_overclock_targeting()
 	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
 	_set_selected_units([])
@@ -1224,6 +1367,7 @@ func recall_control_group(group_num: int, allow_double_tap_center: bool = true) 
 	if not group_buildings.is_empty():
 		control_groups[group_num] = group_buildings
 		cancel_ability_targeting()
+		cancel_overclock_targeting()
 		cancel_attack_move_targeting()
 		cancel_patrol_targeting()
 		_set_selected_units([])
@@ -1772,6 +1916,7 @@ func _set_selected_buildings(buildings: Array[Building]) -> void:
 				selected_buildings.append(b)
 
 	if selected_buildings.is_empty():
+		cancel_overclock_targeting()
 		_set_inspected_entity(null)
 		buildings_selection_changed.emit(selected_buildings)
 		return
@@ -2117,6 +2262,8 @@ func _build_command_cursors() -> void:
 	_command_cursors[&"patrol"] = _make_reticle_cursor(&"patrol")
 	_command_cursors[&"repair"] = _make_reticle_cursor(&"repair")
 	_command_cursors[&"ability_target"] = _make_reticle_cursor(&"ability_target")
+	_command_cursors[&"overclock_valid"] = _make_reticle_cursor(&"overclock_valid")
+	_command_cursors[&"overclock_invalid"] = _make_reticle_cursor(&"overclock_invalid")
 
 
 func _make_reticle_cursor(style: StringName) -> ImageTexture:
@@ -2136,6 +2283,12 @@ func _make_reticle_cursor(style: StringName) -> ImageTexture:
 		&"ability_target":
 			primary = Color(0.96, 0.62, 0.04, 1.0) # Amber #F59E0B
 			secondary = Color(0.76, 0.48, 1.0, 0.96) # Violet accent
+		&"overclock_valid":
+			primary = Color(1.0, 0.624, 0.110, 1.0) # Hazard Amber #FF9F1C
+			secondary = Color(1.0, 0.92, 0.68, 0.98)
+		&"overclock_invalid":
+			primary = Color(0.82, 0.32, 0.30, 0.92) # Muted Red
+			secondary = Color(0.92, 0.56, 0.54, 0.85)
 
 	var put_px: Callable = func(px: int, py: int, col: Color) -> void:
 		if px >= 0 and px < 32 and py >= 0 and py < 32:
@@ -2211,8 +2364,8 @@ func _make_reticle_cursor(style: StringName) -> ImageTexture:
 			draw_seg.call(11, 15, 21, 15, primary)
 			draw_seg.call(11, 17, 21, 17, primary)
 
-		&"ability_target":
-			# Luminous amber/violet concentric reticle + diagonal ticks
+		&"ability_target", &"overclock_valid", &"overclock_invalid":
+			# Luminous concentric reticle + ticks
 			draw_ring.call(11.5, primary)
 			draw_ring.call(5.5, secondary)
 			draw_seg.call(16, 2, 16, 6, primary)
@@ -2373,6 +2526,14 @@ func _update_command_cursor() -> void:
 		return
 	if active_targeting_ability != null:
 		_apply_command_cursor(&"ability_target")
+		return
+	if is_overclock_targeting:
+		var oc_hub: Building = find_ready_overclock_hub()
+		var oc_valid: bool = false
+		if oc_hub != null and command_router != null:
+			var oc_b: Building = command_router.find_building_at_point(get_global_mouse_position(), _get_local_human_team_enum())
+			oc_valid = oc_b != null and oc_b.is_valid_overclock_target(int(oc_hub.team))
+		_apply_command_cursor(&"overclock_valid" if oc_valid else &"overclock_invalid")
 		return
 	if is_attack_move_targeting:
 		_apply_command_cursor(&"attack_move")

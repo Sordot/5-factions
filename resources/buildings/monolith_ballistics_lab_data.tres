@@ -1,0 +1,39 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"ballistics_lab"
+display_name = "Ballistics Lab"
+scene_path = "res://scenes/buildings/monolith_ballistics_lab.tscn"
+biomass_cost = 120
+silica_cost = 130
+compute_cost = 25
+build_time = 7.5
+footprint_size = Vector2(80, 80)
+max_hp = 720.0
+max_shield = 120.0
+shield_regen_rate = 12.0
+shield_regen_delay = 7.0
+damage_reduction = 0.20
+vision_range = 400.0
+bandwidth_provided = 0
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+accepted_dropoff_resources = Array[StringName]([])
+requires_vent = false
+max_staff_slots = 0
+trainable_unit_paths = PackedStringArray("res://resources/units/monolith_rail_sentinel_data.tres", "res://resources/units/monolith_aegis_relay_data.tres")
+can_set_rally = true
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &"assembly_bay"
+prerequisite_building_ids = Array[StringName]([&"assembly_bay"])
+is_core_hub = false
+is_command_hub = false
+is_military_production = true
+is_supply_provider = false
+tech_tier = 1
+audio_select_class = &"production"
+tech_tree_summary = "Precision & Support Facility • Rail-Sentinel & Aegis Relay"

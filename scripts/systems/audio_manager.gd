@@ -103,10 +103,16 @@ var _cooldowns_ms: Dictionary = {
 	&"weapon_slash": 80,
 	&"weapon_rail": 90,
 	&"weapon_mortar": 105,
+	&"weapon_mono_slug": 85,
+	&"weapon_mono_rail": 100,
+	&"weapon_mono_tether": 75,
+	&"weapon_mono_bastion": 105,
 	&"ability_adrenal": 90,
 	&"ability_static": 100,
 	&"ability_slam": 110,
 	&"ability_barrage": 110,
+	&"ability_shield_overcharge": 110,
+	&"ability_suppressive_lock": 95,
 	&"entity_destroyed": 95,
 	&"alert_under_attack": 1800,
 	&"alert_uplink": 1400,
@@ -115,6 +121,9 @@ var _cooldowns_ms: Dictionary = {
 	&"salvage_claimed": 180,
 	&"autocast_toggle": 60,
 	&"relay_captured": 450,
+	&"overclock_activate": 180,
+	&"deploy_lock": 90,
+	&"deploy_release": 90,
 	&"match_victory": 500,
 	&"match_defeat": 500,
 }
@@ -477,6 +486,26 @@ func _get_local_faction_pitch_bias() -> float:
 	return 1.0
 
 
+func _get_local_faction_timbre_profile() -> StringName:
+	if TeamManager == null:
+		return &"technozen_bio"
+	var local_team: int = TeamManager.get_local_human_team()
+	if local_team < 0:
+		return &"technozen_bio"
+	var fdata: FactionData = TeamManager.get_team_faction_data(local_team)
+	if fdata != null and fdata.audio_timbre_profile != &"":
+		return fdata.audio_timbre_profile
+	return &"technozen_bio"
+
+
+func _resolve_timbre_stream_key(base_key: StringName) -> StringName:
+	if _get_local_faction_timbre_profile() == &"monolith_industrial":
+		var mono_key: StringName = StringName("mono_%s" % String(base_key))
+		if _streams.has(mono_key):
+			return mono_key
+	return base_key
+
+
 func _play_on_bark_channel(
 	stream_key: StringName,
 	volume_db_offset: float,
@@ -486,7 +515,8 @@ func _play_on_bark_channel(
 ) -> void:
 	if is_effectively_muted() or master_volume_linear <= 0.005 or ui_volume_linear <= 0.005:
 		return
-	if _bark_player == null or not _streams.has(stream_key):
+	var resolved_key: StringName = _resolve_timbre_stream_key(stream_key)
+	if _bark_player == null or not _streams.has(resolved_key):
 		return
 	var now_ms: int = Time.get_ticks_msec()
 	var prev_ms: int = _last_bark_order_ms if is_order else _last_bark_select_ms
@@ -500,7 +530,7 @@ func _play_on_bark_channel(
 	# Single-voice channel: stop any active bark cleanly so selections/orders never overlap.
 	if _bark_player.playing:
 		_bark_player.stop()
-	_bark_player.stream = _streams[stream_key] as AudioStreamWAV
+	_bark_player.stream = _streams[resolved_key] as AudioStreamWAV
 	_bark_player.volume_db = volume_db_offset + _slider_to_db(ui_volume_linear)
 	var pitch_bias: float = _get_local_faction_pitch_bias()
 	if pitch_jitter > 0.0:
@@ -569,15 +599,15 @@ func play_unit_bark_for_units(units: Array, bark_type: StringName) -> void:
 
 func classify_unit_bark_class(unit_type_id: StringName) -> StringName:
 	match unit_type_id:
-		&"worker", &"silica_harvester", &"engineer":
+		&"worker", &"silica_harvester", &"engineer", &"servo_drone", &"ore_crawler", &"grid_tech":
 			return &"worker"
-		&"clone_trooper", &"stinger", &"scout_unit":
+		&"clone_trooper", &"stinger", &"scout_unit", &"picket_drone":
 			return &"swarm"
-		&"lance_rig", &"signal_jammer":
+		&"lance_rig", &"signal_jammer", &"rail_sentinel":
 			return &"counter"
-		&"symbiote":
+		&"symbiote", &"aegis_relay":
 			return &"support"
-		&"goliath_frame", &"arc_lancer", &"chrysalis_mortar":
+		&"goliath_frame", &"arc_lancer", &"chrysalis_mortar", &"bulwark_automaton":
 			return &"heavy"
 		_:
 			return &"swarm"
@@ -622,6 +652,14 @@ func play_weapon_for_unit_data(unit_data: UnitData, world_pos: Vector2 = Vector2
 		return
 	var sfx: StringName = unit_data.weapon_sfx_id
 	match sfx:
+		&"weapon_mono_slug":
+			play_sfx(&"weapon_mono_slug", -5.0, 0.05, world_pos, true)
+		&"weapon_mono_rail":
+			play_sfx(&"weapon_mono_rail", -4.2, 0.04, world_pos, true)
+		&"weapon_mono_tether":
+			play_sfx(&"weapon_mono_tether", -6.2, 0.05, world_pos, true)
+		&"weapon_mono_bastion":
+			play_sfx(&"weapon_mono_bastion", -4.0, 0.05, world_pos, true)
 		&"weapon_slash", &"acid_slash", &"melee_slash", &"bio_slash":
 			play_sfx(&"weapon_slash", -6.5, 0.06, world_pos, true)
 		&"weapon_rail", &"rail_shot", &"rail_beam", &"arc_lance":
@@ -641,6 +679,12 @@ func play_weapon_for_unit_data(unit_data: UnitData, world_pos: Vector2 = Vector2
 
 func play_weapon_for_unit(unit_type_id: StringName, world_pos: Vector2 = Vector2.INF) -> void:
 	match unit_type_id:
+		&"bulwark_automaton":
+			play_sfx(&"weapon_mono_slug", -5.0, 0.05, world_pos, true)
+		&"rail_sentinel":
+			play_sfx(&"weapon_mono_rail", -4.2, 0.04, world_pos, true)
+		&"picket_drone":
+			play_sfx(&"weapon_mono_tether", -6.2, 0.05, world_pos, true)
 		&"stinger", &"symbiote":
 			play_sfx(&"weapon_slash", -6.5, 0.06, world_pos, true)
 		&"lance_rig", &"arc_lancer":
@@ -670,6 +714,10 @@ func play_ability_sfx(ability_id: StringName, world_pos: Vector2 = Vector2.INF) 
 			play_sfx(&"ability_adrenal", -3.5, 0.04, world_pos, true)
 		&"static_pulse":
 			play_sfx(&"ability_static", -3.0, 0.03, world_pos, true)
+		&"monolith_suppressive_lock":
+			play_sfx(&"ability_suppressive_lock", -3.2, 0.04, world_pos, true)
+		&"monolith_shield_overcharge":
+			play_sfx(&"ability_shield_overcharge", -2.8, 0.03, world_pos, true)
 		&"seismic_slam":
 			play_sfx(&"ability_slam", -2.0, 0.04, world_pos, true)
 		&"spore_barrage", &"overcharge_pulse":
@@ -755,10 +803,16 @@ func _generate_procedural_library() -> void:
 	_streams[&"weapon_slash"] = _synth_acid_snap()
 	_streams[&"weapon_rail"] = _synth_rail_zap()
 	_streams[&"weapon_mortar"] = _synth_mortar_thud()
+	_streams[&"weapon_mono_slug"] = _synth_mono_slug()
+	_streams[&"weapon_mono_rail"] = _synth_mono_rail()
+	_streams[&"weapon_mono_tether"] = _synth_mono_tether()
+	_streams[&"weapon_mono_bastion"] = _synth_mono_bastion()
 	_streams[&"ability_adrenal"] = _synth_adrenal_hum()
 	_streams[&"ability_static"] = _synth_static_pulse()
 	_streams[&"ability_slam"] = _synth_seismic_slam()
 	_streams[&"ability_barrage"] = _synth_mortar_thud()
+	_streams[&"ability_shield_overcharge"] = _synth_mono_shield_overcharge()
+	_streams[&"ability_suppressive_lock"] = _synth_mono_suppressive_lock()
 	_streams[&"entity_destroyed"] = _synth_destruction_boom()
 
 	# Tactical Alerts, Veterancy, Salvage & Auto-Cast
@@ -769,8 +823,11 @@ func _generate_procedural_library() -> void:
 	_streams[&"salvage_claimed"] = _synth_chime(PackedFloat32Array([587.33, 783.99, 1174.66, 1567.98]), 0.045, 0.25)
 	_streams[&"autocast_toggle"] = _synth_chime(PackedFloat32Array([880.0, 1318.5]), 0.04, 0.20)
 	_streams[&"relay_captured"] = _synth_chime(PackedFloat32Array([659.25, 987.77, 1318.51]), 0.06, 0.22)
+	_streams[&"overclock_activate"] = _synth_mono_overclock()
+	_streams[&"deploy_lock"] = _synth_double_chirp(320.0, 145.0, 0.14, 0.28)
+	_streams[&"deploy_release"] = _synth_double_chirp(185.0, 380.0, 0.13, 0.24)
 
-	# Unit-Class Procedural Synth Barks (150–240ms)
+	# Unit-Class Procedural Synth Barks (150–240ms) — GENESIS_V2 baseline
 	_streams[&"bark_worker_select"] = _synth_bark_worker(false)
 	_streams[&"bark_worker_order"] = _synth_bark_worker(true)
 	_streams[&"bark_swarm_select"] = _synth_bark_swarm(false)
@@ -781,6 +838,23 @@ func _generate_procedural_library() -> void:
 	_streams[&"bark_support_order"] = _synth_bark_support(true)
 	_streams[&"bark_heavy_select"] = _synth_bark_heavy(false)
 	_streams[&"bark_heavy_order"] = _synth_bark_heavy(true)
+
+	# MONOLITH_OS Industrial Timbre Barks & Building Selects (&"monolith_industrial")
+	_streams[&"mono_bark_worker_select"] = _synth_mono_bark(PackedFloat32Array([311.13, 466.16]), false)
+	_streams[&"mono_bark_worker_order"] = _synth_mono_bark(PackedFloat32Array([349.23, 523.25]), true)
+	_streams[&"mono_bark_swarm_select"] = _synth_mono_bark(PackedFloat32Array([392.0, 587.33]), false)
+	_streams[&"mono_bark_swarm_order"] = _synth_mono_bark(PackedFloat32Array([440.0, 659.25]), true)
+	_streams[&"mono_bark_counter_select"] = _synth_mono_bark(PackedFloat32Array([261.63, 392.0, 523.25]), false)
+	_streams[&"mono_bark_counter_order"] = _synth_mono_bark(PackedFloat32Array([293.66, 440.0, 587.33]), true)
+	_streams[&"mono_bark_support_select"] = _synth_mono_bark(PackedFloat32Array([329.63, 493.88, 659.25]), false)
+	_streams[&"mono_bark_support_order"] = _synth_mono_bark(PackedFloat32Array([392.0, 587.33, 783.99]), true)
+	_streams[&"mono_bark_heavy_select"] = _synth_mono_bark(PackedFloat32Array([146.83, 220.0]), false)
+	_streams[&"mono_bark_heavy_order"] = _synth_mono_bark(PackedFloat32Array([164.81, 246.94]), true)
+	_streams[&"mono_bldg_select_hub"] = _synth_mono_bark(PackedFloat32Array([110.0, 164.81, 220.0]), false)
+	_streams[&"mono_bldg_select_production"] = _synth_mono_bark(PackedFloat32Array([146.83, 220.0, 293.66]), false)
+	_streams[&"mono_bldg_select_tech"] = _synth_mono_bark(PackedFloat32Array([220.0, 329.63, 440.0]), false)
+	_streams[&"mono_bldg_select_defense"] = _synth_mono_bark(PackedFloat32Array([174.61, 261.63]), true)
+	_streams[&"mono_bldg_select_utility"] = _synth_mono_bark(PackedFloat32Array([196.0, 293.66]), false)
 
 	# Match Flow
 	_streams[&"match_victory"] = _synth_chime(PackedFloat32Array([523.25, 659.25, 783.99, 1046.5, 1318.5]), 0.11, 0.30)
@@ -1240,4 +1314,205 @@ func _synth_bark_heavy(is_order: bool) -> AudioStreamWAV:
 		var ping_f: float = 620.0 if is_order else 490.0
 		var ping: float = sin(TAU * ping_f * ping_t) * ping_env * 0.35
 		out[i] = (sin(phase) * 0.65 + sin(phase * 2.0) * 0.20) * sub_env * 0.32 + ping * 0.28
+	return _make_wav(out)
+
+
+# =============================================================================
+# MONOLITH_OS — INDUSTRIAL PROCEDURAL SYNTHS
+# =============================================================================
+
+func _synth_mono_slug() -> AudioStreamWAV:
+	# Heavy low-mid mechanical thump + crisp metallic bolt clack
+	var dur: float = 0.15
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	var seed_val: int = 31337
+	var lp: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var freq: float = lerpf(210.0, 58.0, pow(u, 0.55))
+		phase += TAU * freq / float(SAMPLE_RATE)
+		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
+		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
+		lp = lerpf(lp, noise, 0.28)
+		var thump_env: float = minf(1.0, t / 0.002) * exp(-u * 6.0)
+		var clack_t: float = maxf(0.0, t - 0.042)
+		var clack_env: float = (minf(1.0, clack_t / 0.0015) * exp(-clack_t * 62.0)) if t >= 0.042 else 0.0
+		var clack: float = (sin(TAU * 1420.0 * clack_t) * 0.5 + sin(TAU * 2380.0 * clack_t) * 0.35 + noise * 0.25) * clack_env
+		out[i] = clampf((sin(phase) * 0.72 + lp * 0.40) * thump_env * 0.36 + clack * 0.22, -0.95, 0.95)
+	return _make_wav(out)
+
+
+func _synth_mono_rail() -> AudioStreamWAV:
+	# Rising high-voltage capacitor whine -> crisp sub-bass crack + metallic ring
+	var dur: float = 0.24
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase_whine: float = 0.0
+	var phase_crack: float = 0.0
+	var seed_val: int = 8088
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var sample: float = 0.0
+		if t < 0.045:
+			var uw: float = t / 0.045
+			var fw: float = lerpf(620.0, 2100.0, uw * uw)
+			phase_whine += TAU * fw / float(SAMPLE_RATE)
+			sample += sin(phase_whine) * (0.14 * uw)
+		else:
+			var lt: float = t - 0.045
+			var uc: float = lt / (dur - 0.045)
+			var fc: float = lerpf(260.0, 46.0, pow(uc, 0.45))
+			phase_crack += TAU * fc / float(SAMPLE_RATE)
+			seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
+			var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
+			var crack_env: float = minf(1.0, lt / 0.0015) * exp(-uc * 5.2)
+			var ring_env: float = exp(-lt * 16.0)
+			var ring: float = (sin(TAU * 1180.0 * lt) * 0.55 + sin(TAU * 1770.0 * lt) * 0.45) * ring_env * 0.16
+			sample += (clampf(sin(phase_crack) * 1.35, -1.0, 1.0) * 0.65 + noise * 0.35 * exp(-lt * 40.0)) * crack_env * 0.36 + ring
+		out[i] = clampf(sample, -0.95, 0.95)
+	return _make_wav(out)
+
+
+func _synth_mono_tether() -> AudioStreamWAV:
+	# Tight rhythmic electrical zap / stun pulse (Picket Drone)
+	var dur: float = 0.12
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var pulse_u: float = fmod(u * 3.0, 1.0)
+		var freq: float = lerpf(1260.0, 440.0, pulse_u) + sin(TAU * 120.0 * t) * 110.0
+		phase += TAU * freq / float(SAMPLE_RATE)
+		var env: float = minf(1.0, pulse_u / 0.08) * exp(-pulse_u * 4.5) * (1.0 - 0.35 * u)
+		var sq: float = clampf(sin(phase) * 1.6, -1.0, 1.0)
+		out[i] = sq * env * 0.25
+	return _make_wav(out)
+
+
+func _synth_mono_bastion() -> AudioStreamWAV:
+	# Deep pneumatic autocannon boom (Bastion Emplacement)
+	var dur: float = 0.26
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	var seed_val: int = 55101
+	var lp: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var freq: float = lerpf(165.0, 42.0, pow(u, 0.48))
+		phase += TAU * freq / float(SAMPLE_RATE)
+		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
+		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
+		lp = lerpf(lp, noise, 0.20)
+		var boom_env: float = minf(1.0, t / 0.0025) * exp(-u * 4.8)
+		var hiss_t: float = maxf(0.0, t - 0.07)
+		var hiss_env: float = (minf(1.0, hiss_t / 0.01) * exp(-hiss_t * 22.0)) if t >= 0.07 else 0.0
+		var hiss: float = (noise - lp) * hiss_env * 0.14
+		out[i] = clampf((sin(phase) * 0.78 + lp * 0.48) * boom_env * 0.38 + hiss, -0.95, 0.95)
+	return _make_wav(out)
+
+
+func _synth_mono_overclock() -> AudioStreamWAV:
+	# Deep industrial turbine spin-up + resonant quantized Axiom chime
+	var dur: float = 0.42
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase_turb: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var turb_f: float = lerpf(95.0, 340.0, pow(u, 0.72))
+		phase_turb += TAU * turb_f / float(SAMPLE_RATE)
+		var turb_env: float = sin(PI * u) * 0.75
+		var turb: float = (sin(phase_turb) * 0.65 + sin(phase_turb * 2.0) * 0.25) * turb_env * 0.26
+		var chime: float = 0.0
+		if t >= 0.14:
+			var ct: float = t - 0.14
+			var c_env: float = minf(1.0, ct / 0.006) * exp(-ct * 7.5)
+			chime = (sin(TAU * 440.0 * ct) * 0.5 + sin(TAU * 659.25 * ct) * 0.35 + sin(TAU * 880.0 * ct) * 0.15) * c_env * 0.24
+		out[i] = clampf(turb + chime, -0.95, 0.95)
+	return _make_wav(out)
+
+
+func _synth_mono_shield_overcharge() -> AudioStreamWAV:
+	# Resonant harmonic shield-capacitor surge + crisp barrier lock chime (Aegis Relay)
+	var dur: float = 0.32
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var f_sweep: float = lerpf(260.0, 780.0, pow(u, 0.6))
+		phase += TAU * f_sweep / float(SAMPLE_RATE)
+		var env: float = minf(1.0, t / 0.012) * exp(-u * 3.2)
+		var lock: float = 0.0
+		if t >= 0.10:
+			var lt: float = t - 0.10
+			var l_env: float = minf(1.0, lt / 0.004) * exp(-lt * 11.0)
+			lock = (sin(TAU * 587.33 * lt) * 0.55 + sin(TAU * 880.0 * lt) * 0.45) * l_env * 0.22
+		out[i] = clampf((sin(phase) * 0.65 + sin(phase * 1.5) * 0.35) * env * 0.24 + lock, -0.95, 0.95)
+	return _make_wav(out)
+
+
+func _synth_mono_suppressive_lock() -> AudioStreamWAV:
+	# Quantized downward clamp-lock stun pulse (Picket Drone)
+	var dur: float = 0.22
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var step_f: float = 780.0 if u < 0.33 else (520.0 if u < 0.66 else 260.0)
+		phase += TAU * (step_f + sin(TAU * 64.0 * t) * 55.0) / float(SAMPLE_RATE)
+		var env: float = minf(1.0, t / 0.004) * exp(-u * 4.2)
+		out[i] = clampf(sin(phase) * 1.3, -1.0, 1.0) * env * 0.26
+	return _make_wav(out)
+
+
+func _synth_mono_bark(notes: PackedFloat32Array, is_order: bool) -> AudioStreamWAV:
+	# Lower-pitched quantized harmonic tones + crisp mechanical relay click (170-220ms)
+	var step_dur: float = 0.050 if is_order else 0.058
+	var tail: float = 0.095
+	var total_dur: float = step_dur * float(notes.size()) + tail
+	var count: int = int(SAMPLE_RATE * total_dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	out.fill(0.0)
+	var seed_val: int = 4409
+	# Initial crisp mechanical relay click (first 16ms)
+	var click_len: int = mini(count, int(SAMPLE_RATE * 0.016))
+	for c: int in range(click_len):
+		var ct: float = float(c) / float(SAMPLE_RATE)
+		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
+		var n: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
+		var c_env: float = exp(-ct * 190.0)
+		out[c] += (sin(TAU * 1650.0 * ct) * 0.55 + n * 0.45) * c_env * 0.22
+	# Quantized harmonic industrial steps
+	for idx: int in range(notes.size()):
+		var f: float = notes[idx]
+		var start_i: int = int((0.012 + float(idx) * step_dur) * float(SAMPLE_RATE))
+		var note_len: int = int((step_dur + tail) * float(SAMPLE_RATE))
+		for j: int in range(note_len):
+			var pos: int = start_i + j
+			if pos >= count:
+				break
+			var lt: float = float(j) / float(SAMPLE_RATE)
+			var env: float = minf(1.0, lt / 0.004) * exp(-lt * 18.0)
+			var wave: float = sin(TAU * f * lt) * 0.68 + clampf(sin(TAU * f * 2.0 * lt) * 1.2, -1.0, 1.0) * 0.22 + sin(TAU * f * 0.5 * lt) * 0.10
+			out[pos] = clampf(out[pos] + wave * env * 0.22, -0.95, 0.95)
 	return _make_wav(out)

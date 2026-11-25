@@ -1,0 +1,41 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/monolith_shield_overcharge.tres" id="2_overcharge"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"aegis_relay"
+display_name = "Aegis Relay"
+max_hp = 150.0
+max_shield = 75.0
+shield_regen_rate = 12.0
+shield_regen_delay = 5.5
+move_speed = 190.0
+acceleration = 1600.0
+turn_speed = 14.0
+selection_radius = 22.0
+collision_radius = 16.0
+attack_damage = 0.0
+attack_range = 0.0
+aggro_range = 240.0
+vision_range = 380.0
+attack_cooldown = 1.0
+is_armored = false
+damage_reduction = 0.12
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_overcharge")])
+bandwidth_cost = 2
+biomass_cost = 65
+silica_cost = 95
+compute_cost = 20
+build_time = 8.0
+train_time = 8.0
+unit_scene_path = "res://scenes/units/monolith_aegis_relay.tscn"
+unit_tags = Array[StringName]([&"mechanical", &"support"])
+weapon_tracer_style = &"pulse"
+weapon_tracer_color = Color(0.22, 0.741, 0.973, 0.95)
+weapon_tracer_width = 2.0
+weapon_sfx_id = &"weapon_mono_tether"
+audio_bark_class = &"support"
+minimap_icon_shape = &"dot"
+role_tags_display = "Shield Support • Auto-Cast Barrier"

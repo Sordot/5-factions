@@ -1,0 +1,40 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"bulwark_automaton"
+display_name = "Bulwark Automaton"
+max_hp = 230.0
+max_shield = 55.0
+shield_regen_rate = 8.0
+shield_regen_delay = 6.0
+move_speed = 165.0
+acceleration = 1350.0
+turn_speed = 10.5
+selection_radius = 24.0
+collision_radius = 18.0
+attack_damage = 34.0
+attack_range = 195.0
+aggro_range = 285.0
+vision_range = 360.0
+attack_cooldown = 1.65
+attack_windup = 0.14
+is_armored = true
+damage_reduction = 0.28
+bandwidth_cost = 2
+biomass_cost = 85
+silica_cost = 55
+compute_cost = 0
+build_time = 7.0
+train_time = 7.0
+unit_scene_path = "res://scenes/units/monolith_bulwark_automaton.tscn"
+unit_tags = Array[StringName]([&"mechanical", &"armored", &"frontline"])
+weapon_tracer_style = &"heavy_slug"
+weapon_tracer_color = Color(1, 0.68, 0.18, 0.98)
+weapon_tracer_width = 3.0
+weapon_sfx_id = &"weapon_mono_slug"
+audio_bark_class = &"heavy"
+minimap_icon_shape = &"dot"
+role_tags_display = "Shielded Frontline • Heavy Armor"

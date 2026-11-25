@@ -9,6 +9,7 @@ const HEALTH_BAR_WIDTH: float = 76.0
 const CONSTRUCT_BAR_WIDTH: float = 68.0
 const DEPOSIT_PULSE_DURATION: float = 0.25
 const HIT_FLASH_DURATION: float = 0.08
+const SHIELD_HIT_FLASH_DURATION: float = 0.14
 const COMPLETION_FLASH_DURATION: float = 0.22
 const SALVAGE_DURATION: float = 4.0
 const DEFAULT_BUILDING_COSTS: Dictionary = {
@@ -24,6 +25,7 @@ const DEFAULT_BUILDING_COSTS: Dictionary = {
 
 signal selection_changed(building: Building, selected: bool)
 signal health_changed(building: Building, current_hp: float, max_hp: float)
+signal shield_changed(building: Building, current_shield: float, max_shield: float)
 signal status_changed(building: Building)
 signal destroyed(building: Building)
 signal construction_progress_changed(building: Building, progress: float, is_constructed: bool)
@@ -37,6 +39,10 @@ signal rally_changed(building: Building)
 @export var building_type_id: StringName = &"nexus_vat"
 @export var display_name: String = "Nexus Vat"
 @export var max_hp: float = 1500.0
+@export var max_shield: float = 0.0
+@export var shield_regen_rate: float = 0.0
+@export var shield_regen_delay: float = 7.0
+@export var damage_reduction: float = 0.0
 @export var vision_range: float = 450.0
 @export var footprint_radius: float = 46.0
 @export var selection_radius: float = 54.0
@@ -65,6 +71,12 @@ signal rally_changed(building: Building)
 @export var turret_bonus_vs_armored: float = 1.0
 @export var turret_tracer_style: StringName = &"pulse"
 @export var turret_turn_speed: float = 7.0
+@export var can_overclock_buildings: bool = false
+@export var overclock_speed_multiplier: float = 2.0
+@export var overclock_duration: float = 15.0
+@export var overclock_cooldown: float = 50.0
+@export var shield_regen_aura_radius: float = 0.0
+@export var shield_regen_delay_speedup: float = 0.0
 
 @onready var selection_ring: Node2D = get_node_or_null("SelectionRing") as Node2D
 @onready var body_visual: Node2D = get_node_or_null("BodyVisual") as Node2D
@@ -76,6 +88,11 @@ signal rally_changed(building: Building)
 @onready var staff_slots_root: Node2D = get_node_or_null("StaffSlots") as Node2D
 
 var current_hp: float = 1500.0
+var current_shield: float = 0.0
+var overclock_remaining: float = 0.0
+var overclock_duration_total: float = 0.0
+var overclock_speed_mult: float = 1.0
+var overclock_ability_cooldown: float = 0.0
 var is_selected: bool = false
 var is_hovered: bool = false
 var is_marquee_highlighted: bool = false
@@ -99,6 +116,15 @@ var salvage_elapsed: float = 0.0
 var _construction_elapsed: float = 0.0
 var _deposit_pulse_timer: float = 0.0
 var _hit_flash_timer: float = 0.0
+var _shield_hit_flash_timer: float = 0.0
+var _shield_regen_timer: float = 0.0
+var _shield_aura_poll_timer: float = 0.0
+var _cached_shield_delay_speedup: float = 0.0
+var _last_emitted_shield_int: int = -1
+var _shield_bar_bg: ColorRect = null
+var _shield_bar_fill: ColorRect = null
+var _overclock_anim_time: float = 0.0
+var _overclock_ui_tick: float = 0.0
 var _base_core_color: Color = Color(0.22, 0.94, 0.88, 1.0)
 var _compute_tick_timer: float = 0.0
 var _entity_visuals: EntityVisuals = null
@@ -115,8 +141,13 @@ func _ready() -> void:
 			building_data = fac_ready.get_building_by_id(building_type_id)
 	if building_data != null:
 		_sync_turret_from_data(building_data)
+		_sync_defense_and_overclock_from_data(building_data)
 		if building_data.is_hub():
 			is_core_hub = true
+		if trainable_unit_data.is_empty():
+			var resolved_ready_units: Array[UnitData] = building_data.resolve_trainable_units()
+			if not resolved_ready_units.is_empty():
+				trainable_unit_data = resolved_ready_units
 	if construction_costs.is_empty():
 		if building_data != null:
 			construction_costs = building_data.get_cost_dict()
@@ -124,12 +155,15 @@ func _ready() -> void:
 			construction_costs = _get_default_costs_for_type(building_type_id)
 	if is_constructed:
 		current_hp = max_hp
+		current_shield = maxf(0.0, max_shield)
 		construction_progress = 1.0
 		_construction_elapsed = build_time
 	else:
 		current_hp = maxf(1.0, max_hp * 0.10)
+		current_shield = 0.0
 		construction_progress = 0.0
 		_construction_elapsed = 0.0
+	_last_emitted_shield_int = int(round(current_shield))
 	_setup_procedural_visuals()
 	_apply_team_visuals()
 	if core_glow != null:
@@ -192,7 +226,13 @@ func _process(delta: float) -> void:
 
 	if _hit_flash_timer > 0.0:
 		_hit_flash_timer = maxf(0.0, _hit_flash_timer - delta)
-		if _hit_flash_timer <= 0.0:
+		if _hit_flash_timer <= 0.0 and _shield_hit_flash_timer <= 0.0:
+			_update_construction_visuals()
+
+	if _shield_hit_flash_timer > 0.0:
+		_shield_hit_flash_timer = maxf(0.0, _shield_hit_flash_timer - delta)
+		queue_redraw()
+		if _shield_hit_flash_timer <= 0.0 and _hit_flash_timer <= 0.0:
 			_update_construction_visuals()
 
 	if completion_flash_timer > 0.0:
@@ -208,6 +248,9 @@ func _process(delta: float) -> void:
 
 	if not is_constructed:
 		return
+
+	_tick_shield_regen(delta)
+	_tick_overclock(delta)
 
 	if is_salvaging:
 		salvage_elapsed += delta
@@ -258,6 +301,17 @@ func _draw_dashed_ring(center: Vector2, radius: float, col: Color, width: float,
 
 
 func _draw() -> void:
+	if is_selected and is_constructed and not is_destroyed and shield_regen_aura_radius > 0.0:
+		var aura_r: float = shield_regen_aura_radius
+		var aura_col: Color = Color(0.220, 0.741, 0.973, 0.42)
+		var amber_dot: Color = Color(1.0, 0.624, 0.110, 0.50)
+		draw_circle(Vector2.ZERO, aura_r, Color(0.220, 0.741, 0.973, 0.035))
+		_draw_dashed_ring(Vector2.ZERO, aura_r, aura_col, 1.6, 36)
+		# Subtle halftone tick dots along the aura perimeter
+		for hi: int in range(18):
+			var ha: float = float(hi) * (TAU / 18.0)
+			draw_circle(Vector2.RIGHT.rotated(ha) * (aura_r - 5.0), 1.8, amber_dot if (hi % 3 == 0) else aura_col)
+
 	if _should_draw_turret_range_ring():
 		var atk_r: float = turret_attack_range + footprint_radius
 		var tc: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else (Color(0.28, 0.94, 0.96, 1.0) if team == Unit.Team.PLAYER else Color(1.0, 0.38, 0.28, 1.0))
@@ -283,6 +337,44 @@ func _draw() -> void:
 		draw_rect(Rect2(bar_pos - Vector2(1.0, 1.0), Vector2(bar_w + 2.0, bar_h + 2.0)), Color(0.04, 0.06, 0.09, 0.92), true)
 		draw_rect(Rect2(bar_pos, Vector2(bar_w * prog, bar_h)), Color(1.0, 0.70, 0.20, pulse), true)
 		draw_arc(Vector2.ZERO, footprint_radius + 6.0, -PI * 0.5, -PI * 0.5 + TAU * prog, 32, Color(1.0, 0.72, 0.22, pulse), 2.4, true)
+
+	# Shield-hit ripple ring
+	if _shield_hit_flash_timer > 0.0 and not is_destroyed:
+		var sf: float = clampf(_shield_hit_flash_timer / SHIELD_HIT_FLASH_DURATION, 0.0, 1.0)
+		var sr: float = footprint_radius + 5.0 + (1.0 - sf) * 6.0
+		draw_circle(Vector2.ZERO, sr * 0.95, Color(0.220, 0.741, 0.973, sf * 0.14))
+		draw_arc(Vector2.ZERO, sr, 0.0, TAU, 36, Color(0.220, 0.741, 0.973, sf * 0.92), 2.5, true)
+
+	# World-space Core Overclock VFX: pulsing Hazard Amber perimeter frame/chevrons + compact progress bar & 2x tag
+	if is_overclocked() and is_constructed and not is_destroyed:
+		var oc_pulse: float = 0.5 + 0.5 * sin(_overclock_anim_time * 7.5)
+		var amber: Color = Color(1.0, 0.624, 0.110, 0.72 + oc_pulse * 0.26) # #FF9F1C
+		var amber_soft: Color = Color(1.0, 0.624, 0.110, 0.10 + oc_pulse * 0.08)
+		var frame_r: float = footprint_radius + 7.5 + oc_pulse * 2.0
+		draw_arc(Vector2.ZERO, frame_r, 0.0, TAU, 36, amber, 2.2, true)
+		draw_circle(Vector2.ZERO, frame_r * 0.94, amber_soft)
+		# 4 pulsing corner chevrons
+		for ci: int in range(4):
+			var c_ang: float = PI * 0.25 + float(ci) * (PI * 0.5)
+			var c_dir: Vector2 = Vector2.RIGHT.rotated(c_ang)
+			var perp: Vector2 = Vector2(-c_dir.y, c_dir.x)
+			var tip: Vector2 = c_dir * (frame_r + 7.0 + oc_pulse * 2.5)
+			var wing_a: Vector2 = tip - c_dir * 6.0 + perp * 6.0
+			var wing_b: Vector2 = tip - c_dir * 6.0 - perp * 6.0
+			draw_polyline(PackedVector2Array([wing_a, tip, wing_b]), amber, 2.2, true)
+		# Compact amber timer bar + 2x tag cleanly above building bars
+		var oc_ratio: float = clampf(overclock_remaining / maxf(0.1, overclock_duration_total), 0.0, 1.0)
+		var oc_bar_w: float = 54.0
+		var oc_bar_h: float = 4.0
+		var base_top_y: float = (health_bar_root.position.y if health_bar_root != null else -(footprint_radius + 14.0)) - (15.0 if max_shield > 0.0 else 10.0)
+		var oc_bar_pos: Vector2 = Vector2(-oc_bar_w * 0.5, base_top_y)
+		draw_rect(Rect2(oc_bar_pos - Vector2(1.0, 1.0), Vector2(oc_bar_w + 2.0, oc_bar_h + 2.0)), Color(0.04, 0.06, 0.10, 0.92), true)
+		draw_rect(Rect2(oc_bar_pos, Vector2(oc_bar_w * oc_ratio, oc_bar_h)), amber, true)
+		var mult_txt: String = ("%dx" % int(round(overclock_speed_mult))) if is_equal_approx(overclock_speed_mult, round(overclock_speed_mult)) else ("%.1fx" % overclock_speed_mult)
+		var font: Font = ThemeDB.fallback_font
+		var txt_sz: Vector2 = font.get_string_size(mult_txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
+		var tag_pos: Vector2 = Vector2(-txt_sz.x * 0.5, base_top_y - 3.0)
+		draw_string(font, tag_pos, mult_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.78, 0.30, 0.98))
 
 	if not is_selected or not has_rally() or _has_rally_overlay():
 		return
@@ -321,6 +413,7 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 		batch_production_count = maxi(1, data.batch_production_count)
 		base_batch_cost_multiplier = maxf(1.0, data.base_batch_cost_multiplier)
 		_sync_turret_from_data(data)
+		_sync_defense_and_overclock_from_data(data, true)
 		var resolved_units: Array[UnitData] = data.resolve_trainable_units()
 		if not resolved_units.is_empty():
 			trainable_unit_data = resolved_units
@@ -349,6 +442,8 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 	_construction_elapsed = 0.0
 	construction_progress = 0.0
 	current_hp = maxf(1.0, max_hp * 0.10)
+	current_shield = 0.0
+	_last_emitted_shield_int = 0
 	_update_construction_visuals()
 	_update_health_bar()
 	_update_staff_slot_visuals()
@@ -372,6 +467,25 @@ func _sync_turret_from_data(data: BuildingData) -> void:
 	turret_bonus_vs_armored = data.turret_bonus_vs_armored
 	turret_tracer_style = data.turret_tracer_style
 	turret_turn_speed = data.turret_turn_speed
+
+
+func _sync_defense_and_overclock_from_data(data: BuildingData, force_overwrite: bool = false) -> void:
+	if data == null:
+		return
+	if force_overwrite or data.max_shield > 0.0:
+		max_shield = maxf(0.0, data.max_shield)
+		shield_regen_rate = maxf(0.0, data.shield_regen_rate)
+		shield_regen_delay = maxf(0.0, data.shield_regen_delay)
+	if force_overwrite or data.damage_reduction > 0.0:
+		damage_reduction = maxf(0.0, data.damage_reduction)
+	if force_overwrite or data.can_overclock_buildings:
+		can_overclock_buildings = data.can_overclock_buildings
+		overclock_speed_multiplier = maxf(1.0, data.overclock_speed_multiplier)
+		overclock_duration = maxf(0.5, data.overclock_duration)
+		overclock_cooldown = maxf(0.5, data.overclock_cooldown)
+	if force_overwrite or data.shield_regen_aura_radius > 0.0:
+		shield_regen_aura_radius = maxf(0.0, data.shield_regen_aura_radius)
+		shield_regen_delay_speedup = maxf(0.0, data.shield_regen_delay_speedup)
 
 
 func _ensure_turret_component() -> void:
@@ -438,6 +552,8 @@ func _complete_construction() -> void:
 	_construction_elapsed = build_time
 	construction_progress = 1.0
 	current_hp = max_hp
+	current_shield = maxf(0.0, max_shield)
+	_last_emitted_shield_int = int(round(current_shield))
 	_update_construction_visuals()
 	_update_health_bar()
 	_update_staff_slot_visuals()
@@ -623,7 +739,7 @@ func get_cluster_saturation() -> Dictionary:
 	if is_core_hub or building_type_id == &"nexus_vat":
 		res_type = &"biomass"
 		search_radius = 520.0
-	elif building_type_id == &"silica_condenser":
+	elif building_type_id == &"silica_condenser" or (is_resource_dropoff and accepts_resource(&"silica")):
 		res_type = &"silica"
 		search_radius = 420.0
 	else:
@@ -642,7 +758,7 @@ func get_cluster_saturation() -> Dictionary:
 			continue
 		if global_position.distance_squared_to(rn.global_position) <= r_sq:
 			total_assigned += rn.get_assigned_count(tid)
-			total_cap += maxi(1, rn.max_harvesters)
+			total_cap += rn.get_effective_max_harvesters(tid)
 			node_count += 1
 	return {
 		"assigned": total_assigned,
@@ -885,6 +1001,183 @@ func pulse_deposit_feedback() -> void:
 	_deposit_pulse_timer = DEPOSIT_PULSE_DURATION
 
 
+func get_trainable_units() -> Array[UnitData]:
+	return trainable_unit_data
+
+
+func get_researchable_upgrades() -> Array[UpgradeData]:
+	return researchable_upgrades
+
+
+func has_overclock_ability() -> bool:
+	return can_overclock_buildings or (building_data != null and building_data.can_overclock_buildings)
+
+
+func get_overclock_config_speed_mult() -> float:
+	if building_data != null and building_data.can_overclock_buildings:
+		return maxf(1.0, building_data.overclock_speed_multiplier)
+	return maxf(1.0, overclock_speed_multiplier)
+
+
+func get_overclock_config_duration() -> float:
+	if building_data != null and building_data.can_overclock_buildings:
+		return maxf(0.5, building_data.overclock_duration)
+	return maxf(0.5, overclock_duration)
+
+
+func get_overclock_config_cooldown() -> float:
+	if building_data != null and building_data.can_overclock_buildings:
+		return maxf(0.5, building_data.overclock_cooldown)
+	return maxf(0.5, overclock_cooldown)
+
+
+func can_cast_overclock() -> bool:
+	return is_constructed and not is_destroyed and not is_salvaging and has_overclock_ability() and overclock_ability_cooldown <= 0.0
+
+
+func is_valid_overclock_target(caster_team: int) -> bool:
+	if not is_constructed or is_destroyed or is_salvaging or int(team) != caster_team:
+		return false
+	return not get_trainable_units().is_empty() or not get_researchable_upgrades().is_empty()
+
+
+func cast_overclock_on(target_building: Building) -> bool:
+	if not can_cast_overclock():
+		return false
+	if target_building == null or not is_instance_valid(target_building):
+		return false
+	if not target_building.is_valid_overclock_target(int(team)):
+		return false
+	target_building.apply_overclock(get_overclock_config_duration(), get_overclock_config_speed_mult())
+	overclock_ability_cooldown = get_overclock_config_cooldown()
+	if AudioManager != null:
+		AudioManager.play_sfx(&"overclock_activate", -2.5, 0.02, target_building.global_position, false)
+	status_changed.emit(self)
+	return true
+
+
+func apply_overclock(duration: float, speed_mult: float) -> void:
+	if is_destroyed or not is_constructed or duration <= 0.0:
+		return
+	overclock_remaining = maxf(overclock_remaining, duration)
+	overclock_duration_total = maxf(overclock_duration_total, duration)
+	overclock_speed_mult = maxf(overclock_speed_mult, maxf(1.0, speed_mult))
+	pulse_deposit_feedback()
+	queue_redraw()
+	status_changed.emit(self)
+
+
+func is_overclocked() -> bool:
+	return overclock_remaining > 0.0
+
+
+func get_local_production_speed_multiplier() -> float:
+	return overclock_speed_mult if overclock_remaining > 0.0 else 1.0
+
+
+func _tick_overclock(delta: float) -> void:
+	var any_active: bool = false
+	var needs_emit: bool = false
+	if overclock_ability_cooldown > 0.0:
+		any_active = true
+		overclock_ability_cooldown = maxf(0.0, overclock_ability_cooldown - delta)
+		if overclock_ability_cooldown <= 0.0:
+			needs_emit = true
+
+	if overclock_remaining > 0.0:
+		any_active = true
+		_overclock_anim_time += delta
+		overclock_remaining = maxf(0.0, overclock_remaining - delta)
+		if overclock_remaining <= 0.0:
+			overclock_speed_mult = 1.0
+			overclock_duration_total = 0.0
+			needs_emit = true
+		queue_redraw()
+
+	if any_active and is_selected:
+		_overclock_ui_tick += delta
+		if _overclock_ui_tick >= 0.20:
+			_overclock_ui_tick = 0.0
+			needs_emit = true
+	else:
+		_overclock_ui_tick = 0.0
+
+	if needs_emit:
+		status_changed.emit(self)
+
+
+func has_shields() -> bool:
+	return max_shield > 0.0
+
+
+func restore_shield(amount: float) -> float:
+	if is_destroyed or not is_constructed or max_shield <= 0.0 or amount <= 0.0:
+		return 0.0
+	var prev: float = current_shield
+	current_shield = minf(max_shield, current_shield + amount)
+	var restored: float = current_shield - prev
+	if restored > 0.0:
+		_last_emitted_shield_int = int(round(current_shield))
+		_update_health_bar()
+		queue_redraw()
+		shield_changed.emit(self, current_shield, max_shield)
+		status_changed.emit(self)
+	return restored
+
+
+func get_effective_damage_reduction() -> float:
+	var dr: float = maxf(0.0, damage_reduction)
+	var econ: EconomyManager = _get_economy_manager()
+	if econ != null:
+		dr += econ.get_bonus_armor(int(team))
+	return clampf(dr, 0.0, 0.75)
+
+
+static func get_shield_regen_delay_speedup_at(tree: SceneTree, world_pos: Vector2, target_team: int) -> float:
+	if tree == null:
+		return 0.0
+	var best_speedup: float = 0.0
+	var candidates: Array = SpatialGrid.query_buildings_in_radius(world_pos, 320.0) if SpatialGrid != null else tree.get_nodes_in_group("buildings")
+	for node: Variant in candidates:
+		if not is_instance_valid(node) or not (node is Building):
+			continue
+		var b: Building = node as Building
+		if b.is_destroyed or not b.is_constructed or b.is_salvaging or b.shield_regen_aura_radius <= 0.0 or b.shield_regen_delay_speedup <= 0.0:
+			continue
+		var is_ally: bool = (int(b.team) == target_team) or (TeamManager != null and TeamManager.are_allies(target_team, int(b.team)))
+		if not is_ally:
+			continue
+		if world_pos.distance_squared_to(b.global_position) <= b.shield_regen_aura_radius * b.shield_regen_aura_radius:
+			best_speedup = maxf(best_speedup, b.shield_regen_delay_speedup)
+	return best_speedup
+
+
+func _tick_shield_regen(delta: float) -> void:
+	if max_shield <= 0.0 or current_shield >= max_shield:
+		return
+	if _shield_regen_timer > 0.0:
+		_shield_aura_poll_timer -= delta
+		if _shield_aura_poll_timer <= 0.0:
+			_shield_aura_poll_timer = 0.25
+			_cached_shield_delay_speedup = Building.get_shield_regen_delay_speedup_at(get_tree(), global_position, int(team)) if is_inside_tree() else 0.0
+		_shield_regen_timer = maxf(0.0, _shield_regen_timer - delta * (1.0 + _cached_shield_delay_speedup))
+		return
+	if shield_regen_rate <= 0.0:
+		return
+	var econ: EconomyManager = _get_economy_manager()
+	var rate_mult: float = econ.get_shield_regen_rate_multiplier(int(team)) if econ != null else 1.0
+	var next_shd: float = minf(max_shield, current_shield + shield_regen_rate * rate_mult * delta)
+	if is_equal_approx(next_shd, current_shield):
+		return
+	current_shield = next_shd
+	_update_health_bar()
+	var shd_int: int = int(round(current_shield))
+	if shd_int != _last_emitted_shield_int or current_shield >= max_shield:
+		_last_emitted_shield_int = shd_int
+		shield_changed.emit(self, current_shield, max_shield)
+		status_changed.emit(self)
+
+
 func repair(amount: float) -> void:
 	if is_destroyed or not is_constructed or amount <= 0.0:
 		return
@@ -1014,17 +1307,52 @@ func _get_default_costs_for_type(type_id: StringName) -> Dictionary:
 func take_damage(amount: float, attacker: Node = null) -> void:
 	if is_destroyed or amount <= 0.0:
 		return
-	current_hp = maxf(0.0, current_hp - amount)
-	_hit_flash_timer = HIT_FLASH_DURATION
-	if is_node_ready() and body_visual != null:
-		body_visual.modulate = Color(1.9, 2.2, 2.3, 1.0)
+
+	var econ: EconomyManager = _get_economy_manager()
+	if max_shield > 0.0:
+		var delay_mult: float = econ.get_shield_regen_delay_multiplier(int(team)) if econ != null else 1.0
+		_shield_regen_timer = maxf(0.0, shield_regen_delay * delay_mult)
+
+	var remaining: float = amount
+	# Layer 2 — Native Regenerating Shield (Unmitigated)
+	var absorbed_native: float = 0.0
+	if remaining > 0.0 and current_shield > 0.0:
+		absorbed_native = minf(current_shield, remaining)
+		current_shield = maxf(0.0, current_shield - absorbed_native)
+		remaining = maxf(0.0, remaining - absorbed_native)
+
+	var shield_absorbed: bool = absorbed_native > 0.0
+	if shield_absorbed:
+		_shield_hit_flash_timer = SHIELD_HIT_FLASH_DURATION
+		_last_emitted_shield_int = int(round(current_shield))
+		shield_changed.emit(self, current_shield, max_shield)
+
+	# Layer 3 — Hull HP (Mitigated)
+	var hull_damaged: bool = false
+	if remaining > 0.0:
+		var mitigation: float = get_effective_damage_reduction()
+		var effective_damage: float = remaining * (1.0 - mitigation)
+		if effective_damage > 0.0:
+			current_hp = maxf(0.0, current_hp - effective_damage)
+			hull_damaged = true
+			_hit_flash_timer = HIT_FLASH_DURATION
+			if is_node_ready() and body_visual != null:
+				body_visual.modulate = Color(1.9, 2.2, 2.3, 1.0)
+			health_changed.emit(self, current_hp, max_hp)
+	elif shield_absorbed and is_node_ready() and body_visual != null and _hit_flash_timer <= 0.0:
+		body_visual.modulate = Color(0.82, 1.48, 2.15, 1.0)
+
+	if not hull_damaged and not shield_absorbed:
+		status_changed.emit(self)
+		return
+
 	_update_health_bar()
+	queue_redraw()
 	var is_local_owned: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Unit.Team.PLAYER)
 	if is_local_owned and is_inside_tree():
 		var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
 		if mm != null:
 			mm.push_tactical_alert(global_position, &"under_attack", "%s Under Attack!" % display_name)
-	health_changed.emit(self, current_hp, max_hp)
 	status_changed.emit(self)
 	if current_hp <= 0.0:
 		if attacker != null and is_instance_valid(attacker) and attacker is Unit:
@@ -1049,6 +1377,10 @@ func get_inspection_data() -> Dictionary:
 		accent = Color(0.96, 0.64, 0.26, 1.0)
 	elif building_type_id == &"synthetics_fabricator":
 		accent = Color(0.36, 0.96, 1.0, 1.0)
+	elif building_type_id == &"capacitor_pylon" or building_type_id == &"logic_monolith":
+		accent = Color(0.220, 0.741, 0.973, 1.0)
+	elif building_type_id == &"foundry_core" or building_type_id == &"silica_smelter" or building_type_id == &"assembly_bay" or building_type_id == &"ballistics_lab" or building_type_id == &"bastion_emplacement":
+		accent = Color(1.0, 0.624, 0.110, 1.0)
 	elif team == Unit.Team.ENEMY:
 		accent = Color(1.0, 0.36, 0.26, 1.0)
 
@@ -1072,6 +1404,9 @@ func get_inspection_data() -> Dictionary:
 			"show_hp_bar": true,
 			"hp_current": current_hp,
 			"hp_max": max_hp,
+			"show_shield_bar": false,
+			"shield_current": 0.0,
+			"shield_max": max_shield,
 			"show_primary_bar": true,
 			"primary_bar_label": "Building: %d%% — Under Construction" % pct,
 			"primary_bar_value": construction_progress * 100.0,
@@ -1122,47 +1457,82 @@ func get_inspection_data() -> Dictionary:
 		var fac_code: String = fac_hub.short_code if (fac_hub != null and not fac_hub.short_code.is_empty()) else "FACTION"
 		subtitle = ("%s PRIMARY HUB" % fac_code) if is_local_owned else "HOSTILE COMMAND HUB"
 		var bw_str: String = "%d / %d" % [econ.get_bandwidth_used(team), econ.get_bandwidth_cap(team)] if econ != null else "--"
-		stats.append({"label": "Drop-Off", "value": "Biomass"})
+		var drop_res: Array[StringName] = building_data.get_dropoff_resources() if building_data != null else accepted_resources
+		var drop_parts: PackedStringArray = PackedStringArray()
+		for r_id: StringName in drop_res:
+			drop_parts.append(String(r_id).capitalize())
+		var drop_str: String = " / ".join(drop_parts) if not drop_parts.is_empty() else "Biomass"
+		stats.append({"label": "Drop-Off", "value": drop_str})
 		stats.append({"label": "Bandwidth", "value": "+%d Capacity" % bandwidth_provided})
 		stats.append({"label": "Network", "value": bw_str})
 		stats.append({"label": "Rally", "value": _get_rally_summary()})
 	elif building_type_id == &"cloning_vat":
 		subtitle = "TIER-1 BATCH CLONING" if team == Unit.Team.PLAYER else "HOSTILE CLONING VAT"
 		var mult: float = econ.get_batch_cost_multiplier(team, base_batch_cost_multiplier) if econ != null else base_batch_cost_multiplier
-		var spd: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * 100.0))
+		var spd: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * get_local_production_speed_multiplier() * 100.0))
 		stats.append({"label": "Batch Output", "value": "x%d Units (%.2fx Cost)" % [batch_production_count, mult]})
 		stats.append({"label": "Prod Speed", "value": "%d%%" % spd})
 		stats.append({"label": "Rally", "value": _get_rally_summary()})
 		stats.append({"label": "Tech", "value": "Unlocks Fabricator"})
 	elif building_type_id == &"calibration_foundry":
 		subtitle = "TIER-1.5 MECH COUNTER" if team == Unit.Team.PLAYER else "HOSTILE FOUNDRY"
-		var spd_f: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * 100.0))
+		var spd_f: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * get_local_production_speed_multiplier() * 100.0))
 		stats.append({"label": "Roster", "value": "Lance-Rig / Jammer"})
 		stats.append({"label": "Prod Speed", "value": "%d%%" % spd_f})
 		stats.append({"label": "Rally", "value": _get_rally_summary()})
 		stats.append({"label": "Role", "value": "Anti-Armor & Utility"})
 	elif building_type_id == &"synthetics_fabricator":
 		subtitle = "TIER-2 HEAVY SYNTHETICS" if team == Unit.Team.PLAYER else "HOSTILE FABRICATOR"
-		var spd_s: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * 100.0))
+		var spd_s: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * get_local_production_speed_multiplier() * 100.0))
 		stats.append({"label": "Roster", "value": "Goliath / Arc / Mortar"})
 		stats.append({"label": "Prod Speed", "value": "%d%%" % spd_s})
 		stats.append({"label": "Rally", "value": _get_rally_summary()})
 		stats.append({"label": "Role", "value": "Heavy Compute Pivot"})
-	elif building_type_id == &"silica_condenser":
+	elif building_type_id == &"assembly_bay" or building_type_id == &"ballistics_lab" or is_military_production_building():
+		var tier_label: String = "TIER-%d PRODUCTION" % maxi(1, get_tech_tier())
+		subtitle = tier_label if is_local_owned else "HOSTILE PRODUCTION"
+		var spd_m: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * get_local_production_speed_multiplier() * 100.0))
+		var roster_names: PackedStringArray = PackedStringArray()
+		for u_d: UnitData in trainable_unit_data:
+			if u_d != null:
+				roster_names.append(u_d.display_name)
+		stats.append({"label": "Roster", "value": " / ".join(roster_names) if not roster_names.is_empty() else "Military Units"})
+		stats.append({"label": "Prod Speed", "value": "%d%%" % spd_m})
+		stats.append({"label": "Rally", "value": _get_rally_summary()})
+		if building_type_id == &"assembly_bay":
+			stats.append({"label": "Tech", "value": "Unlocks Ballistics Lab"})
+		else:
+			stats.append({"label": "Role", "value": "Precision & Support"})
+	elif building_type_id == &"silica_condenser" or building_type_id == &"silica_smelter":
 		subtitle = "SILICA REFINING FACILITY"
 		stats.append({"label": "Drop-Off", "value": "Silica"})
 		stats.append({"label": "Harvesters", "value": "%d Active" % _count_friendly_harvesters()})
 		stats.append({"label": "Rally", "value": _get_rally_summary()})
 		stats.append({"label": "Throughput", "value": "25 Silica / Trip"})
-	elif building_type_id == &"synapse_pylon":
+	elif building_type_id == &"synapse_pylon" or building_type_id == &"capacitor_pylon" or bandwidth_provided > 0:
 		subtitle = "INFRASTRUCTURE NODE"
 		var bw_net: String = "%d / %d" % [econ.get_bandwidth_used(team), econ.get_bandwidth_cap(team)] if econ != null else "--"
 		stats.append({"label": "Bandwidth", "value": "+%d Capacity" % bandwidth_provided})
 		stats.append({"label": "Network", "value": bw_net})
-		stats.append({"label": "Status", "value": "Online"})
-		stats.append({"label": "Role", "value": "Population Relay"})
+		if shield_regen_aura_radius > 0.0 and shield_regen_delay_speedup > 0.0:
+			stats.append({
+				"label": "Shield Aura",
+				"value": "+%d%% Recovery (%dpx)" % [int(round(shield_regen_delay_speedup * 100.0)), int(round(shield_regen_aura_radius))],
+				"color": Color(0.220, 0.741, 0.973, 1.0),
+			})
+			stats.append({"label": "Role", "value": "Supply & Capacitor Relay"})
+		else:
+			stats.append({"label": "Status", "value": "Online"})
+			stats.append({"label": "Role", "value": "Population Relay"})
 	else:
 		stats.append({"label": "Status", "value": "Operational"})
+
+	if is_overclocked():
+		stats.append({
+			"label": "Status",
+			"value": "OVERCLOCKED %.1fx — %.1fs" % [overclock_speed_mult, overclock_remaining],
+			"color": Color(1.0, 0.624, 0.110, 1.0),
+		})
 
 	if is_salvaging:
 		var rem_s: float = maxf(0.0, SALVAGE_DURATION - salvage_elapsed)
@@ -1181,6 +1551,9 @@ func get_inspection_data() -> Dictionary:
 		"show_hp_bar": true,
 		"hp_current": current_hp,
 		"hp_max": max_hp,
+		"show_shield_bar": max_shield > 0.0,
+		"shield_current": current_shield,
+		"shield_max": max_shield,
 		"show_primary_bar": show_primary,
 		"primary_bar_label": primary_label,
 		"primary_bar_value": primary_val,
@@ -1301,7 +1674,7 @@ func _count_friendly_harvesters() -> int:
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if node is Unit and is_instance_valid(node):
 			var u: Unit = node
-			if not u.is_dead and u.team == team and u.get_unit_type_id() == &"silica_harvester":
+			if not u.is_dead and u.team == team and u.can_gather_resource(&"silica"):
 				count += 1
 	return count
 
@@ -1383,19 +1756,56 @@ func _update_staff_slot_visuals() -> void:
 	staff_slots_root.visible = false
 
 
+func _ensure_shield_bar_nodes() -> void:
+	if health_bar_root == null or _shield_bar_bg != null:
+		return
+	_shield_bar_bg = ColorRect.new()
+	_shield_bar_bg.name = "ShieldBg"
+	_shield_bar_bg.offset_left = -1.0
+	_shield_bar_bg.offset_top = -6.0
+	_shield_bar_bg.offset_right = HEALTH_BAR_WIDTH + 1.0
+	_shield_bar_bg.offset_bottom = -1.0
+	_shield_bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shield_bar_bg.color = Color(0.04, 0.07, 0.11, 0.88)
+	health_bar_root.add_child(_shield_bar_bg)
+
+	_shield_bar_fill = ColorRect.new()
+	_shield_bar_fill.name = "ShieldFill"
+	_shield_bar_fill.offset_left = 0.0
+	_shield_bar_fill.offset_top = -5.0
+	_shield_bar_fill.offset_right = HEALTH_BAR_WIDTH
+	_shield_bar_fill.offset_bottom = -2.0
+	_shield_bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shield_bar_fill.color = Color(0.220, 0.741, 0.973, 1.0) # #38BDF8
+	health_bar_root.add_child(_shield_bar_fill)
+
+
 func _update_health_bar() -> void:
 	if health_bar_root == null or health_bar_fill == null:
 		return
 	var max_val: float = maxf(1.0, max_hp)
 	var ratio: float = clampf(current_hp / max_val, 0.0, 1.0)
 	health_bar_fill.size.x = HEALTH_BAR_WIDTH * ratio
+	var has_shd: bool = is_constructed and max_shield > 0.0
+	var shield_damaged: bool = has_shd and current_shield < max_shield - 0.01
 	var mode: int = SettingsManager.health_bar_mode if SettingsManager != null else 0
 	if mode == 1:
 		health_bar_root.visible = true
 	elif mode == 2:
 		health_bar_root.visible = is_selected
 	else:
-		health_bar_root.visible = always_show_health_bar or is_selected or not is_constructed or ratio < 0.999
+		health_bar_root.visible = always_show_health_bar or is_selected or not is_constructed or ratio < 0.999 or shield_damaged
+
+	if has_shd:
+		_ensure_shield_bar_nodes()
+		if _shield_bar_bg != null and _shield_bar_fill != null:
+			var shd_ratio: float = clampf(current_shield / maxf(1.0, max_shield), 0.0, 1.0)
+			_shield_bar_bg.visible = true
+			_shield_bar_fill.visible = shd_ratio > 0.001
+			_shield_bar_fill.size.x = HEALTH_BAR_WIDTH * shd_ratio
+	elif _shield_bar_bg != null and _shield_bar_fill != null:
+		_shield_bar_bg.visible = false
+		_shield_bar_fill.visible = false
 
 
 func _get_economy_manager() -> EconomyManager:

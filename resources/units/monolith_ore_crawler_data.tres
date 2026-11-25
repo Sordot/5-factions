@@ -1,0 +1,47 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"ore_crawler"
+display_name = "Ore-Crawler"
+max_hp = 115.0
+max_shield = 30.0
+shield_regen_rate = 6.0
+shield_regen_delay = 6.0
+move_speed = 185.0
+acceleration = 1400.0
+turn_speed = 12.0
+selection_radius = 22.0
+collision_radius = 16.0
+attack_damage = 0.0
+attack_range = 0.0
+aggro_range = 0.0
+vision_range = 300.0
+attack_cooldown = 1.0
+is_armored = true
+damage_reduction = 0.15
+bandwidth_cost = 1
+can_gather = true
+gather_duration = 3.5
+carry_capacity = 25
+gather_range = 52.0
+dropoff_range = 68.0
+allowed_resource = &"silica"
+auto_gather_on_spawn = true
+can_staff_compute = false
+biomass_cost = 60
+silica_cost = 20
+compute_cost = 0
+build_time = 5.0
+train_time = 5.0
+unit_scene_path = "res://scenes/units/monolith_ore_crawler.tscn"
+unit_tags = Array[StringName]([&"harvester", &"mechanical"])
+weapon_tracer_style = &"pulse"
+weapon_tracer_color = Color(1, 0.68, 0.18, 0.95)
+weapon_tracer_width = 2.0
+weapon_sfx_id = &"weapon_mono_slug"
+audio_bark_class = &"worker"
+minimap_icon_shape = &"worker"
+role_tags_display = "Armored Silica Harvester (3/Vein)"

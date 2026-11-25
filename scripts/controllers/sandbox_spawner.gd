@@ -61,6 +61,14 @@ const COMBAT_LAB_PRESETS: Array = [
 		"team0_buildings": [],
 		"team1_buildings": [],
 	},
+	{
+		"label": "MONOLITH_OS (Bulwark+Picket+Rail+Aegis) vs. GENESIS_V2 Wave",
+		"half_sep": 245.0,
+		"team0_units": [{"id": &"bulwark_automaton", "count": 2}, {"id": &"picket_drone", "count": 2}, {"id": &"rail_sentinel", "count": 2}, {"id": &"aegis_relay", "count": 1}],
+		"team1_units": [{"id": &"clone_trooper", "count": 4}, {"id": &"stinger", "count": 4}, {"id": &"goliath_frame", "count": 2}],
+		"team0_buildings": [],
+		"team1_buildings": [],
+	},
 ]
 
 @export var arena_safe_bounds: Rect2 = Rect2(-580.0, -300.0, 1160.0, 600.0)
@@ -387,6 +395,16 @@ func _get_camera_center_or_zero() -> Vector2:
 
 
 func _find_unit_scene_path(unit_id: StringName) -> String:
+	if TeamManager != null and TeamManager.has_method("get_playable_factions"):
+		for f: FactionData in TeamManager.get_playable_factions():
+			if f == null:
+				continue
+			var u: UnitData = f.get_unit_by_id(unit_id)
+			if u != null:
+				if not u.unit_scene_path.is_empty():
+					return u.unit_scene_path
+				if u.unit_scene != null and not u.unit_scene.resource_path.is_empty():
+					return u.unit_scene.resource_path
 	for entry: Dictionary in GENESIS_UNIT_CATALOG:
 		if entry["id"] == unit_id:
 			return String(entry["scene"])
@@ -394,6 +412,16 @@ func _find_unit_scene_path(unit_id: StringName) -> String:
 
 
 func _find_building_scene_path(bldg_id: StringName) -> String:
+	if TeamManager != null and TeamManager.has_method("get_playable_factions"):
+		for f: FactionData in TeamManager.get_playable_factions():
+			if f == null:
+				continue
+			var b: BuildingData = f.get_building_by_id(bldg_id)
+			if b != null:
+				if not b.scene_path.is_empty():
+					return b.scene_path
+				if b.scene != null and not b.scene.resource_path.is_empty():
+					return b.scene.resource_path
 	for entry: Dictionary in GENESIS_BUILDING_CATALOG:
 		if entry["id"] == bldg_id:
 			return String(entry["scene"])

@@ -11,6 +11,10 @@ extends Resource
 @export var build_time: float = 4.0
 @export var footprint_size: Vector2 = Vector2(72.0, 72.0)
 @export var max_hp: float = 500.0
+@export var max_shield: float = 0.0
+@export var shield_regen_rate: float = 0.0
+@export var shield_regen_delay: float = 7.0
+@export var damage_reduction: float = 0.0
 @export var vision_range: float = 420.0
 @export var bandwidth_provided: int = 0
 @export var is_dropoff: bool = false
@@ -44,6 +48,16 @@ extends Resource
 @export var turret_bonus_vs_armored: float = 1.0
 @export var turret_tracer_style: StringName = &"pulse"
 @export var turret_turn_speed: float = 7.0
+
+# Optional Command Hub Core Overclock Ability (Milestone 3.0a)
+@export var can_overclock_buildings: bool = false
+@export var overclock_speed_multiplier: float = 2.0
+@export var overclock_duration: float = 15.0
+@export var overclock_cooldown: float = 50.0
+
+# Optional Passive Shield Regen Aura (Milestone 3.0b — e.g. Capacitor Pylon)
+@export var shield_regen_aura_radius: float = 0.0
+@export var shield_regen_delay_speedup: float = 0.0
 
 
 func is_hub() -> bool:

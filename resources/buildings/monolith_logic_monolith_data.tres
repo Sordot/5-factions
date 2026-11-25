@@ -1,0 +1,38 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"logic_monolith"
+display_name = "Logic Monolith"
+scene_path = "res://scenes/buildings/monolith_logic_monolith.tscn"
+biomass_cost = 110
+silica_cost = 90
+compute_cost = 0
+build_time = 6.0
+footprint_size = Vector2(74, 74)
+max_hp = 520.0
+max_shield = 100.0
+shield_regen_rate = 10.0
+shield_regen_delay = 7.0
+damage_reduction = 0.18
+vision_range = 380.0
+bandwidth_provided = 0
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+accepted_dropoff_resources = Array[StringName]([])
+requires_vent = true
+max_staff_slots = 3
+can_set_rally = false
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &""
+prerequisite_building_ids = Array[StringName]([])
+is_core_hub = false
+is_command_hub = false
+is_military_production = false
+is_supply_provider = false
+tech_tier = 0
+audio_select_class = &"tech"
+tech_tree_summary = "Thermal Vent Compute Extractor • 3 Grid-Tech Staff Slots (+1)"

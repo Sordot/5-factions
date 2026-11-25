@@ -247,6 +247,7 @@ func tick(owner_building: Building, delta: float) -> void:
 
 	var econ: EconomyManager = _get_economy_manager(owner_building)
 	var speed_mult: float = econ.get_production_speed_multiplier(owner_building.team) if econ != null else 1.0
+	speed_mult *= owner_building.get_local_production_speed_multiplier()
 	var front: Dictionary = _queue[0]
 	var duration: float = maxf(0.1, float(front["duration"]))
 	_elapsed += delta * speed_mult

@@ -1,0 +1,42 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/monolith_suppressive_lock.tres" id="2_suppress"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"picket_drone"
+display_name = "Picket Drone"
+max_hp = 115.0
+max_shield = 35.0
+shield_regen_rate = 7.0
+shield_regen_delay = 5.5
+move_speed = 245.0
+acceleration = 1850.0
+turn_speed = 15.0
+selection_radius = 20.0
+collision_radius = 15.0
+attack_damage = 16.0
+attack_range = 215.0
+aggro_range = 300.0
+vision_range = 420.0
+attack_cooldown = 1.25
+attack_windup = 0.08
+is_armored = false
+damage_reduction = 0.12
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_suppress")])
+bandwidth_cost = 1
+biomass_cost = 60
+silica_cost = 40
+compute_cost = 0
+build_time = 5.5
+train_time = 5.5
+unit_scene_path = "res://scenes/units/monolith_picket_drone.tscn"
+unit_tags = Array[StringName]([&"mechanical", &"scout", &"control"])
+weapon_tracer_style = &"arc_tether"
+weapon_tracer_color = Color(1, 0.68, 0.18, 0.96)
+weapon_tracer_width = 2.2
+weapon_sfx_id = &"weapon_mono_tether"
+audio_bark_class = &"swarm"
+minimap_icon_shape = &"dot"
+role_tags_display = "Scout • Anti-Swarm Pin"

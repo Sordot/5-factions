@@ -282,6 +282,8 @@ func _fire_at(target: Node2D) -> void:
 				AudioManager.play_weapon_for_unit(&"chrysalis_mortar", owner_building.global_position)
 			&"heavy":
 				AudioManager.play_weapon_for_unit(&"goliath_frame", owner_building.global_position)
+			&"heavy_slug":
+				AudioManager.play_sfx(&"weapon_mono_bastion", -4.0, 0.05, owner_building.global_position, true)
 			_:
 				AudioManager.play_weapon_for_unit(&"clone_trooper", owner_building.global_position)
 		if AudioManager.has_method("notify_combat_activity"):
@@ -311,6 +313,12 @@ func _fire_at(target: Node2D) -> void:
 			if _is_armored_target(target) and owner_building.turret_bonus_vs_armored > 1.0:
 				var shot_dir: Vector2 = (end_pos - origin).normalized() if end_pos.distance_squared_to(origin) > 1.0 else Vector2.RIGHT
 				_spawn_armor_spark(end_pos, shot_dir, Color(1.0, 0.88, 0.36, 1.0))
+		&"heavy_slug":
+			var slug_col: Color = Color(1.0, 0.68, 0.18, 0.98) if int(owner_building.team) == 0 else team_col
+			_spawn_tracer(origin, end_pos, slug_col, 3.2, 0.15, AttackTracer.TracerStyle.HEAVY_SLUG)
+			if _is_armored_target(target) and owner_building.turret_bonus_vs_armored > 1.0:
+				var shot_dir_hs: Vector2 = (end_pos - origin).normalized() if end_pos.distance_squared_to(origin) > 1.0 else Vector2.RIGHT
+				_spawn_armor_spark(end_pos, shot_dir_hs, Color(1.0, 0.72, 0.20, 1.0))
 		&"heavy":
 			_spawn_tracer(origin, end_pos, team_col, 3.0, 0.14, AttackTracer.TracerStyle.TWIN_SLUG)
 		_:

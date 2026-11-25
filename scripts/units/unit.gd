@@ -29,6 +29,13 @@ enum Stance {
 	HOLD_POSITION,
 }
 
+enum DeployState {
+	MOBILE,
+	DEPLOYING,
+	DEPLOYED,
+	UNDEPLOYING,
+}
+
 const DEFENSIVE_LEASH_RADIUS: float = 260.0
 
 const CMD_EXEC_FAILED: int = 0
@@ -48,12 +55,14 @@ const AUTO_RETARGET_INTERVAL: float = 0.25
 const VETERANCY_THRESHOLDS: Array = [0, 3, 6, 10]
 const VETERANCY_NAMES: Array = ["Standard", "Veteran", "Elite", "Apex"]
 const HIT_FLASH_DURATION: float = 0.08
+const SHIELD_HIT_FLASH_DURATION: float = 0.14
 const SPAWN_ANIM_DURATION: float = 0.25
 const HEALTH_BAR_WIDTH: float = 36.0
 const GATHER_BAR_WIDTH: float = 32.0
 
 signal selection_changed(unit: Unit, selected: bool)
 signal health_changed(unit: Unit, current_hp: float, max_hp: float)
+signal shield_changed(unit: Unit, current_shield: float, max_shield: float)
 signal status_changed(unit: Unit)
 signal died(unit: Unit)
 signal ability_cooldown_updated(ability_id: StringName, remaining: float, duration: float)
@@ -62,6 +71,7 @@ signal cargo_changed(unit: Unit, resource_type: StringName, amount: int)
 signal staffed_state_changed(unit: Unit, staffed: bool)
 signal command_queue_changed(unit: Unit)
 signal stance_changed(unit: Unit, new_stance: Stance)
+signal deploy_state_changed(unit: Unit, new_state: DeployState)
 
 @export var team: Team = Team.PLAYER
 @export var data: UnitData
@@ -87,6 +97,9 @@ var spawn_anim_timer: float = 0.0
 var is_dead: bool = false
 var is_staffed: bool = false
 var current_hp: float = 100.0
+var max_shield: float = 0.0
+var current_shield: float = 0.0
+var deploy_state: DeployState = DeployState.MOBILE
 var kill_count: int = 0
 var veterancy_rank: int = 0
 var command_state: CommandState = CommandState.IDLE
@@ -109,6 +122,16 @@ var _salvage_vfx_timer: float = 0.0
 var _move_destination: Vector2 = Vector2.ZERO
 var _attack_move_destination: Vector2 = Vector2.ZERO
 var _hit_flash_timer: float = 0.0
+var _shield_hit_flash_timer: float = 0.0
+var _shield_regen_timer: float = 0.0
+var _shield_aura_poll_timer: float = 0.0
+var _cached_shield_delay_speedup: float = 0.0
+var _was_in_rail_windup: bool = false
+var _last_emitted_shield_int: int = -1
+var _shield_bar_bg: ColorRect = null
+var _shield_bar_fill: ColorRect = null
+var _deploy_timer: float = 0.0
+var _deploy_duration_active: float = 1.2
 var _last_delta: float = 1.0 / 60.0
 var _entity_visuals: EntityVisuals = null
 var _trail_points: Array[Vector2] = []
@@ -123,6 +146,9 @@ func _ready() -> void:
 	if data == null:
 		data = UnitData.new()
 	current_hp = data.max_hp
+	max_shield = maxf(0.0, data.max_shield)
+	current_shield = max_shield
+	_last_emitted_shield_int = int(round(current_shield))
 	selection_ring.visible = is_selected
 	_setup_procedural_visuals()
 	_apply_team_visuals()
@@ -516,6 +542,10 @@ func clear_command_queue() -> void:
 func issue_command(cmd: Dictionary, append_to_queue: bool = false) -> bool:
 	if is_dead or is_staffed or cmd.is_empty():
 		return false
+	var cmd_type_check: StringName = cmd.get("type", &"")
+	# Anchored/deploying units ignore Move/Attack-Move/Patrol without accidentally undeploying or breaking focus-fire.
+	if is_movement_locked_by_deploy() and (cmd_type_check == &"move" or cmd_type_check == &"attack_move" or cmd_type_check == &"patrol"):
+		return false
 	if append_to_queue:
 		var is_idle_now: bool = (
 			(command_state == CommandState.IDLE or command_state == CommandState.HOLD_POSITION)
@@ -857,6 +887,105 @@ func heal(amount: float) -> void:
 	status_changed.emit(self)
 
 
+func has_shields() -> bool:
+	return max_shield > 0.0
+
+
+func restore_shield(amount: float) -> float:
+	if is_dead or is_staffed or max_shield <= 0.0 or amount <= 0.0:
+		return 0.0
+	var prev: float = current_shield
+	current_shield = minf(max_shield, current_shield + amount)
+	var restored: float = current_shield - prev
+	if restored > 0.0:
+		_last_emitted_shield_int = int(round(current_shield))
+		_update_health_bar()
+		queue_redraw()
+		shield_changed.emit(self, current_shield, max_shield)
+		status_changed.emit(self)
+	return restored
+
+
+func can_toggle_deploy() -> bool:
+	return data != null and data.can_deploy and not is_dead and not is_staffed
+
+
+func is_deployed() -> bool:
+	return deploy_state == DeployState.DEPLOYED
+
+
+func is_deploy_transitioning() -> bool:
+	return deploy_state == DeployState.DEPLOYING or deploy_state == DeployState.UNDEPLOYING
+
+
+func is_movement_locked_by_deploy() -> bool:
+	return deploy_state != DeployState.MOBILE
+
+
+func get_deploy_progress() -> float:
+	var dur: float = maxf(0.1, _deploy_duration_active)
+	if deploy_state == DeployState.DEPLOYING:
+		return 1.0 - clampf(_deploy_timer / dur, 0.0, 1.0)
+	if deploy_state == DeployState.UNDEPLOYING:
+		return clampf(_deploy_timer / dur, 0.0, 1.0)
+	if deploy_state == DeployState.DEPLOYED:
+		return 1.0
+	return 0.0
+
+
+func request_deploy() -> void:
+	if not can_toggle_deploy():
+		return
+	if deploy_state == DeployState.DEPLOYED or deploy_state == DeployState.DEPLOYING:
+		return
+	var total_dur: float = maxf(0.1, data.deploy_duration)
+	if deploy_state == DeployState.UNDEPLOYING:
+		_deploy_timer = maxf(0.05, _deploy_duration_active - _deploy_timer)
+	else:
+		_deploy_duration_active = total_dur
+		_deploy_timer = _deploy_duration_active
+	clear_command_queue()
+	_cancel_active_tasks(false)
+	command_state = CommandState.IDLE
+	current_target = null
+	stop_component_navigation()
+	velocity = Vector2.ZERO
+	deploy_state = DeployState.DEPLOYING
+	if AudioManager != null:
+		AudioManager.play_sfx(&"deploy_lock", -3.0, 0.03, global_position, true)
+	queue_redraw()
+	deploy_state_changed.emit(self, deploy_state)
+	status_changed.emit(self)
+
+
+func request_undeploy() -> void:
+	if not can_toggle_deploy():
+		return
+	if deploy_state == DeployState.MOBILE or deploy_state == DeployState.UNDEPLOYING:
+		return
+	var total_dur: float = maxf(0.1, data.deploy_duration)
+	if deploy_state == DeployState.DEPLOYING:
+		_deploy_timer = maxf(0.05, _deploy_duration_active - _deploy_timer)
+	else:
+		_deploy_duration_active = total_dur
+		_deploy_timer = _deploy_duration_active
+	if combat_component != null:
+		combat_component.cancel_attack_animation()
+	deploy_state = DeployState.UNDEPLOYING
+	if AudioManager != null:
+		AudioManager.play_sfx(&"deploy_release", -3.0, 0.03, global_position, true)
+	queue_redraw()
+	deploy_state_changed.emit(self, deploy_state)
+	status_changed.emit(self)
+
+
+func toggle_deploy() -> void:
+	if deploy_state == DeployState.MOBILE or deploy_state == DeployState.UNDEPLOYING:
+		request_deploy()
+	else:
+		request_undeploy()
+
+
 func command_move(target_pos: Vector2, append_to_queue: bool = false) -> void:
 	issue_command({"type": &"move", "pos": target_pos}, append_to_queue)
 
@@ -956,7 +1085,7 @@ func _start_attack_move(target_pos: Vector2) -> bool:
 	_reset_progress_tracker()
 	if _can_attack() and combat_component != null:
 		# Instant target scan on A-click so rapid stutter-step kiting fires without scan lag
-		var immediate_target: Node2D = combat_component.force_immediate_target_scan(self, data.aggro_range)
+		var immediate_target: Node2D = combat_component.force_immediate_target_scan(self, get_effective_aggro_range())
 		if immediate_target != null and is_instance_valid(immediate_target):
 			current_target = immediate_target
 			if combat_component.is_within_attack_envelope(self, current_target):
@@ -1022,26 +1151,64 @@ func command_defensive_stance() -> void:
 func take_damage(amount: float, attacker: Node = null) -> void:
 	if is_dead or amount <= 0.0:
 		return
-	var mitigation: float = get_effective_damage_reduction()
-	var dmg_mult: float = float(status_effect_component.call("get_damage_taken_multiplier")) if status_effect_component != null else 1.0
-	var effective_damage: float = amount * (1.0 - mitigation) * dmg_mult
-	if status_effect_component != null and effective_damage > 0.0:
-		effective_damage = float(status_effect_component.call("absorb_damage_shield", effective_damage, &"generic"))
-	if effective_damage <= 0.0:
+
+	var econ: EconomyManager = _get_economy_manager()
+	if max_shield > 0.0:
+		var delay_mult: float = econ.get_shield_regen_delay_multiplier(int(team)) if econ != null else 1.0
+		var base_delay: float = data.shield_regen_delay if data != null else 6.0
+		_shield_regen_timer = maxf(0.0, base_delay * delay_mult)
+
+	var remaining: float = amount
+	var absorbed_temp: float = 0.0
+	# Layer 1 — Temporary Bonus Barrier (Unmitigated)
+	if status_effect_component != null and remaining > 0.0:
+		var before_temp: float = remaining
+		remaining = float(status_effect_component.call("absorb_damage_shield", remaining, &"generic"))
+		absorbed_temp = maxf(0.0, before_temp - remaining)
+
+	# Layer 2 — Native Regenerating Shield (Unmitigated)
+	var absorbed_native: float = 0.0
+	if remaining > 0.0 and current_shield > 0.0:
+		absorbed_native = minf(current_shield, remaining)
+		current_shield = maxf(0.0, current_shield - absorbed_native)
+		remaining = maxf(0.0, remaining - absorbed_native)
+
+	var shield_absorbed: bool = (absorbed_temp > 0.0 or absorbed_native > 0.0)
+	if shield_absorbed:
+		_shield_hit_flash_timer = SHIELD_HIT_FLASH_DURATION
+		if absorbed_native > 0.0:
+			_last_emitted_shield_int = int(round(current_shield))
+			shield_changed.emit(self, current_shield, max_shield)
+
+	# Layer 3 — Hull HP (Mitigated)
+	var hull_damaged: bool = false
+	if remaining > 0.0:
+		var mitigation: float = get_effective_damage_reduction()
+		var dmg_mult: float = float(status_effect_component.call("get_damage_taken_multiplier")) if status_effect_component != null else 1.0
+		var effective_damage: float = remaining * (1.0 - mitigation) * dmg_mult
+		if effective_damage > 0.0:
+			current_hp = maxf(0.0, current_hp - effective_damage)
+			hull_damaged = true
+			_hit_flash_timer = HIT_FLASH_DURATION
+			if is_node_ready():
+				body_visual.modulate = Color(1.95, 2.25, 2.35, 1.0)
+			health_changed.emit(self, current_hp, get_max_hp())
+	elif shield_absorbed and is_node_ready() and _hit_flash_timer <= 0.0:
+		# Subtle cyan shield-hit flash distinct from hull damage flash
+		body_visual.modulate = Color(0.82, 1.48, 2.15, 1.0)
+
+	if not hull_damaged and not shield_absorbed:
 		status_changed.emit(self)
 		return
-	current_hp = maxf(0.0, current_hp - effective_damage)
-	_hit_flash_timer = HIT_FLASH_DURATION
-	if is_node_ready():
-		body_visual.modulate = Color(1.95, 2.25, 2.35, 1.0)
+
 	_update_health_bar()
+	queue_redraw()
 	var is_local_owned: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Team.PLAYER)
 	if is_local_owned and is_inside_tree():
 		var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
 		if mm != null:
 			var unit_label: String = data.display_name if data != null else "Unit"
 			mm.push_tactical_alert(global_position, &"under_attack", "%s Under Attack!" % unit_label)
-	health_changed.emit(self, current_hp, get_max_hp())
 	status_changed.emit(self)
 
 	# Idle aggressive/defensive combatants retaliate against attackers (within leash when Defensive).
@@ -1050,7 +1217,7 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 			var atk_node: Node2D = attacker as Node2D
 			var allow_retaliate: bool = true
 			if stance == Stance.DEFENSIVE:
-				var max_engage: float = DEFENSIVE_LEASH_RADIUS + (data.attack_range if data != null else 180.0)
+				var max_engage: float = DEFENSIVE_LEASH_RADIUS + get_effective_attack_range()
 				allow_retaliate = combat_component.is_within_attack_envelope(self, atk_node) or defensive_anchor.distance_to(atk_node.global_position) <= max_engage
 			if allow_retaliate:
 				current_target = atk_node
@@ -1158,21 +1325,73 @@ func get_effective_move_speed() -> float:
 	return spd
 
 
+func get_effective_attack_damage() -> float:
+	if data == null:
+		return 0.0
+	if is_deployed() and data.deployed_attack_damage > 0.0:
+		return data.deployed_attack_damage
+	return data.attack_damage
+
+
+func get_effective_attack_range() -> float:
+	if data == null:
+		return 0.0
+	if is_deployed() and data.deployed_attack_range > 0.0:
+		return data.deployed_attack_range
+	return data.attack_range
+
+
+func get_effective_min_attack_range() -> float:
+	if data == null:
+		return 0.0
+	if is_deployed() and data.deployed_min_attack_range > 0.0:
+		return data.deployed_min_attack_range
+	return data.min_attack_range
+
+
+func get_effective_aoe_radius() -> float:
+	if data == null:
+		return 0.0
+	if is_deployed() and data.deployed_aoe_radius > 0.0:
+		return data.deployed_aoe_radius
+	return data.aoe_attack_radius
+
+
+func get_effective_weapon_tracer_style() -> StringName:
+	if data == null:
+		return &"pulse"
+	if is_deployed() and data.deployed_weapon_tracer_style != &"":
+		return data.deployed_weapon_tracer_style
+	return data.weapon_tracer_style
+
+
+func get_effective_aggro_range() -> float:
+	if data == null:
+		return 280.0
+	return maxf(data.aggro_range, get_effective_attack_range())
+
+
 func get_effective_attack_cooldown() -> float:
-	if data == null or data.attack_cooldown <= 0.0:
+	if data == null:
+		return 1.0
+	var base_cd: float = data.deployed_attack_cooldown if (is_deployed() and data.deployed_attack_cooldown > 0.0) else data.attack_cooldown
+	if base_cd <= 0.0:
 		return 1.0
 	var rate_mult: float = float(status_effect_component.call("get_attack_speed_multiplier")) if status_effect_component != null else 1.0
-	return data.attack_cooldown / maxf(0.25, rate_mult)
+	return base_cd / maxf(0.25, rate_mult)
 
 
 func get_effective_damage_reduction() -> float:
 	if data == null:
 		return 0.0
 	var dr: float = maxf(0.0, data.damage_reduction)
-	if data.unit_type_id == &"goliath_frame":
-		var econ: EconomyManager = _get_economy_manager()
-		if econ != null:
+	var econ: EconomyManager = _get_economy_manager()
+	if econ != null:
+		dr += econ.get_bonus_armor(int(team))
+		if data.unit_type_id == &"goliath_frame":
 			dr += econ.get_goliath_extra_damage_reduction(team)
+	if is_deployed() and data.deployed_damage_reduction_bonus > 0.0:
+		dr += data.deployed_damage_reduction_bonus
 	return clampf(dr, 0.0, 0.75)
 
 
@@ -1203,17 +1422,80 @@ func _should_draw_attack_range() -> bool:
 
 
 func _draw() -> void:
-	var type_id: StringName = get_unit_type_id()
-	# Selected unit attack-range & min-range tactical previews (gated by Settings -> Gameplay -> Attack Range Indicator)
-	if _should_draw_attack_range():
-		var atk_r: float = data.attack_range + data.collision_radius
-		var is_siege: bool = data.min_attack_range > 0.0 or data.aoe_attack_radius > 0.0
+	var eff_atk_range: float = get_effective_attack_range()
+	var eff_min_range: float = get_effective_min_attack_range()
+	var eff_aoe: float = get_effective_aoe_radius()
+	# Selected unit attack-range & min-range tactical previews
+	if is_selected and is_deployed() and eff_atk_range > 0.0 and data != null:
+		var dep_r: float = eff_atk_range + data.collision_radius
+		var dep_col: Color = Color(1.0, 0.68, 0.18, 0.42) if team == Team.PLAYER else Color(1.0, 0.38, 0.28, 0.34)
+		_draw_dashed_ring(Vector2.ZERO, dep_r, dep_col, 1.6, 48 if dep_r > 260.0 else 36)
+		if eff_min_range > 0.0:
+			var dep_min_r: float = eff_min_range + data.collision_radius
+			draw_circle(Vector2.ZERO, dep_min_r, Color(1.0, 0.28, 0.24, 0.05))
+			_draw_dashed_ring(Vector2.ZERO, dep_min_r, Color(1.0, 0.36, 0.28, 0.44), 1.4, 20)
+	elif _should_draw_attack_range():
+		var atk_r: float = eff_atk_range + data.collision_radius
+		var is_siege: bool = eff_min_range > 0.0 or eff_aoe > 0.0
 		var range_col: Color = (Color(0.46, 1.0, 0.56, 0.34) if is_siege else Color(0.32, 0.94, 0.96, 0.24)) if team == Team.PLAYER else Color(1.0, 0.38, 0.28, 0.26)
 		_draw_dashed_ring(Vector2.ZERO, atk_r, range_col, 1.5 if is_siege else 1.2, 40 if atk_r > 220.0 else 28)
-		if data.min_attack_range > 0.0:
-			var min_r: float = data.min_attack_range + data.collision_radius
+		if eff_min_range > 0.0:
+			var min_r: float = eff_min_range + data.collision_radius
 			draw_circle(Vector2.ZERO, min_r, Color(1.0, 0.28, 0.24, 0.05))
 			_draw_dashed_ring(Vector2.ZERO, min_r, Color(1.0, 0.36, 0.28, 0.44), 1.4, 20)
+
+	# Deploy / Anchor 4 corner stabilizer clamps when anchored
+	if is_deployed():
+		var clamp_r: float = (data.collision_radius if data != null else 16.0) + 4.0
+		var amber_pin: Color = Color(1.0, 0.624, 0.110, 0.96)
+		var steel_pad: Color = Color(0.18, 0.24, 0.30, 0.95)
+		var trim_col: Color = Color(0.62, 0.72, 0.80, 0.92)
+		for ci: int in range(4):
+			var c_ang: float = PI * 0.25 + float(ci) * (PI * 0.5)
+			var c_dir: Vector2 = Vector2.RIGHT.rotated(c_ang)
+			var perp: Vector2 = Vector2(-c_dir.y, c_dir.x)
+			var p_in: Vector2 = c_dir * (clamp_r - 5.5)
+			var p_out: Vector2 = c_dir * (clamp_r + 3.5)
+			draw_line(p_in, p_out, trim_col, 3.0, true)
+			var pad_pts: PackedVector2Array = PackedVector2Array([
+				p_out + perp * -3.5 - c_dir * 2.0,
+				p_out + perp * 3.5 - c_dir * 2.0,
+				p_out + perp * 4.2 + c_dir * 2.2,
+				p_out + perp * -4.2 + c_dir * 2.2,
+			])
+			draw_colored_polygon(pad_pts, steel_pad)
+			draw_polyline(pad_pts + PackedVector2Array([pad_pts[0]]), amber_pin, 1.2, true)
+			draw_circle(p_out, 1.6, amber_pin)
+
+	# Shield-hit flash ripple ring
+	if _shield_hit_flash_timer > 0.0:
+		var sf: float = clampf(_shield_hit_flash_timer / SHIELD_HIT_FLASH_DURATION, 0.0, 1.0)
+		var sr: float = (data.collision_radius if data != null else 16.0) + 3.5 + (1.0 - sf) * 4.5
+		draw_circle(Vector2.ZERO, sr * 0.92, Color(0.220, 0.741, 0.973, sf * 0.18))
+		draw_arc(Vector2.ZERO, sr, 0.0, TAU, 24, Color(0.220, 0.741, 0.973, sf * 0.92), 2.2, true)
+
+	# Rail-Lance targeting lock-line telegraph during attack windup
+	if combat_component != null and combat_component.is_in_windup() and get_effective_weapon_tracer_style() == &"rail_lance":
+		var lock_tgt: Node2D = combat_component.get_windup_target()
+		if lock_tgt != null and is_instance_valid(lock_tgt):
+			var lock_p: float = combat_component.get_windup_progress(self)
+			var muzzle_local: Vector2 = Vector2.RIGHT.rotated(body_visual.rotation) * ((data.collision_radius if data != null else 16.0) + 2.0)
+			var tgt_local: Vector2 = to_local(lock_tgt.global_position)
+			var lock_col: Color = Color(1.0, 0.624, 0.110, 0.35 + lock_p * 0.60)
+			draw_line(muzzle_local, tgt_local, lock_col, 1.0 + lock_p * 1.1, true)
+			draw_line(muzzle_local, tgt_local, Color(1.0, 0.96, 0.86, 0.25 + lock_p * 0.55), 0.7, true)
+			draw_arc(tgt_local, lerpf(16.0, 6.0, lock_p), 0.0, TAU, 16, lock_col, 1.3, true)
+
+	# Deploy / Undeploy transition progress bar
+	if is_deploy_transitioning():
+		var d_prog: float = get_deploy_progress()
+		var d_w: float = HEALTH_BAR_WIDTH
+		var d_h: float = 4.0
+		var base_bar_y: float = health_bar_root.position.y if health_bar_root != null else -((data.collision_radius if data != null else 16.0) + 14.0)
+		var d_y: float = base_bar_y - (12.0 if max_shield > 0.0 else 7.0)
+		var d_pos: Vector2 = Vector2(-d_w * 0.5, d_y)
+		draw_rect(Rect2(d_pos - Vector2(1.0, 1.0), Vector2(d_w + 2.0, d_h + 2.0)), Color(0.04, 0.06, 0.10, 0.92), true)
+		draw_rect(Rect2(d_pos, Vector2(d_w * d_prog, d_h)), Color(1.0, 0.624, 0.110, 0.96), true)
 
 	# Elevated ground shadow for Colossus Stride units
 	if data != null and data.ignore_friendly_unit_collision:
@@ -1367,10 +1649,18 @@ func _physics_process(delta: float) -> void:
 	if repair_component != null:
 		repair_component.call("tick_auto_repair", self, delta)
 	_tick_status_effects(delta)
+	_tick_shield_regen(delta)
+	_tick_deploy_transition(delta)
 
 	if _hit_flash_timer > 0.0:
 		_hit_flash_timer = maxf(0.0, _hit_flash_timer - delta)
-		if _hit_flash_timer <= 0.0:
+		if _hit_flash_timer <= 0.0 and _shield_hit_flash_timer <= 0.0:
+			body_visual.modulate = Color.WHITE
+
+	if _shield_hit_flash_timer > 0.0:
+		_shield_hit_flash_timer = maxf(0.0, _shield_hit_flash_timer - delta)
+		queue_redraw()
+		if _shield_hit_flash_timer <= 0.0 and _hit_flash_timer <= 0.0:
 			body_visual.modulate = Color.WHITE
 
 	if spawn_anim_timer > 0.0:
@@ -1388,6 +1678,7 @@ func _physics_process(delta: float) -> void:
 		_update_stinger_trail(delta)
 
 	if not _can_move() and not _can_attack():
+		velocity = Vector2.ZERO
 		return
 
 	if movement_component != null:
@@ -1422,6 +1713,11 @@ func _physics_process(delta: float) -> void:
 	if movement_component != null:
 		movement_component.call("finish_physics_step", self, delta)
 
+	var in_rail_windup: bool = combat_component != null and combat_component.is_in_windup() and get_effective_weapon_tracer_style() == &"rail_lance"
+	if in_rail_windup or _was_in_rail_windup:
+		_was_in_rail_windup = in_rail_windup
+		queue_redraw()
+
 
 func _on_nav_velocity_computed(safe_velocity: Vector2) -> void:
 	if movement_component != null:
@@ -1439,6 +1735,51 @@ func _tick_status_effects(delta: float) -> void:
 	if changed:
 		_sync_nav_max_speed()
 		queue_redraw()
+		status_changed.emit(self)
+
+
+func _tick_shield_regen(delta: float) -> void:
+	if max_shield <= 0.0 or current_shield >= max_shield:
+		return
+	if _shield_regen_timer > 0.0:
+		_shield_aura_poll_timer -= delta
+		if _shield_aura_poll_timer <= 0.0:
+			_shield_aura_poll_timer = 0.25
+			_cached_shield_delay_speedup = Building.get_shield_regen_delay_speedup_at(get_tree(), global_position, int(team)) if is_inside_tree() else 0.0
+		_shield_regen_timer = maxf(0.0, _shield_regen_timer - delta * (1.0 + _cached_shield_delay_speedup))
+		return
+	var base_rate: float = data.shield_regen_rate if data != null else 0.0
+	if base_rate <= 0.0:
+		return
+	var econ: EconomyManager = _get_economy_manager()
+	var rate_mult: float = econ.get_shield_regen_rate_multiplier(int(team)) if econ != null else 1.0
+	var next_shd: float = minf(max_shield, current_shield + base_rate * rate_mult * delta)
+	if is_equal_approx(next_shd, current_shield):
+		return
+	current_shield = next_shd
+	_update_health_bar()
+	var shd_int: int = int(round(current_shield))
+	if shd_int != _last_emitted_shield_int or current_shield >= max_shield:
+		_last_emitted_shield_int = shd_int
+		shield_changed.emit(self, current_shield, max_shield)
+		status_changed.emit(self)
+
+
+func _tick_deploy_transition(delta: float) -> void:
+	if not is_deploy_transitioning():
+		return
+	velocity = Vector2.ZERO
+	_deploy_timer = maxf(0.0, _deploy_timer - delta)
+	queue_redraw()
+	if _deploy_timer <= 0.0:
+		if deploy_state == DeployState.DEPLOYING:
+			deploy_state = DeployState.DEPLOYED
+		elif deploy_state == DeployState.UNDEPLOYING:
+			deploy_state = DeployState.MOBILE
+		if _entity_visuals != null and is_instance_valid(_entity_visuals):
+			_entity_visuals.queue_redraw()
+		queue_redraw()
+		deploy_state_changed.emit(self, deploy_state)
 		status_changed.emit(self)
 
 
@@ -1473,29 +1814,32 @@ func _process_idle(delta: float) -> void:
 		current_target = null
 		return
 
+	var eff_atk_r: float = get_effective_attack_range()
+	var eff_aggro_r: float = get_effective_aggro_range()
+
 	# Aggressive combat units acquire enemies inside aggro_range and pursue within leash range.
 	if combat_component.should_pursue_targets(self) and _can_move():
-		var leash: float = maxf(data.aggro_range, data.attack_range) * 1.35
+		var leash: float = maxf(eff_aggro_r, eff_atk_r) * 1.35
 		if current_target == null or not combat_component.is_valid_target_in_range(self, current_target, leash):
-			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
+			current_target = combat_component.find_nearest_enemy(self, eff_aggro_r)
 		else:
-			_maybe_retarget_higher_threat(delta, data.attack_range)
+			_maybe_retarget_higher_threat(delta, eff_atk_r)
 		if current_target != null and is_instance_valid(current_target):
 			if combat_component.is_within_attack_envelope(self, current_target):
 				_face_point(current_target.global_position, delta)
 				combat_component.process_attack_at(self, current_target, delta)
 			elif combat_component.is_target_inside_min_range(self, current_target):
 				combat_component.cancel_attack_animation()
-				current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
+				current_target = combat_component.find_nearest_enemy(self, eff_aggro_r)
 			else:
 				combat_component.cancel_attack_animation()
 				_request_nav_toward_point(current_target.global_position, 8.0)
 		return
 
 	if current_target == null or not combat_component.is_within_attack_envelope(self, current_target):
-		current_target = combat_component.find_nearest_enemy(self, data.attack_range)
+		current_target = combat_component.find_nearest_enemy(self, eff_atk_r)
 	else:
-		_maybe_retarget_higher_threat(delta, data.attack_range)
+		_maybe_retarget_higher_threat(delta, eff_atk_r)
 	if current_target != null and is_instance_valid(current_target):
 		_face_point(current_target.global_position, delta)
 		combat_component.process_attack_at(self, current_target, delta)
@@ -1510,8 +1854,8 @@ func _process_defensive_stance(delta: float) -> void:
 		return
 
 	var dist_from_anchor: float = global_position.distance_to(defensive_anchor)
-	var attack_r: float = data.attack_range if data != null else 180.0
-	var scan_r: float = maxf(data.aggro_range if data != null else 280.0, attack_r)
+	var attack_r: float = get_effective_attack_range()
+	var scan_r: float = get_effective_aggro_range()
 	var max_target_anchor_dist: float = DEFENSIVE_LEASH_RADIUS + attack_r + 24.0
 
 	if current_target != null:
@@ -1591,13 +1935,15 @@ func _process_attack_moving(delta: float) -> void:
 		current_target = null
 
 	if _can_attack() and combat_component != null:
-		var leash_range: float = maxf(data.aggro_range, data.attack_range) * 1.25
+		var eff_atk_am: float = get_effective_attack_range()
+		var eff_aggro_am: float = get_effective_aggro_range()
+		var leash_range: float = maxf(eff_aggro_am, eff_atk_am) * 1.25
 		if current_target != null and not combat_component.is_valid_target_in_range(self, current_target, leash_range):
 			current_target = null
 		if current_target == null:
-			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
+			current_target = combat_component.find_nearest_enemy(self, eff_aggro_am)
 		else:
-			_maybe_retarget_higher_threat(delta, data.attack_range)
+			_maybe_retarget_higher_threat(delta, eff_atk_am)
 
 	if current_target != null and is_instance_valid(current_target) and combat_component != null:
 		_reset_progress_tracker()
@@ -1648,6 +1994,8 @@ func _process_attacking_target(delta: float) -> void:
 
 	if _can_move():
 		_request_nav_toward_point(current_target.global_position, 6.0)
+	elif is_deployed():
+		_face_point(current_target.global_position, delta)
 
 
 func _process_hold_position(delta: float) -> void:
@@ -1656,10 +2004,11 @@ func _process_hold_position(delta: float) -> void:
 		return
 	if current_target != null and not is_instance_valid(current_target):
 		current_target = null
+	var eff_atk_r: float = get_effective_attack_range()
 	if current_target == null or not combat_component.is_within_attack_envelope(self, current_target):
-		current_target = combat_component.find_nearest_enemy(self, data.attack_range)
+		current_target = combat_component.find_nearest_enemy(self, eff_atk_r)
 	else:
-		_maybe_retarget_higher_threat(delta, data.attack_range)
+		_maybe_retarget_higher_threat(delta, eff_atk_r)
 	if current_target != null and is_instance_valid(current_target):
 		_face_point(current_target.global_position, delta)
 		combat_component.process_attack_at(self, current_target, delta)
@@ -1790,13 +2139,15 @@ func _process_patrolling(delta: float) -> void:
 
 	var aggro_on: bool = MatchManager.is_aggro_ai_enabled(get_tree())
 	if aggro_on and _can_attack() and combat_component != null:
-		var leash_range: float = maxf(data.aggro_range, data.attack_range) * 1.25
+		var eff_atk_p: float = get_effective_attack_range()
+		var eff_aggro_p: float = get_effective_aggro_range()
+		var leash_range: float = maxf(eff_aggro_p, eff_atk_p) * 1.25
 		if current_target != null and not combat_component.is_valid_target_in_range(self, current_target, leash_range):
 			current_target = null
 		if current_target == null:
-			current_target = combat_component.find_nearest_enemy(self, data.aggro_range)
+			current_target = combat_component.find_nearest_enemy(self, eff_aggro_p)
 		else:
-			_maybe_retarget_higher_threat(delta, data.attack_range)
+			_maybe_retarget_higher_threat(delta, eff_atk_p)
 	elif not aggro_on:
 		current_target = null
 
@@ -1919,11 +2270,35 @@ func _is_nav_map_ready() -> bool:
 
 
 func _can_move() -> bool:
-	return nav_agent != null and data != null and data.move_speed > 0.0
+	return nav_agent != null and data != null and data.move_speed > 0.0 and not is_movement_locked_by_deploy()
 
 
 func _can_attack() -> bool:
 	return combat_component != null and combat_component.can_attack(self)
+
+
+func _ensure_shield_bar_nodes() -> void:
+	if health_bar_root == null or _shield_bar_bg != null:
+		return
+	_shield_bar_bg = ColorRect.new()
+	_shield_bar_bg.name = "ShieldBg"
+	_shield_bar_bg.offset_left = -1.0
+	_shield_bar_bg.offset_top = -6.0
+	_shield_bar_bg.offset_right = HEALTH_BAR_WIDTH + 1.0
+	_shield_bar_bg.offset_bottom = -1.0
+	_shield_bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shield_bar_bg.color = Color(0.04, 0.07, 0.11, 0.88)
+	health_bar_root.add_child(_shield_bar_bg)
+
+	_shield_bar_fill = ColorRect.new()
+	_shield_bar_fill.name = "ShieldFill"
+	_shield_bar_fill.offset_left = 0.0
+	_shield_bar_fill.offset_top = -5.0
+	_shield_bar_fill.offset_right = HEALTH_BAR_WIDTH
+	_shield_bar_fill.offset_bottom = -2.0
+	_shield_bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shield_bar_fill.color = Color(0.220, 0.741, 0.973, 1.0) # #38BDF8
+	health_bar_root.add_child(_shield_bar_fill)
 
 
 func _update_health_bar() -> void:
@@ -1932,13 +2307,26 @@ func _update_health_bar() -> void:
 	var max_val: float = maxf(1.0, get_max_hp())
 	var ratio: float = clampf(current_hp / max_val, 0.0, 1.0)
 	health_bar_fill.size.x = HEALTH_BAR_WIDTH * ratio
+	var has_shd: bool = max_shield > 0.0
+	var shield_damaged: bool = has_shd and current_shield < max_shield - 0.01
 	var mode: int = SettingsManager.health_bar_mode if SettingsManager != null else 0
 	if mode == 1:
 		health_bar_root.visible = true
 	elif mode == 2:
 		health_bar_root.visible = is_selected
 	else:
-		health_bar_root.visible = always_show_health_bar or is_selected or ratio < 0.999
+		health_bar_root.visible = always_show_health_bar or is_selected or ratio < 0.999 or shield_damaged
+
+	if has_shd:
+		_ensure_shield_bar_nodes()
+		if _shield_bar_bg != null and _shield_bar_fill != null:
+			var shd_ratio: float = clampf(current_shield / maxf(1.0, max_shield), 0.0, 1.0)
+			_shield_bar_bg.visible = true
+			_shield_bar_fill.visible = shd_ratio > 0.001
+			_shield_bar_fill.size.x = HEALTH_BAR_WIDTH * shd_ratio
+	elif _shield_bar_bg != null and _shield_bar_fill != null:
+		_shield_bar_bg.visible = false
+		_shield_bar_fill.visible = false
 
 
 func _setup_procedural_visuals() -> void:
@@ -2092,26 +2480,34 @@ func get_inspection_data() -> Dictionary:
 		stats.append({"label": "Speed", "value": "%d px/s" % int(round(get_effective_move_speed()))})
 		stats.append({"label": "Bandwidth", "value": "%d BW" % data.bandwidth_cost})
 	elif data != null:
-		var dmg_str: String = "%d" % int(round(data.attack_damage))
+		var eff_dmg: float = get_effective_attack_damage()
+		var eff_rng: float = get_effective_attack_range()
+		var eff_min_rng: float = get_effective_min_attack_range()
+		var eff_aoe: float = get_effective_aoe_radius()
+		var dmg_str: String = "%d" % int(round(eff_dmg))
 		if data.bonus_vs_armored > 0.0:
 			dmg_str += " (+%d vs Armored)" % int(round(data.bonus_vs_armored))
-		elif data.aoe_attack_radius > 0.0:
-			dmg_str += " (AoE %dpx)" % int(round(data.aoe_attack_radius))
+		elif eff_aoe > 0.0:
+			dmg_str += " (AoE %dpx)" % int(round(eff_aoe))
 		elif data.line_pierce_width > 0.0:
 			dmg_str += " (Line Pierce)"
 		stats.append({"label": "Damage", "value": dmg_str})
 
-		var range_str: String = "%d px" % int(round(data.attack_range))
-		if data.min_attack_range > 0.0:
-			range_str = "%d–%d px (Min)" % [int(round(data.min_attack_range)), int(round(data.attack_range))]
+		var range_str: String = "%d px" % int(round(eff_rng))
+		if eff_min_rng > 0.0:
+			range_str = "%d–%d px (Min)" % [int(round(eff_min_rng)), int(round(eff_rng))]
 		stats.append({"label": "Range", "value": range_str})
 
-		var spd_str: String = "%d px/s" % int(round(get_effective_move_speed()))
-		if has_status_effect(&"adrenal_surge"):
-			spd_str += " [SURGE]"
-		elif has_status_effect(&"static_slow"):
-			spd_str += " [SLOW]"
-		stats.append({"label": "Speed", "value": spd_str})
+		var spd_str: String = "ANCHORED" if is_deployed() else ("DEPLOYING..." if deploy_state == DeployState.DEPLOYING else ("UNDEPLOYING..." if deploy_state == DeployState.UNDEPLOYING else "%d px/s" % int(round(get_effective_move_speed()))))
+		if not is_movement_locked_by_deploy():
+			if has_status_effect(&"adrenal_surge"):
+				spd_str += " [SURGE]"
+			elif has_status_effect(&"static_slow"):
+				spd_str += " [SLOW]"
+		var spd_entry: Dictionary = {"label": "Speed", "value": spd_str}
+		if is_movement_locked_by_deploy():
+			spd_entry["color"] = Color(1.0, 0.624, 0.110, 1.0)
+		stats.append(spd_entry)
 
 		var dr: float = get_effective_damage_reduction()
 		if data.heal_aura_rate > 0.0:
@@ -2120,12 +2516,12 @@ func get_inspection_data() -> Dictionary:
 			stats.append({"label": "Class", "value": "%s • Stride" % get_armor_class_label()})
 		elif dr > 0.001:
 			stats.append({"label": "Armor", "value": "%s (-%d%% Dmg)" % [get_armor_class_label(), int(round(dr * 100.0))]})
-		elif data.attack_damage > 0.0 and data.attack_cooldown > 0.0:
+		elif eff_dmg > 0.0 and get_effective_attack_cooldown() > 0.0:
 			stats.append({"label": "Class", "value": "%s • %.1f/s" % [get_armor_class_label(), 1.0 / get_effective_attack_cooldown()]})
 		else:
 			stats.append({"label": "Class", "value": get_armor_class_label()})
 
-		if data.attack_damage > 0.0 or kill_count > 0:
+		if eff_dmg > 0.0 or kill_count > 0:
 			if veterancy_rank > 0:
 				var rank_col: Color = Color(1.0, 0.86, 0.28, 1.0) if veterancy_rank >= 3 else Color(0.46, 0.98, 1.0, 1.0)
 				stats.append({
@@ -2146,6 +2542,9 @@ func get_inspection_data() -> Dictionary:
 		"show_hp_bar": true,
 		"hp_current": current_hp,
 		"hp_max": max_hp_val,
+		"show_shield_bar": max_shield > 0.0,
+		"shield_current": current_shield,
+		"shield_max": max_shield,
 		"show_primary_bar": show_primary,
 		"primary_bar_label": primary_label,
 		"primary_bar_value": primary_val,

@@ -58,9 +58,90 @@ func tick_autocast(owner_unit: Unit, delta: float) -> void:
 			continue
 		if not is_autocast_enabled(ab.ability_id) or not is_ability_ready(ab):
 			continue
-		if _should_trigger_autocast(owner_unit, ab):
-			request_cast(owner_unit, ab, owner_unit.global_position, owner_unit)
-			return
+		if ab.target_type == AbilityData.TargetType.INSTANT:
+			if _should_trigger_autocast(owner_unit, ab):
+				request_cast(owner_unit, ab, owner_unit.global_position, owner_unit)
+				return
+		elif ab.target_type == AbilityData.TargetType.POINT_AOE:
+			var auto_pos: Vector2 = _find_autocast_point_target(owner_unit, ab)
+			if auto_pos != Vector2.INF:
+				request_cast(owner_unit, ab, auto_pos, null)
+				return
+
+
+func _find_autocast_point_target(owner_unit: Unit, ability: AbilityData) -> Vector2:
+	var ab_id: StringName = ability.ability_id
+	var cast_r: float = maxf(60.0, ability.cast_range)
+
+	if ab_id == &"monolith_shield_overcharge":
+		var allies: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, cast_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		var best_pos: Vector2 = Vector2.INF
+		var best_score: float = 0.0
+		for node: Variant in allies:
+			if not is_instance_valid(node) or not (node is Unit):
+				continue
+			var u: Unit = node as Unit
+			if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
+				continue
+			var is_ally: bool = (int(u.team) == int(owner_unit.team)) or (TeamManager != null and TeamManager.are_allies(int(owner_unit.team), int(u.team)))
+			if not is_ally:
+				continue
+			if u.global_position.distance_to(owner_unit.global_position) > cast_r:
+				continue
+			# Trigger on friendly combat units (or self if under fire) whose shield < 50% or hull damaged
+			var is_combat: bool = u.data != null and (not u.data.can_gather and not u.data.can_staff_compute)
+			if not is_combat:
+				continue
+			var shield_low: bool = u.max_shield > 0.0 and (u.current_shield / maxf(1.0, u.max_shield)) < 0.50
+			var hull_damaged: bool = u.current_hp < u.get_max_hp() * 0.98
+			if not shield_low and not hull_damaged:
+				continue
+			var score: float = 10.0
+			if shield_low:
+				score += (1.0 - (u.current_shield / maxf(1.0, u.max_shield))) * 35.0
+			if hull_damaged:
+				score += (1.0 - (u.current_hp / maxf(1.0, u.get_max_hp()))) * 45.0
+			if u == owner_unit:
+				score *= 0.80
+			if score > best_score:
+				best_score = score
+				best_pos = u.global_position
+		return best_pos
+
+	if ab_id == &"monolith_suppressive_lock":
+		# Only auto-cast suppressive lock against enemies within cast range (prefer current target or fast flankers)
+		if owner_unit.current_target != null and is_instance_valid(owner_unit.current_target) and owner_unit.current_target is Unit:
+			var cur_u: Unit = owner_unit.current_target as Unit
+			if not cur_u.is_dead and not cur_u.is_staffed and cur_u.global_position.distance_to(owner_unit.global_position) <= cast_r:
+				if not cur_u.has_status_effect(&"static_slow"):
+					return cur_u.global_position
+		var enemies: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, cast_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		var best_enemy_pos: Vector2 = Vector2.INF
+		var best_enemy_score: float = 0.0
+		for node: Variant in enemies:
+			if not is_instance_valid(node) or not (node is Unit):
+				continue
+			var e: Unit = node as Unit
+			if e.is_dead or e.is_staffed or e.is_queued_for_deletion():
+				continue
+			var is_hostile: bool = TeamManager.are_enemies(int(owner_unit.team), int(e.team)) if TeamManager != null else (e.team != owner_unit.team)
+			if not is_hostile or e.global_position.distance_to(owner_unit.global_position) > cast_r:
+				continue
+			if e.has_status_effect(&"static_slow"):
+				continue
+			var score_e: float = 10.0
+			if e.data != null:
+				if e.data.has_tag(&"flanker") or e.data.has_tag(&"swarm") or e.data.move_speed >= 260.0:
+					score_e += 30.0
+				elif e.data.attack_damage > 0.0:
+					score_e += 18.0
+			score_e -= (e.global_position.distance_to(owner_unit.global_position) / maxf(1.0, cast_r)) * 5.0
+			if score_e > best_enemy_score:
+				best_enemy_score = score_e
+				best_enemy_pos = e.global_position
+		return best_enemy_pos
+
+	return Vector2.INF
 
 
 func _should_trigger_autocast(owner_unit: Unit, ability: AbilityData) -> bool:
@@ -209,6 +290,27 @@ func execute_ability(owner_unit: Unit, ability: AbilityData, target_pos: Vector2
 func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vector2) -> void:
 	_spawn_aoe_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
 	var unit_list: Array = SpatialGrid.query_units_in_radius(target_pos, ability.aoe_radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+
+	# Allied Shield Overcharge (Aegis Relay)
+	if ability.ability_id == &"monolith_shield_overcharge":
+		var restore_amt: float = ability.damage_or_value if ability.damage_or_value > 0.0 else 45.0
+		var barrier_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 6.0
+		for node: Variant in unit_list:
+			if not is_instance_valid(node) or not (node is Unit):
+				continue
+			var ally: Unit = node as Unit
+			if ally.is_dead or ally.is_staffed or ally.is_queued_for_deletion():
+				continue
+			var is_ally: bool = (int(ally.team) == int(owner_unit.team)) or (TeamManager != null and TeamManager.are_allies(int(owner_unit.team), int(ally.team)))
+			if not is_ally:
+				continue
+			var ally_r: float = ally.data.collision_radius if ally.data != null else 16.0
+			if ally.global_position.distance_to(target_pos) <= ability.aoe_radius + ally_r:
+				if ally.has_shields():
+					ally.restore_shield(restore_amt)
+				ally.add_damage_shield(30.0, barrier_dur, "Shield Overcharge")
+		return
+
 	for node: Variant in unit_list:
 		if not is_instance_valid(node) or not (node is Unit):
 			continue

@@ -71,6 +71,17 @@ func _draw() -> void:
 			draw_circle(preview_pos, min_r, Color(1.0, 0.30, 0.26, 0.06))
 			_draw_dashed_ring(preview_pos, min_r, Color(1.0, 0.38, 0.30, 0.52), 1.4, 22)
 
+	# 2.5 Passive shield-regen aura preview ring (e.g. Capacitor Pylon)
+	if building_data.shield_regen_aura_radius > 0.0:
+		var aura_r: float = building_data.shield_regen_aura_radius
+		var aura_col: Color = Color(0.220, 0.741, 0.973, 0.48) if is_valid else Color(1.0, 0.36, 0.32, 0.30)
+		var amber_dot: Color = Color(1.0, 0.624, 0.110, 0.56) if is_valid else Color(1.0, 0.36, 0.32, 0.34)
+		draw_circle(preview_pos, aura_r, Color(aura_col.r, aura_col.g, aura_col.b, 0.04))
+		_draw_dashed_ring(preview_pos, aura_r, aura_col, 1.6, 36)
+		for hi: int in range(18):
+			var ha: float = float(hi) * (TAU / 18.0)
+			draw_circle(preview_pos + Vector2.RIGHT.rotated(ha) * (aura_r - 5.0), 1.8, amber_dot if (hi % 3 == 0) else aura_col)
+
 	# 3. Drop-off tether lines & node rings for economy hubs (Nexus Vat / Biomass Silo / Silica Condenser)
 	if building_data.is_dropoff:
 		_draw_dropoff_tethers(preview_pos, building_data.get_dropoff_resources())

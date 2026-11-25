@@ -33,6 +33,7 @@ var _harvest_slots: Dictionary = {} # slot_index: int -> Unit
 var _badge_timer: float = 0.0
 var _show_saturation_badge: bool = false
 var _cached_badge_assigned: int = -1
+var _cached_badge_cap: int = -1
 
 
 func _ready() -> void:
@@ -90,9 +91,11 @@ func _refresh_saturation_badge_state() -> void:
 							break
 
 	var count_now: int = get_assigned_count(viewer_team if viewer_team >= 0 else -1) if should_show else -1
-	if should_show != _show_saturation_badge or count_now != _cached_badge_assigned:
+	var cap_now: int = get_effective_max_harvesters(viewer_team) if should_show else -1
+	if should_show != _show_saturation_badge or count_now != _cached_badge_assigned or cap_now != _cached_badge_cap:
 		_show_saturation_badge = should_show
 		_cached_badge_assigned = count_now
+		_cached_badge_cap = cap_now
 		queue_redraw()
 
 
@@ -120,8 +123,9 @@ func _draw() -> void:
 
 	if not _show_saturation_badge or is_vent or is_depleted():
 		return
+	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 	var assigned: int = maxi(0, _cached_badge_assigned)
-	var cap: int = maxi(1, max_harvesters)
+	var cap: int = get_effective_max_harvesters(viewer_team)
 	var label_txt: String = "%d/%d" % [assigned, cap]
 	var col: Color = get_saturation_color(assigned, cap)
 	var font: Font = ThemeDB.fallback_font
@@ -198,10 +202,19 @@ func get_assigned_count(team_filter: int = -1) -> int:
 	return count
 
 
+func get_effective_max_harvesters(team_filter: int = -1) -> int:
+	var cap: int = maxi(1, max_harvesters)
+	if team_filter >= 0 and TeamManager != null and TeamManager.has_method("get_team_faction_data"):
+		var faction: FactionData = TeamManager.get_team_faction_data(team_filter)
+		if faction != null and faction.has_method("get_bonus_harvesters"):
+			cap += faction.get_bonus_harvesters(resource_type)
+	return cap
+
+
 func has_free_slot(team_filter: int = -1) -> bool:
 	if is_depleted() or is_vent:
 		return false
-	return get_assigned_count(team_filter) < maxi(1, max_harvesters)
+	return get_assigned_count(team_filter) < get_effective_max_harvesters(team_filter)
 
 
 func assign_worker(worker: Unit) -> void:
@@ -247,8 +260,9 @@ func claim_harvest_slot(worker: Unit, dropoff_pos: Vector2 = Vector2.INF) -> Vec
 	var hub_angle: float = hub_dir.angle()
 
 	# Hub-facing primary perimeter arc + overflow fallback angles
+	var cap: int = get_effective_max_harvesters(int(worker.team) if worker != null else -1)
 	var offsets: PackedFloat32Array
-	if max_harvesters <= 2:
+	if cap <= 2:
 		offsets = PackedFloat32Array([-0.5585, 0.5585, 0.0, -1.6057, 1.6057, PI])
 	else:
 		offsets = PackedFloat32Array([0.0, -0.8378, 0.8378, -1.6755, 1.6755, PI])
@@ -259,8 +273,8 @@ func claim_harvest_slot(worker: Unit, dropoff_pos: Vector2 = Vector2.INF) -> Vec
 			var idx_existing: int = clampi(int(k), 0, offsets.size() - 1)
 			return global_position + Vector2.RIGHT.rotated(hub_angle + offsets[idx_existing]) * stand_r
 
-	# Prefer unclaimed primary slots (0 .. max_harvesters - 1) closest to the worker
-	var primary_count: int = mini(maxi(1, max_harvesters), offsets.size())
+	# Prefer unclaimed primary slots (0 .. cap - 1) closest to the worker
+	var primary_count: int = mini(maxi(1, cap), offsets.size())
 	var best_idx: int = -1
 	var best_d_sq: float = INF
 	var worker_pos: Vector2 = worker.global_position if (worker != null and is_instance_valid(worker)) else global_position
@@ -515,12 +529,13 @@ func get_inspection_data() -> Dictionary:
 	var fmt_max: String = InspectionHelper.format_number(max_amount)
 	var viewer_t: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 	var active_gatherers: int = get_assigned_count(viewer_t if viewer_t >= 0 else -1)
-	var sat_col: Color = get_saturation_color(active_gatherers, max_harvesters)
+	var cap: int = get_effective_max_harvesters(viewer_t)
+	var sat_col: Color = get_saturation_color(active_gatherers, cap)
 	var deposit_stats: Array[Dictionary] = [
 		{"label": "Resource", "value": "Silica" if is_silica else "Biomass"},
 		{"label": "Remaining", "value": "%s / %s (%d%%)" % [fmt_rem, fmt_max, pct]},
 		{"label": "Harvest", "value": "Automated Harvester" if is_silica else "Direct Worker Gather"},
-		{"label": "Saturation", "value": "%d / %d Harvesters" % [active_gatherers, max_harvesters], "color": sat_col},
+		{"label": "Saturation", "value": "%d / %d Harvesters" % [active_gatherers, cap], "color": sat_col},
 	]
 	return {
 		"title": display_name,

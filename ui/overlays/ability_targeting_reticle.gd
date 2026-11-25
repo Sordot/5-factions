@@ -10,6 +10,18 @@ var _cursor_world: Vector2 = Vector2.ZERO
 var _command_mode: StringName = &""
 var _command_cursor_world: Vector2 = Vector2.ZERO
 
+var _overclock_active: bool = false
+var _overclock_cursor_world: Vector2 = Vector2.ZERO
+var _overclock_target_building: Building = null
+var _overclock_valid: bool = false
+var _anim_time: float = 0.0
+
+
+func _process(delta: float) -> void:
+	if _overclock_active:
+		_anim_time += delta
+		queue_redraw()
+
 
 func set_targeting(ability: AbilityData, caster_pos: Vector2, has_caster: bool, cursor_world: Vector2) -> void:
 	_ability = ability
@@ -19,6 +31,8 @@ func set_targeting(ability: AbilityData, caster_pos: Vector2, has_caster: bool, 
 	_cursor_world = cursor_world
 	if _active:
 		_command_mode = &""
+		_overclock_active = false
+		_overclock_target_building = null
 	queue_redraw()
 
 
@@ -34,6 +48,8 @@ func clear_targeting() -> void:
 func set_command_mode_reticle(mode: StringName, cursor_world: Vector2) -> void:
 	_command_mode = mode
 	_command_cursor_world = cursor_world
+	_overclock_active = false
+	_overclock_target_building = null
 	queue_redraw()
 
 
@@ -44,9 +60,30 @@ func clear_command_mode_reticle() -> void:
 	queue_redraw()
 
 
+func set_overclock_targeting(cursor_world: Vector2, target_building: Building, is_valid: bool) -> void:
+	_overclock_active = true
+	_overclock_cursor_world = cursor_world
+	_overclock_target_building = target_building
+	_overclock_valid = is_valid
+	_command_mode = &""
+	queue_redraw()
+
+
+func clear_overclock_targeting() -> void:
+	if not _overclock_active:
+		return
+	_overclock_active = false
+	_overclock_target_building = null
+	_overclock_valid = false
+	queue_redraw()
+
+
 func _draw() -> void:
 	if _active and _ability != null:
 		_draw_ability_reticle()
+		return
+	if _overclock_active:
+		_draw_overclock_reticle()
 		return
 	if _command_mode != &"":
 		_draw_command_mode_reticle()
@@ -73,6 +110,23 @@ func _draw_ability_reticle() -> void:
 		_draw_dashed_circle(cursor_local, _ability.aoe_radius * 0.55, Color(accent.r, accent.g, accent.b, 0.42), 1.2, 16)
 
 	_draw_crosshair(cursor_local, accent, 10.0, 17.0)
+
+
+func _draw_overclock_reticle() -> void:
+	var cursor_local: Vector2 = to_local(_overclock_cursor_world)
+	var pulse: float = 0.5 + 0.5 * sin(_anim_time * 8.0)
+	if _overclock_valid and _overclock_target_building != null and is_instance_valid(_overclock_target_building):
+		var amber: Color = Color(1.0, 0.624, 0.110, 0.80 + pulse * 0.20) # Hazard Amber #FF9F1C
+		var target_local: Vector2 = to_local(_overclock_target_building.global_position)
+		var ring_r: float = _overclock_target_building.footprint_radius + 10.0 + pulse * 3.0
+		draw_circle(target_local, ring_r, Color(amber.r, amber.g, amber.b, 0.12 + pulse * 0.08))
+		draw_arc(target_local, ring_r, 0.0, TAU, 40, amber, 2.6, true)
+		_draw_dashed_circle(target_local, ring_r + 7.0, Color(amber.r, amber.g, amber.b, 0.55), 1.5, 24)
+		_draw_crosshair(cursor_local, amber, 11.0, 18.0)
+	else:
+		var muted_red: Color = Color(0.86, 0.34, 0.32, 0.78)
+		draw_circle(cursor_local, 12.0, Color(muted_red.r, muted_red.g, muted_red.b, 0.10))
+		_draw_crosshair(cursor_local, muted_red, 10.0, 16.0)
 
 
 func _draw_command_mode_reticle() -> void:

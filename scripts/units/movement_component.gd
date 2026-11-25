@@ -209,6 +209,13 @@ func compute_nav_desired_velocity(owner_unit: Unit) -> void:
 func finish_physics_step(owner_unit: Unit, delta: float) -> void:
 	if owner_unit == null:
 		return
+	if owner_unit.is_movement_locked_by_deploy():
+		wants_nav_movement = false
+		desired_move_velocity = Vector2.ZERO
+		owner_unit.velocity = Vector2.ZERO
+		if owner_unit.nav_agent != null and owner_unit.nav_agent.avoidance_enabled:
+			owner_unit.nav_agent.set_velocity(Vector2.ZERO)
+		return
 	update_worker_collision_passing(owner_unit)
 	apply_anti_stuck_steering(owner_unit, delta)
 
@@ -221,7 +228,7 @@ func finish_physics_step(owner_unit: Unit, delta: float) -> void:
 
 
 func on_nav_velocity_computed(owner_unit: Unit, safe_velocity: Vector2, last_delta: float) -> void:
-	if owner_unit == null or owner_unit.is_dead or owner_unit.is_staffed or not wants_nav_movement:
+	if owner_unit == null or owner_unit.is_dead or owner_unit.is_staffed or owner_unit.is_movement_locked_by_deploy() or not wants_nav_movement:
 		return
 	if owner_unit.nav_agent != null and not owner_unit.nav_agent.avoidance_enabled:
 		return
@@ -247,7 +254,8 @@ func apply_direct_motion(owner_unit: Unit, target_velocity: Vector2, delta: floa
 
 
 func apply_stationary_separation(owner_unit: Unit, delta: float) -> void:
-	if not owner_unit.can_unit_move():
+	if owner_unit.is_movement_locked_by_deploy() or not owner_unit.can_unit_move():
+		owner_unit.velocity = Vector2.ZERO
 		return
 	if owner_unit.command_state == Unit.CommandState.GATHERING and owner_unit.gather_component != null and owner_unit.gather_component.is_harvesting_in_place():
 		_apply_harvester_perimeter_separation(owner_unit, delta)

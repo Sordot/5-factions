@@ -1,0 +1,88 @@
+[gd_resource type="Resource" script_class="FactionData" load_steps=22 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/faction_data.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/monolith_foundry_core.tscn" id="2_hub"]
+[ext_resource type="PackedScene" path="res://scenes/units/monolith_servo_drone.tscn" id="3_worker"]
+[ext_resource type="PackedScene" path="res://scenes/units/monolith_ore_crawler.tscn" id="4_harvester"]
+[ext_resource type="PackedScene" path="res://scenes/units/monolith_grid_tech.tscn" id="5_engineer"]
+[ext_resource type="PackedScene" path="res://scenes/units/monolith_bulwark_automaton.tscn" id="6_bulwark_scn"]
+[ext_resource type="PackedScene" path="res://scenes/units/monolith_picket_drone.tscn" id="7_picket_scn"]
+[ext_resource type="Resource" path="res://resources/buildings/monolith_foundry_core_data.tres" id="8_b_hub"]
+[ext_resource type="Resource" path="res://resources/buildings/monolith_capacitor_pylon_data.tres" id="9_b_pylon"]
+[ext_resource type="Resource" path="res://resources/buildings/monolith_silica_smelter_data.tres" id="10_b_smelter"]
+[ext_resource type="Resource" path="res://resources/buildings/monolith_logic_monolith_data.tres" id="11_b_logic"]
+[ext_resource type="Resource" path="res://resources/buildings/monolith_assembly_bay_data.tres" id="12_b_assembly"]
+[ext_resource type="Resource" path="res://resources/buildings/monolith_ballistics_lab_data.tres" id="13_b_ballistics"]
+[ext_resource type="Resource" path="res://resources/buildings/monolith_bastion_emplacement_data.tres" id="14_b_bastion"]
+[ext_resource type="Resource" path="res://resources/units/monolith_servo_drone_data.tres" id="15_u_servo"]
+[ext_resource type="Resource" path="res://resources/units/monolith_ore_crawler_data.tres" id="16_u_crawler"]
+[ext_resource type="Resource" path="res://resources/units/monolith_grid_tech_data.tres" id="17_u_tech"]
+[ext_resource type="Resource" path="res://resources/units/monolith_bulwark_automaton_data.tres" id="18_u_bulwark"]
+[ext_resource type="Resource" path="res://resources/units/monolith_picket_drone_data.tres" id="19_u_picket"]
+[ext_resource type="Resource" path="res://resources/units/monolith_rail_sentinel_data.tres" id="20_u_rail"]
+[ext_resource type="Resource" path="res://resources/units/monolith_aegis_relay_data.tres" id="21_u_aegis"]
+
+[resource]
+script = ExtResource("1_script")
+faction_id = &"monolith_os"
+display_name = "MONOLITH_OS — The Iron Axiom"
+short_code = "MONO-OS"
+tagline = "Neo-brutalist machine-state. Slow, shielded heavy robotics, superior Silica/Compute extraction, and Core Overclocked industry."
+is_playable = true
+primary_color = Color(0.95, 0.94, 0.91, 1)
+accent_color = Color(1, 0.624, 0.11, 1)
+hud_accent_color = Color(1, 0.624, 0.11, 1)
+boot_banner_text = "// AXIOM KERNEL LOCKED — MONOLITH_OS"
+audio_bark_pitch_bias = 0.82
+audio_timbre_profile = &"monolith_industrial"
+starting_biomass = 200
+starting_silica = 50
+starting_compute = 0
+starting_worker_count = 3
+starting_hub_scene = ExtResource("2_hub")
+worker_scene = ExtResource("3_worker")
+harvester_scene = ExtResource("4_harvester")
+engineer_scene = ExtResource("5_engineer")
+extra_starting_units = Array[PackedScene]([ExtResource("6_bulwark_scn"), ExtResource("7_picket_scn")])
+building_roster = Array[Resource("res://scripts/data/building_data.gd")]([ExtResource("8_b_hub"), ExtResource("9_b_pylon"), ExtResource("10_b_smelter"), ExtResource("11_b_logic"), ExtResource("12_b_assembly"), ExtResource("13_b_ballistics"), ExtResource("14_b_bastion")])
+unit_roster = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("15_u_servo"), ExtResource("16_u_crawler"), ExtResource("17_u_tech"), ExtResource("18_u_bulwark"), ExtResource("19_u_picket"), ExtResource("20_u_rail"), ExtResource("21_u_aegis")])
+upgrade_roster = Array[Resource("res://scripts/data/upgrade_data.gd")]([])
+ai_build_profile = {
+&"barracks_t1": &"assembly_bay",
+&"compute_hub": &"logic_monolith",
+&"counter_foundry": &"ballistics_lab",
+&"hub": &"foundry_core",
+&"refinery": &"silica_smelter",
+&"supply": &"capacitor_pylon"
+}
+ai_scout_unit_id = &"picket_drone"
+ai_salvage_unit_ids = Array[StringName]([&"grid_tech", &"servo_drone"])
+ai_counter_units = {
+&"ANTI_ARMOR": [&"rail_sentinel", &"bulwark_automaton"],
+&"ANTI_SIEGE": [&"picket_drone", &"bulwark_automaton", &"rail_sentinel"],
+&"ANTI_SWARM": [&"bulwark_automaton", &"picket_drone", &"aegis_relay"],
+&"BREACH": [&"rail_sentinel", &"bulwark_automaton"]
+}
+ai_playstyle_weights = {
+&"balanced": {
+&"aegis_relay": 0.9,
+&"bulwark_automaton": 3.0,
+&"picket_drone": 1.8,
+&"rail_sentinel": 2.0
+},
+&"swarm_rush": {
+&"aegis_relay": 0.6,
+&"bulwark_automaton": 2.8,
+&"picket_drone": 3.0,
+&"rail_sentinel": 1.2
+},
+&"synthetics_tech": {
+&"aegis_relay": 1.3,
+&"bulwark_automaton": 2.4,
+&"picket_drone": 1.2,
+&"rail_sentinel": 2.8
+}
+}
+bonus_harvesters_by_resource = {
+&"silica": 1
+}

@@ -1,0 +1,54 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/build_monolith_silica_smelter.tres" id="2_build_smelter"]
+[ext_resource type="Resource" path="res://resources/abilities/build_monolith_logic_monolith.tres" id="3_build_monolith"]
+[ext_resource type="Resource" path="res://resources/abilities/build_monolith_capacitor_pylon.tres" id="4_build_pylon"]
+[ext_resource type="Resource" path="res://resources/abilities/build_monolith_assembly_bay.tres" id="5_build_assembly"]
+[ext_resource type="Resource" path="res://resources/abilities/build_monolith_ballistics_lab.tres" id="6_build_ballistics"]
+[ext_resource type="Resource" path="res://resources/abilities/build_monolith_bastion_emplacement.tres" id="7_build_bastion"]
+[ext_resource type="Resource" path="res://resources/abilities/build_monolith_foundry_core.tres" id="8_build_foundry"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"servo_drone"
+display_name = "Servo-Drone"
+max_hp = 75.0
+max_shield = 20.0
+shield_regen_rate = 5.0
+shield_regen_delay = 6.0
+move_speed = 205.0
+acceleration = 1700.0
+turn_speed = 15.0
+selection_radius = 18.0
+collision_radius = 13.0
+attack_damage = 6.0
+attack_range = 80.0
+aggro_range = 130.0
+vision_range = 310.0
+attack_cooldown = 1.0
+damage_reduction = 0.08
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_build_smelter"), ExtResource("3_build_monolith"), ExtResource("4_build_pylon"), ExtResource("5_build_assembly"), ExtResource("6_build_ballistics"), ExtResource("7_build_bastion"), ExtResource("8_build_foundry")])
+bandwidth_cost = 1
+can_gather = true
+gather_duration = 3.0
+carry_capacity = 10
+gather_range = 48.0
+dropoff_range = 64.0
+allowed_resource = &"biomass"
+auto_gather_on_spawn = false
+can_staff_compute = false
+biomass_cost = 50
+silica_cost = 0
+compute_cost = 0
+build_time = 4.5
+train_time = 4.5
+unit_scene_path = "res://scenes/units/monolith_servo_drone.tscn"
+unit_tags = Array[StringName]([&"worker", &"mechanical"])
+weapon_tracer_style = &"arc_tether"
+weapon_tracer_color = Color(1, 0.68, 0.18, 0.95)
+weapon_tracer_width = 1.8
+weapon_sfx_id = &"weapon_mono_tether"
+audio_bark_class = &"worker"
+minimap_icon_shape = &"worker"
+role_tags_display = "Biomass Gather • Build • Repair Bldgs"

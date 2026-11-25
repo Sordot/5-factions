@@ -1,0 +1,39 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"assembly_bay"
+display_name = "Assembly Bay"
+scene_path = "res://scenes/buildings/monolith_assembly_bay.tscn"
+biomass_cost = 140
+silica_cost = 95
+compute_cost = 0
+build_time = 7.0
+footprint_size = Vector2(82, 82)
+max_hp = 780.0
+max_shield = 120.0
+shield_regen_rate = 12.0
+shield_regen_delay = 7.0
+damage_reduction = 0.20
+vision_range = 400.0
+bandwidth_provided = 0
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+accepted_dropoff_resources = Array[StringName]([])
+requires_vent = false
+max_staff_slots = 0
+trainable_unit_paths = PackedStringArray("res://resources/units/monolith_bulwark_automaton_data.tres", "res://resources/units/monolith_picket_drone_data.tres")
+can_set_rally = true
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &""
+prerequisite_building_ids = Array[StringName]([])
+is_core_hub = false
+is_command_hub = false
+is_military_production = true
+is_supply_provider = false
+tech_tier = 1
+audio_select_class = &"production"
+tech_tree_summary = "Tier-1 Robotics Factory • Bulwark Automaton & Picket Drone"

@@ -40,6 +40,20 @@ extends Resource
 @export var ai_counter_units: Dictionary = {}
 @export var ai_playstyle_weights: Dictionary = {}
 
+# Faction-specific resource saturation overrides (e.g., { &"silica": 1 })
+@export var bonus_harvesters_by_resource: Dictionary = {}
+
+
+func get_bonus_harvesters(res_type: StringName) -> int:
+	if res_type == &"":
+		return 0
+	if bonus_harvesters_by_resource.has(res_type):
+		return maxi(0, int(bonus_harvesters_by_resource[res_type]))
+	var key_str: String = String(res_type)
+	if bonus_harvesters_by_resource.has(key_str):
+		return maxi(0, int(bonus_harvesters_by_resource[key_str]))
+	return 0
+
 
 func get_building_by_id(type_id: StringName) -> BuildingData:
 	for b: BuildingData in building_roster:

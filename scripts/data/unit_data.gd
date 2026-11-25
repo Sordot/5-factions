@@ -4,6 +4,9 @@ extends Resource
 @export var unit_type_id: StringName = &"clone_trooper"
 @export var display_name: String = "Clone Trooper"
 @export var max_hp: float = 100.0
+@export var max_shield: float = 0.0
+@export var shield_regen_rate: float = 0.0
+@export var shield_regen_delay: float = 6.0
 @export var move_speed: float = 260.0
 @export var acceleration: float = 1800.0
 @export var turn_speed: float = 14.0
@@ -53,6 +56,17 @@ extends Resource
 @export var audio_bark_class: StringName = &"swarm" # &"worker", &"swarm", &"counter", &"support", &"heavy"
 @export var minimap_icon_shape: StringName = &"dot" # &"dot", &"worker", &"triangle_heavy"
 @export var role_tags_display: String = ""
+
+# Optional Deploy / Anchor Stance Overrides (Milestone 3.0a)
+@export var can_deploy: bool = false
+@export var deploy_duration: float = 1.2
+@export var deployed_attack_damage: float = 0.0
+@export var deployed_attack_range: float = 0.0
+@export var deployed_min_attack_range: float = 0.0
+@export var deployed_attack_cooldown: float = 0.0
+@export var deployed_aoe_radius: float = 0.0
+@export var deployed_damage_reduction_bonus: float = 0.0
+@export var deployed_weapon_tracer_style: StringName = &""
 
 
 func has_tag(tag: StringName) -> bool:

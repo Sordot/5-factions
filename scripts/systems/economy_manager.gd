@@ -459,3 +459,15 @@ func get_goliath_speed_multiplier(team: int) -> float:
 
 func get_goliath_extra_damage_reduction(team: int) -> float:
 	return upgrade_manager.get_goliath_extra_damage_reduction(team)
+
+
+func get_shield_regen_delay_multiplier(_team: int) -> float:
+	return 1.0
+
+
+func get_shield_regen_rate_multiplier(_team: int) -> float:
+	return 1.0
+
+
+func get_bonus_armor(_team: int) -> float:
+	return 0.0

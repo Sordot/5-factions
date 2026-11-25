@@ -50,6 +50,7 @@ func _process(delta: float) -> void:
 			or entity_type_id == &"arc_lancer"
 			or entity_type_id == &"goliath_frame"
 			or entity_type_id == &"clone_trooper"
+			or entity_type_id == &"aegis_relay"
 			or _owner_unit.has_status_effect(&"adrenal_surge")
 		):
 			queue_redraw()
@@ -182,6 +183,9 @@ func _draw_marquee_preview_ring() -> void:
 # =============================================================================
 
 func _draw_unit_silhouette(p: Dictionary) -> void:
+	if _is_monolith_unit(entity_type_id):
+		_draw_monolith_unit_silhouette(p)
+		return
 	var shell: Color = p["shell"]
 	var shell_hi: Color = p["shell_hi"]
 	var deck: Color = p["deck"]
@@ -522,6 +526,16 @@ func _draw_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> v
 	var is_active_prod: bool = _owner_building.is_actively_producing()
 	var standby_slate: Color = Color(0.28, 0.42, 0.50, 0.72)
 
+	if _is_monolith_building(entity_type_id):
+		_draw_monolith_building_completed(hull_poly, p)
+		if _owner_building.has_turret:
+			_draw_building_turret_overlay(p)
+		if _owner_building.completion_flash_timer > 0.0:
+			var cf_m: float = clampf(_owner_building.completion_flash_timer / Building.COMPLETION_FLASH_DURATION, 0.0, 1.0)
+			_draw_closed_outline(_scale_poly(hull_poly, 1.0 + (1.0 - cf_m) * 0.10), Color(1.0, 0.72, 0.22, cf_m * 0.95), 3.0)
+		_draw_hub_saturation_badge()
+		return
+
 	# Subtle Technozen circuit grounding pad under completed structures
 	if SettingsManager == null or SettingsManager.battle_scars_enabled:
 		var pad_poly: PackedVector2Array = _scale_poly(hull_poly, 1.18)
@@ -757,7 +771,8 @@ func _draw_active_conduit_sparks(col: Color, spread_r: float) -> void:
 func _draw_hub_saturation_badge() -> void:
 	if _owner_building == null or not is_instance_valid(_owner_building) or not _owner_building.is_constructed or _owner_building.is_destroyed:
 		return
-	var is_hub: bool = _owner_building.is_core_hub or entity_type_id == &"nexus_vat" or entity_type_id == &"silica_condenser"
+	var is_silica_dropoff: bool = entity_type_id == &"silica_condenser" or (not _owner_building.is_command_hub() and _owner_building.is_resource_dropoff and _owner_building.accepts_resource(&"silica"))
+	var is_hub: bool = _owner_building.is_command_hub() or is_silica_dropoff
 	if not is_hub:
 		return
 	var is_local: bool = TeamManager.is_team_controlled_by_local_human(int(_owner_building.team)) if TeamManager != null else (_owner_building.team == Unit.Team.PLAYER)
@@ -771,7 +786,7 @@ func _draw_hub_saturation_badge() -> void:
 		if _owner_building.global_position.distance_squared_to(mouse_world) <= hover_r * hover_r:
 			should_show = true
 	if not should_show and _owner_building.is_inside_tree():
-		var want_res: StringName = &"silica" if entity_type_id == &"silica_condenser" else &"biomass"
+		var want_res: StringName = &"silica" if is_silica_dropoff else &"biomass"
 		var sel: Node = _owner_building.get_tree().get_first_node_in_group("selection_controller")
 		if sel != null:
 			var sel_units: Variant = sel.get("selected_units")
@@ -817,6 +832,43 @@ func _draw_building_turret_overlay(p: Dictionary) -> void:
 	var accent: Color = Color(1.0, 0.82, 0.32, 1.0) if (style == &"rail" and team == 0) else core
 	if style == &"mortar" and team == 0:
 		accent = core_alt
+
+	if style == &"heavy_slug":
+		# MONOLITH_OS Bastion Emplacement heavy brutalist AP turret housing + twin pneumatic barrels
+		var mono_ink: Color = Color(0.05, 0.06, 0.08, 0.96)
+		var mono_slab: Color = Color(0.24, 0.27, 0.31, 0.98)
+		var mono_amber: Color = Color(1.0, 0.624, 0.110, 1.0)
+		var mono_white: Color = Color(0.95, 0.94, 0.91, 0.96)
+		var team_col: Color = TeamManager.get_team_color(team) if TeamManager != null else core
+		var mono_base: PackedVector2Array = PackedVector2Array([
+			dir * 13.0 + perp * -8.5,
+			dir * 13.0 + perp * 8.5,
+			dir * 6.0 + perp * 12.0,
+			dir * -12.0 + perp * 12.0,
+			dir * -15.0 + perp * 8.0,
+			dir * -15.0 + perp * -8.0,
+			dir * -12.0 + perp * -12.0,
+			dir * 6.0 + perp * -12.0,
+		])
+		# Hard offset drop shadow
+		var shadow_base: PackedVector2Array = PackedVector2Array()
+		for pt_b: Vector2 in mono_base:
+			shadow_base.append(pt_b + Vector2(2.5, 2.5))
+		draw_colored_polygon(shadow_base, Color(0.04, 0.05, 0.07, 0.80))
+		_poly_outlined(mono_base, mono_slab, mono_ink, 2.2)
+		# Heavy twin AP cannon barrels
+		var bs_m: Vector2 = dir * (8.0 - recoil)
+		var be_m: Vector2 = dir * (28.0 - recoil)
+		draw_line(bs_m + perp * -4.2, be_m + perp * -4.2, mono_ink, 6.2, true)
+		draw_line(bs_m + perp * 4.2, be_m + perp * 4.2, mono_ink, 6.2, true)
+		draw_line(bs_m + perp * -4.2, be_m + perp * -4.2, mono_white, 2.8, true)
+		draw_line(bs_m + perp * 4.2, be_m + perp * 4.2, mono_white, 2.8, true)
+		# Muzzle brake collars
+		draw_line(dir * (24.0 - recoil) + perp * -6.5, dir * (24.0 - recoil) + perp * 6.5, mono_amber, 2.6, true)
+		# Team-color dorsal stripe + amber optic slit
+		draw_line(dir * -9.0 + perp * -7.0, dir * -9.0 + perp * 7.0, team_col, 3.0, true)
+		draw_line(dir * 5.0 + perp * -5.0, dir * 5.0 + perp * 5.0, mono_amber, 2.2, true)
+		return
 
 	# Rotating armored turret housing
 	var base_pts: PackedVector2Array = PackedVector2Array([
@@ -870,6 +922,15 @@ func _get_building_outer_poly(type_id: StringName, radius: float) -> PackedVecto
 				Vector2(-r * 0.92, -r * 0.92), Vector2(r * 0.92, -r * 0.92),
 				Vector2(r * 0.92, r * 0.92), Vector2(-r * 0.92, r * 0.92),
 			])
+		&"foundry_core", &"capacitor_pylon", &"silica_smelter", &"logic_monolith", &"assembly_bay", &"ballistics_lab", &"bastion_emplacement":
+			var e_m: float = r * 0.96
+			var ch_m: float = r * 0.24
+			return PackedVector2Array([
+				Vector2(-e_m + ch_m, -e_m), Vector2(e_m - ch_m, -e_m),
+				Vector2(e_m, -e_m + ch_m), Vector2(e_m, e_m - ch_m),
+				Vector2(e_m - ch_m, e_m), Vector2(-e_m + ch_m, e_m),
+				Vector2(-e_m, e_m - ch_m), Vector2(-e_m, -e_m + ch_m),
+			])
 		_:
 			# Clean Y2K chamfered octagon
 			var c: float = r * 0.42
@@ -899,3 +960,433 @@ func _draw_closed_outline(poly: PackedVector2Array, outline_col: Color, width: f
 	var pts: PackedVector2Array = poly.duplicate()
 	pts.append(poly[0])
 	draw_polyline(pts, outline_col, width, true)
+
+
+# =============================================================================
+# MONOLITH_OS — NEO-BRUTALIST HALFTONE PROCEDURAL VISUALS
+# =============================================================================
+
+const MONO_INK: Color = Color(0.04, 0.05, 0.07, 0.96)
+const MONO_SHADOW: Color = Color(0.04, 0.05, 0.07, 0.85)
+const MONO_CONCRETE_DARK: Color = Color(0.169, 0.180, 0.200, 0.98) # #2B2E33
+const MONO_CONCRETE_MID: Color = Color(0.227, 0.243, 0.271, 0.98)  # #3A3E45
+const MONO_OFFWHITE: Color = Color(0.949, 0.937, 0.914, 0.98)      # #F2EFE9
+const MONO_AMBER: Color = Color(1.0, 0.624, 0.110, 1.0)            # #FF9F1C
+const MONO_SHIELD_CYAN: Color = Color(0.220, 0.741, 0.973, 1.0)    # #38BDF8
+
+
+func _is_monolith_unit(type_id: StringName) -> bool:
+	return (
+		type_id == &"servo_drone"
+		or type_id == &"ore_crawler"
+		or type_id == &"grid_tech"
+		or type_id == &"bulwark_automaton"
+		or type_id == &"picket_drone"
+		or type_id == &"rail_sentinel"
+		or type_id == &"aegis_relay"
+	)
+
+
+func _is_monolith_building(type_id: StringName) -> bool:
+	return (
+		type_id == &"foundry_core"
+		or type_id == &"capacitor_pylon"
+		or type_id == &"silica_smelter"
+		or type_id == &"logic_monolith"
+		or type_id == &"assembly_bay"
+		or type_id == &"ballistics_lab"
+		or type_id == &"bastion_emplacement"
+	)
+
+
+func _get_monolith_team_color(p: Dictionary) -> Color:
+	if TeamManager != null:
+		return TeamManager.get_team_color(team)
+	return p["core"]
+
+
+func _build_chamfer_rect_poly(rect: Rect2, chamfer: float) -> PackedVector2Array:
+	var c: float = clampf(chamfer, 0.0, minf(rect.size.x, rect.size.y) * 0.45)
+	var x0: float = rect.position.x
+	var y0: float = rect.position.y
+	var x1: float = rect.end.x
+	var y1: float = rect.end.y
+	return PackedVector2Array([
+		Vector2(x0 + c, y0), Vector2(x1 - c, y0),
+		Vector2(x1, y0 + c), Vector2(x1, y1 - c),
+		Vector2(x1 - c, y1), Vector2(x0 + c, y1),
+		Vector2(x0, y1 - c), Vector2(x0, y0 + c),
+	])
+
+
+func _draw_brutalist_slab(
+	canvas: CanvasItem,
+	rect: Rect2,
+	fill_col: Color,
+	outline_col: Color,
+	shadow_offset: Vector2 = Vector2(3.0, 3.0),
+	chamfer: float = 5.0,
+	trim_col: Color = MONO_OFFWHITE
+) -> void:
+	var poly: PackedVector2Array = _build_chamfer_rect_poly(rect, chamfer)
+	if shadow_offset.length_squared() > 0.01:
+		var shadow_poly: PackedVector2Array = PackedVector2Array()
+		shadow_poly.resize(poly.size())
+		for i: int in range(poly.size()):
+			shadow_poly[i] = poly[i] + shadow_offset
+		canvas.draw_colored_polygon(shadow_poly, MONO_SHADOW)
+	canvas.draw_colored_polygon(poly, fill_col)
+	var closed: PackedVector2Array = poly.duplicate()
+	closed.append(poly[0])
+	canvas.draw_polyline(closed, outline_col, 2.2, true)
+	# Crisp inner top-left highlight trim stripe
+	var inset: float = 2.2
+	var c_in: float = maxf(1.5, chamfer - 1.2)
+	if rect.size.x > 10.0 and rect.size.y > 10.0:
+		canvas.draw_line(
+			Vector2(rect.position.x + c_in + inset, rect.position.y + inset),
+			Vector2(rect.end.x - c_in - inset, rect.position.y + inset),
+			Color(trim_col.r, trim_col.g, trim_col.b, 0.85),
+			1.4,
+			true
+		)
+
+
+func _draw_halftone_dots(
+	canvas: CanvasItem,
+	bounds: Rect2,
+	spacing: float,
+	dot_radius: float,
+	col: Color,
+	clip_inset: float = 4.0
+) -> void:
+	var step: float = maxf(4.0, spacing)
+	var inner: Rect2 = bounds.grow(-clip_inset)
+	if inner.size.x <= 0.0 or inner.size.y <= 0.0:
+		return
+	var row_idx: int = 0
+	var y: float = inner.position.y
+	while y <= inner.end.y:
+		var x_offset: float = (step * 0.5) if (row_idx % 2 == 1) else 0.0
+		var x: float = inner.position.x + x_offset
+		while x <= inner.end.x:
+			canvas.draw_circle(Vector2(x, y), dot_radius, col)
+			x += step
+		y += step
+		row_idx += 1
+
+
+func _draw_team_corner_brackets(canvas: CanvasItem, rect: Rect2, team_col: Color, arm: float = 7.0, width: float = 2.2) -> void:
+	var tl: Vector2 = rect.position
+	var tr: Vector2 = Vector2(rect.end.x, rect.position.y)
+	var br: Vector2 = rect.end
+	var bl: Vector2 = Vector2(rect.position.x, rect.end.y)
+	canvas.draw_line(tl, tl + Vector2(arm, 0.0), team_col, width, true)
+	canvas.draw_line(tl, tl + Vector2(0.0, arm), team_col, width, true)
+	canvas.draw_line(tr, tr + Vector2(-arm, 0.0), team_col, width, true)
+	canvas.draw_line(tr, tr + Vector2(0.0, arm), team_col, width, true)
+	canvas.draw_line(br, br + Vector2(-arm, 0.0), team_col, width, true)
+	canvas.draw_line(br, br + Vector2(0.0, -arm), team_col, width, true)
+	canvas.draw_line(bl, bl + Vector2(arm, 0.0), team_col, width, true)
+	canvas.draw_line(bl, bl + Vector2(0.0, -arm), team_col, width, true)
+
+
+func _draw_monolith_unit_silhouette(p: Dictionary) -> void:
+	var team_col: Color = _get_monolith_team_color(p)
+	var slab_base: Color = MONO_CONCRETE_MID.lerp(team_col, 0.14)
+	var slab_dark: Color = MONO_CONCRETE_DARK.lerp(team_col, 0.10)
+	var pulse: float = 0.5 + 0.5 * sin(_anim_time * 4.5)
+
+	match entity_type_id:
+		&"servo_drone":
+			# Compact brutalist utility block with twin weld-prongs & halftone rear cap
+			_draw_brutalist_slab(self, Rect2(-11, -9, 21, 18), slab_base, MONO_INK, Vector2(2.2, 2.2), 3.5, MONO_OFFWHITE)
+			# Twin industrial manipulator prongs
+			draw_rect(Rect2(9, -7.5, 7.5, 3.2), MONO_INK, true)
+			draw_rect(Rect2(9, 4.3, 7.5, 3.2), MONO_INK, true)
+			draw_line(Vector2(10, -5.9), Vector2(16, -5.9), MONO_OFFWHITE, 1.5, true)
+			draw_line(Vector2(10, 5.9), Vector2(16, 5.9), MONO_OFFWHITE, 1.5, true)
+			# Halftone rear vent dots (4 dots)
+			_draw_halftone_dots(self, Rect2(-10, -7, 10, 14), 5.0, 1.2, Color(0.04, 0.05, 0.07, 0.55), 2.5)
+			# Team hazard bar + amber sensor slit
+			draw_rect(Rect2(-9, -6, 3.5, 12), team_col, true)
+			draw_rect(Rect2(3, -3.5, 4.2, 7.0), MONO_AMBER, true)
+
+		&"ore_crawler":
+			# Heavily armored tread-block with wide brutalist mining jaw & silica hopper
+			# Heavy side tread blocks
+			draw_rect(Rect2(-15, -14.5, 28, 4.5), MONO_INK, true)
+			draw_rect(Rect2(-15, 10.0, 28, 4.5), MONO_INK, true)
+			_draw_brutalist_slab(self, Rect2(-15, -11.5, 29, 23), slab_base, MONO_INK, Vector2(2.5, 2.5), 4.0, MONO_AMBER)
+			# Wide bolted ore scoop
+			var jaw: PackedVector2Array = PackedVector2Array([
+				Vector2(12, -12), Vector2(20, -9), Vector2(20, 9), Vector2(12, 12),
+				Vector2(15, 6), Vector2(15, -6),
+			])
+			_poly_outlined(jaw, MONO_OFFWHITE, MONO_INK, 2.0)
+			# Recessed hopper bay + halftone rear plate (6 dots)
+			draw_rect(Rect2(-10, -7, 15, 14), slab_dark, true)
+			draw_rect(Rect2(-8, -4.5, 9, 9), MONO_AMBER, true)
+			draw_rect(Rect2(-13.5, -9, 3.0, 18), team_col, true)
+			_draw_halftone_dots(self, Rect2(-9, -7, 12, 14), 6.0, 1.2, Color(0.04, 0.05, 0.07, 0.48), 2.0)
+
+		&"grid_tech":
+			# Angular compute technician slab with twin arc-welder clamps & cyan logic core
+			_draw_brutalist_slab(self, Rect2(-12, -10.5, 23, 21), MONO_OFFWHITE.lerp(slab_base, 0.35), MONO_INK, Vector2(2.2, 2.2), 4.0, MONO_AMBER)
+			# Twin diagnostic clamps
+			draw_line(Vector2(9, -5.5), Vector2(16.5, -6.5), MONO_INK, 3.6, true)
+			draw_line(Vector2(9, 5.5), Vector2(16.5, 6.5), MONO_INK, 3.6, true)
+			draw_line(Vector2(9, -5.5), Vector2(16, -6.2), MONO_SHIELD_CYAN, 1.5, true)
+			draw_line(Vector2(9, 5.5), Vector2(16, 6.2), MONO_SHIELD_CYAN, 1.5, true)
+			# Recessed logic deck + cyan emitter + team stripe
+			draw_rect(Rect2(-7, -6.5, 13, 13), slab_dark, true)
+			draw_rect(Rect2(-3, -3.5, 7, 7), MONO_SHIELD_CYAN, true)
+			draw_rect(Rect2(-10.5, -7.5, 3.2, 15), team_col, true)
+			_draw_halftone_dots(self, Rect2(-7, -6, 12, 12), 5.5, 1.1, Color(0.95, 0.94, 0.91, 0.32), 2.0)
+
+		&"bulwark_automaton":
+			# Broad monolithic frontline bruiser with heavy forward ballistic shield slab & twin cannons
+			# Heavy shoulder twin-slug barrels
+			draw_rect(Rect2(6, -16.5, 15, 5.2), MONO_INK, true)
+			draw_rect(Rect2(6, 11.3, 15, 5.2), MONO_INK, true)
+			draw_line(Vector2(8, -13.9), Vector2(20, -13.9), MONO_OFFWHITE, 1.8, true)
+			draw_line(Vector2(8, 13.9), Vector2(20, 13.9), MONO_OFFWHITE, 1.8, true)
+			# Main heavy chassis slab
+			_draw_brutalist_slab(self, Rect2(-16, -15, 29, 30), slab_base, MONO_INK, Vector2(3.2, 3.2), 5.0, MONO_OFFWHITE)
+			# Thick forward riot-shield bulkhead plate
+			_draw_brutalist_slab(self, Rect2(8, -13, 8, 26), MONO_OFFWHITE.lerp(team_col, 0.12), MONO_INK, Vector2(1.5, 1.5), 2.5, MONO_AMBER)
+			# Halftone armor shading band (6 dots)
+			_draw_halftone_dots(self, Rect2(-14, -12, 16, 24), 7.0, 1.4, Color(0.04, 0.05, 0.07, 0.55), 3.0)
+			# Bold team-color shoulder hazard bars + Hazard Amber visor slit
+			draw_rect(Rect2(-12, -13, 16, 4.2), team_col, true)
+			draw_rect(Rect2(-12, 8.8, 16, 4.2), team_col, true)
+			draw_rect(Rect2(10.5, -5.5, 3.2, 11.0), MONO_AMBER, true)
+			draw_rect(Rect2(-4, -5, 8, 10), slab_dark, true)
+			draw_rect(Rect2(-2, -3, 4, 6), MONO_SHIELD_CYAN, true)
+
+		&"picket_drone":
+			# Sharp angular wedge-block scout/skirmisher with forward arc-tether prongs
+			var drop_pts: PackedVector2Array = PackedVector2Array([
+				Vector2(17, 0), Vector2(5, -11), Vector2(-11, -11),
+				Vector2(-14, -5), Vector2(-14, 5), Vector2(-11, 11), Vector2(5, 11),
+			])
+			var sh_pts: PackedVector2Array = PackedVector2Array()
+			for pt_p: Vector2 in drop_pts:
+				sh_pts.append(pt_p + Vector2(2.4, 2.4))
+			draw_colored_polygon(sh_pts, MONO_SHADOW)
+			_poly_outlined(drop_pts, slab_base, MONO_INK, 2.2)
+			# Forward arc-tether prongs
+			draw_line(Vector2(10, -5.5), Vector2(20, -3.5), MONO_INK, 3.4, true)
+			draw_line(Vector2(10, 5.5), Vector2(20, 3.5), MONO_INK, 3.4, true)
+			draw_line(Vector2(11, -5.2), Vector2(19.5, -3.5), MONO_OFFWHITE, 1.4, true)
+			draw_line(Vector2(11, 5.2), Vector2(19.5, 3.5), MONO_OFFWHITE, 1.4, true)
+			# Stark off-white dorsal keel + cyan/amber tether core + team wing stripes
+			draw_rect(Rect2(-9, -4, 16, 8), slab_dark, true)
+			draw_rect(Rect2(-3, -2.5, 9, 5), MONO_SHIELD_CYAN, true)
+			draw_line(Vector2(-9, -8.5), Vector2(4, -8.5), team_col, 3.0, true)
+			draw_line(Vector2(-9, 8.5), Vector2(4, 8.5), team_col, 3.0, true)
+			_draw_halftone_dots(self, Rect2(-12, -8, 10, 16), 5.5, 1.1, Color(0.95, 0.94, 0.91, 0.35), 2.0)
+
+		&"rail_sentinel":
+			# Heavy long-range anti-armor precision walker with stark off-white slab & elongated rail barrel
+			# Stabilizer outrigger tread pods
+			draw_rect(Rect2(-18, -18, 28, 6), MONO_INK, true)
+			draw_rect(Rect2(-18, 12, 28, 6), MONO_INK, true)
+			draw_line(Vector2(-15, -15), Vector2(7, -15), team_col, 2.6, true)
+			draw_line(Vector2(-15, 15), Vector2(7, 15), team_col, 2.6, true)
+			# Monolithic off-white / gunmetal turret slab
+			_draw_brutalist_slab(self, Rect2(-17, -13, 29, 26), MONO_OFFWHITE.lerp(slab_base, 0.30), MONO_INK, Vector2(3.2, 3.2), 4.5, MONO_AMBER)
+			# Elongated heavy twin-rail barrel + glowing amber accelerator slot
+			draw_rect(Rect2(6, -6.2, 24, 4.0), MONO_INK, true)
+			draw_rect(Rect2(6, 2.2, 24, 4.0), MONO_INK, true)
+			draw_line(Vector2(8, -4.2), Vector2(28, -4.2), MONO_OFFWHITE, 1.6, true)
+			draw_line(Vector2(8, 4.2), Vector2(28, 4.2), MONO_OFFWHITE, 1.6, true)
+			draw_line(Vector2(5, 0.0), Vector2(29, 0.0), MONO_AMBER, 2.8, true)
+			# Rear halftone heatsink + capacitor core
+			draw_rect(Rect2(-14, -9, 14, 18), slab_dark, true)
+			_draw_halftone_dots(self, Rect2(-13, -8, 12, 16), 5.5, 1.2, Color(0.95, 0.94, 0.91, 0.40), 2.0)
+			draw_rect(Rect2(-1, -5, 7, 10), MONO_AMBER, true)
+
+		&"aegis_relay":
+			# Unarmed hovering shield-support prism with stark off-white diamond slabs & cyan emitter core
+			var hover_off: Vector2 = Vector2(3.8, 4.2)
+			var outer_d: PackedVector2Array = PackedVector2Array([
+				Vector2(15, 0), Vector2(8, -12), Vector2(-8, -12),
+				Vector2(-15, 0), Vector2(-8, 12), Vector2(8, 12),
+			])
+			var sh_d: PackedVector2Array = PackedVector2Array()
+			for pt_a: Vector2 in outer_d:
+				sh_d.append(pt_a + hover_off)
+			draw_colored_polygon(sh_d, Color(0.04, 0.05, 0.07, 0.65))
+			# Pulsing shield-emitter halo
+			draw_arc(Vector2.ZERO, 15.0 + pulse * 1.8, 0.0, TAU, 24, Color(MONO_SHIELD_CYAN.r, MONO_SHIELD_CYAN.g, MONO_SHIELD_CYAN.b, 0.40 + pulse * 0.28), 1.6, true)
+			_poly_outlined(outer_d, MONO_OFFWHITE.lerp(slab_base, 0.25), MONO_INK, 2.2)
+			# Inner recessed prism + pulsing cyan core
+			var inner_d: PackedVector2Array = PackedVector2Array([
+				Vector2(9, 0), Vector2(0, -8), Vector2(-9, 0), Vector2(0, 8),
+			])
+			_poly_outlined(inner_d, slab_dark, team_col, 1.8)
+			draw_circle(Vector2.ZERO, 4.2 + pulse * 0.9, MONO_SHIELD_CYAN)
+			draw_circle(Vector2.ZERO, 2.0, MONO_OFFWHITE)
+			# Team-color prism corner ticks
+			draw_line(Vector2(-7, -11), Vector2(7, -11), team_col, 2.6, true)
+			draw_line(Vector2(-7, 11), Vector2(7, 11), team_col, 2.6, true)
+
+
+func _draw_monolith_building_completed(hull_poly: PackedVector2Array, p: Dictionary) -> void:
+	var team_col: Color = _get_monolith_team_color(p)
+	var slab_base: Color = MONO_CONCRETE_MID.lerp(team_col, 0.10)
+	var slab_dark: Color = MONO_CONCRETE_DARK.lerp(team_col, 0.08)
+	var pulse: float = 0.5 + 0.5 * sin(_anim_time * 3.4)
+	var active_pulse: float = 0.5 + 0.5 * sin(_anim_time * TAU * 2.2)
+	var is_training: bool = _owner_building.get_training_queue_size() > 0
+	var is_active_prod: bool = _owner_building.is_actively_producing()
+	var r: float = maxf(24.0, _owner_building.footprint_radius)
+	var half: float = r * 0.94
+
+	# Subtle brutalist concrete foundation pad
+	if SettingsManager == null or SettingsManager.battle_scars_enabled:
+		var pad_poly: PackedVector2Array = _scale_poly(hull_poly, 1.12)
+		draw_colored_polygon(pad_poly, Color(0.04, 0.05, 0.07, 0.45))
+		_draw_closed_outline(pad_poly, Color(MONO_AMBER.r, MONO_AMBER.g, MONO_AMBER.b, 0.22), 1.2)
+
+	match entity_type_id:
+		&"foundry_core":
+			# Massive neo-brutalist command fortress (92x92) with 4 corner buttresses & Axiom reactor
+			var main_rect: Rect2 = Rect2(-half, -half, half * 2.0, half * 2.0)
+			_draw_brutalist_slab(self, main_rect, slab_base, MONO_INK, Vector2(4.5, 4.5), 10.0, MONO_OFFWHITE)
+			# Halftone shadow band on lower-right terrace (~18 dots)
+			_draw_halftone_dots(self, Rect2(-half + 6, 4, half * 2.0 - 12, half - 10), 8.5, 1.5, Color(0.04, 0.05, 0.07, 0.48), 3.0)
+			# 4 heavy architectural corner buttresses
+			for b_pos: Vector2 in [Vector2(-38, -38), Vector2(22, -38), Vector2(22, 22), Vector2(-38, 22)]:
+				_draw_brutalist_slab(self, Rect2(b_pos, Vector2(16, 16)), slab_dark, MONO_INK, Vector2(1.5, 1.5), 3.0, team_col)
+			# Central stepped off-white command monolith + recessed amber core
+			_draw_brutalist_slab(self, Rect2(-22, -22, 44, 44), MONO_OFFWHITE.lerp(slab_base, 0.22), MONO_INK, Vector2(2.5, 2.5), 6.0, MONO_AMBER)
+			draw_rect(Rect2(-13, -13, 26, 26), slab_dark, true)
+			draw_rect(Rect2(-8, -8, 16, 16), Color(MONO_AMBER.r, MONO_AMBER.g, MONO_AMBER.b, 0.80 + pulse * 0.20), true)
+			draw_rect(Rect2(-4, -4, 8, 8), MONO_OFFWHITE, true)
+			# Cardinal industrial conduits + team brackets
+			draw_line(Vector2(-36, 0), Vector2(-22, 0), MONO_AMBER, 3.0)
+			draw_line(Vector2(22, 0), Vector2(36, 0), MONO_AMBER, 3.0)
+			draw_line(Vector2(0, -36), Vector2(0, -22), MONO_AMBER, 3.0)
+			draw_line(Vector2(0, 22), Vector2(0, 36), MONO_AMBER, 3.0)
+			_draw_team_corner_brackets(self, Rect2(-half + 3, -half + 3, half * 2.0 - 6, half * 2.0 - 6), team_col, 11.0, 2.6)
+			if is_training:
+				draw_arc(Vector2.ZERO, 26.0, _anim_time * 2.4, _anim_time * 2.4 + PI * 1.15, 20, MONO_AMBER, 2.5, true)
+
+		&"capacitor_pylon":
+			# Brutalist capacitor obelisk (56x56) with twin cyan bus-bars & shield-aura core
+			var main_rect: Rect2 = Rect2(-half, -half, half * 2.0, half * 2.0)
+			_draw_brutalist_slab(self, main_rect, slab_base, MONO_INK, Vector2(3.5, 3.5), 7.0, MONO_OFFWHITE)
+			_draw_halftone_dots(self, Rect2(-half + 4, 2, half * 2.0 - 8, half - 6), 7.5, 1.3, Color(0.04, 0.05, 0.07, 0.45), 2.5)
+			# Twin vertical cyan shield-capacitor bus bars
+			draw_rect(Rect2(-16, -15, 7, 30), slab_dark, true)
+			draw_rect(Rect2(9, -15, 7, 30), slab_dark, true)
+			draw_rect(Rect2(-14, -12, 3, 24), MONO_SHIELD_CYAN, true)
+			draw_rect(Rect2(11, -12, 3, 24), MONO_SHIELD_CYAN, true)
+			# Central chamfered monolith core
+			_draw_brutalist_slab(self, Rect2(-8, -11, 16, 22), MONO_OFFWHITE, MONO_INK, Vector2(1.5, 1.5), 3.0, MONO_AMBER)
+			draw_circle(Vector2.ZERO, 4.5 + pulse * 1.2, MONO_SHIELD_CYAN)
+			draw_arc(Vector2.ZERO, 17.5, 0.0, TAU, 24, Color(MONO_SHIELD_CYAN.r, MONO_SHIELD_CYAN.g, MONO_SHIELD_CYAN.b, 0.30 + pulse * 0.25), 1.4, true)
+			_draw_team_corner_brackets(self, Rect2(-half + 3, -half + 3, half * 2.0 - 6, half * 2.0 - 6), team_col, 8.0, 2.2)
+
+		&"silica_smelter":
+			# Twin-furnace industrial smelter (74x74) with molten amber crucible channel
+			var main_rect: Rect2 = Rect2(-half, -half, half * 2.0, half * 2.0)
+			_draw_brutalist_slab(self, main_rect, slab_base, MONO_INK, Vector2(4.0, 4.0), 8.0, MONO_AMBER)
+			_draw_halftone_dots(self, Rect2(-half + 5, 6, half * 2.0 - 10, half - 10), 8.0, 1.4, Color(0.04, 0.05, 0.07, 0.48), 3.0)
+			# Dual concrete furnace stacks
+			_draw_brutalist_slab(self, Rect2(-26, -22, 18, 36), slab_dark, MONO_INK, Vector2(1.8, 1.8), 3.0, MONO_OFFWHITE)
+			_draw_brutalist_slab(self, Rect2(8, -22, 18, 36), slab_dark, MONO_INK, Vector2(1.8, 1.8), 3.0, MONO_OFFWHITE)
+			draw_rect(Rect2(-22, -16, 10, 24), Color(MONO_AMBER.r, MONO_AMBER.g, MONO_AMBER.b, 0.72 + pulse * 0.24), true)
+			draw_rect(Rect2(12, -16, 10, 24), Color(MONO_AMBER.r, MONO_AMBER.g, MONO_AMBER.b, 0.58 + pulse * 0.32), true)
+			# Center molten channel
+			draw_rect(Rect2(-5, -18, 10, 28), MONO_INK, true)
+			draw_line(Vector2(0, -14), Vector2(0, 6), MONO_OFFWHITE, 3.0)
+			_draw_team_corner_brackets(self, Rect2(-half + 3, -half + 3, half * 2.0 - 6, half * 2.0 - 6), team_col, 9.0, 2.4)
+
+		&"logic_monolith":
+			# Severe brutalist server monolith (74x74) with 3 crisp Grid-Tech staffing pips
+			var main_rect: Rect2 = Rect2(-half, -half, half * 2.0, half * 2.0)
+			var staffed: int = _owner_building.get_assigned_engineer_count()
+			_draw_brutalist_slab(self, main_rect, slab_base, MONO_INK, Vector2(4.0, 4.0), 7.0, MONO_SHIELD_CYAN if is_active_prod else MONO_OFFWHITE)
+			draw_rect(Rect2(-25, -26, 50, 38), slab_dark, true)
+			# Vertical brutalist server rack fins
+			var fin_col: Color = Color(MONO_SHIELD_CYAN.r, MONO_SHIELD_CYAN.g, MONO_SHIELD_CYAN.b, 0.65 + active_pulse * 0.35) if is_active_prod else Color(0.45, 0.50, 0.56, 0.45)
+			for fx: float in [-18.0, -9.0, 0.0, 9.0, 18.0]:
+				draw_line(Vector2(fx, -22), Vector2(fx, 8), fin_col, 2.2)
+			# Central Axiom processor block
+			_draw_brutalist_slab(self, Rect2(-10, -15, 20, 16), MONO_OFFWHITE, MONO_INK, Vector2(1.2, 1.2), 2.5, MONO_AMBER)
+			draw_rect(Rect2(-5, -11, 10, 8), MONO_SHIELD_CYAN if is_active_prod else Color(0.28, 0.32, 0.38, 0.9), true)
+			if is_active_prod:
+				_draw_active_conduit_sparks(MONO_SHIELD_CYAN, 22.0)
+			# 3 staffing indicator pips along bottom terrace
+			var slots: int = maxi(1, _owner_building.max_staff_slots)
+			var pip_span: float = 13.5
+			for s: int in range(slots):
+				var px: float = (float(s) - float(slots - 1) * 0.5) * pip_span
+				var pip_rect: Rect2 = Rect2(px - 5.0, 17.0, 10.0, 6.5)
+				var filled: bool = s < staffed
+				draw_rect(pip_rect, MONO_AMBER if filled else Color(0.12, 0.14, 0.17, 0.96), true)
+				draw_rect(pip_rect, MONO_OFFWHITE if filled else MONO_INK, false, 1.4)
+			_draw_team_corner_brackets(self, Rect2(-half + 3, -half + 3, half * 2.0 - 6, half * 2.0 - 6), team_col, 9.0, 2.4)
+
+		&"assembly_bay":
+			# Primary robotics factory slab (82x82) with industrial gantry rails & sliding overhead beam
+			var main_rect: Rect2 = Rect2(-half, -half, half * 2.0, half * 2.0)
+			_draw_brutalist_slab(self, main_rect, slab_base, MONO_INK, Vector2(4.2, 4.2), 8.0, MONO_AMBER if is_active_prod else MONO_OFFWHITE)
+			# Recessed assembly bay deck + halftone grid (~16 dots)
+			draw_rect(Rect2(-26, -24, 52, 48), slab_dark, true)
+			_draw_halftone_dots(self, Rect2(-24, -22, 48, 44), 9.5, 1.4, Color(0.95, 0.94, 0.91, 0.24), 4.0)
+			# Twin heavy vertical crane rails
+			draw_rect(Rect2(-31, -28, 8, 56), MONO_OFFWHITE.lerp(slab_base, 0.35), true)
+			draw_rect(Rect2(23, -28, 8, 56), MONO_OFFWHITE.lerp(slab_base, 0.35), true)
+			draw_rect(Rect2(-31, -28, 8, 56), MONO_INK, false, 1.8)
+			draw_rect(Rect2(23, -28, 8, 56), MONO_INK, false, 1.8)
+			# Sliding overhead gantry beam + active forge glow
+			var bridge_y: float = sin(_anim_time * 2.4) * 12.0 if is_active_prod else -2.0
+			draw_rect(Rect2(-30, bridge_y - 4.5, 60, 9.0), MONO_OFFWHITE, true)
+			draw_rect(Rect2(-30, bridge_y - 4.5, 60, 9.0), MONO_INK, false, 1.8)
+			if is_active_prod:
+				draw_rect(Rect2(-12, -13, 24, 26), Color(MONO_AMBER.r, MONO_AMBER.g, MONO_AMBER.b, 0.68 + active_pulse * 0.28), true)
+				draw_rect(Rect2(-12, -13, 24, 26), MONO_OFFWHITE, false, 1.6)
+				draw_circle(Vector2(0.0, bridge_y), 3.8 + active_pulse * 1.4, MONO_AMBER)
+				_draw_active_conduit_sparks(MONO_AMBER, 24.0)
+			else:
+				draw_rect(Rect2(-12, -13, 24, 26), Color(0.24, 0.27, 0.31, 0.75), true)
+				draw_rect(Rect2(-12, -13, 24, 26), MONO_INK, false, 1.4)
+			_draw_team_corner_brackets(self, Rect2(-half + 3, -half + 3, half * 2.0 - 6, half * 2.0 - 6), team_col, 10.0, 2.4)
+
+		&"ballistics_lab":
+			# Precision & support facility (80x80) with central rail-test channel & twin shield capacitor banks
+			var main_rect: Rect2 = Rect2(-half, -half, half * 2.0, half * 2.0)
+			_draw_brutalist_slab(self, main_rect, slab_base, MONO_INK, Vector2(4.2, 4.2), 9.0, MONO_SHIELD_CYAN if is_active_prod else MONO_OFFWHITE)
+			_draw_halftone_dots(self, Rect2(-half + 5, -half + 5, half * 2.0 - 10, half - 6), 8.5, 1.3, Color(0.04, 0.05, 0.07, 0.42), 3.0)
+			# Twin precision capacitor banks (top and bottom flanks)
+			_draw_brutalist_slab(self, Rect2(-26, -27, 52, 13), slab_dark, MONO_INK, Vector2(1.4, 1.4), 3.0, MONO_SHIELD_CYAN)
+			_draw_brutalist_slab(self, Rect2(-26, 14, 52, 13), slab_dark, MONO_INK, Vector2(1.4, 1.4), 3.0, MONO_AMBER)
+			# Central horizontal rail-calibration corridor
+			draw_rect(Rect2(-28, -9, 56, 18), MONO_INK, true)
+			var rail_col: Color = Color(MONO_AMBER.r, MONO_AMBER.g, MONO_AMBER.b, 0.70 + active_pulse * 0.30) if is_active_prod else Color(0.42, 0.46, 0.52, 0.65)
+			draw_line(Vector2(-24, -4), Vector2(24, -4), MONO_OFFWHITE, 2.0)
+			draw_line(Vector2(-24, 4), Vector2(24, 4), MONO_OFFWHITE, 2.0)
+			draw_line(Vector2(-24, 0), Vector2(24, 0), rail_col, 3.0)
+			if is_active_prod:
+				var sweep_x: float = lerpf(-20.0, 20.0, fmod(_anim_time * 1.4, 1.0))
+				draw_circle(Vector2(sweep_x, 0.0), 4.2, MONO_SHIELD_CYAN)
+				_draw_active_conduit_sparks(MONO_SHIELD_CYAN, 24.0)
+			_draw_team_corner_brackets(self, Rect2(-half + 3, -half + 3, half * 2.0 - 6, half * 2.0 - 6), team_col, 10.0, 2.4)
+
+		&"bastion_emplacement":
+			# Heavy fortified concrete turret bunker (64x64) with 4 blast buttresses & turret pit
+			var main_rect: Rect2 = Rect2(-half, -half, half * 2.0, half * 2.0)
+			_draw_brutalist_slab(self, main_rect, slab_base, MONO_INK, Vector2(4.0, 4.0), 9.0, MONO_AMBER)
+			_draw_halftone_dots(self, Rect2(-half + 4, -half + 4, half * 2.0 - 8, half * 2.0 - 8), 8.0, 1.3, Color(0.04, 0.05, 0.07, 0.44), 3.0)
+			# 4 heavy corner blast buttresses
+			for lug: Vector2 in [Vector2(-24, -24), Vector2(14, -24), Vector2(14, 14), Vector2(-24, 14)]:
+				draw_rect(Rect2(lug, Vector2(10, 10)), MONO_OFFWHITE.lerp(slab_dark, 0.45), true)
+				draw_rect(Rect2(lug, Vector2(10, 10)), MONO_INK, false, 1.8)
+			# Recessed turret bearing pit
+			draw_circle(Vector2.ZERO, 15.5, slab_dark)
+			draw_arc(Vector2.ZERO, 15.5, 0.0, TAU, 24, MONO_AMBER, 2.0, true)
+			_draw_team_corner_brackets(self, Rect2(-half + 3, -half + 3, half * 2.0 - 6, half * 2.0 - 6), team_col, 8.5, 2.4)

@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"rail_sentinel"
+display_name = "Rail-Sentinel"
+max_hp = 195.0
+max_shield = 60.0
+shield_regen_rate = 9.0
+shield_regen_delay = 6.0
+move_speed = 155.0
+acceleration = 1250.0
+turn_speed = 9.5
+selection_radius = 26.0
+collision_radius = 20.0
+attack_damage = 68.0
+attack_range = 310.0
+line_pierce_width = 18.0
+aggro_range = 350.0
+vision_range = 410.0
+attack_cooldown = 2.6
+attack_windup = 0.28
+is_armored = true
+bonus_vs_armored = 35.0
+damage_reduction = 0.18
+bandwidth_cost = 3
+biomass_cost = 80
+silica_cost = 115
+compute_cost = 20
+salvage_silica = 35
+salvage_compute = 10
+build_time = 9.5
+train_time = 9.5
+unit_scene_path = "res://scenes/units/monolith_rail_sentinel.tscn"
+unit_tags = Array[StringName]([&"mechanical", &"anti_armor", &"heavy"])
+weapon_tracer_style = &"rail_lance"
+weapon_tracer_color = Color(1, 0.624, 0.11, 0.98)
+weapon_tracer_width = 3.2
+weapon_sfx_id = &"weapon_mono_rail"
+audio_bark_class = &"counter"
+minimap_icon_shape = &"triangle_heavy"
+role_tags_display = "Long-Range Rail • Anti-Armor Pierce"

@@ -44,6 +44,19 @@ func is_in_windup() -> bool:
 	return attack_phase == AttackPhase.WINDUP
 
 
+func get_windup_target() -> Node2D:
+	if attack_phase != AttackPhase.WINDUP:
+		return null
+	return _windup_target
+
+
+func get_windup_progress(owner_unit: Unit) -> float:
+	if attack_phase != AttackPhase.WINDUP:
+		return 0.0
+	var total_w: float = maxf(0.02, get_effective_windup(owner_unit))
+	return clampf(1.0 - (_windup_timer / total_w), 0.0, 1.0)
+
+
 func is_in_backswing() -> bool:
 	return attack_phase == AttackPhase.BACKSWING
 
@@ -53,7 +66,7 @@ func get_effective_windup(owner_unit: Unit) -> float:
 		return 0.08
 	var base_w: float = owner_unit.data.attack_windup
 	if base_w < 0.0:
-		if owner_unit.data.has_tag(&"artillery") or owner_unit.data.has_tag(&"siege") or owner_unit.data.line_pierce_width > 0.0:
+		if owner_unit.data.has_tag(&"artillery") or owner_unit.data.has_tag(&"siege") or owner_unit.data.line_pierce_width > 0.0 or owner_unit.get_effective_aoe_radius() > 0.0:
 			base_w = 0.15
 		elif owner_unit.data.is_heavy_unit() or owner_unit.data.bonus_vs_armored > 0.0:
 			base_w = 0.11
@@ -61,7 +74,8 @@ func get_effective_windup(owner_unit: Unit) -> float:
 			base_w = 0.06
 		else:
 			base_w = 0.08
-	var base_cd: float = maxf(0.05, owner_unit.data.attack_cooldown)
+	var raw_cd: float = owner_unit.data.deployed_attack_cooldown if (owner_unit.is_deployed() and owner_unit.data.deployed_attack_cooldown > 0.0) else owner_unit.data.attack_cooldown
+	var base_cd: float = maxf(0.05, raw_cd)
 	var eff_cd: float = owner_unit.get_effective_attack_cooldown()
 	var scale: float = clampf(eff_cd / base_cd, 0.55, 1.35)
 	return clampf(base_w * scale, 0.0, eff_cd * 0.45)
@@ -74,7 +88,9 @@ func force_immediate_target_scan(owner_unit: Unit, max_range: float) -> Node2D:
 
 
 func can_attack(owner_unit: Unit) -> bool:
-	return owner_unit != null and owner_unit.data != null and owner_unit.data.attack_damage > 0.0 and owner_unit.data.attack_range > 0.0
+	if owner_unit == null or owner_unit.data == null or owner_unit.is_deploy_transitioning():
+		return false
+	return owner_unit.get_effective_attack_damage() > 0.0 and owner_unit.get_effective_attack_range() > 0.0
 
 
 func should_pursue_targets(owner_unit: Unit) -> bool:
@@ -125,7 +141,7 @@ func is_valid_target_in_range(owner_unit: Unit, candidate: Variant, max_range: f
 		return false
 	var target_node: Node2D = candidate as Node2D
 	var dist: float = distance_to_target_edge(owner_unit, target_node)
-	var min_range: float = owner_unit.data.min_attack_range if owner_unit.data != null else 0.0
+	var min_range: float = owner_unit.get_effective_min_attack_range() if owner_unit != null else 0.0
 	return dist <= max_range and dist >= min_range
 
 
@@ -136,17 +152,20 @@ func is_within_attack_envelope(owner_unit: Unit, target: Variant) -> bool:
 		return false
 	var target_node: Node2D = target as Node2D
 	var dist: float = distance_to_target_edge(owner_unit, target_node)
-	return dist <= owner_unit.data.attack_range and dist >= owner_unit.data.min_attack_range
+	return dist <= owner_unit.get_effective_attack_range() and dist >= owner_unit.get_effective_min_attack_range()
 
 
 func is_target_inside_min_range(owner_unit: Unit, target: Variant) -> bool:
 	if target == null or not is_instance_valid(target):
 		return false
-	if owner_unit == null or owner_unit.data == null or owner_unit.data.min_attack_range <= 0.0:
+	if owner_unit == null or owner_unit.data == null:
+		return false
+	var min_range: float = owner_unit.get_effective_min_attack_range()
+	if min_range <= 0.0:
 		return false
 	if not is_valid_target(owner_unit, target):
 		return false
-	return distance_to_target_edge(owner_unit, target as Node2D) < owner_unit.data.min_attack_range
+	return distance_to_target_edge(owner_unit, target as Node2D) < min_range
 
 
 func distance_to_target_edge(owner_unit: Unit, target: Variant) -> float:
@@ -224,7 +243,7 @@ func find_nearest_enemy(owner_unit: Unit, max_range: float) -> Node2D:
 	if owner_unit == null or not is_instance_valid(owner_unit) or not owner_unit.is_inside_tree():
 		return null
 
-	var min_range: float = owner_unit.data.min_attack_range if owner_unit.data != null else 0.0
+	var min_range: float = owner_unit.get_effective_min_attack_range() if owner_unit != null else 0.0
 	var my_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 16.0
 	var query_r: float = max_range + my_r + 16.0
 	var best_target: Node2D = null
@@ -294,6 +313,10 @@ func find_higher_priority_threat(owner_unit: Unit, current_target: Node2D, scan_
 
 
 func process_attack_at(owner_unit: Unit, target: Variant, delta: float) -> bool:
+	if owner_unit == null or owner_unit.is_deploy_transitioning():
+		if attack_phase == AttackPhase.WINDUP:
+			cancel_attack_animation()
+		return false
 	if target == null or not is_instance_valid(target) or not is_within_attack_envelope(owner_unit, target):
 		if attack_phase == AttackPhase.WINDUP:
 			cancel_attack_animation()
@@ -326,7 +349,7 @@ func process_attack_at(owner_unit: Unit, target: Variant, delta: float) -> bool:
 
 
 func try_fire_at(owner_unit: Unit, target: Variant) -> bool:
-	if target == null or not is_instance_valid(target):
+	if owner_unit == null or owner_unit.is_deploy_transitioning() or target == null or not is_instance_valid(target):
 		return false
 	if _attack_cooldown_timer > 0.0 or not is_within_attack_envelope(owner_unit, target):
 		return false
@@ -336,7 +359,7 @@ func try_fire_at(owner_unit: Unit, target: Variant) -> bool:
 
 
 func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
-	if target_node == null or not is_instance_valid(target_node) or not is_within_attack_envelope(owner_unit, target_node):
+	if owner_unit == null or owner_unit.is_deploy_transitioning() or target_node == null or not is_instance_valid(target_node) or not is_within_attack_envelope(owner_unit, target_node):
 		return false
 	_attack_cooldown_timer = owner_unit.get_effective_attack_cooldown()
 	var muzzle_offset: Vector2 = Vector2.RIGHT.rotated(owner_unit.body_visual.rotation) * owner_unit.data.collision_radius
@@ -344,11 +367,11 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 	var tracer_end: Vector2 = target_node.global_position
 
 	var dmg_dealt_mult: float = float(owner_unit.status_effect_component.call("get_damage_dealt_multiplier")) if owner_unit.status_effect_component != null else 1.0
-	var base_dmg: float = owner_unit.data.attack_damage * dmg_dealt_mult
+	var base_dmg: float = owner_unit.get_effective_attack_damage() * dmg_dealt_mult
 	var bonus_armored: float = owner_unit.data.bonus_vs_armored * dmg_dealt_mult
-	var aoe_radius: float = owner_unit.data.aoe_attack_radius
+	var aoe_radius: float = owner_unit.get_effective_aoe_radius()
 	var pierce_width: float = owner_unit.data.line_pierce_width
-	var tracer_style: StringName = owner_unit.data.weapon_tracer_style
+	var tracer_style: StringName = owner_unit.get_effective_weapon_tracer_style()
 	var tracer_width: float = maxf(1.8, owner_unit.data.weapon_tracer_width)
 	var is_spec: bool = TeamManager != null and TeamManager.is_spectator_mode()
 	var is_local_player: bool = TeamManager.is_team_controlled_by_local_human(int(owner_unit.team)) if TeamManager != null else (owner_unit.team == Unit.Team.PLAYER)
@@ -381,17 +404,40 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 		return true
 
 	if pierce_width > 0.0:
-		# High-energy piercing beam with sweep flash
+		# High-energy piercing beam (Arc-Lancer or MONOLITH_OS Rail-Sentinel)
 		var dir: Vector2 = (tracer_end - tracer_origin).normalized() if tracer_end.distance_squared_to(tracer_origin) > 1.0 else Vector2.RIGHT
 		var beam_end: Vector2 = tracer_end + dir * 56.0
-		_spawn_attack_tracer(owner_unit, tracer_origin, beam_end, shot_col, maxf(3.5, tracer_width), 0.21, 0.0, AttackTracer.TracerStyle.ARC_LANCE)
+		if tracer_style == &"rail_lance":
+			_spawn_attack_tracer(owner_unit, tracer_origin, beam_end, shot_col, maxf(3.0, tracer_width), 0.18, 0.0, AttackTracer.TracerStyle.RAIL_LANCE)
+			if _is_armored_target(target_node):
+				_spawn_armor_pierce_spark_vfx(owner_unit, tracer_end, dir, Color(1.0, 0.72, 0.20, 1.0))
+		else:
+			_spawn_attack_tracer(owner_unit, tracer_origin, beam_end, shot_col, maxf(3.5, tracer_width), 0.21, 0.0, AttackTracer.TracerStyle.ARC_LANCE)
 		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
 		_apply_line_pierce_damage(owner_unit, tracer_origin, beam_end, pierce_width, base_dmg * 0.65, bonus_armored, target_node)
 		return true
 
-	if tracer_style == &"bio" or tracer_style == &"melee_cleave" or owner_unit.data.attack_range <= 64.0:
+	if tracer_style == &"bio" or tracer_style == &"melee_cleave" or owner_unit.get_effective_attack_range() <= 64.0:
 		# Fast directional melee cleave arc
 		_spawn_melee_cleave_vfx(owner_unit, owner_unit.global_position, tracer_end, shot_col)
+		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+		return true
+
+	if tracer_style == &"rail_lance":
+		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(3.0, tracer_width), 0.18, 0.0, AttackTracer.TracerStyle.RAIL_LANCE)
+		if _is_armored_target(target_node):
+			var shot_dir_rl: Vector2 = (tracer_end - tracer_origin).normalized() if tracer_end.distance_squared_to(tracer_origin) > 1.0 else Vector2.RIGHT
+			_spawn_armor_pierce_spark_vfx(owner_unit, tracer_end, shot_dir_rl, Color(1.0, 0.72, 0.20, 1.0))
+		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+		return true
+
+	if tracer_style == &"heavy_slug":
+		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(2.8, tracer_width), 0.14, 0.0, AttackTracer.TracerStyle.HEAVY_SLUG)
+		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+		return true
+
+	if tracer_style == &"arc_tether":
+		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(2.1, tracer_width), 0.13, 0.0, AttackTracer.TracerStyle.ARC_TETHER)
 		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
 		return true
 
