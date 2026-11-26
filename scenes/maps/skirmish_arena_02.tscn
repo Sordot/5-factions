@@ -1,4 +1,4 @@
-[gd_scene load_steps=38 format=3]
+[gd_scene load_steps=39 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
 [ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
@@ -36,6 +36,7 @@
 [ext_resource type="PackedScene" path="res://ui/hud/tactical_event_feed.tscn" id="35_event_feed"]
 [ext_resource type="PackedScene" path="res://scenes/world/sensor_relay.tscn" id="36_sensor_relay"]
 [ext_resource type="Script" path="res://scripts/world/map_biome_backdrop.gd" id="37_biome_backdrop"]
+[ext_resource type="PackedScene" path="res://scenes/world/high_ground_plateau.tscn" id="38_high_ground"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_causeway"]
 vertices = PackedVector2Array(-1300, -950, 1300, -950, 1300, 950, -1300, 950)
@@ -80,6 +81,20 @@ z_index = -100
 script = ExtResource("37_biome_backdrop")
 biome_id = &"twin_causeway"
 arena_bounds = Rect2(-1300, -950, 2600, 1900)
+
+[node name="HighGroundPlateaus" type="Node2D" parent="."]
+
+[node name="BastionSW" parent="HighGroundPlateaus" instance=ExtResource("38_high_ground")]
+position = Vector2(-365, 480)
+plateau_polygon = PackedVector2Array(-100, -80, 65, -80, 100, -45, 100, 80, -65, 80, -100, 56)
+ramp_edge_indices = PackedInt32Array(0, 5)
+biome_tint = Color(0.155, 0.175, 0.205, 1)
+
+[node name="BastionNE" parent="HighGroundPlateaus" instance=ExtResource("38_high_ground")]
+position = Vector2(365, -480)
+plateau_polygon = PackedVector2Array(100, 80, -65, 80, -100, 45, -100, -80, 65, -80, 100, -56)
+ramp_edge_indices = PackedInt32Array(0, 5)
+biome_tint = Color(0.155, 0.175, 0.205, 1)
 
 [node name="BattleScarsOverlay" type="Node2D" parent="."]
 z_index = -6

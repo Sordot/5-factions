@@ -566,6 +566,13 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 				result["reason"] = "Blocked by barricade"
 				return result
 
+	# Block scaffolds straddling a high-ground cliff lip (while allowing valid placement cleanly on top or below).
+	for node: Node in get_tree().get_nodes_in_group("high_ground_plateaus"):
+		if is_instance_valid(node) and node.has_method("overlaps_cliff_wall"):
+			if bool(node.call("overlaps_cliff_wall", place_pos, new_radius + 4.0)):
+				result["reason"] = "Blocked by cliff edge"
+				return result
+
 	# Keep central Hyper-Uplink clear of structures.
 	for node: Node in get_tree().get_nodes_in_group("hyper_uplinks"):
 		if node is Node2D and is_instance_valid(node):
@@ -729,6 +736,22 @@ func find_sensor_relay_at_point(world_point: Vector2) -> Node2D:
 	var closest: Node2D = null
 	var closest_dist_sq: float = INF
 	for node: Node in get_tree().get_nodes_in_group("sensor_relays"):
+		if not is_instance_valid(node) or not (node is Node2D):
+			continue
+		if node.is_queued_for_deletion():
+			continue
+		if node.has_method("contains_point") and bool(node.call("contains_point", world_point)):
+			var d_sq: float = (node as Node2D).global_position.distance_squared_to(world_point)
+			if d_sq < closest_dist_sq:
+				closest_dist_sq = d_sq
+				closest = node as Node2D
+	return closest
+
+
+func find_hyper_uplink_at_point(world_point: Vector2) -> Node2D:
+	var closest: Node2D = null
+	var closest_dist_sq: float = INF
+	for node: Node in get_tree().get_nodes_in_group("hyper_uplinks"):
 		if not is_instance_valid(node) or not (node is Node2D):
 			continue
 		if node.is_queued_for_deletion():

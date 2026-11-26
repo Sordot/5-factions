@@ -25,6 +25,9 @@ static var _global_aggro_ai_enabled: bool = true
 var match_elapsed: float = 0.0
 var player_uplink_time: float = 0.0
 var enemy_uplink_time: float = 0.0
+var alliance_uplink_times: Dictionary = {}
+var _uplink_milestones_announced: Dictionary = {}
+var _alliance_uplink_rep_team: Dictionary = {}
 var player_units_trained: int = 0
 var enemy_units_trained: int = 0
 var player_units_lost: int = 0
@@ -749,7 +752,7 @@ func _process(delta: float) -> void:
 
 	match_elapsed += delta
 	var uplink: HyperUplink = get_tree().get_first_node_in_group("hyper_uplinks") as HyperUplink
-	if uplink != null and uplink.controlling_team >= 0:
+	if uplink != null and uplink.controlling_team >= 0 and not uplink.is_contested:
 		var ctrl_tid: int = uplink.controlling_team
 		var bucket: Dictionary = _ensure_team_stat_bucket(ctrl_tid)
 		bucket["uplink_seconds"] = float(bucket["uplink_seconds"]) + delta
@@ -757,6 +760,13 @@ func _process(delta: float) -> void:
 			player_uplink_time += delta
 		elif ctrl_tid == int(Unit.Team.ENEMY):
 			enemy_uplink_time += delta
+
+		var ally_id: int = uplink.controlling_alliance if uplink.controlling_alliance >= 0 else (TeamManager.get_team_alliance(ctrl_tid) if TeamManager != null else ctrl_tid)
+		_alliance_uplink_rep_team[ally_id] = ctrl_tid
+		var cur_ally_sec: float = float(alliance_uplink_times.get(ally_id, 0.0)) + delta
+		alliance_uplink_times[ally_id] = cur_ally_sec
+		if is_uplink_victory_enabled():
+			_check_uplink_victory_progress(ally_id, ctrl_tid, cur_ally_sec, uplink.global_position)
 
 	_timeline_sample_timer += delta
 	if _timeline_sample_timer >= TIMELINE_SAMPLE_INTERVAL:
@@ -977,6 +987,83 @@ func evaluate_match_state() -> void:
 		if TeamManager != null and TeamManager.is_spectator_mode():
 			reason = "%s Achieved Total Domination" % _format_winner_label(winner_tid)
 		_finish_match(winner_tid as Unit.Team, reason)
+
+
+func is_uplink_victory_enabled() -> bool:
+	if sandbox_mode_active:
+		return false
+	if GameConfig != null:
+		return GameConfig.uplink_victory_enabled
+	return true
+
+
+func get_uplink_victory_target_seconds() -> float:
+	if GameConfig != null:
+		return GameConfig.UPLINK_VICTORY_DURATION
+	return 180.0
+
+
+func _check_uplink_victory_progress(ally_id: int, ctrl_tid: int, cur_sec: float, uplink_pos: Vector2) -> void:
+	var target_sec: float = maxf(10.0, get_uplink_victory_target_seconds())
+	var ratio: float = cur_sec / target_sec
+	var mask: int = int(_uplink_milestones_announced.get(ally_id, 0))
+	var local_t: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	var is_local_ally: bool = local_t >= 0 and (TeamManager.are_allies(local_t, ctrl_tid) if TeamManager != null else (ctrl_tid == local_t))
+	var team_tag: String = TeamManager.get_team_short_label(ctrl_tid, true) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (ctrl_tid + 1))
+	var alert_col: Color = Color(1.0, 0.84, 0.24, 1.0) if is_local_ally else Color(1.0, 0.36, 0.28, 1.0)
+
+	var thresholds: Array[Dictionary] = [
+		{"bit": 1, "pct": 0.50, "rem": "1:30"},
+		{"bit": 2, "pct": 0.75, "rem": "0:45"},
+		{"bit": 4, "pct": 0.90, "rem": "0:18"},
+	]
+	for entry: Dictionary in thresholds:
+		var bit: int = int(entry["bit"])
+		if ratio >= float(entry["pct"]) and (mask & bit) == 0:
+			mask |= bit
+			_uplink_milestones_announced[ally_id] = mask
+			var rem_s: String = String(entry["rem"])
+			var msg: String = "%s Uplink Victory in %s!" % [team_tag, rem_s]
+			push_tactical_alert(uplink_pos, &"uplink_contested", msg)
+			emit_tactical_event(&"objective", msg, uplink_pos, alert_col)
+
+	if cur_sec >= target_sec:
+		var reason: String = "%s Achieved Data Hyper-Uplink Sovereignty (03:00)" % _format_winner_label(ctrl_tid)
+		_finish_match(ctrl_tid as Unit.Team, reason)
+
+
+func get_uplink_victory_status() -> Dictionary:
+	var uplink: HyperUplink = get_tree().get_first_node_in_group("hyper_uplinks") as HyperUplink if is_inside_tree() else null
+	var target_s: float = get_uplink_victory_target_seconds()
+	var lead_ally: int = -1
+	var lead_team: int = -1
+	var lead_sec: float = 0.0
+	for raw_a: Variant in alliance_uplink_times.keys():
+		var a_id: int = int(raw_a)
+		var sec_val: float = float(alliance_uplink_times[raw_a])
+		if sec_val > lead_sec:
+			lead_sec = sec_val
+			lead_ally = a_id
+			lead_team = int(_alliance_uplink_rep_team.get(a_id, a_id))
+
+	var ctrl_team: int = uplink.controlling_team if (uplink != null and is_instance_valid(uplink)) else -1
+	var ctrl_ally: int = uplink.controlling_alliance if (uplink != null and is_instance_valid(uplink)) else -1
+	if ctrl_ally < 0 and ctrl_team >= 0:
+		ctrl_ally = TeamManager.get_team_alliance(ctrl_team) if TeamManager != null else ctrl_team
+
+	return {
+		"has_uplink": uplink != null and is_instance_valid(uplink),
+		"enabled": is_uplink_victory_enabled(),
+		"target_seconds": target_s,
+		"leading_alliance": lead_ally,
+		"leading_team": lead_team,
+		"leading_seconds": lead_sec,
+		"controlling_alliance": ctrl_ally,
+		"controlling_team": ctrl_team,
+		"controlling_seconds": float(alliance_uplink_times.get(ctrl_ally, 0.0)) if ctrl_ally >= 0 else 0.0,
+		"is_contested": uplink.is_contested if (uplink != null and is_instance_valid(uplink)) else false,
+		"uplink_pos": uplink.global_position if (uplink != null and is_instance_valid(uplink)) else Vector2.ZERO,
+	}
 
 
 func _format_winner_label(winner_tid: int) -> String:

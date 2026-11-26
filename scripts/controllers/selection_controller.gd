@@ -1908,6 +1908,10 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 		if spec_relay != null:
 			_set_inspected_entity(spec_relay)
 			return
+		var spec_uplink: Node2D = command_router.find_hyper_uplink_at_point(world_point)
+		if spec_uplink != null:
+			_set_inspected_entity(spec_uplink)
+			return
 		var spec_salvage: Node2D = command_router.find_salvage_core_at_point(world_point)
 		if spec_salvage != null:
 			_set_inspected_entity(spec_salvage)
@@ -2008,6 +2012,13 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 		_set_selected_units([])
 		_set_selected_buildings([])
 		_set_inspected_entity(clicked_relay)
+		return
+
+	var clicked_uplink: Node2D = command_router.find_hyper_uplink_at_point(world_point)
+	if clicked_uplink != null:
+		_set_selected_units([])
+		_set_selected_buildings([])
+		_set_inspected_entity(clicked_uplink)
 		return
 
 	var clicked_salvage: Node2D = command_router.find_salvage_core_at_point(world_point)
@@ -2348,6 +2359,8 @@ func _set_inspected_entity(entity: Node, emit_audio: bool = true) -> void:
 			next_entity = entity
 		elif entity.is_in_group("sensor_relays"):
 			next_entity = entity
+		elif entity.is_in_group("hyper_uplinks"):
+			next_entity = entity
 
 	if inspected_entity == next_entity:
 		return
@@ -2380,7 +2393,7 @@ func _set_inspected_entity(entity: Node, emit_audio: bool = true) -> void:
 				inspected_entity.disconnect("expired", _on_inspected_entity_removed)
 			if inspected_entity.has_method("set_selected"):
 				inspected_entity.call("set_selected", false)
-		elif inspected_entity.is_in_group("sensor_relays"):
+		elif inspected_entity.is_in_group("sensor_relays") or inspected_entity.is_in_group("hyper_uplinks"):
 			if inspected_entity.has_method("set_selected"):
 				inspected_entity.call("set_selected", false)
 
@@ -2417,7 +2430,7 @@ func _set_inspected_entity(entity: Node, emit_audio: bool = true) -> void:
 				inspected_entity.connect("claimed", _on_inspected_entity_removed)
 			if inspected_entity.has_signal("expired") and not inspected_entity.is_connected("expired", _on_inspected_entity_removed):
 				inspected_entity.connect("expired", _on_inspected_entity_removed)
-		elif inspected_entity.is_in_group("sensor_relays"):
+		elif inspected_entity.is_in_group("sensor_relays") or inspected_entity.is_in_group("hyper_uplinks"):
 			if inspected_entity.has_method("set_selected"):
 				inspected_entity.call("set_selected", true)
 
@@ -2836,6 +2849,9 @@ func _find_top_hover_entity(world_point: Vector2) -> Node:
 	var relay_h: Node2D = command_router.find_sensor_relay_at_point(world_point)
 	if relay_h != null:
 		return relay_h
+	var uplink_h: Node2D = command_router.find_hyper_uplink_at_point(world_point)
+	if uplink_h != null:
+		return uplink_h
 	var salv: Node2D = command_router.find_salvage_core_at_point(world_point)
 	if salv != null:
 		return salv

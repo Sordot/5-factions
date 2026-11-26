@@ -110,13 +110,24 @@ func can_target_entity(target: Node2D) -> bool:
 		if u.has_method("has_unit_tag"):
 			if bool(u.call("has_unit_tag", &"untargetable")) or bool(u.call("has_unit_tag", &"phase_invulnerable")):
 				return false
-		return true
+		return _has_elevation_sight(u.global_position)
 	if target is Building:
 		var b: Building = target as Building
-		return not b.is_destroyed and not b.is_queued_for_deletion() and _are_teams_hostile(int(owner_building.team), int(b.team))
+		if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(int(owner_building.team), int(b.team)):
+			return false
+		return _has_elevation_sight(b.global_position)
 	if target.is_in_group("destructible_barricades"):
 		return not bool(target.get("is_destroyed")) and not target.is_queued_for_deletion()
 	return false
+
+
+func _has_elevation_sight(target_pos: Vector2) -> bool:
+	if owner_building == null or not owner_building.is_inside_tree():
+		return true
+	var fog: FogOfWarSystem = owner_building.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	if fog == null or not fog.fog_enabled:
+		return true
+	return fog.can_team_see_target_elevation(int(owner_building.team), owner_building.global_position, target_pos)
 
 
 func is_valid_target(candidate: Variant) -> bool:

@@ -41,6 +41,7 @@ const TEAM_PRESET_1V3: StringName = &"1v3"
 const TEAM_PRESET_CUSTOM: StringName = &"custom"
 
 const ALLIANCE_LETTERS: Array = ["A", "B", "C", "D"]
+const UPLINK_VICTORY_DURATION: float = 180.0
 
 var selected_faction_id: StringName = &"genesis_v2"
 var selected_map_path: String = MAP_SKIRMISH_01
@@ -64,6 +65,7 @@ var slot_configs: Array[Dictionary] = []
 var mutator_high_yield: bool = false
 var mutator_no_fog: bool = false
 var mutator_fast_build: bool = false
+var uplink_victory_enabled: bool = true
 
 
 func _ready() -> void:
@@ -240,6 +242,8 @@ func get_active_mutator_labels() -> PackedStringArray:
 		labels.append("NO FOG")
 	if mutator_fast_build:
 		labels.append("FAST BUILD")
+	if uplink_victory_enabled:
+		labels.append("UPLINK WIN (3m)")
 	return labels
 
 
@@ -312,7 +316,8 @@ func set_lobby_config(
 	faction_id: StringName = &"genesis_v2",
 	p_high_yield: bool = false,
 	p_no_fog: bool = false,
-	p_fast_build: bool = false
+	p_fast_build: bool = false,
+	p_uplink_victory: bool = true
 ) -> void:
 	_ensure_default_slots()
 	selected_map_path = map_path if not map_path.is_empty() else MAP_SKIRMISH_01
@@ -358,6 +363,7 @@ func set_lobby_config(
 	mutator_high_yield = p_high_yield
 	mutator_no_fog = p_no_fog
 	mutator_fast_build = p_fast_build
+	uplink_victory_enabled = p_uplink_victory
 	configured_from_menu = true
 	if TeamManager != null:
 		TeamManager.configure_from_game_config()
@@ -375,7 +381,8 @@ func set_match_config(
 	p_team0_style: int = -1,
 	p_high_yield: bool = false,
 	p_no_fog: bool = false,
-	p_fast_build: bool = false
+	p_fast_build: bool = false,
+	p_uplink_victory: bool = true
 ) -> void:
 	_ensure_default_slots()
 	var is_spec: bool = (clampi(p_match_mode, 0, 1) == MatchMode.AI_VS_AI)
@@ -402,5 +409,6 @@ func set_match_config(
 		faction_id,
 		p_high_yield,
 		p_no_fog,
-		p_fast_build
+		p_fast_build,
+		p_uplink_victory
 	)

@@ -17,6 +17,14 @@ const MONO_CONCRETE_MID: Color = Color(0.227, 0.243, 0.271, 0.98)  # #3A3E45
 const MONO_OFFWHITE: Color = Color(0.949, 0.937, 0.914, 0.98)      # #F2EFE9
 const MONO_AMBER: Color = Color(1.0, 0.624, 0.110, 1.0)            # #FF9F1C
 const MONO_SHIELD_CYAN: Color = Color(0.220, 0.741, 0.973, 1.0)    # #38BDF8
+const GENESIS_EMERALD: Color = Color(0.204, 0.827, 0.600, 1.0)     # #34D399
+
+const UPG_BIT_BATCH: int = 1
+const UPG_BIT_ADRENAL: int = 2
+const UPG_BIT_OVERDRIVE: int = 4
+const UPG_BIT_PLATING: int = 8
+const UPG_BIT_CAPACITORS: int = 16
+const UPG_BIT_RAILS: int = 32
 
 var mode: Mode = Mode.UNIT
 var entity_type_id: StringName = &""
@@ -24,6 +32,22 @@ var team: int = 0
 var _owner_unit: Unit = null
 var _owner_building: Building = null
 var _anim_time: float = 0.0
+var _economy_manager: EconomyManager = null
+var _upgrade_flags: int = 0
+var _upgrade_cache_team: int = -999
+
+
+func _ready() -> void:
+	call_deferred("_bind_economy_manager")
+
+
+func _exit_tree() -> void:
+	if _economy_manager != null and is_instance_valid(_economy_manager):
+		if _economy_manager.tech_changed.is_connected(_on_economy_tech_changed):
+			_economy_manager.tech_changed.disconnect(_on_economy_tech_changed)
+		if _economy_manager.upgrade_completed.is_connected(_on_economy_upgrade_completed):
+			_economy_manager.upgrade_completed.disconnect(_on_economy_upgrade_completed)
+	_economy_manager = null
 
 
 func bind_unit(unit: Unit) -> void:
@@ -31,6 +55,7 @@ func bind_unit(unit: Unit) -> void:
 	_owner_unit = unit
 	entity_type_id = unit.get_unit_type_id()
 	team = int(unit.team)
+	_sync_upgrade_cache()
 	queue_redraw()
 
 
@@ -39,7 +64,81 @@ func bind_building(building: Building) -> void:
 	_owner_building = building
 	entity_type_id = building.building_type_id
 	team = int(building.team)
+	_sync_upgrade_cache()
 	queue_redraw()
+
+
+func _bind_economy_manager() -> void:
+	if _economy_manager != null and is_instance_valid(_economy_manager):
+		return
+	if not is_inside_tree():
+		return
+	_economy_manager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	if _economy_manager != null:
+		if not _economy_manager.tech_changed.is_connected(_on_economy_tech_changed):
+			_economy_manager.tech_changed.connect(_on_economy_tech_changed)
+		if not _economy_manager.upgrade_completed.is_connected(_on_economy_upgrade_completed):
+			_economy_manager.upgrade_completed.connect(_on_economy_upgrade_completed)
+		_sync_upgrade_cache()
+		queue_redraw()
+
+
+func _on_economy_tech_changed(changed_team: int) -> void:
+	if changed_team == team:
+		_sync_upgrade_cache()
+		queue_redraw()
+
+
+func _on_economy_upgrade_completed(changed_team: int, _upgrade_id: StringName) -> void:
+	if changed_team == team:
+		_sync_upgrade_cache()
+		queue_redraw()
+
+
+func _sync_upgrade_cache() -> void:
+	if _economy_manager == null or not is_instance_valid(_economy_manager):
+		if is_inside_tree():
+			_economy_manager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+			if _economy_manager != null:
+				if not _economy_manager.tech_changed.is_connected(_on_economy_tech_changed):
+					_economy_manager.tech_changed.connect(_on_economy_tech_changed)
+				if not _economy_manager.upgrade_completed.is_connected(_on_economy_upgrade_completed):
+					_economy_manager.upgrade_completed.connect(_on_economy_upgrade_completed)
+	_upgrade_cache_team = team
+	_upgrade_flags = 0
+	if _economy_manager == null or not is_instance_valid(_economy_manager):
+		return
+	if _economy_manager.has_upgrade(team, UpgradeManager.UPGRADE_BATCH_EFFICIENCY):
+		_upgrade_flags |= UPG_BIT_BATCH
+	if _economy_manager.has_upgrade(team, UpgradeManager.UPGRADE_ADRENAL_POTENCY):
+		_upgrade_flags |= UPG_BIT_ADRENAL
+	if _economy_manager.has_upgrade(team, UpgradeManager.UPGRADE_COMPUTE_OVERDRIVE):
+		_upgrade_flags |= UPG_BIT_OVERDRIVE
+	if _economy_manager.has_upgrade(team, UpgradeManager.UPGRADE_HARDENED_PLATING):
+		_upgrade_flags |= UPG_BIT_PLATING
+	if _economy_manager.has_upgrade(team, UpgradeManager.UPGRADE_RAPID_CAPACITORS):
+		_upgrade_flags |= UPG_BIT_CAPACITORS
+	if _economy_manager.has_upgrade(team, UpgradeManager.UPGRADE_HYPER_VELOCITY_RAILS):
+		_upgrade_flags |= UPG_BIT_RAILS
+
+
+func _has_team_upgrade(upgrade_id: StringName) -> bool:
+	if _upgrade_cache_team != team or (_economy_manager == null and is_inside_tree()):
+		_sync_upgrade_cache()
+	match upgrade_id:
+		UpgradeManager.UPGRADE_BATCH_EFFICIENCY:
+			return (_upgrade_flags & UPG_BIT_BATCH) != 0
+		UpgradeManager.UPGRADE_ADRENAL_POTENCY:
+			return (_upgrade_flags & UPG_BIT_ADRENAL) != 0
+		UpgradeManager.UPGRADE_COMPUTE_OVERDRIVE:
+			return (_upgrade_flags & UPG_BIT_OVERDRIVE) != 0
+		UpgradeManager.UPGRADE_HARDENED_PLATING:
+			return (_upgrade_flags & UPG_BIT_PLATING) != 0
+		UpgradeManager.UPGRADE_RAPID_CAPACITORS:
+			return (_upgrade_flags & UPG_BIT_CAPACITORS) != 0
+		UpgradeManager.UPGRADE_HYPER_VELOCITY_RAILS:
+			return (_upgrade_flags & UPG_BIT_RAILS) != 0
+	return false
 
 
 func _process(delta: float) -> void:
@@ -62,6 +161,7 @@ func _process(delta: float) -> void:
 			or entity_type_id == &"monolith_dreadnought"
 			or entity_type_id == &"null_grid_projector"
 			or entity_type_id == &"anvil_siege_walker"
+			or (_upgrade_flags & UPG_BIT_CAPACITORS) != 0
 			or _owner_unit.has_status_effect(&"adrenal_surge")
 			or (_owner_unit.current_hp / maxf(1.0, _owner_unit.get_max_hp())) <= 0.40
 		):
@@ -107,10 +207,12 @@ func _draw() -> void:
 	_draw_marquee_preview_ring()
 	if mode == Mode.UNIT:
 		_draw_unit_silhouette(p)
+		_draw_unit_upgrade_telltales()
 		_draw_unit_damage_overlay()
 		_draw_unit_spawn_flash(p)
 	else:
 		_draw_building_silhouette(p)
+		_draw_building_upgrade_telltales()
 		_draw_building_damage_overlay()
 
 
@@ -360,11 +462,7 @@ func _draw_unit_silhouette(p: Dictionary) -> void:
 
 		&"goliath_frame":
 			# Broad imposing heavy mech with layered shoulder plates + Compute Overdrive trim
-			var has_overdrive: bool = false
-			if _owner_unit != null and _owner_unit.is_inside_tree():
-				var econ: EconomyManager = _owner_unit.get_tree().get_first_node_in_group("economy_manager") as EconomyManager
-				if econ != null:
-					has_overdrive = econ.has_upgrade(_owner_unit.team, UpgradeManager.UPGRADE_COMPUTE_OVERDRIVE)
+			var has_overdrive: bool = _has_team_upgrade(UpgradeManager.UPGRADE_COMPUTE_OVERDRIVE)
 			var accent_col: Color = Color(0.32, 0.96, 1.0, 1.0) if team == 0 else core
 			var od_col: Color = Color(1.0, 0.86, 0.28, 1.0) if team == 0 else Color(1.0, 0.62, 0.16, 1.0)
 			var main_hull: PackedVector2Array = PackedVector2Array([
@@ -1611,3 +1709,107 @@ func _draw_damage_state(hp_ratio: float, radius: float, is_mechanical: bool, up_
 			var a2: Vector2 = -side_dir * (radius * 0.30) + up_dir * (radius * 0.12)
 			var t2: Vector2 = a2 + (up_dir * 0.6 - side_dir * 0.8) * clampf(radius * 0.34, 5.5, 10.5)
 			draw_line(a2, t2, Color(0.95, 0.96, 1.0, 0.92), 1.4, true)
+
+
+# =============================================================================
+# SCOUTABLE VISUAL UPGRADE TELLTALES (ALL 6 FACTION UPGRADES, <= 4 PRIMS EACH)
+# =============================================================================
+
+func _draw_unit_upgrade_telltales() -> void:
+	if _owner_unit == null or not is_instance_valid(_owner_unit) or _owner_unit.is_dead:
+		return
+	var pulse: float = 0.5 + 0.5 * sin(_anim_time * 4.5)
+
+	# 1. GENESIS_V2 — Batch Efficiency: crisp emerald-mint collar/wingtip chevrons
+	if _has_team_upgrade(UpgradeManager.UPGRADE_BATCH_EFFICIENCY):
+		if entity_type_id == &"clone_trooper" or entity_type_id == &"stinger" or entity_type_id == &"symbiote":
+			draw_polyline(PackedVector2Array([Vector2(-3.5, -10.5), Vector2(1.5, -7.5), Vector2(-3.5, -4.5)]), GENESIS_EMERALD, 1.7, true)
+			draw_polyline(PackedVector2Array([Vector2(-3.5, 10.5), Vector2(1.5, 7.5), Vector2(-3.5, 4.5)]), GENESIS_EMERALD, 1.7, true)
+
+	# 2. GENESIS_V2 — Adrenal Potency: glowing twin-cell crimson/gold dorsal stim-pack + bright visor ridge
+	if _has_team_upgrade(UpgradeManager.UPGRADE_ADRENAL_POTENCY) and entity_type_id == &"clone_trooper":
+		draw_rect(Rect2(-9.5, -5.5, 4.0, 4.2), Color(1.0, 0.34, 0.24, 0.96), true)
+		draw_rect(Rect2(-9.5, 1.3, 4.0, 4.2), Color(1.0, 0.84, 0.28, 0.96), true)
+		draw_line(Vector2(6.5, -3.6), Vector2(6.5, 3.6), Color(1.0, 0.94, 0.62, 0.98), 2.1, true)
+
+	# 3. MONOLITH_OS — Hardened Plating: stark off-white reinforced front-slab armor brackets
+	var is_mono_combat: bool = (
+		entity_type_id == &"bulwark_automaton"
+		or entity_type_id == &"picket_drone"
+		or entity_type_id == &"rail_sentinel"
+		or entity_type_id == &"aegis_relay"
+		or entity_type_id == &"anvil_siege_walker"
+		or entity_type_id == &"monolith_dreadnought"
+		or entity_type_id == &"null_grid_projector"
+	)
+	if is_mono_combat and _has_team_upgrade(UpgradeManager.UPGRADE_HARDENED_PLATING):
+		var r: float = clampf(_owner_unit.data.collision_radius if _owner_unit.data != null else 16.0, 12.0, 26.0)
+		var fx: float = r * 0.72
+		var sy: float = r * 0.68
+		var back_x: float = r * 0.12
+		# Bolted chamfered front-left and front-right off-white armor flanges + ink seam ticks
+		draw_polyline(PackedVector2Array([Vector2(back_x, -sy - 2.0), Vector2(fx, -sy * 0.72), Vector2(fx + 2.5, -sy * 0.28)]), MONO_OFFWHITE, 2.8, true)
+		draw_polyline(PackedVector2Array([Vector2(back_x, sy + 2.0), Vector2(fx, sy * 0.72), Vector2(fx + 2.5, sy * 0.28)]), MONO_OFFWHITE, 2.8, true)
+		draw_line(Vector2(fx - 2.0, -sy * 0.78), Vector2(fx - 2.0, -sy * 0.56), MONO_INK, 1.6)
+		draw_line(Vector2(fx - 2.0, sy * 0.56), Vector2(fx - 2.0, sy * 0.78), MONO_INK, 1.6)
+
+	# 4. MONOLITH_OS — Rapid Capacitors: twin bright Shield-Cyan dorsal pips + shimmering outer energy arc
+	if is_mono_combat and _has_team_upgrade(UpgradeManager.UPGRADE_RAPID_CAPACITORS):
+		var rc: float = clampf(_owner_unit.data.collision_radius if _owner_unit.data != null else 16.0, 12.0, 26.0)
+		draw_circle(Vector2(-rc * 0.28, -rc * 0.42), 2.3, MONO_SHIELD_CYAN)
+		draw_circle(Vector2(-rc * 0.28, rc * 0.42), 2.3, MONO_SHIELD_CYAN)
+		var arc_a: float = _anim_time * 1.9
+		var arc_col: Color = Color(MONO_SHIELD_CYAN.r, MONO_SHIELD_CYAN.g, MONO_SHIELD_CYAN.b, 0.42 + pulse * 0.30)
+		draw_arc(Vector2.ZERO, rc * 0.92, arc_a, arc_a + PI * 0.65, 12, arc_col, 1.5, true)
+		draw_arc(Vector2.ZERO, rc * 0.92, arc_a + PI, arc_a + PI * 1.65, 12, arc_col, 1.5, true)
+
+	# 5. MONOLITH_OS — Hyper-Velocity Rails: glowing Hazard Amber induction coils + off-white muzzle highlight
+	if _has_team_upgrade(UpgradeManager.UPGRADE_HYPER_VELOCITY_RAILS):
+		if entity_type_id == &"rail_sentinel":
+			draw_line(Vector2(11.0, -4.5), Vector2(11.0, 4.5), MONO_AMBER, 2.2, true)
+			draw_line(Vector2(17.5, -4.0), Vector2(17.5, 4.0), MONO_AMBER, 2.2, true)
+			draw_circle(Vector2(23.5, 0.0), 2.3, MONO_OFFWHITE)
+		elif entity_type_id == &"anvil_siege_walker":
+			draw_line(Vector2(14.0, -6.5), Vector2(14.0, 6.5), MONO_AMBER, 2.6, true)
+			draw_line(Vector2(21.0, -5.8), Vector2(21.0, 5.8), MONO_AMBER, 2.6, true)
+			draw_circle(Vector2(27.5, 0.0), 2.8, MONO_OFFWHITE)
+
+
+func _draw_building_upgrade_telltales() -> void:
+	if _owner_building == null or not is_instance_valid(_owner_building) or _owner_building.is_destroyed or not _owner_building.is_constructed:
+		return
+	var pulse: float = 0.5 + 0.5 * sin(_anim_time * 4.2)
+
+	# 1. GENESIS_V2 — Batch Efficiency on Cloning Vat
+	if entity_type_id == &"cloning_vat" and _has_team_upgrade(UpgradeManager.UPGRADE_BATCH_EFFICIENCY):
+		draw_polyline(PackedVector2Array([Vector2(-7.0, -4.0), Vector2(0.0, -10.0), Vector2(7.0, -4.0)]), GENESIS_EMERALD, 2.2, true)
+		draw_polyline(PackedVector2Array([Vector2(-7.0, 4.0), Vector2(0.0, 10.0), Vector2(7.0, 4.0)]), GENESIS_EMERALD, 2.2, true)
+		draw_circle(Vector2(-15.0, -18.0), 2.8, GENESIS_EMERALD)
+		draw_circle(Vector2(15.0, -18.0), 2.8, GENESIS_EMERALD)
+
+	# 2. MONOLITH_OS — Hardened Plating on Bastion Emplacement
+	if entity_type_id == &"bastion_emplacement" and _has_team_upgrade(UpgradeManager.UPGRADE_HARDENED_PLATING):
+		var h: float = maxf(18.0, _owner_building.footprint_radius * 0.78)
+		draw_polyline(PackedVector2Array([Vector2(-h, -h + 9.0), Vector2(-h, -h), Vector2(-h + 9.0, -h)]), MONO_OFFWHITE, 3.0)
+		draw_polyline(PackedVector2Array([Vector2(h - 9.0, -h), Vector2(h, -h), Vector2(h, -h + 9.0)]), MONO_OFFWHITE, 3.0)
+		draw_polyline(PackedVector2Array([Vector2(-h, h - 9.0), Vector2(-h, h), Vector2(-h + 9.0, h)]), MONO_OFFWHITE, 3.0)
+		draw_polyline(PackedVector2Array([Vector2(h - 9.0, h), Vector2(h, h), Vector2(h, h - 9.0)]), MONO_OFFWHITE, 3.0)
+
+	# 3. MONOLITH_OS — Rapid Capacitors on Capacitor Pylon
+	if entity_type_id == &"capacitor_pylon" and _has_team_upgrade(UpgradeManager.UPGRADE_RAPID_CAPACITORS):
+		draw_circle(Vector2(-11.0, -17.0), 2.6, MONO_SHIELD_CYAN)
+		draw_circle(Vector2(11.0, -17.0), 2.6, MONO_SHIELD_CYAN)
+		var c_ang: float = _anim_time * 1.8
+		var c_col: Color = Color(MONO_SHIELD_CYAN.r, MONO_SHIELD_CYAN.g, MONO_SHIELD_CYAN.b, 0.50 + pulse * 0.34)
+		draw_arc(Vector2.ZERO, 22.0, c_ang, c_ang + PI * 0.72, 14, c_col, 1.8, true)
+		draw_arc(Vector2.ZERO, 22.0, c_ang + PI, c_ang + PI * 1.72, 14, c_col, 1.8, true)
+
+	# 4. MONOLITH_OS — Hyper-Velocity Rails on Bastion Emplacement
+	if entity_type_id == &"bastion_emplacement" and _has_team_upgrade(UpgradeManager.UPGRADE_HYPER_VELOCITY_RAILS):
+		var aim_ang: float = _owner_building.get_turret_angle()
+		var dir: Vector2 = Vector2.RIGHT.rotated(aim_ang)
+		var perp: Vector2 = Vector2(-dir.y, dir.x)
+		draw_line(dir * 12.0 - perp * 7.5, dir * 12.0 + perp * 7.5, MONO_AMBER, 2.4, true)
+		draw_line(dir * 19.0 - perp * 6.8, dir * 19.0 + perp * 6.8, MONO_AMBER, 2.4, true)
+		draw_circle(dir * 25.0 - perp * 3.8, 2.2, MONO_OFFWHITE)
+		draw_circle(dir * 25.0 + perp * 3.8, 2.2, MONO_OFFWHITE)

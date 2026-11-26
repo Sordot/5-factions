@@ -19,6 +19,7 @@ const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.
 @onready var chk_mutator_yield: CheckBox = %ChkMutatorYield
 @onready var chk_mutator_no_fog: CheckBox = %ChkMutatorNoFog
 @onready var chk_mutator_fast_build: CheckBox = %ChkMutatorFastBuild
+@onready var chk_uplink_victory: CheckBox = %ChkUplinkVictory
 @onready var validation_label: Label = %ValidationLabel
 @onready var summary_label: Label = %MatchSummaryLabel
 @onready var dossier_notice_label: Label = %DossierNoticeLabel
@@ -96,6 +97,7 @@ var _resource_preset: StringName = GameConfig.PRESET_STANDARD
 var _mutator_high_yield: bool = false
 var _mutator_no_fog: bool = false
 var _mutator_fast_build: bool = false
+var _uplink_victory_enabled: bool = true
 var _bg_time: float = 0.0
 var _settings_instance: SettingsMenu = null
 var _inspected_locked_btn: Button = null
@@ -115,6 +117,7 @@ func _ready() -> void:
 	_mutator_high_yield = GameConfig.mutator_high_yield
 	_mutator_no_fog = GameConfig.mutator_no_fog
 	_mutator_fast_build = GameConfig.mutator_fast_build
+	_uplink_victory_enabled = GameConfig.uplink_victory_enabled
 
 	_slot_configs.clear()
 	for i: int in range(4):
@@ -200,6 +203,13 @@ func _ready() -> void:
 			_mutator_fast_build = pressed
 			_refresh_ui()
 		)
+	if chk_uplink_victory != null:
+		chk_uplink_victory.button_pressed = _uplink_victory_enabled
+		chk_uplink_victory.toggled.connect(func(pressed: bool) -> void:
+			AudioManager.play_ui_click()
+			_uplink_victory_enabled = pressed
+			_refresh_ui()
+		)
 
 	if btn_audio_mute != null:
 		btn_audio_mute.pressed.connect(func() -> void:
@@ -243,7 +253,7 @@ func _ready() -> void:
 	_wire_hover_audio([
 		btn_audio_mute, map_option, btn_players_2, btn_players_3, btn_players_4,
 		opt_team_preset, btn_ai_standard, btn_ai_passive, btn_res_standard, btn_res_fast,
-		chk_mutator_yield, chk_mutator_no_fog, chk_mutator_fast_build,
+		chk_mutator_yield, chk_mutator_no_fog, chk_mutator_fast_build, chk_uplink_victory,
 		btn_launch, btn_settings, btn_quit,
 		locked_slot_2, locked_slot_3, locked_slot_4, locked_slot_5,
 	])
@@ -863,6 +873,7 @@ func _refresh_ui() -> void:
 			mut_parts.append("No Fog")
 		if _mutator_fast_build:
 			mut_parts.append("Fast Build")
+		var win_tag: String = "Domination + Uplink (3:00)" if _uplink_victory_enabled else "Domination Only"
 		var mut_suffix: String = ("  •  " + ", ".join(mut_parts)) if not mut_parts.is_empty() else ""
 		var matchup_str: String = _build_alliance_summary_text()
 		var local_fid: StringName = _get_local_human_faction_id()
@@ -872,7 +883,7 @@ func _refresh_ui() -> void:
 			if lf_data != null and not lf_data.short_code.is_empty():
 				local_fac_label = lf_data.short_code
 		var mode_tag: String = "AI SPECTATOR" if is_spec else ("PASSIVE SANDBOX (%s)" % local_fac_label if not _aggro_ai_enabled else local_fac_label)
-		summary_label.text = "%s  •  %s\nTEAMS: %s\nRES: %s%s" % [mode_tag, map_name, matchup_str, res_str, mut_suffix]
+		summary_label.text = "%s  •  %s\nTEAMS: %s\nWIN: %s  •  RES: %s%s" % [mode_tag, map_name, matchup_str, win_tag, res_str, mut_suffix]
 	_suppress_callbacks = false
 
 
@@ -916,7 +927,8 @@ func _on_launch_pressed() -> void:
 		primary_faction_id,
 		_mutator_high_yield,
 		_mutator_no_fog,
-		_mutator_fast_build
+		_mutator_fast_build,
+		_uplink_victory_enabled
 	)
 	get_tree().change_scene_to_file(_selected_map_path)
 

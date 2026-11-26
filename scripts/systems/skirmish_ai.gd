@@ -1730,7 +1730,20 @@ func _manage_deploy_micro(tick_dt: float) -> void:
 func _select_wave_target(wave_idx: int, core: Building = null) -> Vector2:
 	var origin: Vector2 = core.global_position if (core != null and is_instance_valid(core)) else (_staging_point if _staging_point_valid else Vector2.ZERO)
 
-	# 1. Urgent Data Hyper-Uplink denial when an enemy controls it or progress > 35%
+	# 1. Urgent Data Hyper-Uplink denial when Uplink Victory is active or an enemy holds/captures it
+	var mm: Node = get_tree().get_first_node_in_group("match_manager")
+	if mm != null and mm.has_method("get_uplink_victory_status"):
+		var vst: Dictionary = mm.call("get_uplink_victory_status") as Dictionary
+		if bool(vst.get("enabled", false)) and bool(vst.get("has_uplink", false)):
+			var ctrl_t: int = int(vst.get("controlling_team", -1))
+			var lead_t: int = int(vst.get("leading_team", -1))
+			var lead_s: float = float(vst.get("leading_seconds", 0.0))
+			var target_s: float = maxf(1.0, float(vst.get("target_seconds", 180.0)))
+			var enemy_holds_now: bool = ctrl_t >= 0 and _is_enemy_team(ctrl_t)
+			var enemy_timer_urgent: bool = lead_t >= 0 and _is_enemy_team(lead_t) and lead_s >= target_s * 0.40
+			if enemy_holds_now or enemy_timer_urgent:
+				return vst.get("uplink_pos", Vector2.ZERO) as Vector2
+
 	var uplink: HyperUplink = get_tree().get_first_node_in_group("hyper_uplinks") as HyperUplink
 	if uplink != null and is_instance_valid(uplink):
 		var enemy_controls_uplink: bool = uplink.controlling_team >= 0 and _is_enemy_team(uplink.controlling_team)

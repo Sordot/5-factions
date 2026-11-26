@@ -523,9 +523,11 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Fast-Tech (1000B)"
 
-[node name="MutatorsRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="MutatorsRow" type="GridContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 2
+columns = 2
 
 [node name="ChkMutatorYield" type="CheckBox" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MutatorsRow"]
 unique_name_in_owner = true
@@ -550,6 +552,16 @@ size_flags_horizontal = 3
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Fast Build"
+
+[node name="ChkUplinkVictory" type="CheckBox" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MutatorsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+tooltip_text = "Hold the central Data Hyper-Uplink for 3:00 total to win the match (in addition to Command Hub elimination)."
+theme_override_font_sizes/font_size = 11
+button_pressed = true
+text = "Uplink Win (3m)"
 
 [node name="ValidationLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 unique_name_in_owner = true

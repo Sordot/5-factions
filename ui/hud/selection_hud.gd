@@ -1542,6 +1542,11 @@ func _connect_inspected_signals(entity: Node) -> void:
 	elif entity.is_in_group("sensor_relays"):
 		if entity.has_signal("state_changed") and not entity.is_connected("state_changed", _on_inspected_entity_updated):
 			entity.connect("state_changed", _on_inspected_entity_updated)
+	elif entity.is_in_group("hyper_uplinks"):
+		if entity.has_signal("capture_state_changed") and not entity.is_connected("capture_state_changed", _on_inspected_entity_updated):
+			entity.connect("capture_state_changed", _on_inspected_entity_updated)
+		if entity.has_signal("controller_changed") and not entity.is_connected("controller_changed", _on_inspected_entity_updated):
+			entity.connect("controller_changed", _on_inspected_entity_updated)
 
 
 func _disconnect_inspected_signals() -> void:
@@ -1588,6 +1593,11 @@ func _disconnect_inspected_signals() -> void:
 	elif _inspected_entity.is_in_group("sensor_relays"):
 		if _inspected_entity.has_signal("state_changed") and _inspected_entity.is_connected("state_changed", _on_inspected_entity_updated):
 			_inspected_entity.disconnect("state_changed", _on_inspected_entity_updated)
+	elif _inspected_entity.is_in_group("hyper_uplinks"):
+		if _inspected_entity.has_signal("capture_state_changed") and _inspected_entity.is_connected("capture_state_changed", _on_inspected_entity_updated):
+			_inspected_entity.disconnect("capture_state_changed", _on_inspected_entity_updated)
+		if _inspected_entity.has_signal("controller_changed") and _inspected_entity.is_connected("controller_changed", _on_inspected_entity_updated):
+			_inspected_entity.disconnect("controller_changed", _on_inspected_entity_updated)
 
 
 func _on_ability_targeting_changed(active_ability: AbilityData) -> void:

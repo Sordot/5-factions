@@ -328,6 +328,16 @@ mouse_filter = 2
 alignment = 2
 theme_override_constants/separation = 4
 
+[node name="UplinkBonusLabel" type="Button" parent="RootControl/TopRightAnchor/TopRightVBox/SpeedStrip"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 22)
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Click to snap camera to Data Hyper-Uplink (0, 0)"
+theme_override_font_sizes/font_size = 10
+text = "UPLINK: NEUTRAL"
+
 [node name="SpeedLbl" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/SpeedStrip"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.56, 0.78, 0.86, 0.88)
@@ -374,15 +384,6 @@ mouse_filter = 2
 theme_override_colors/font_color = Color(1, 0.68, 0.28, 1)
 theme_override_font_sizes/font_size = 11
 text = "AGGRO AI: PAUSED (F10)"
-
-[node name="UplinkBonusLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox/ObjectivesStrip"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-mouse_filter = 2
-theme_override_colors/font_color = Color(0.24, 0.98, 0.9, 1)
-theme_override_font_sizes/font_size = 11
-text = "UPLINK: +5% SPEED"
 
 [node name="ResourceAlertLabel" type="Label" parent="RootControl/TopRightAnchor/TopRightVBox"]
 unique_name_in_owner = true

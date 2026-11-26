@@ -31,7 +31,7 @@ const CONTROLS_REF_SCENE_PATH: String = "res://scenes/ui/controls_reference_over
 @onready var btn_speed_15: Button = %BtnSpeed15
 @onready var btn_speed_20: Button = %BtnSpeed20
 @onready var aggro_paused_badge: Label = %AggroPausedBadge
-@onready var uplink_bonus_label: Label = %UplinkBonusLabel
+@onready var uplink_bonus_label: Button = %UplinkBonusLabel
 @onready var resource_alert_label: Label = %ResourceAlertLabel
 
 var _economy_manager: EconomyManager = null
@@ -47,6 +47,9 @@ var _bandwidth_near_cap: bool = false
 var _bw_near_cap_armed: bool = true
 var _bw_near_cap_cooldown: float = 0.0
 var _bw_pulse_time: float = 0.0
+var _uplink_warn_pulse: bool = false
+var _uplink_base_col: Color = Color(0.68, 0.80, 0.88, 0.92)
+var _uplink_world_pos: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -90,6 +93,9 @@ func _ready() -> void:
 	if btn_spectator_fog != null:
 		btn_spectator_fog.add_to_group("blocks_edge_pan")
 		btn_spectator_fog.pressed.connect(_on_spectator_fog_pressed)
+	if uplink_bonus_label != null:
+		uplink_bonus_label.add_to_group("blocks_edge_pan")
+		uplink_bonus_label.pressed.connect(_on_uplink_pill_pressed)
 
 	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and not TeamManager.teams_reconfigured.is_connected(_apply_faction_hud_theme):
 		TeamManager.teams_reconfigured.connect(_apply_faction_hud_theme)
@@ -313,6 +319,8 @@ func _apply_faction_hud_theme() -> void:
 		FactionHudTheme.style_utility_button(btn_idle_production, fid)
 	if btn_select_army != null:
 		FactionHudTheme.style_utility_button(btn_select_army, fid)
+	if uplink_bonus_label != null:
+		FactionHudTheme.style_utility_button(uplink_bonus_label, fid)
 
 
 func _apply_faction_hud_accent() -> void:
@@ -362,6 +370,10 @@ func _process(delta: float) -> void:
 			var pulse_n: float = 0.5 + 0.5 * sin(_bw_pulse_time * 3.4)
 			bandwidth_value_label.modulate = Color(0.98, 0.86, 0.52, 1.0).lerp(Color(0.961, 0.620, 0.043, 1.0), pulse_n)
 
+	if _uplink_warn_pulse and uplink_bonus_label != null and uplink_bonus_label.visible:
+		var up_p: float = 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.008)
+		uplink_bonus_label.modulate = Color(1.0, 0.78, 0.24, 1.0).lerp(Color(1.0, 0.34, 0.28, 1.0), up_p)
+
 	if _alert_timer > 0.0:
 		_alert_timer = maxf(0.0, _alert_timer - delta)
 		if resource_alert_label != null:
@@ -392,6 +404,7 @@ func _refresh_income_rates_and_timer() -> void:
 		_connect_match_manager()
 	if match_timer_label != null and _match_manager != null and _match_manager.has_method("get_match_elapsed_formatted"):
 		match_timer_label.text = String(_match_manager.call("get_match_elapsed_formatted"))
+	_refresh_uplink_pill()
 
 	if _economy_manager == null:
 		return
@@ -663,9 +676,83 @@ func _on_bandwidth_changed(team: int, used: int, cap: int) -> void:
 			bandwidth_value_label.modulate = Color(0.74, 0.96, 1.0, 1.0)
 
 
-func _on_production_bonus_changed(team: int, multiplier: float) -> void:
-	if team != int(tracked_team) or uplink_bonus_label == null:
+func _on_uplink_pill_pressed() -> void:
+	if not is_inside_tree():
 		return
-	var pct: int = int(round((multiplier - 1.0) * 100.0))
-	uplink_bonus_label.visible = pct > 0
-	uplink_bonus_label.text = "UPLINK: +%d%% SPEED" % pct
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	var cam: RTSCamera = get_tree().get_first_node_in_group("rts_camera") as RTSCamera
+	if cam != null:
+		cam.smooth_center_on(_uplink_world_pos)
+
+
+func _format_mm_ss(sec_val: float) -> String:
+	var s_int: int = maxi(0, int(floor(sec_val)))
+	return "%02d:%02d" % [s_int / 60, s_int % 60]
+
+
+func _refresh_uplink_pill() -> void:
+	if uplink_bonus_label == null or not is_inside_tree():
+		return
+	if _match_manager == null or not _match_manager.has_method("get_uplink_victory_status"):
+		uplink_bonus_label.visible = false
+		return
+	var st: Dictionary = _match_manager.call("get_uplink_victory_status") as Dictionary
+	if not bool(st.get("has_uplink", false)):
+		uplink_bonus_label.visible = false
+		return
+
+	_uplink_world_pos = st.get("uplink_pos", Vector2.ZERO) as Vector2
+	var victory_on: bool = bool(st.get("enabled", false))
+	var contested: bool = bool(st.get("is_contested", false))
+	var ctrl_team: int = int(st.get("controlling_team", -1))
+	var ctrl_sec: float = float(st.get("controlling_seconds", 0.0))
+	var lead_team: int = int(st.get("leading_team", -1))
+	var lead_sec: float = float(st.get("leading_seconds", 0.0))
+	var target_sec: float = maxf(1.0, float(st.get("target_seconds", 180.0)))
+	var local_t: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+
+	uplink_bonus_label.visible = true
+	_uplink_warn_pulse = false
+
+	if contested:
+		uplink_bonus_label.text = "UPLINK: CONTESTED"
+		_uplink_warn_pulse = true
+		return
+
+	if victory_on:
+		var tot_str: String = _format_mm_ss(target_sec)
+		if ctrl_team >= 0:
+			var tag: String = TeamManager.get_team_short_label(ctrl_team, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (ctrl_team + 1))
+			uplink_bonus_label.text = "UPLINK [%s]: %s / %s" % [tag, _format_mm_ss(ctrl_sec), tot_str]
+			var col: Color = TeamManager.get_team_color(ctrl_team) if TeamManager != null else Color(0.24, 0.98, 0.90, 1.0)
+			_uplink_base_col = col
+			var is_enemy_ctrl: bool = local_t >= 0 and (TeamManager.are_enemies(local_t, ctrl_team) if TeamManager != null else (ctrl_team != local_t))
+			if is_enemy_ctrl and (ctrl_sec / target_sec) >= 0.75:
+				_uplink_warn_pulse = true
+			else:
+				uplink_bonus_label.modulate = col
+		elif lead_team >= 0 and lead_sec >= 1.0:
+			var ltag: String = TeamManager.get_team_short_label(lead_team, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (lead_team + 1))
+			uplink_bonus_label.text = "UPLINK: NEUTRAL (%s %s)" % [ltag, _format_mm_ss(lead_sec)]
+			uplink_bonus_label.modulate = Color(0.76, 0.86, 0.94, 0.92)
+		else:
+			uplink_bonus_label.text = "UPLINK: NEUTRAL"
+			uplink_bonus_label.modulate = Color(0.70, 0.82, 0.90, 0.88)
+	else:
+		if ctrl_team >= 0:
+			var is_ally: bool = local_t < 0 or (TeamManager.are_allies(local_t, ctrl_team) if TeamManager != null else (ctrl_team == local_t))
+			var col2: Color = TeamManager.get_team_color(ctrl_team) if TeamManager != null else Color(0.24, 0.98, 0.90, 1.0)
+			if is_ally and local_t >= 0:
+				uplink_bonus_label.text = "UPLINK: +5%"
+			else:
+				var tag2: String = TeamManager.get_team_short_label(ctrl_team, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (ctrl_team + 1))
+				uplink_bonus_label.text = "UPLINK: [%s]" % tag2
+			uplink_bonus_label.modulate = col2
+		else:
+			uplink_bonus_label.text = "UPLINK: NEUTRAL"
+			uplink_bonus_label.modulate = Color(0.70, 0.82, 0.90, 0.88)
+
+
+func _on_production_bonus_changed(_team: int, _multiplier: float) -> void:
+	_refresh_uplink_pill()

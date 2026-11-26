@@ -323,6 +323,20 @@ func _on_map_viewport_draw() -> void:
 		map_viewport.draw_line(Vector2(gx, 0.0), Vector2(gx, rect.size.y), grid_col, 1.0)
 		map_viewport.draw_line(Vector2(0.0, gy), Vector2(rect.size.x, gy), grid_col, 1.0)
 
+	# 1.5. High-Ground Plateaus (subtle raised-contrast terraces beneath obstacles/units/Fog).
+	for node: Node in get_tree().get_nodes_in_group("high_ground_plateaus"):
+		if not is_instance_valid(node) or not node.has_method("get_world_polygon"):
+			continue
+		var hg_poly: PackedVector2Array = node.call("get_world_polygon")
+		if hg_poly.size() < 3:
+			continue
+		var mini_hg: PackedVector2Array = PackedVector2Array()
+		mini_hg.resize(hg_poly.size())
+		for hi: int in range(hg_poly.size()):
+			mini_hg[hi] = _world_to_minimap(hg_poly[hi])
+		map_viewport.draw_colored_polygon(mini_hg, Color(0.18, 0.25, 0.32, 0.92))
+		map_viewport.draw_polyline(mini_hg + PackedVector2Array([mini_hg[0]]), Color(0.46, 0.62, 0.74, 0.55), 1.0)
+
 	# 2. Terrain obstacle silhouettes.
 	for node: Node in get_tree().get_nodes_in_group("terrain_obstacles"):
 		if not is_instance_valid(node) or not node.has_method("get_world_polygon"):
