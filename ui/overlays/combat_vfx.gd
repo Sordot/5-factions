@@ -12,6 +12,7 @@ enum VFXMode {
 	FLOATING_TEXT,
 	BUILDING_COMPLETE,
 	RALLY_RIPPLE,
+	SHIELD_SHATTER,
 }
 
 var _mode: VFXMode = VFXMode.DEATH_BURST
@@ -32,6 +33,7 @@ var _on_impact: Callable = Callable()
 # Cleave / spark / burst state
 var _dir: Vector2 = Vector2.RIGHT
 var _is_heavy: bool = false
+var _is_monolith_style: bool = false
 var _rank_level: int = 1
 var _seed: int = 1337
 var _draw_visuals: bool = true
@@ -58,6 +60,7 @@ func reset_for_pool() -> void:
 	_on_impact = Callable()
 	_dir = Vector2.RIGHT
 	_is_heavy = false
+	_is_monolith_style = false
 	_rank_level = 1
 	_draw_visuals = true
 	_label_text = ""
@@ -193,6 +196,19 @@ func setup_rally_ripple(world_pos: Vector2, vfx_color: Color = Color(0.22, 0.92,
 	queue_redraw()
 
 
+func setup_shield_shatter(world_pos: Vector2, radius: float, is_monolith_style: bool = false) -> void:
+	_mode = VFXMode.SHIELD_SHATTER
+	_target_world = world_pos
+	_radius = maxf(16.0, radius)
+	_is_monolith_style = is_monolith_style
+	_color = Color(0.220, 0.741, 0.973, 1.0) # #38BDF8
+	_duration = 0.34
+	_elapsed = 0.0
+	_seed = int(Time.get_ticks_usec() & 0x7FFFFFFF)
+	_draw_visuals = true
+	queue_redraw()
+
+
 func _process(delta: float) -> void:
 	_elapsed += delta
 	if _mode == VFXMode.MORTAR_SHELL:
@@ -251,6 +267,8 @@ func _draw() -> void:
 			_draw_building_complete()
 		VFXMode.RALLY_RIPPLE:
 			_draw_rally_ripple()
+		VFXMode.SHIELD_SHATTER:
+			_draw_shield_shatter()
 
 
 func _draw_mortar_shell() -> void:
@@ -485,6 +503,60 @@ func _draw_rally_ripple() -> void:
 	for i: int in range(4):
 		var dir: Vector2 = Vector2.RIGHT.rotated(float(i) * PI * 0.5)
 		draw_line(p + dir * (r1 - 3.0), p + dir * (r1 + 4.5), Color(_color.r, _color.g, _color.b, fade * 0.85), 1.5, true)
+
+
+func _draw_shield_shatter() -> void:
+	var t: float = clampf(_elapsed / maxf(0.01, _duration), 0.0, 1.0)
+	var ease_out: float = sqrt(t)
+	var fade: float = 1.0 - t
+	var p: Vector2 = to_local(_target_world)
+
+	var cyan: Color = Color(0.220, 0.741, 0.973, 1.0) # #38BDF8
+	var offwhite: Color = Color(0.949, 0.937, 0.914, 1.0) # #F2EFE9
+	var amber: Color = Color(1.0, 0.624, 0.110, 1.0) # #FF9F1C
+	var ring_col: Color = cyan.lerp(offwhite, clampf(1.0 - t * 2.2, 0.0, 1.0))
+
+	# Expanding fractured cyan-white ring (6 crisp broken segments)
+	var ring_r: float = lerpf(_radius * 0.80, _radius * 1.65, ease_out)
+	var seg_count: int = 6
+	var seg_step: float = TAU / float(seg_count)
+	var base_rot: float = float(_seed % 360) * 0.017453
+	for s: int in range(seg_count):
+		var a0: float = base_rot + float(s) * seg_step + t * 0.25
+		var span: float = seg_step * lerpf(0.76, 0.34, t)
+		draw_arc(p, ring_r, a0, a0 + span, 6, Color(ring_col.r, ring_col.g, ring_col.b, fade * 0.96), 2.8 * fade + 0.8, true)
+
+	# Brief crisp flash halo on snap frame
+	if t < 0.24:
+		var ff: float = 1.0 - (t / 0.24)
+		draw_circle(p, _radius * 0.95, Color(offwhite.r, offwhite.g, offwhite.b, ff * 0.28))
+
+	# 7 angular polygonal shard fragments flying outward
+	var shard_count: int = 7
+	for i: int in range(shard_count):
+		var ang: float = base_rot + (TAU * float(i) / float(shard_count)) + float((i * 23) % 7) * 0.05
+		var rad: Vector2 = Vector2.RIGHT.rotated(ang)
+		var perp: Vector2 = Vector2(-rad.y, rad.x)
+		var dist_scale: float = 0.86 + float((i * 19) % 7) * 0.05
+		var pos: Vector2 = p + rad * lerpf(_radius * 0.65, _radius * 1.95 * dist_scale, ease_out)
+		var sz: float = clampf(_radius * 0.22, 4.0, 8.5) * fade
+		if sz > 1.2:
+			var shard_pts: PackedVector2Array = PackedVector2Array([
+				pos + rad * sz * 1.35,
+				pos - rad * sz * 0.65 + perp * sz * 0.72,
+				pos - rad * sz * 0.65 - perp * sz * 0.72,
+			])
+			var sc: Color = offwhite if (i % 3 == 0) else cyan
+			draw_colored_polygon(shard_pts, Color(sc.r, sc.g, sc.b, fade * 0.92))
+
+	# MONOLITH_OS neo-brutalist Hazard Amber / off-white halftone burst dots
+	if _is_monolith_style:
+		for m: int in range(4):
+			var ma: float = base_rot + float(m) * (PI * 0.5) + 0.38
+			var mdir: Vector2 = Vector2.RIGHT.rotated(ma)
+			var mpos: Vector2 = p + mdir * lerpf(_radius * 0.72, _radius * 1.72, ease_out)
+			var dot_col: Color = amber if (m % 2 == 0) else offwhite
+			draw_circle(mpos, maxf(1.5, 3.2 * fade), Color(dot_col.r, dot_col.g, dot_col.b, fade * 0.94))
 
 
 func _draw_dashed_circle(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:

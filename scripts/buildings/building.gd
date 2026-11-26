@@ -1351,6 +1351,7 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 
 	var remaining: float = amount
 	# Layer 2 — Native Regenerating Shield (Unmitigated)
+	var had_native_shield: bool = (current_shield > 0.001)
 	var absorbed_native: float = 0.0
 	if remaining > 0.0 and current_shield > 0.0:
 		absorbed_native = minf(current_shield, remaining)
@@ -1362,6 +1363,8 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 		_shield_hit_flash_timer = SHIELD_HIT_FLASH_DURATION
 		_last_emitted_shield_int = int(round(current_shield))
 		shield_changed.emit(self, current_shield, max_shield)
+		if had_native_shield and current_shield <= 0.001:
+			_trigger_shield_shatter_feedback()
 
 	# Layer 3 — Hull HP (Mitigated)
 	var hull_damaged: bool = false
@@ -1397,6 +1400,26 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 			if not killer.is_dead and is_enemy_killer:
 				killer.register_kill(self)
 		_destroy()
+
+
+func _trigger_shield_shatter_feedback() -> void:
+	if not is_inside_tree():
+		return
+	var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	var is_friendly_view: bool = viewer < 0 or (TeamManager.are_allies(viewer, int(team)) if TeamManager != null else (team == Unit.Team.PLAYER))
+	if not is_friendly_view and not visible:
+		return
+	var is_mono: bool = TeamManager != null and TeamManager.has_method("get_team_faction") and TeamManager.get_team_faction(int(team)) == &"monolith_os"
+	var host: Node = get_parent()
+	if host != null:
+		var fx: CombatVFX = VFXPool.acquire_combat_vfx(56) if VFXPool != null else null
+		if fx == null:
+			fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+			fx.z_index = 56
+			host.add_child(fx)
+		fx.setup_shield_shatter(global_position, footprint_radius * 1.05, is_mono)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"shield_shatter", -4.5, 0.06, global_position, true)
 
 
 func get_inspection_data() -> Dictionary:

@@ -17,6 +17,9 @@ var _refresh_timer: float = 0.0
 var _last_clicked_building_id: int = 0
 var _last_click_ms: int = 0
 var _row_widgets: Array[Dictionary] = []
+var _active_faction_id: StringName = &"genesis_v2"
+var _faction_accent: Color = Color(0.24, 0.96, 0.86, 1.0)
+var _pulse_time: float = 0.0
 
 
 func _ready() -> void:
@@ -28,8 +31,64 @@ func _ready() -> void:
 	if btn_collapse != null:
 		btn_collapse.add_to_group("blocks_edge_pan")
 		btn_collapse.pressed.connect(_on_toggle_collapse)
+	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and not TeamManager.teams_reconfigured.is_connected(_apply_faction_theme):
+		TeamManager.teams_reconfigured.connect(_apply_faction_theme)
+	_apply_faction_theme()
 	call_deferred("_resolve_selection_controller")
 	call_deferred("_refresh_ticker")
+
+
+func _apply_faction_theme() -> void:
+	_active_faction_id = FactionHudTheme.resolve_local_faction_id()
+	var pal: Dictionary = FactionHudTheme.get_palette(_active_faction_id)
+	_faction_accent = pal["accent"] as Color
+	if ticker_panel != null:
+		ticker_panel.add_theme_stylebox_override("panel", FactionHudTheme.make_panel_style(_active_faction_id, true))
+		FactionHudTheme.attach_frame_overlay(ticker_panel, _active_faction_id, &"ticker")
+	if header_label != null:
+		header_label.add_theme_color_override("font_color", _faction_accent)
+	if btn_collapse != null:
+		FactionHudTheme.style_utility_button(btn_collapse, _active_faction_id)
+	for w: Dictionary in _row_widgets:
+		var row_btn: Button = w.get("button", null) as Button
+		if row_btn != null and is_instance_valid(row_btn):
+			_apply_row_button_theme(row_btn, _active_faction_id)
+
+
+func _apply_row_button_theme(btn: Button, fid: StringName) -> void:
+	var pal: Dictionary = FactionHudTheme.get_palette(fid)
+	var is_brutal: bool = (pal["style"] == &"brutalist")
+	var accent: Color = pal["accent"] as Color
+	var norm: StyleBoxFlat = StyleBoxFlat.new()
+	var hov: StyleBoxFlat = StyleBoxFlat.new()
+	if is_brutal:
+		norm.bg_color = pal["bg_row"] as Color
+		norm.border_width_left = 3
+		norm.border_width_top = 1
+		norm.border_width_right = 1
+		norm.border_width_bottom = 1
+		norm.border_color = Color(accent.r, accent.g, accent.b, 0.90)
+		norm.set_corner_radius_all(0)
+		hov.bg_color = pal["bg_hover"] as Color
+		hov.border_width_left = 3
+		hov.border_width_top = 1
+		hov.border_width_right = 1
+		hov.border_width_bottom = 1
+		hov.border_color = pal["inner_trim"] as Color
+		hov.set_corner_radius_all(0)
+	else:
+		norm.bg_color = pal["bg_row"] as Color
+		norm.set_border_width_all(1)
+		norm.border_color = Color(accent.r, accent.g, accent.b, 0.36)
+		norm.set_corner_radius_all(4)
+		hov.bg_color = pal["bg_hover"] as Color
+		hov.set_border_width_all(1)
+		hov.border_color = Color(accent.r, accent.g, accent.b, 0.85)
+		hov.set_corner_radius_all(4)
+	btn.add_theme_stylebox_override("normal", norm)
+	btn.add_theme_stylebox_override("hover", hov)
+	btn.add_theme_stylebox_override("pressed", hov)
+	btn.add_theme_stylebox_override("focus", hov)
 
 
 func _resolve_selection_controller() -> void:
@@ -38,6 +97,7 @@ func _resolve_selection_controller() -> void:
 
 
 func _process(delta: float) -> void:
+	_pulse_time += delta
 	_refresh_timer += delta
 	if _refresh_timer < REFRESH_INTERVAL:
 		return
@@ -136,12 +196,20 @@ func _refresh_ticker() -> void:
 		var prefix: String = "[UPG] " if is_upgrade else ""
 		var batch_tag: String = (" x%d" % batch_cnt) if (not is_upgrade and batch_cnt > 1) else ""
 		var q_tag: String = (" (+%d)" % (q_size - 1)) if q_size > 1 else ""
-		title_lbl.text = "%s%s%s%s" % [prefix, short_name, batch_tag, q_tag]
-		title_lbl.modulate = Color(1.0, 0.88, 0.42, 1.0) if is_upgrade else Color(0.88, 0.98, 1.0, 1.0)
+		var is_oc: bool = b.is_overclocked()
+		var oc_tag: String = " [2x]" if is_oc else ""
+		title_lbl.text = "%s%s%s%s%s" % [prefix, short_name, batch_tag, q_tag, oc_tag]
+		title_lbl.modulate = Color(1.0, 0.88, 0.42, 1.0) if (is_upgrade or is_oc) else Color(0.92, 0.96, 0.98, 1.0)
 		pct_lbl.text = "%d%%" % pct
 		bar.value = progress * 100.0
 		if fill_style != null:
-			fill_style.bg_color = Color(1.0, 0.80, 0.28, 1.0) if is_upgrade else Color(0.24, 0.96, 0.86, 1.0)
+			if is_oc:
+				var oc_p: float = 0.5 + 0.5 * sin(_pulse_time * 8.0)
+				fill_style.bg_color = Color(1.0, 0.624, 0.110, 1.0).lerp(Color(1.0, 0.86, 0.40, 1.0), oc_p * 0.55)
+			elif is_upgrade:
+				fill_style.bg_color = Color(1.0, 0.80, 0.28, 1.0)
+			else:
+				fill_style.bg_color = _faction_accent
 
 	if overflow_label != null:
 		var hidden_count: int = active_entries.size() - display_count
@@ -161,6 +229,7 @@ func _ensure_row_count(target_count: int) -> void:
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.tooltip_text = "LMB: Select  •  Double-Click: Focus  •  RMB: Cancel"
 		btn.add_to_group("blocks_edge_pan")
+		_apply_row_button_theme(btn, _active_faction_id)
 
 		var margin: MarginContainer = MarginContainer.new()
 		margin.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -285,4 +354,14 @@ func _shorten_name(full_name: String) -> String:
 		.replace("Batch Efficiency", "Batch Eff.")
 		.replace("Adrenal Potency", "Adrenal Pot.")
 		.replace("Compute Overdrive", "Overdrive")
+		.replace("Bulwark Automaton", "Bulwark")
+		.replace("Picket Drone", "Picket")
+		.replace("Rail-Sentinel", "Rail-Snt")
+		.replace("Aegis Relay", "Aegis")
+		.replace("Anvil Siege-Walker", "Anvil")
+		.replace("Monolith Dreadnought", "Dreadnought")
+		.replace("Null-Grid Projector", "Null-Grid")
+		.replace("Hardened Plating", "Plating")
+		.replace("Rapid Capacitors", "Capacitors")
+		.replace("Hyper-Velocity Rails", "HV Rails")
 	)

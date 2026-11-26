@@ -81,7 +81,6 @@ func _ready() -> void:
 	if btn_tech_tree != null:
 		btn_tech_tree.add_to_group("blocks_edge_pan")
 		btn_tech_tree.pressed.connect(toggle_tech_tree)
-		_apply_faction_hud_accent()
 	if btn_controls_help != null:
 		btn_controls_help.add_to_group("blocks_edge_pan")
 		btn_controls_help.pressed.connect(toggle_controls_help)
@@ -91,6 +90,10 @@ func _ready() -> void:
 	if btn_spectator_fog != null:
 		btn_spectator_fog.add_to_group("blocks_edge_pan")
 		btn_spectator_fog.pressed.connect(_on_spectator_fog_pressed)
+
+	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and not TeamManager.teams_reconfigured.is_connected(_apply_faction_hud_theme):
+		TeamManager.teams_reconfigured.connect(_apply_faction_hud_theme)
+	_apply_faction_hud_theme()
 
 	_wire_speed_button(btn_speed_05, 0.5)
 	_wire_speed_button(btn_speed_10, 1.0)
@@ -274,13 +277,46 @@ func _on_keybind_changed(_action_name: StringName) -> void:
 	_refresh_aggro_badge()
 
 
+func _apply_faction_hud_theme() -> void:
+	if TeamManager != null and TeamManager.get_local_human_team() >= 0:
+		tracked_team = TeamManager.get_local_human_team() as Unit.Team
+	var fid: StringName = FactionHudTheme.resolve_local_faction_id()
+	var pal: Dictionary = FactionHudTheme.get_palette(fid)
+	var accent: Color = pal["accent"] as Color
+	var is_brutal: bool = (pal["style"] == &"brutalist")
+
+	var res_panel: PanelContainer = get_node_or_null("RootControl/TopRightAnchor/TopRightVBox/ResourceBarPanel") as PanelContainer
+	if res_panel != null:
+		res_panel.add_theme_stylebox_override("panel", FactionHudTheme.make_panel_style(fid, true))
+		FactionHudTheme.attach_frame_overlay(res_panel, fid, &"top_bar")
+		var hbox: Node = res_panel.get_node_or_null("HBox")
+		if hbox != null:
+			for child: Node in hbox.get_children():
+				if child is VSeparator:
+					(child as VSeparator).modulate = Color(accent.r, accent.g, accent.b, 0.85) if is_brutal else Color.WHITE
+
+	if spectator_panel != null:
+		spectator_panel.add_theme_stylebox_override("panel", FactionHudTheme.make_panel_style(&"spectator", true))
+		FactionHudTheme.attach_frame_overlay(spectator_panel, &"spectator", &"top_bar")
+
+	if btn_tech_tree != null:
+		FactionHudTheme.style_utility_button(btn_tech_tree, fid)
+		btn_tech_tree.modulate = accent.lightened(0.20)
+	if btn_controls_help != null:
+		FactionHudTheme.style_utility_button(btn_controls_help, fid)
+		btn_controls_help.modulate = (pal["primary"] as Color) if is_brutal else Color(0.76, 0.96, 1.0, 1.0)
+	if btn_audio_mute != null:
+		FactionHudTheme.style_utility_button(btn_audio_mute, fid)
+	if btn_idle_workers != null:
+		FactionHudTheme.style_utility_button(btn_idle_workers, fid)
+	if btn_idle_production != null:
+		FactionHudTheme.style_utility_button(btn_idle_production, fid)
+	if btn_select_army != null:
+		FactionHudTheme.style_utility_button(btn_select_army, fid)
+
+
 func _apply_faction_hud_accent() -> void:
-	if btn_tech_tree == null or TeamManager == null or not TeamManager.has_method("get_team_faction_data"):
-		return
-	var fac: FactionData = TeamManager.get_team_faction_data(int(tracked_team))
-	if fac == null:
-		return
-	btn_tech_tree.modulate = fac.hud_accent_color.lightened(0.25)
+	_apply_faction_hud_theme()
 
 
 func _refresh_tech_button_label() -> void:

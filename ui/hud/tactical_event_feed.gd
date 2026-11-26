@@ -12,6 +12,7 @@ var _match_manager: MatchManager = null
 var _selection_hud_panel: Control = null
 var _anchor_check_timer: float = 0.0
 var _using_elevated_offset: bool = false
+var _active_faction_id: StringName = &"genesis_v2"
 
 
 func _ready() -> void:
@@ -19,7 +20,49 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if feed_vbox != null:
 		feed_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and not TeamManager.teams_reconfigured.is_connected(_on_teams_reconfigured):
+		TeamManager.teams_reconfigured.connect(_on_teams_reconfigured)
+	_active_faction_id = FactionHudTheme.resolve_local_faction_id()
 	call_deferred("_resolve_references")
+
+
+func _on_teams_reconfigured() -> void:
+	_active_faction_id = FactionHudTheme.resolve_local_faction_id()
+	for entry: Dictionary in _entries:
+		var panel: PanelContainer = entry.get("node", null) as PanelContainer
+		var acc: Color = entry.get("accent", Color(0.28, 0.96, 0.92, 1.0)) as Color
+		if panel != null and is_instance_valid(panel):
+			panel.add_theme_stylebox_override("panel", _make_pill_style(acc, false))
+
+
+func _make_pill_style(accent: Color, hovered: bool) -> StyleBoxFlat:
+	var pal: Dictionary = FactionHudTheme.get_palette(_active_faction_id)
+	var is_brutal: bool = (pal["style"] == &"brutalist")
+	var sb: StyleBoxFlat = StyleBoxFlat.new()
+	sb.content_margin_left = 8.0
+	sb.content_margin_top = 4.0
+	sb.content_margin_right = 8.0
+	sb.content_margin_bottom = 4.0
+	if is_brutal:
+		sb.bg_color = (pal["bg_hover"] as Color) if hovered else (pal["bg"] as Color)
+		sb.border_width_left = 4
+		sb.border_width_top = 2
+		sb.border_width_right = 2
+		sb.border_width_bottom = 2
+		sb.border_color = Color(accent.r, accent.g, accent.b, 0.96)
+		sb.set_corner_radius_all(0)
+		sb.shadow_color = Color(0.03, 0.04, 0.06, 0.80)
+		sb.shadow_size = 1
+		sb.shadow_offset = Vector2(2.0, 2.0)
+	else:
+		sb.bg_color = (pal["bg_hover"] as Color) if hovered else (pal["bg"] as Color)
+		sb.border_width_left = 3
+		sb.border_width_top = 1
+		sb.border_width_right = 1
+		sb.border_width_bottom = 1
+		sb.border_color = Color(accent.r, accent.g, accent.b, 0.88)
+		sb.set_corner_radius_all(4)
+	return sb
 
 
 func _resolve_references() -> void:
@@ -49,6 +92,7 @@ func push_event(category: StringName, message: String, world_pos: Vector2, accen
 	feed_vbox.add_child(pill)
 	_entries.append({
 		"node": pill,
+		"accent": accent_color,
 		"age": 0.0,
 		"lifetime": ENTRY_LIFETIME,
 	})
@@ -68,22 +112,9 @@ func _build_event_pill(category: StringName, message: String, world_pos: Vector2
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_END
 	panel.tooltip_text = "Click to center camera on event"
 
-	var sb: StyleBoxFlat = StyleBoxFlat.new()
-	sb.bg_color = Color(0.035, 0.065, 0.095, 0.86)
-	sb.border_width_left = 3
-	sb.border_width_top = 1
-	sb.border_width_right = 1
-	sb.border_width_bottom = 1
-	sb.border_color = Color(accent.r, accent.g, accent.b, 0.88)
-	sb.corner_radius_top_left = 4
-	sb.corner_radius_top_right = 4
-	sb.corner_radius_bottom_right = 4
-	sb.corner_radius_bottom_left = 4
-	sb.content_margin_left = 8.0
-	sb.content_margin_top = 4.0
-	sb.content_margin_right = 8.0
-	sb.content_margin_bottom = 4.0
-	panel.add_theme_stylebox_override("panel", sb)
+	var sb_norm: StyleBoxFlat = _make_pill_style(accent, false)
+	var sb_hov: StyleBoxFlat = _make_pill_style(accent, true)
+	panel.add_theme_stylebox_override("panel", sb_norm)
 
 	var hbox: HBoxContainer = HBoxContainer.new()
 	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -133,10 +164,10 @@ func _build_event_pill(category: StringName, message: String, world_pos: Vector2
 				panel.accept_event()
 	)
 	panel.mouse_entered.connect(func() -> void:
-		sb.bg_color = Color(0.06, 0.12, 0.17, 0.94)
+		panel.add_theme_stylebox_override("panel", sb_hov)
 	)
 	panel.mouse_exited.connect(func() -> void:
-		sb.bg_color = Color(0.035, 0.065, 0.095, 0.86)
+		panel.add_theme_stylebox_override("panel", sb_norm)
 	)
 
 	return panel
@@ -195,9 +226,9 @@ func _update_bottom_anchor(force: bool) -> void:
 		return
 	_using_elevated_offset = hud_visible
 	if hud_visible:
-		# Clear SelectionHUD's 128px bottom bar cleanly at 1280x720
-		feed_vbox.offset_bottom = -150.0
-		feed_vbox.offset_top = -310.0
+		# Clear SelectionHUD's compact 160px bottom bar cleanly at 1280x720
+		feed_vbox.offset_bottom = -176.0
+		feed_vbox.offset_top = -336.0
 	else:
 		feed_vbox.offset_bottom = -16.0
 		feed_vbox.offset_top = -176.0

@@ -63,6 +63,7 @@ func _process(delta: float) -> void:
 			or entity_type_id == &"null_grid_projector"
 			or entity_type_id == &"anvil_siege_walker"
 			or _owner_unit.has_status_effect(&"adrenal_surge")
+			or (_owner_unit.current_hp / maxf(1.0, _owner_unit.get_max_hp())) <= 0.40
 		):
 			queue_redraw()
 	else:
@@ -106,9 +107,11 @@ func _draw() -> void:
 	_draw_marquee_preview_ring()
 	if mode == Mode.UNIT:
 		_draw_unit_silhouette(p)
+		_draw_unit_damage_overlay()
 		_draw_unit_spawn_flash(p)
 	else:
 		_draw_building_silhouette(p)
+		_draw_building_damage_overlay()
 
 
 func _get_zoom_invariant_width(base_px: float) -> float:
@@ -1537,3 +1540,74 @@ func _draw_monolith_building_completed(hull_poly: PackedVector2Array, p: Diction
 				draw_rect(Rect2(-15, -15, 30, 30), MONO_INK, false, 1.6)
 				draw_circle(Vector2(0.0, 0.0), 5.0, Color(0.32, 0.40, 0.48, 0.72))
 			_draw_team_corner_brackets(self, Rect2(-half + 3, -half + 3, half * 2.0 - 6, half * 2.0 - 6), team_col, 11.0, 2.6)
+
+
+# =============================================================================
+# PROCEDURAL LOW-HP DAMAGE STATES (<= 40% DAMAGED, <= 20% CRITICAL)
+# =============================================================================
+
+func _draw_unit_damage_overlay() -> void:
+	if _owner_unit == null or not is_instance_valid(_owner_unit) or _owner_unit.is_dead:
+		return
+	var max_hp_v: float = maxf(1.0, _owner_unit.get_max_hp())
+	var hp_ratio: float = clampf(_owner_unit.current_hp / max_hp_v, 0.0, 1.0)
+	if hp_ratio > 0.40:
+		return
+	var rad: float = _owner_unit.data.collision_radius if _owner_unit.data != null else 16.0
+	var is_mech: bool = _is_monolith_unit(entity_type_id) or (
+		_owner_unit.data != null and (
+			_owner_unit.data.has_tag(&"mechanical")
+			or _owner_unit.data.has_tag(&"synthetic")
+			or _owner_unit.data.has_tag(&"heavy")
+		)
+	)
+	var up_dir: Vector2 = Vector2(0.0, -1.0).rotated(-_owner_unit.body_visual.rotation) if _owner_unit.body_visual != null else Vector2(0.0, -1.0)
+	_draw_damage_state(hp_ratio, rad, is_mech, up_dir)
+
+
+func _draw_building_damage_overlay() -> void:
+	if _owner_building == null or not is_instance_valid(_owner_building) or _owner_building.is_destroyed or not _owner_building.is_constructed:
+		return
+	var max_hp_v: float = maxf(1.0, _owner_building.max_hp)
+	var hp_ratio: float = clampf(_owner_building.current_hp / max_hp_v, 0.0, 1.0)
+	if hp_ratio > 0.40:
+		return
+	_draw_damage_state(hp_ratio, _owner_building.footprint_radius, true, Vector2(0.0, -1.0))
+
+
+func _draw_damage_state(hp_ratio: float, radius: float, is_mechanical: bool, up_dir: Vector2) -> void:
+	var is_critical: bool = hp_ratio <= 0.20
+	var side_dir: Vector2 = Vector2(-up_dir.y, up_dir.x)
+	var puff_count: int = 3 if is_critical else 2
+	var rise_scale: float = clampf(radius * 0.72, 12.0, 32.0)
+
+	# 1. Rising translucent smoke / bio-vapor puffs (2 damaged, 3 critical)
+	for i: int in range(puff_count):
+		var phase: float = fmod(_anim_time * (0.95 if is_critical else 0.65) + float(i) / float(puff_count), 1.0)
+		var puff_a: float = sin(phase * PI) * (0.52 if is_critical else 0.36)
+		if puff_a <= 0.04:
+			continue
+		var lateral: float = (float(i) - float(puff_count - 1) * 0.5) * (radius * 0.34) + sin(_anim_time * 3.0 + float(i) * 2.1) * 2.2
+		var pos: Vector2 = side_dir * lateral + up_dir * (radius * 0.12 + phase * rise_scale)
+		var pr: float = lerpf(2.4, clampf(radius * 0.24, 4.0, 8.5), phase)
+		var puff_col: Color = Color(0.08, 0.09, 0.11, puff_a) if is_mechanical else Color(0.76, 0.94, 0.86, puff_a * 0.85)
+		draw_circle(pos, pr, puff_col)
+
+	# 2. Intermittent electrical sparks (mechanical) or bio-warning flicker (organic) — strictly <= 3 primitives
+	var spark_freq: float = 11.0 if is_critical else 6.0
+	var spark_wave: float = sin(_anim_time * spark_freq + radius * 0.3)
+	if spark_wave > (0.15 if is_critical else 0.55):
+		var spark_col: Color = Color(1.0, 0.84, 0.34, 0.95) if is_mechanical else Color(1.0, 0.44, 0.36, 0.88)
+		var anchor: Vector2 = side_dir * (radius * 0.28) + up_dir * (radius * 0.18)
+		var tip: Vector2 = anchor + (up_dir * 0.75 + side_dir * 0.65) * clampf(radius * 0.35, 5.5, 11.0)
+		var mid: Vector2 = anchor.lerp(tip, 0.5) + side_dir * (-2.6)
+		draw_polyline(PackedVector2Array([anchor, mid, tip]), spark_col, 1.6, true)
+
+	if is_critical:
+		var flare: float = 0.5 + 0.5 * sin(_anim_time * 16.0)
+		var flare_col: Color = Color(1.0, 0.36, 0.22, 0.42 + flare * 0.48) if is_mechanical else Color(1.0, 0.32, 0.38, 0.38 + flare * 0.42)
+		draw_circle(Vector2.ZERO, clampf(radius * 0.22, 3.0, 7.0), flare_col)
+		if is_mechanical and sin(_anim_time * 13.5 + 1.4) > 0.25:
+			var a2: Vector2 = -side_dir * (radius * 0.30) + up_dir * (radius * 0.12)
+			var t2: Vector2 = a2 + (up_dir * 0.6 - side_dir * 0.8) * clampf(radius * 0.34, 5.5, 10.5)
+			draw_line(a2, t2, Color(0.95, 0.96, 1.0, 0.92), 1.4, true)

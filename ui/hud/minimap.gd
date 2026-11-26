@@ -33,7 +33,27 @@ func _ready() -> void:
 			map_viewport.draw.connect(_on_map_viewport_draw)
 		if not map_viewport.gui_input.is_connected(_on_map_viewport_gui_input):
 			map_viewport.gui_input.connect(_on_map_viewport_gui_input)
+	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and not TeamManager.teams_reconfigured.is_connected(_apply_faction_theme):
+		TeamManager.teams_reconfigured.connect(_apply_faction_theme)
+	_apply_faction_theme()
 	call_deferred("_resolve_references")
+
+
+func _apply_faction_theme() -> void:
+	var fid: StringName = FactionHudTheme.resolve_local_faction_id()
+	var pal: Dictionary = FactionHudTheme.get_palette(fid)
+	var accent: Color = pal["accent"] as Color
+	var frame_panel: PanelContainer = get_node_or_null("BottomLeftAnchor/FramePanel") as PanelContainer
+	if frame_panel != null:
+		frame_panel.add_to_group("blocks_edge_pan")
+		frame_panel.add_theme_stylebox_override("panel", FactionHudTheme.make_panel_style(fid, true))
+		FactionHudTheme.attach_frame_overlay(frame_panel, fid, &"minimap")
+	var title_lbl: Label = get_node_or_null("BottomLeftAnchor/FramePanel/VBox/HeaderRow/TitleLabel") as Label
+	if title_lbl != null:
+		title_lbl.add_theme_color_override("font_color", accent)
+	if status_badge != null:
+		var badge_col: Color = (pal["primary"] as Color) if pal["style"] == &"brutalist" else Color(0.58, 0.80, 0.86, 0.88)
+		status_badge.add_theme_color_override("font_color", badge_col)
 
 
 func _resolve_references() -> void:

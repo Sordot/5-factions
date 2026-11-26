@@ -117,6 +117,7 @@ var _cooldowns_ms: Dictionary = {
 	&"ability_kinetic_barrier": 110,
 	&"ability_grav_pulse": 120,
 	&"entity_destroyed": 95,
+	&"shield_shatter": 85,
 	&"alert_under_attack": 1800,
 	&"alert_uplink": 1400,
 	&"alert_complete": 700,
@@ -828,6 +829,7 @@ func _generate_procedural_library() -> void:
 	_streams[&"ability_kinetic_barrier"] = _synth_mono_kinetic_barrier()
 	_streams[&"ability_grav_pulse"] = _synth_mono_grav_pulse()
 	_streams[&"entity_destroyed"] = _synth_destruction_boom()
+	_streams[&"shield_shatter"] = _synth_shield_shatter()
 
 	# Tactical Alerts, Veterancy, Salvage & Auto-Cast
 	_streams[&"alert_under_attack"] = _synth_alert_under_attack()
@@ -1599,4 +1601,32 @@ func _synth_mono_grav_pulse() -> AudioStreamWAV:
 		var env: float = minf(1.0, t / 0.015) * exp(-u * 3.1)
 		var wave: float = (sin(phase) * 0.55 + clampf(sin(phase * 1.5) * 1.3, -1.0, 1.0) * 0.20 + sin(phase_sub) * 0.45) * env * 0.34
 		out[i] = clampf(wave, -0.95, 0.95)
+	return _make_wav(out)
+
+
+func _synth_shield_shatter() -> AudioStreamWAV:
+	# Crisp crystalline high-frequency shield snap + rapid downward sweep + brief electric crackle (~0.22s)
+	var dur: float = 0.22
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase_hi: float = 0.0
+	var phase_sw: float = 0.0
+	var seed_val: int = 91827
+	var lp: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var f_hi: float = lerpf(2450.0, 1180.0, pow(u, 0.45))
+		var f_sw: float = lerpf(1320.0, 290.0, pow(u, 0.52))
+		phase_hi += TAU * f_hi / float(SAMPLE_RATE)
+		phase_sw += TAU * f_sw / float(SAMPLE_RATE)
+		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
+		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
+		lp = lerpf(lp, noise, 0.35)
+		var hp_crackle: float = noise - lp
+		var snap_env: float = minf(1.0, t / 0.0018) * exp(-u * 6.2)
+		var crackle_env: float = minf(1.0, t / 0.004) * exp(-u * 8.5)
+		var sig: float = (sin(phase_hi) * 0.45 + sin(phase_sw) * 0.55) * snap_env * 0.32 + hp_crackle * crackle_env * 0.24
+		out[i] = clampf(sig, -0.95, 0.95)
 	return _make_wav(out)

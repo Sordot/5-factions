@@ -57,7 +57,6 @@ var _faction_frame_overlay: Control = null
 
 func _ready() -> void:
 	_setup_dynamic_bar_styles()
-	_setup_faction_frame_overlay()
 	_selection_controller = get_node_or_null(selection_controller_path) as SelectionController
 	if _selection_controller != null:
 		_selection_controller.selection_changed.connect(_on_selection_changed)
@@ -160,41 +159,25 @@ func _setup_dynamic_bar_styles() -> void:
 		production_bar.add_theme_stylebox_override("fill", _prod_fill_style)
 
 
-func _setup_faction_frame_overlay() -> void:
-	if bottom_panel == null or _faction_frame_overlay != null:
-		return
-	_faction_frame_overlay = _FactionHudFrameOverlay.new()
-	_faction_frame_overlay.name = "FactionHudFrameOverlay"
-	_faction_frame_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_faction_frame_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_faction_frame_overlay.z_index = 4
-	bottom_panel.add_child(_faction_frame_overlay)
-
-
 func _resolve_active_hud_faction_id() -> StringName:
 	if TeamManager == null:
 		return &"genesis_v2"
 	var is_spec: bool = TeamManager.has_method("is_spectator_mode") and TeamManager.is_spectator_mode()
 	if not is_spec:
-		var local_t: int = TeamManager.get_local_human_team()
-		if local_t >= 0 and TeamManager.has_method("get_team_faction"):
-			var fid: StringName = TeamManager.get_team_faction(local_t)
-			if fid != &"":
-				return fid
-	else:
-		var inspect_team: int = -1
-		if not _active_subgroup_units.is_empty() and is_instance_valid(_active_subgroup_units[0]):
-			inspect_team = int(_active_subgroup_units[0].team)
-		elif _inspected_entity != null and is_instance_valid(_inspected_entity):
-			if _inspected_entity is Building:
-				inspect_team = int((_inspected_entity as Building).team)
-			elif _inspected_entity is Unit:
-				inspect_team = int((_inspected_entity as Unit).team)
-		if inspect_team >= 0 and TeamManager.has_method("get_team_faction"):
-			var sfid: StringName = TeamManager.get_team_faction(inspect_team)
-			if sfid != &"":
-				return sfid
-	return &"genesis_v2"
+		return FactionHudTheme.resolve_local_faction_id()
+	var inspect_team: int = -1
+	if not _active_subgroup_units.is_empty() and is_instance_valid(_active_subgroup_units[0]):
+		inspect_team = int(_active_subgroup_units[0].team)
+	elif _inspected_entity != null and is_instance_valid(_inspected_entity):
+		if _inspected_entity is Building:
+			inspect_team = int((_inspected_entity as Building).team)
+		elif _inspected_entity is Unit:
+			inspect_team = int((_inspected_entity as Unit).team)
+	if inspect_team >= 0 and TeamManager.has_method("get_team_faction"):
+		var sfid: StringName = TeamManager.get_team_faction(inspect_team)
+		if sfid != &"":
+			return sfid
+	return &"spectator"
 
 
 func _apply_faction_hud_theme(force: bool = false) -> void:
@@ -203,47 +186,13 @@ func _apply_faction_hud_theme(force: bool = false) -> void:
 		return
 	_active_hud_faction_id = fid
 
-	var fdata: FactionData = null
-	if TeamManager != null and TeamManager.has_method("get_faction_data"):
-		fdata = TeamManager.get_faction_data(fid) as FactionData
-
-	var is_mono: bool = (fid == &"monolith_os")
-	if is_mono:
-		_active_hud_accent = Color(1.0, 0.624, 0.110, 1.0) # #FF9F1C Hazard Amber
-		_active_hud_primary = Color(0.949, 0.937, 0.914, 1.0) # #F2EFE9 Off-White
-	elif fdata != null:
-		_active_hud_accent = fdata.hud_accent_color
-		_active_hud_primary = fdata.primary_color
-	else:
-		_active_hud_accent = Color(0.125, 0.961, 0.863, 1.0) # #20F5DC
-		_active_hud_primary = Color(0.90, 0.96, 0.98, 1.0)
+	var pal: Dictionary = FactionHudTheme.get_palette(fid)
+	_active_hud_accent = pal["accent"] as Color
+	_active_hud_primary = pal["primary"] as Color
 
 	if bottom_panel != null:
-		var sb: StyleBoxFlat = StyleBoxFlat.new()
-		sb.content_margin_left = 10.0
-		sb.content_margin_top = 8.0
-		sb.content_margin_right = 10.0
-		sb.content_margin_bottom = 8.0
-		if is_mono:
-			sb.bg_color = Color(0.150, 0.165, 0.185, 0.96)
-			sb.set_corner_radius_all(0)
-			sb.set_border_width_all(3)
-			sb.border_color = Color(0.039, 0.051, 0.071, 1.0) # #0A0D12
-			sb.shadow_color = Color(0.03, 0.04, 0.06, 0.78)
-			sb.shadow_size = 1
-			sb.shadow_offset = Vector2(3.0, 3.0)
-		else:
-			sb.bg_color = Color(0.040, 0.080, 0.120, 0.92)
-			sb.set_corner_radius_all(6)
-			sb.set_border_width_all(2)
-			sb.border_color = Color(_active_hud_accent.r, _active_hud_accent.g, _active_hud_accent.b, 0.86)
-			sb.shadow_color = Color(0.0, 0.03, 0.06, 0.55)
-			sb.shadow_size = 6
-			sb.shadow_offset = Vector2(0.0, 2.0)
-		bottom_panel.add_theme_stylebox_override("panel", sb)
-
-	if _faction_frame_overlay != null and _faction_frame_overlay.has_method("configure"):
-		_faction_frame_overlay.call("configure", fid, _active_hud_accent, _active_hud_primary)
+		bottom_panel.add_theme_stylebox_override("panel", FactionHudTheme.make_panel_style(fid, false))
+		_faction_frame_overlay = FactionHudTheme.attach_frame_overlay(bottom_panel, fid, &"selection")
 
 	if command_grid != null:
 		for child: Node in command_grid.get_children():
@@ -1988,88 +1937,3 @@ func _refresh_single_ability_button(ability_id: StringName) -> void:
 		var display_cd: float = 0.0 if min_cd == INF else min_cd
 		btn.disabled = false if ability.allow_autocast else true
 		btn.set_tile_state("A" if ac_on else "", _active_hud_accent, false, false, false, display_cd, maxf(0.1, ability.cooldown_duration))
-
-
-# =============================================================================
-# PROCEDURAL FACTION HUD BORDER & FLAIR OVERLAY
-# =============================================================================
-
-class _FactionHudFrameOverlay extends Control:
-	var _faction_id: StringName = &"genesis_v2"
-	var _accent: Color = Color(0.125, 0.961, 0.863, 1.0)
-	var _primary: Color = Color(0.90, 0.96, 0.98, 1.0)
-
-	func configure(faction_id: StringName, accent_col: Color, primary_col: Color) -> void:
-		_faction_id = faction_id
-		_accent = accent_col
-		_primary = primary_col
-		queue_redraw()
-
-	func _draw() -> void:
-		var w: float = size.x
-		var h: float = size.y
-		if w < 40.0 or h < 40.0:
-			return
-
-		if _faction_id == &"monolith_os":
-			var amber: Color = Color(1.0, 0.624, 0.110, 1.0) # #FF9F1C
-			var offwhite: Color = Color(0.949, 0.937, 0.914, 0.86) # #F2EFE9
-			var ink: Color = Color(0.039, 0.051, 0.071, 0.92)
-
-			# Crisp inner off-white frame inside the thick ink outer border
-			draw_rect(Rect2(4.0, 4.0, w - 8.0, h - 8.0), offwhite, false, 1.4)
-
-			# Subtle diagonal hazard-stripe bar along the top edge above the right Command Card (last 204px)
-			var bar_x: float = maxf(8.0, w - 208.0)
-			var bar_w: float = w - bar_x - 6.0
-			draw_rect(Rect2(bar_x, 5.0, bar_w, 4.5), ink, true)
-			var sx: float = bar_x + 2.0
-			while sx < bar_x + bar_w - 6.0:
-				draw_line(Vector2(sx, 9.2), Vector2(sx + 5.0, 5.2), Color(amber.r, amber.g, amber.b, 0.72), 2.0)
-				sx += 11.0
-
-			# Bold Hazard Amber L-brackets on Top-Left & Bottom-Right corners
-			var arm: float = 16.0
-			draw_line(Vector2(1.5, 1.5), Vector2(1.5 + arm, 1.5), amber, 3.0)
-			draw_line(Vector2(1.5, 1.5), Vector2(1.5, 1.5 + arm), amber, 3.0)
-			draw_line(Vector2(w - 1.5, h - 1.5), Vector2(w - 1.5 - arm, h - 1.5), amber, 3.0)
-			draw_line(Vector2(w - 1.5, h - 1.5), Vector2(w - 1.5, h - 1.5 - arm), amber, 3.0)
-			# Subtle off-white secondary opposite corners
-			draw_line(Vector2(w - 1.5, 1.5), Vector2(w - 1.5 - 10.0, 1.5), offwhite, 2.0)
-			draw_line(Vector2(w - 1.5, 1.5), Vector2(w - 1.5, 1.5 + 10.0), offwhite, 2.0)
-			draw_line(Vector2(1.5, h - 1.5), Vector2(1.5 + 10.0, h - 1.5), offwhite, 2.0)
-			draw_line(Vector2(1.5, h - 1.5), Vector2(1.5, h - 1.5 - 10.0), offwhite, 2.0)
-
-			# Procedural halftone dot-matrix band along lower-right corner
-			var ht_x0: float = maxf(12.0, w - 76.0)
-			var ht_y0: float = maxf(12.0, h - 22.0)
-			var row: int = 0
-			var y: float = ht_y0
-			while y < h - 6.0:
-				var x: float = ht_x0 + (3.5 if (row % 2 == 1) else 0.0)
-				while x < w - 7.0:
-					draw_circle(Vector2(x, y), 1.1, Color(amber.r, amber.g, amber.b, 0.24))
-					x += 7.0
-				y += 6.0
-				row += 1
-		else:
-			# GENESIS_V2 (Technozen / Y2K Bio-Synth) & future faction fallback tinted by _accent
-			var glow_line: Color = Color(_accent.r, _accent.g, _accent.b, 0.62)
-			var soft_line: Color = Color(_accent.r, _accent.g, _accent.b, 0.24)
-			# Thin top & bottom glowing telemetry scanline accents
-			draw_line(Vector2(18.0, 2.5), Vector2(w - 18.0, 2.5), glow_line, 1.4, true)
-			draw_line(Vector2(28.0, h - 2.5), Vector2(w - 28.0, h - 2.5), soft_line, 1.2, true)
-			# Bioluminescent corner nodes (3px dot + soft outer halo ring)
-			var corners: PackedVector2Array = PackedVector2Array([
-				Vector2(8.0, 8.0),
-				Vector2(w - 8.0, 8.0),
-				Vector2(w - 8.0, h - 8.0),
-				Vector2(8.0, h - 8.0),
-			])
-			for pt: Vector2 in corners:
-				draw_circle(pt, 5.2, Color(_accent.r, _accent.g, _accent.b, 0.14))
-				draw_arc(pt, 4.4, 0.0, TAU, 14, Color(_accent.r, _accent.g, _accent.b, 0.55), 1.1, true)
-				draw_circle(pt, 2.2, _accent)
-			# Subtle vertical circuit accent ticks along the panel left/right inner edges
-			draw_line(Vector2(3.5, 22.0), Vector2(3.5, h - 22.0), soft_line, 1.1)
-			draw_line(Vector2(w - 3.5, 22.0), Vector2(w - 3.5, h - 22.0), soft_line, 1.1)
