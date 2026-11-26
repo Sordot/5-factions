@@ -140,7 +140,7 @@ func _has_elevation_sight(owner_unit: Unit, target_pos: Vector2) -> bool:
 	var fog: FogOfWarSystem = owner_unit.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
 	if fog == null or not fog.fog_enabled:
 		return true
-	return fog.can_team_see_target_elevation(int(owner_unit.team), owner_unit.global_position, target_pos)
+	return fog.is_world_pos_visible_to_team(int(owner_unit.team), target_pos)
 
 
 func is_valid_target(owner_unit: Unit, candidate: Variant) -> bool:
@@ -431,10 +431,11 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 			mfx.setup_muzzle_shock(tracer_origin, aim_d, shock_r, shot_col, is_brutal_ms)
 
 	if AudioManager != null and _is_pos_audible(owner_unit, tracer_origin, tracer_end):
+		var sfx_pos: Vector2 = owner_unit.global_position if _is_point_visible_local(owner_unit, tracer_origin) else tracer_end
 		if owner_unit.is_deployed() and tracer_style == &"mortar" and owner_unit.data != null and owner_unit.data.has_tag(&"mechanical"):
-			AudioManager.play_sfx(&"weapon_mono_siege", -3.0, 0.04, owner_unit.global_position, true)
+			AudioManager.play_sfx(&"weapon_mono_siege", -3.0, 0.04, sfx_pos, true)
 		else:
-			AudioManager.play_weapon_for_unit_data(owner_unit.data, owner_unit.global_position)
+			AudioManager.play_weapon_for_unit_data(owner_unit.data, sfx_pos)
 		if AudioManager.has_method("notify_combat_activity"):
 			AudioManager.call("notify_combat_activity", 0.35)
 
@@ -689,14 +690,16 @@ func _spawn_attack_tracer(
 ) -> void:
 	if owner_unit.get_parent() == null:
 		return
-	if not _is_vfx_visible(owner_unit, from_pos, to_pos):
+	var from_vis: bool = _is_point_visible_local(owner_unit, from_pos)
+	var to_vis: bool = _is_point_visible_local(owner_unit, to_pos)
+	if not from_vis and not to_vis:
 		return
 	var tracer: AttackTracer = VFXPool.acquire_attack_tracer(50) if VFXPool != null else null
 	if tracer == null:
 		tracer = ATTACK_TRACER_SCRIPT.new()
 		tracer.z_index = 50
 		owner_unit.get_parent().add_child(tracer)
-	tracer.setup(from_pos, to_pos, tracer_color, width, tracer_duration, arc_height, style)
+	tracer.setup(from_pos, to_pos, tracer_color, width, tracer_duration, arc_height, style, not from_vis)
 
 
 func _spawn_mortar_shell_vfx(
@@ -763,21 +766,23 @@ func _trigger_camera_shake(tree: SceneTree, intensity: float, duration: float, w
 		cam.call("add_camera_shake", intensity, duration, world_pos)
 
 
-func _is_vfx_visible(owner_unit: Unit, from_pos: Vector2, to_pos: Vector2) -> bool:
+func _is_point_visible_local(owner_unit: Unit, world_pos: Vector2) -> bool:
 	if owner_unit == null or not owner_unit.is_inside_tree():
 		return false
-	var fog: Node = owner_unit.get_tree().get_first_node_in_group("fog_of_war")
-	if fog != null and fog.has_method("is_world_pos_visible") and fog.get("fog_enabled"):
-		return bool(fog.call("is_world_pos_visible", from_pos)) or bool(fog.call("is_world_pos_visible", to_pos))
+	var fog: FogOfWarSystem = owner_unit.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	if fog != null and fog.fog_enabled:
+		return fog.is_world_pos_visible_strict(world_pos)
 	return true
+
+
+func _is_vfx_visible(owner_unit: Unit, from_pos: Vector2, to_pos: Vector2) -> bool:
+	return _is_point_visible_local(owner_unit, from_pos) or _is_point_visible_local(owner_unit, to_pos)
 
 
 func _is_pos_audible(owner_unit: Unit, from_pos: Vector2, to_pos: Vector2) -> bool:
 	if owner_unit == null or not owner_unit.is_inside_tree():
 		return false
-	if owner_unit.team == Unit.Team.PLAYER:
+	var is_local: bool = TeamManager.is_team_controlled_by_local_human(int(owner_unit.team)) if TeamManager != null else (owner_unit.team == Unit.Team.PLAYER)
+	if is_local:
 		return true
-	var fog: Node = owner_unit.get_tree().get_first_node_in_group("fog_of_war")
-	if fog != null and fog.has_method("is_world_pos_visible") and fog.get("fog_enabled"):
-		return bool(fog.call("is_world_pos_visible", from_pos)) or bool(fog.call("is_world_pos_visible", to_pos))
-	return true
+	return _is_vfx_visible(owner_unit, from_pos, to_pos)

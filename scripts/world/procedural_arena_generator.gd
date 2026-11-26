@@ -11,6 +11,11 @@ const SENSOR_RELAY_SCENE: PackedScene = preload("res://scenes/world/sensor_relay
 const LANDMARK_SCENE: PackedScene = preload("res://scenes/world/map_landmark.tscn")
 const TERRAIN_OBSTACLE_SCRIPT: GDScript = preload("res://scripts/world/terrain_obstacle.gd")
 
+const BASE_PLATEAU_EXCLUSION_DEFAULT: float = 560.0
+const BASE_PLATEAU_EXCLUSION_MIN: float = 520.0
+const RESOURCE_PLATEAU_MIN_CLEARANCE: float = 115.0
+const RAMP_APPROACH_CLEAR_DEPTH: float = 135.0
+
 const BIOME_POOL: Array = [&"vat_basin", &"twin_causeway", &"quad_nexus"]
 const BIOME_PALETTES: Dictionary = {
 	&"vat_basin": {
@@ -42,6 +47,9 @@ var _is_four_way: bool = false
 var _reserved_circles: Array[Dictionary] = [] # {"pos": Vector2, "r": float}
 var _reserved_corridors: Array[Dictionary] = [] # {"a": Vector2, "b": Vector2, "half_w": float}
 var _placed_solids: Array[Dictionary] = [] # {"pos": Vector2, "r": float}
+var _placed_plateaus: Array[Dictionary] = [] # {"pos": Vector2, "poly": PackedVector2Array}
+var _ramp_clear_zones: Array[Dictionary] = [] # {"a": Vector2, "b": Vector2, "out_n": Vector2, "depth": float}
+var _resource_positions: Array[Vector2] = []
 var _spawn_positions: Array[Vector2] = []
 
 
@@ -83,7 +91,7 @@ func generate_arena() -> void:
 	_is_four_way = (p_count >= 3)
 
 	if _is_four_way:
-		generated_bounds = Rect2(-1400.0, -1050.0, 2800.0, 2100.0)
+		generated_bounds = Rect2(-1500.0, -1120.0, 3000.0, 2240.0)
 	else:
 		generated_bounds = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 
@@ -95,6 +103,9 @@ func generate_arena() -> void:
 	_reserved_circles.clear()
 	_reserved_corridors.clear()
 	_placed_solids.clear()
+	_placed_plateaus.clear()
+	_ramp_clear_zones.clear()
+	_resource_positions.clear()
 	_spawn_positions.clear()
 
 	_sync_scene_bounds_and_biome(scene_root)
@@ -120,11 +131,11 @@ func generate_arena() -> void:
 	# Step 4 — Symmetric Natural & Contested Mid Expansions
 	_spawn_expansions(res_parent, nat_base_pos, richness, yield_mult)
 
-	# Step 5 — High-Ground Plateaus (when proc_map_high_ground >= 1)
+	# Step 5 — Spacious High-Ground Plateaus with Wide Assault Ramps (180-220 px)
 	if hg_level >= 1:
 		_spawn_high_ground_plateaus(hg_parent, hg_level)
 
-	# Step 6 — Symmetric Cover Monoliths & Barricaded Flanks
+	# Step 6 — Symmetric Cover Monoliths & Barricaded Flanks (strictly clear of ramp zones)
 	_spawn_cover_monoliths(obs_parent, chokes)
 	if chokes >= 1:
 		_spawn_flank_barricades(bar_parent)
@@ -254,8 +265,8 @@ func _spawn_hyper_uplink(obj_parent: Node, lm_parent: Node) -> void:
 func _spawn_corner_anchors_and_corridors(anchor_parent: Node, lm_parent: Node) -> Vector2:
 	# Corner anchor inset safely from arena borders with slight deterministic seed jitter
 	var base_spawn: Vector2 = Vector2(
-		-_rng.randf_range(990.0, 1055.0) if _is_four_way else -_rng.randf_range(890.0, 965.0),
-		_rng.randf_range(670.0, 735.0) if _is_four_way else _rng.randf_range(560.0, 640.0)
+		-_rng.randf_range(1080.0, 1145.0) if _is_four_way else -_rng.randf_range(920.0, 985.0),
+		_rng.randf_range(735.0, 795.0) if _is_four_way else _rng.randf_range(585.0, 650.0)
 	)
 	_spawn_positions = _mirror_points(base_spawn)
 
@@ -264,25 +275,25 @@ func _spawn_corner_anchors_and_corridors(anchor_parent: Node, lm_parent: Node) -
 	var nat_base: Vector2 = Vector2.ZERO
 	if _is_four_way:
 		if nat_along_x:
-			nat_base = Vector2(-_rng.randf_range(380.0, 470.0), _rng.randf_range(760.0, 840.0))
+			nat_base = Vector2(-_rng.randf_range(400.0, 490.0), _rng.randf_range(830.0, 910.0))
 		else:
-			nat_base = Vector2(-_rng.randf_range(1030.0, 1120.0), _rng.randf_range(260.0, 350.0))
+			nat_base = Vector2(-_rng.randf_range(1130.0, 1215.0), _rng.randf_range(260.0, 350.0))
 	else:
 		if nat_along_x:
-			nat_base = Vector2(-_rng.randf_range(240.0, 360.0), _rng.randf_range(680.0, 760.0))
+			nat_base = Vector2(-_rng.randf_range(240.0, 360.0), _rng.randf_range(700.0, 775.0))
 		else:
-			nat_base = Vector2(-_rng.randf_range(930.0, 1020.0), -_rng.randf_range(60.0, 180.0))
+			nat_base = Vector2(-_rng.randf_range(940.0, 1025.0), -_rng.randf_range(60.0, 180.0))
 
 	var nat_positions: Array[Vector2] = _mirror_points(nat_base)
 
 	var flank_wp_base: Vector2 = Vector2(
-		-_rng.randf_range(1140.0, 1200.0) if _is_four_way else -_rng.randf_range(1030.0, 1100.0),
+		-_rng.randf_range(1230.0, 1300.0) if _is_four_way else -_rng.randf_range(1040.0, 1110.0),
 		0.0
 	)
 	if not nat_along_x:
 		flank_wp_base = Vector2(
 			0.0,
-			_rng.randf_range(820.0, 880.0) if _is_four_way else _rng.randf_range(730.0, 790.0)
+			_rng.randf_range(880.0, 950.0) if _is_four_way else _rng.randf_range(740.0, 800.0)
 		)
 	var flank_wps: Array[Vector2] = _mirror_points(flank_wp_base)
 
@@ -308,7 +319,7 @@ func _spawn_corner_anchors_and_corridors(anchor_parent: Node, lm_parent: Node) -
 			lm.set("label_offset", Vector2(0.0, 102.0 if spos.y > 0.0 else -102.0))
 			lm_parent.add_child(lm)
 
-		_reserved_circles.append({"pos": spos, "r": 290.0})
+		_reserved_circles.append({"pos": spos, "r": 295.0})
 		var npos: Vector2 = nat_positions[i]
 		_reserved_circles.append({"pos": npos, "r": 185.0})
 
@@ -372,9 +383,8 @@ func _spawn_expansions(res_parent: Node, nat_base: Vector2, richness: int, yield
 
 	# Contested side-pocket expansion on Rich / Abundant
 	if richness >= 1:
-		var pocket_base: Vector2 = Vector2(-_rng.randf_range(860.0, 960.0), -_rng.randf_range(520.0, 620.0))
+		var pocket_base: Vector2 = Vector2(-_rng.randf_range(880.0, 975.0), -_rng.randf_range(540.0, 640.0))
 		if _is_four_way:
-			# Edge midpoint pockets (West/East + North/South)
 			var w_mid: Vector2 = Vector2(generated_bounds.position.x + 175.0, 0.0)
 			var n_mid: Vector2 = Vector2(0.0, generated_bounds.position.y + 165.0)
 			for mid_pt: Vector2 in [w_mid, -w_mid, n_mid, -n_mid]:
@@ -411,7 +421,30 @@ func _spawn_single_resource(parent: Node, scene: PackedScene, pos: Vector2, yiel
 		rn.max_amount = scaled
 		rn.remaining_amount = scaled
 	parent.add_child(rn)
+	_resource_positions.append(pos)
 	_reserved_circles.append({"pos": pos, "r": 108.0})
+
+
+## Deterministic chamfered octagon whose cardinal edges have exact controllable widths in [180, 220] px:
+## - Edge 0 (Top):   length = width - 2 * chamfer_x
+## - Edge 2 (Right): length = height - 2 * chamfer_y
+## - Edge 4 (Bot):   length = width - 2 * chamfer_x
+## - Edge 6 (Left):  length = height - 2 * chamfer_y
+func _build_wide_ramp_octagon(total_w: float, total_h: float, ramp_h_len: float, ramp_v_len: float) -> PackedVector2Array:
+	var hw: float = total_w * 0.5
+	var hh: float = total_h * 0.5
+	var cx: float = clampf((total_w - ramp_h_len) * 0.5, 24.0, hw - 40.0)
+	var cy: float = clampf((total_h - ramp_v_len) * 0.5, 24.0, hh - 40.0)
+	return PackedVector2Array([
+		Vector2(-hw + cx, -hh),
+		Vector2(hw - cx, -hh),
+		Vector2(hw, -hh + cy),
+		Vector2(hw, hh - cy),
+		Vector2(hw - cx, hh),
+		Vector2(-hw + cx, hh),
+		Vector2(-hw, hh - cy),
+		Vector2(-hw, -hh + cy),
+	])
 
 
 func _spawn_high_ground_plateaus(hg_parent: Node, hg_level: int) -> void:
@@ -419,55 +452,296 @@ func _spawn_high_ground_plateaus(hg_parent: Node, hg_level: int) -> void:
 	var tint: Color = pal["plateau_tint"] as Color
 
 	var target_sets: int = 2 if (hg_level >= 2 and not _is_four_way) else 1
-	var half_w: float = 112.0 if hg_level >= 2 else 96.0
-	var half_h: float = 88.0 if hg_level >= 2 else 78.0
-	var check_r: float = maxf(half_w, half_h) + 36.0
-
-	# Chamfered hexagonal plateau with 2 wide open ramp edges (>= 140px): edge 0 (top/center) & edge 5 (west/base)
-	var chamfer: float = 34.0
-	var base_poly: PackedVector2Array = PackedVector2Array([
-		Vector2(-half_w, -half_h),
-		Vector2(half_w - chamfer, -half_h),
-		Vector2(half_w, -half_h + chamfer),
-		Vector2(half_w, half_h),
-		Vector2(-half_w + chamfer, half_h),
-		Vector2(-half_w, half_h - chamfer),
-	])
-	var ramp_indices: PackedInt32Array = PackedInt32Array([0, 5])
 
 	for set_i: int in range(target_sets):
+		var base_poly: PackedVector2Array
+		var ramp_options: Array[PackedInt32Array] = []
+		if set_i == 0:
+			# Major Contested Mid-Field Ridge:
+			# - Mid Plateaus: 380x280 px (ramps: 200 px & 192 px)
+			# - High Ground+: 430x305 px (ramps: 212 px & 200 px) in 2P, or 390x280 px (202 px & 194 px) in 4P
+			var maj_w: float = 380.0 if hg_level == 1 else (390.0 if _is_four_way else 430.0)
+			var maj_h: float = 280.0 if hg_level == 1 else (280.0 if _is_four_way else 305.0)
+			var rh_len: float = 200.0 if hg_level == 1 else (202.0 if _is_four_way else 212.0)
+			var rv_len: float = 192.0 if hg_level == 1 else (194.0 if _is_four_way else 200.0)
+			base_poly = _build_wide_ramp_octagon(maj_w, maj_h, rh_len, rv_len)
+			# Always 2 wide ramps (one center/flank-facing, one base/natural-facing)
+			ramp_options = [
+				PackedInt32Array([0, 6]),
+				PackedInt32Array([4, 2]),
+				PackedInt32Array([0, 2]),
+				PackedInt32Array([4, 6]),
+			]
+		else:
+			# Secondary Flank Lookout Ledge (High Ground+ 2P): 350x255 px with 1 wide ramp (194 px or 190 px)
+			base_poly = _build_wide_ramp_octagon(350.0, 255.0, 194.0, 190.0)
+			ramp_options = [
+				PackedInt32Array([2]),
+				PackedInt32Array([4]),
+				PackedInt32Array([0]),
+				PackedInt32Array([6]),
+			]
+
 		var placed: bool = false
-		for _attempt: int in range(36):
-			var cand: Vector2 = Vector2.ZERO
-			if set_i == 0:
-				# Inner tactical overlook between base and Hyper-Uplink Plaza
-				cand = Vector2(
-					-_rng.randf_range(310.0, 500.0),
-					_rng.randf_range(260.0, 440.0)
-				)
-			else:
-				# Secondary outer flank high-ground terrace (2P Elevated mode)
-				cand = Vector2(
-					-_rng.randf_range(520.0, 740.0),
-					-_rng.randf_range(220.0, 430.0)
-				)
-			if not _is_mirrored_spot_clear(cand, check_r, 136.0):
-				continue
-			var pts: Array[Vector2] = _mirror_points(cand)
-			for sym_i: int in range(pts.size()):
-				var pl: HighGroundPlateau = HIGH_GROUND_SCENE.instantiate() as HighGroundPlateau
-				if pl != null:
-					pl.name = "ProcPlateau_%d_%d" % [set_i, sym_i]
-					pl.position = pts[sym_i]
-					pl.plateau_polygon = _mirror_polygon(base_poly, sym_i)
-					pl.ramp_edge_indices = ramp_indices
-					pl.biome_tint = tint
-					hg_parent.add_child(pl)
-					_placed_solids.append({"pos": pts[sym_i], "r": check_r})
-			placed = true
-			break
-		if not placed:
+		# Pass 0 enforces strict 560 px base clearance; Pass 1 relaxes only to the 520 px hard minimum.
+		for excl_r: float in [BASE_PLATEAU_EXCLUSION_DEFAULT, BASE_PLATEAU_EXCLUSION_MIN]:
+			if placed:
+				break
+			for _attempt: int in range(60):
+				var cand: Vector2 = _sample_plateau_candidate(set_i)
+				var chosen_ramps: PackedInt32Array = _pick_valid_ramps_for_plateau(cand, base_poly, ramp_options, excl_r)
+				if chosen_ramps.is_empty():
+					continue
+				_commit_mirrored_plateau(hg_parent, set_i, cand, base_poly, chosen_ramps, tint)
+				placed = true
+				break
+
+
+func _sample_plateau_candidate(set_i: int) -> Vector2:
+	if _is_four_way:
+		return Vector2(
+			-_rng.randf_range(340.0, 620.0),
+			_rng.randf_range(260.0, 500.0)
+		)
+	if set_i == 0:
+		# Spacious mid-field ridges in either the off-diagonal overlook quadrant or mid-flank overlook
+		if _rng.randf() < 0.72:
+			return Vector2(
+				-_rng.randf_range(280.0, 620.0),
+				-_rng.randf_range(220.0, 520.0)
+			)
+		return Vector2(
+			-_rng.randf_range(220.0, 420.0),
+			_rng.randf_range(210.0, 460.0)
+		)
+	# Secondary flank lookout ledge (High Ground+ 2P)
+	return Vector2(
+		-_rng.randf_range(250.0, 740.0),
+		_rng.randf_range(-560.0, 520.0)
+	)
+
+
+func _pick_valid_ramps_for_plateau(
+	base_pos: Vector2,
+	base_poly: PackedVector2Array,
+	ramp_options: Array[PackedInt32Array],
+	base_excl_r: float
+) -> PackedInt32Array:
+	if not _is_plateau_body_clear(base_pos, base_poly, base_excl_r):
+		return PackedInt32Array()
+	for r_opt: PackedInt32Array in ramp_options:
+		if _are_mirrored_ramps_clear(base_pos, base_poly, r_opt):
+			return r_opt
+	return PackedInt32Array()
+
+
+func _commit_mirrored_plateau(
+	hg_parent: Node,
+	set_i: int,
+	base_pos: Vector2,
+	base_poly: PackedVector2Array,
+	ramp_indices: PackedInt32Array,
+	tint: Color
+) -> void:
+	var pts: Array[Vector2] = _mirror_points(base_pos)
+	var bound_r: float = _polygon_bounding_radius(base_poly)
+	for sym_i: int in range(pts.size()):
+		var local_poly: PackedVector2Array = _mirror_polygon(base_poly, sym_i)
+		var world_poly: PackedVector2Array = _translate_polygon(local_poly, pts[sym_i])
+		var pl: HighGroundPlateau = HIGH_GROUND_SCENE.instantiate() as HighGroundPlateau
+		if pl != null:
+			pl.name = "ProcPlateau_%d_%d" % [set_i, sym_i]
+			pl.position = pts[sym_i]
+			pl.plateau_polygon = local_poly
+			pl.ramp_edge_indices = ramp_indices
+			pl.biome_tint = tint
+			hg_parent.add_child(pl)
+		_placed_plateaus.append({"pos": pts[sym_i], "poly": world_poly})
+		_placed_solids.append({"pos": pts[sym_i], "r": bound_r + 12.0})
+		for rz: Dictionary in _extract_ramp_clear_zones(world_poly, ramp_indices):
+			_ramp_clear_zones.append(rz)
+
+
+func _translate_polygon(poly: PackedVector2Array, offset: Vector2) -> PackedVector2Array:
+	var out: PackedVector2Array = PackedVector2Array()
+	out.resize(poly.size())
+	for i: int in range(poly.size()):
+		out[i] = poly[i] + offset
+	return out
+
+
+func _polygon_bounding_radius(poly: PackedVector2Array) -> float:
+	var max_r: float = 0.0
+	for v: Vector2 in poly:
+		max_r = maxf(max_r, v.length())
+	return max_r
+
+
+func _point_to_polygon_distance(pt: Vector2, world_poly: PackedVector2Array) -> float:
+	if Geometry2D.is_point_in_polygon(pt, world_poly):
+		return 0.0
+	var best: float = INF
+	var n: int = world_poly.size()
+	for i: int in range(n):
+		var d: float = _point_to_segment_dist(pt, world_poly[i], world_poly[(i + 1) % n])
+		if d < best:
+			best = d
+	return best
+
+
+func _polygons_min_distance(poly_a: PackedVector2Array, poly_b: PackedVector2Array) -> float:
+	var best: float = INF
+	for va: Vector2 in poly_a:
+		var da: float = _point_to_polygon_distance(va, poly_b)
+		if da < best:
+			best = da
+	for vb: Vector2 in poly_b:
+		var db: float = _point_to_polygon_distance(vb, poly_a)
+		if db < best:
+			best = db
+	return best
+
+
+func _is_plateau_body_clear(base_pos: Vector2, base_poly: PackedVector2Array, base_excl_r: float) -> bool:
+	var pts: Array[Vector2] = _mirror_points(base_pos)
+	var world_polys: Array[PackedVector2Array] = []
+	var border_rect: Rect2 = generated_bounds.grow(-78.0)
+
+	for sym_i: int in range(pts.size()):
+		var wpoly: PackedVector2Array = _translate_polygon(_mirror_polygon(base_poly, sym_i), pts[sym_i])
+		for v: Vector2 in wpoly:
+			if not border_rect.has_point(v):
+				return false
+		# 1. Strict base exclusion clearance (>= 560 px default, >= 520 px hard minimum)
+		for spos: Vector2 in _spawn_positions:
+			if _point_to_polygon_distance(spos, wpoly) < base_excl_r:
+				return false
+		# 2. Central Hyper-Uplink clearance
+		if _point_to_polygon_distance(Vector2.ZERO, wpoly) < 195.0:
+			return false
+		# 3. Resource node clearance (>= 115 px from every starter & expansion node)
+		for rpos: Vector2 in _resource_positions:
+			if _point_to_polygon_distance(rpos, wpoly) < RESOURCE_PLATEAU_MIN_CLEARANCE:
+				return false
+		# 4. Primary base exit corridor clearance (avoid boxing spawns)
+		for cor: Dictionary in _reserved_corridors:
+			var ca: Vector2 = cor["a"] as Vector2
+			var cb: Vector2 = cor["b"] as Vector2
+			var hw: float = float(cor["half_w"]) * 0.78
+			for v: Vector2 in wpoly:
+				if _point_to_segment_dist(v, ca, cb) < hw:
+					return false
+			if _point_to_segment_dist(pts[sym_i], ca, cb) < hw + 54.0:
+				return false
+		# 5. Separation from previously placed plateaus
+		for prev: Dictionary in _placed_plateaus:
+			if _polygons_min_distance(wpoly, prev["poly"] as PackedVector2Array) < 150.0:
+				return false
+		# 6. Do not encroach on existing plateaus' ramp clear zones
+		for v: Vector2 in wpoly:
+			if _overlaps_any_ramp_zone(v, 30.0):
+				return false
+		world_polys.append(wpoly)
+
+	# Ensure mirrored copies don't crowd each other across symmetry axes
+	for i: int in range(world_polys.size()):
+		for j: int in range(i + 1, world_polys.size()):
+			if _polygons_min_distance(world_polys[i], world_polys[j]) < 150.0:
+				return false
+
+	return true
+
+
+func _extract_ramp_clear_zones(world_poly: PackedVector2Array, ramp_indices: PackedInt32Array) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var n: int = world_poly.size()
+	if n < 3:
+		return out
+	var signed_area2: float = 0.0
+	for i: int in range(n):
+		var v0: Vector2 = world_poly[i]
+		var v1: Vector2 = world_poly[(i + 1) % n]
+		signed_area2 += (v0.x * v1.y - v1.x * v0.y)
+	var is_cw: bool = signed_area2 >= 0.0
+
+	for r_idx: int in ramp_indices:
+		if r_idx < 0 or r_idx >= n:
 			continue
+		var a: Vector2 = world_poly[r_idx]
+		var b: Vector2 = world_poly[(r_idx + 1) % n]
+		var edge: Vector2 = b - a
+		var elen: float = edge.length()
+		if elen <= 1.0:
+			continue
+		var dir: Vector2 = edge / elen
+		var out_n: Vector2 = Vector2(dir.y, -dir.x) if is_cw else Vector2(-dir.y, dir.x)
+		out.append({
+			"a": a,
+			"b": b,
+			"dir": dir,
+			"len": elen,
+			"out_n": out_n,
+			"depth": RAMP_APPROACH_CLEAR_DEPTH,
+		})
+	return out
+
+
+func _are_mirrored_ramps_clear(base_pos: Vector2, base_poly: PackedVector2Array, ramp_indices: PackedInt32Array) -> bool:
+	var pts: Array[Vector2] = _mirror_points(base_pos)
+	var world_polys: Array[PackedVector2Array] = []
+	for sym_i: int in range(pts.size()):
+		world_polys.append(_translate_polygon(_mirror_polygon(base_poly, sym_i), pts[sym_i]))
+
+	var safe_arena: Rect2 = generated_bounds.grow(-38.0)
+
+	for sym_i: int in range(world_polys.size()):
+		var zones: Array[Dictionary] = _extract_ramp_clear_zones(world_polys[sym_i], ramp_indices)
+		for z: Dictionary in zones:
+			var a: Vector2 = z["a"] as Vector2
+			var b: Vector2 = z["b"] as Vector2
+			var out_n: Vector2 = z["out_n"] as Vector2
+			var depth: float = float(z["depth"])
+			# Verify ramp edge is strictly >= 180 px wide
+			if float(z["len"]) < HighGroundPlateau.DEFAULT_WIDE_RAMP_MIN_WIDTH:
+				return false
+			# Sample 3 across x 3 deep points covering the full width x 135 px ramp approach rectangle
+			for du: float in [0.25, 0.62, 1.0]:
+				for su: float in [0.08, 0.50, 0.92]:
+					var sp: Vector2 = a.lerp(b, su) + out_n * (depth * du)
+					if not safe_arena.has_point(sp):
+						return false
+					if sp.distance_to(Vector2.ZERO) < 165.0:
+						return false
+					for spawn_p: Vector2 in _spawn_positions:
+						if sp.distance_to(spawn_p) < 270.0:
+							return false
+					for rpos: Vector2 in _resource_positions:
+						if sp.distance_to(rpos) < 82.0:
+							return false
+					for other_i: int in range(world_polys.size()):
+						if other_i == sym_i:
+							continue
+						if _point_to_polygon_distance(sp, world_polys[other_i]) < 36.0:
+							return false
+					for prev: Dictionary in _placed_plateaus:
+						if _point_to_polygon_distance(sp, prev["poly"] as PackedVector2Array) < 36.0:
+							return false
+	return true
+
+
+func _overlaps_any_ramp_zone(pt: Vector2, radius: float) -> bool:
+	for z: Dictionary in _ramp_clear_zones:
+		var a: Vector2 = z["a"] as Vector2
+		var dir: Vector2 = z["dir"] as Vector2
+		var elen: float = float(z["len"])
+		var out_n: Vector2 = z["out_n"] as Vector2
+		var depth: float = float(z["depth"])
+		var rel: Vector2 = pt - a
+		var along: float = rel.dot(dir)
+		var out_d: float = rel.dot(out_n)
+		if along >= -radius and along <= (elen + radius) and out_d >= -radius and out_d <= (depth + radius):
+			return true
+	return false
 
 
 func _spawn_cover_monoliths(obs_parent: Node, chokes: int) -> void:
@@ -486,7 +760,7 @@ func _spawn_cover_monoliths(obs_parent: Node, chokes: int) -> void:
 		var obs_size: Vector2 = Vector2(w, h)
 		var foot_r: float = maxf(w, h) * 0.5 + 14.0
 
-		for _attempt: int in range(40):
+		for _attempt: int in range(44):
 			var cand: Vector2 = Vector2(
 				_rng.randf_range(generated_bounds.position.x + 210.0, -140.0),
 				_rng.randf_range(140.0, generated_bounds.end.y - 210.0) if _is_four_way else _rng.randf_range(generated_bounds.position.y + 210.0, generated_bounds.end.y - 210.0)
@@ -506,12 +780,12 @@ func _spawn_cover_monoliths(obs_parent: Node, chokes: int) -> void:
 
 
 func _spawn_flank_barricades(bar_parent: Node) -> void:
-	# Place 2 (2P) or 4 (4P) symmetric destructible barricades on outer flank shortcuts (never main center lane)
+	# Place 2 (2P) or 4 (4P) symmetric destructible barricades on outer flank shortcuts (never main center lane or ramps)
 	var cand_base: Vector2 = Vector2(
 		-_rng.randf_range(120.0, 220.0),
-		_rng.randf_range(760.0, 860.0) if _is_four_way else _rng.randf_range(640.0, 740.0)
+		_rng.randf_range(800.0, 920.0) if _is_four_way else _rng.randf_range(640.0, 740.0)
 	)
-	for _attempt: int in range(28):
+	for _attempt: int in range(32):
 		if _is_mirrored_spot_clear(cand_base, 72.0, 96.0, true):
 			var pts: Array[Vector2] = _mirror_points(cand_base)
 			for sym_i: int in range(pts.size()):
@@ -524,17 +798,17 @@ func _spawn_flank_barricades(bar_parent: Node) -> void:
 					_placed_solids.append({"pos": pts[sym_i], "r": 64.0})
 			return
 		cand_base = Vector2(
-			-_rng.randf_range(160.0, 420.0),
+			-_rng.randf_range(160.0, 440.0),
 			_rng.randf_range(620.0, generated_bounds.end.y - 160.0)
 		)
 
 
 func _spawn_sensor_relays(obj_parent: Node) -> void:
 	var names: Array = ["West Flank Sensor Relay", "East Flank Sensor Relay", "NW Flank Sensor Relay", "SE Flank Sensor Relay"]
-	for _attempt: int in range(36):
+	for _attempt: int in range(40):
 		var cand: Vector2 = Vector2(
-			-_rng.randf_range(620.0, 840.0),
-			-_rng.randf_range(120.0, 320.0) if not _is_four_way else _rng.randf_range(180.0, 420.0)
+			-_rng.randf_range(640.0, 880.0),
+			-_rng.randf_range(120.0, 320.0) if not _is_four_way else _rng.randf_range(180.0, 440.0)
 		)
 		if not _is_mirrored_spot_clear(cand, 62.0, 88.0, true):
 			continue
@@ -570,6 +844,11 @@ func _is_mirrored_spot_clear(
 				return false
 
 	for pt: Vector2 in pts:
+		if _overlaps_any_ramp_zone(pt, radius + 16.0):
+			return false
+		for pl: Dictionary in _placed_plateaus:
+			if _point_to_polygon_distance(pt, pl["poly"] as PackedVector2Array) < (radius + solid_gap * 0.72):
+				return false
 		for rc: Dictionary in _reserved_circles:
 			var rpos: Vector2 = rc["pos"] as Vector2
 			var rr: float = float(rc["r"])

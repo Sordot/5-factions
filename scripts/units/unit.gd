@@ -103,6 +103,7 @@ var deploy_state: DeployState = DeployState.MOBILE
 var kill_count: int = 0
 var veterancy_rank: int = 0
 var last_attacker_team: int = -1
+var _last_unseen_retaliate_ms: int = -9999
 var command_state: CommandState = CommandState.IDLE
 var current_target: Node2D = null
 var ability_component: AbilityComponent = null
@@ -1243,16 +1244,39 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 			mm.push_tactical_alert(global_position, &"under_attack", "%s Under Attack!" % unit_label)
 	status_changed.emit(self)
 
-	# Idle aggressive/defensive combatants retaliate against attackers (within leash when Defensive).
-	if MatchManager.is_aggro_ai_enabled(get_tree()) and command_state == CommandState.IDLE and (current_target == null or not is_instance_valid(current_target)) and attacker != null and is_instance_valid(attacker) and attacker is Unit and _can_attack():
-		if combat_component != null and combat_component.should_pursue_targets(self) and combat_component.is_valid_target(self, attacker):
+	# Idle aggressive/defensive combatants retaliate against visible attackers (within leash when Defensive).
+	# If taking unseen fire (e.g., from fogged high ground), NEVER shoot through fog; instead advance up
+	# the nearest navigable ramp toward the firing sector to establish high-ground vision.
+	if MatchManager.is_aggro_ai_enabled(get_tree()) and command_state == CommandState.IDLE and (current_target == null or not is_instance_valid(current_target)) and attacker != null and is_instance_valid(attacker) and (attacker is Unit or attacker is Building) and _can_attack():
+		if combat_component != null and combat_component.should_pursue_targets(self):
 			var atk_node: Node2D = attacker as Node2D
-			var allow_retaliate: bool = true
-			if stance == Stance.DEFENSIVE:
-				var max_engage: float = DEFENSIVE_LEASH_RADIUS + get_effective_attack_range()
-				allow_retaliate = combat_component.is_within_attack_envelope(self, atk_node) or defensive_anchor.distance_to(atk_node.global_position) <= max_engage
-			if allow_retaliate:
-				current_target = atk_node
+			if combat_component.is_valid_target(self, attacker):
+				var allow_retaliate: bool = true
+				if stance == Stance.DEFENSIVE:
+					var max_engage: float = DEFENSIVE_LEASH_RADIUS + get_effective_attack_range()
+					allow_retaliate = combat_component.is_within_attack_envelope(self, atk_node) or defensive_anchor.distance_to(atk_node.global_position) <= max_engage
+				if allow_retaliate:
+					current_target = atk_node
+			else:
+				var atk_team: int = int((attacker as Unit).team) if attacker is Unit else int((attacker as Building).team)
+				var is_hostile_atk: bool = TeamManager.are_enemies(int(team), atk_team) if TeamManager != null else (atk_team != int(team))
+				var now_ret_ms: int = Time.get_ticks_msec()
+				if is_hostile_atk and (now_ret_ms - _last_unseen_retaliate_ms) >= 1200:
+					_last_unseen_retaliate_ms = now_ret_ms
+					var dir_to_fire: Vector2 = atk_node.global_position - global_position
+					var dist_to_fire: float = dir_to_fire.length()
+					var probe_pos: Vector2 = atk_node.global_position
+					if dist_to_fire > 420.0:
+						probe_pos = global_position + (dir_to_fire / dist_to_fire) * 420.0
+					if stance == Stance.DEFENSIVE:
+						var from_anchor: Vector2 = probe_pos - defensive_anchor
+						if from_anchor.length() > DEFENSIVE_LEASH_RADIUS:
+							probe_pos = defensive_anchor + from_anchor.normalized() * DEFENSIVE_LEASH_RADIUS
+					var nav_map: RID = get_world_2d().get_navigation_map() if is_inside_tree() else RID()
+					if nav_map.is_valid():
+						probe_pos = NavigationServer2D.map_get_closest_point(nav_map, probe_pos)
+					if probe_pos.distance_squared_to(global_position) > 24.0 * 24.0:
+						command_attack_move(probe_pos, false)
 
 	if current_hp <= 0.0:
 		if attacker != null and is_instance_valid(attacker) and attacker is Unit:

@@ -86,25 +86,25 @@ arena_bounds = Rect2(-1600, -1600, 3200, 3200)
 
 [node name="PlateauSW" parent="HighGroundPlateaus" instance=ExtResource("38_high_ground")]
 position = Vector2(-455, 455)
-plateau_polygon = PackedVector2Array(-95, -95, 55, -95, 95, -55, 95, 95, -55, 95, -95, 55)
+plateau_polygon = PackedVector2Array(-115, -115, 75, -115, 115, -75, 115, 115, -75, 115, -115, 75)
 ramp_edge_indices = PackedInt32Array(3, 5)
 biome_tint = Color(0.115, 0.145, 0.22, 1)
 
 [node name="PlateauNW" parent="HighGroundPlateaus" instance=ExtResource("38_high_ground")]
 position = Vector2(-455, -455)
-plateau_polygon = PackedVector2Array(95, -95, 95, 55, 55, 95, -95, 95, -95, -55, -55, -95)
+plateau_polygon = PackedVector2Array(115, -115, 115, 75, 75, 115, -115, 115, -115, -75, -75, -115)
 ramp_edge_indices = PackedInt32Array(3, 5)
 biome_tint = Color(0.115, 0.145, 0.22, 1)
 
 [node name="PlateauNE" parent="HighGroundPlateaus" instance=ExtResource("38_high_ground")]
 position = Vector2(455, -455)
-plateau_polygon = PackedVector2Array(95, 95, -55, 95, -95, 55, -95, -95, 55, -95, 95, -55)
+plateau_polygon = PackedVector2Array(115, 115, -75, 115, -115, 75, -115, -115, 75, -115, 115, -75)
 ramp_edge_indices = PackedInt32Array(3, 5)
 biome_tint = Color(0.115, 0.145, 0.22, 1)
 
 [node name="PlateauSE" parent="HighGroundPlateaus" instance=ExtResource("38_high_ground")]
 position = Vector2(455, 455)
-plateau_polygon = PackedVector2Array(-95, 95, -95, -55, -55, -95, 95, -95, 95, 55, 55, 95)
+plateau_polygon = PackedVector2Array(-115, 115, -115, -75, -75, -115, 115, -115, 115, 75, 75, 115)
 ramp_edge_indices = PackedInt32Array(3, 5)
 biome_tint = Color(0.115, 0.145, 0.22, 1)
 

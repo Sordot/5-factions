@@ -40,6 +40,7 @@ var _is_monolith_style: bool = false
 var _rank_level: int = 1
 var _seed: int = 1337
 var _draw_visuals: bool = true
+var _origin_hidden_in_fog: bool = false
 var _label_text: String = ""
 var is_pooled: bool = false
 
@@ -67,6 +68,7 @@ func reset_for_pool() -> void:
 	_is_monolith_style = false
 	_rank_level = 1
 	_draw_visuals = true
+	_origin_hidden_in_fog = false
 	_label_text = ""
 	global_position = Vector2.ZERO
 
@@ -275,12 +277,17 @@ func _process(delta: float) -> void:
 func _refresh_fog_visibility() -> void:
 	if not is_inside_tree():
 		_draw_visuals = true
+		_origin_hidden_in_fog = false
 		return
-	var fog: Node = get_tree().get_first_node_in_group("fog_of_war")
-	if fog != null and fog.has_method("is_world_pos_visible") and fog.get("fog_enabled"):
-		_draw_visuals = bool(fog.call("is_world_pos_visible", _target_world)) or bool(fog.call("is_world_pos_visible", _from_world))
+	var fog: FogOfWarSystem = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	if fog != null and fog.fog_enabled:
+		var target_vis: bool = fog.is_world_pos_visible_strict(_target_world)
+		var origin_vis: bool = fog.is_world_pos_visible_strict(_from_world)
+		_draw_visuals = target_vis or origin_vis
+		_origin_hidden_in_fog = (not origin_vis) and target_vis
 	else:
 		_draw_visuals = true
+		_origin_hidden_in_fog = false
 
 
 func _draw() -> void:
@@ -333,25 +340,27 @@ func _draw_mortar_shell() -> void:
 		draw_line(p1 + Vector2(-6.0, 0.0), p1 + Vector2(6.0, 0.0), ring_col, 1.4, true)
 		draw_line(p1 + Vector2(0.0, -6.0), p1 + Vector2(0.0, 6.0), ring_col, 1.4, true)
 
-		# Faint parabolic trajectory arc behind shell
-		var trail_steps: int = 10
-		var trail_start: float = maxf(0.0, u - 0.38)
-		var pts: PackedVector2Array = PackedVector2Array()
-		pts.resize(trail_steps + 1)
-		for i: int in range(trail_steps + 1):
-			var tu: float = lerpf(trail_start, u, float(i) / float(trail_steps))
-			pts[i] = p0.lerp(p1, tu) + Vector2(0.0, -sin(tu * PI) * _arc_height)
-		draw_polyline(pts, Color(_color.r, _color.g, _color.b, 0.58), 2.4, true)
+		# Faint parabolic trajectory arc behind shell (emerges cleanly out of fog if shooter is uphill & hidden)
+		var min_vis_u: float = 0.28 if _origin_hidden_in_fog else 0.0
+		if u >= min_vis_u:
+			var trail_steps: int = 10
+			var trail_start: float = maxf(min_vis_u, u - 0.38)
+			var pts: PackedVector2Array = PackedVector2Array()
+			pts.resize(trail_steps + 1)
+			for i: int in range(trail_steps + 1):
+				var tu: float = lerpf(trail_start, u, float(i) / float(trail_steps))
+				pts[i] = p0.lerp(p1, tu) + Vector2(0.0, -sin(tu * PI) * _arc_height)
+			draw_polyline(pts, Color(_color.r, _color.g, _color.b, 0.58), 2.4, true)
 
-		# Ground shadow beneath arcing shell
-		var ground_pos: Vector2 = p0.lerp(p1, u)
-		draw_circle(ground_pos, 4.5, Color(0.02, 0.05, 0.06, 0.34))
+			# Ground shadow beneath arcing shell
+			var ground_pos: Vector2 = p0.lerp(p1, u)
+			draw_circle(ground_pos, 4.5, Color(0.02, 0.05, 0.06, 0.34))
 
-		# Caustic shell orb with bright core
-		var shell_pos: Vector2 = ground_pos + Vector2(0.0, -sin(u * PI) * _arc_height)
-		draw_circle(shell_pos, 6.8, Color(_color.r, _color.g, _color.b, 0.36))
-		draw_circle(shell_pos, 4.2, _color)
-		draw_circle(shell_pos, 2.0, Color(0.95, 1.0, 0.94, 0.95))
+			# Caustic shell orb with bright core
+			var shell_pos: Vector2 = ground_pos + Vector2(0.0, -sin(u * PI) * _arc_height)
+			draw_circle(shell_pos, 6.8, Color(_color.r, _color.g, _color.b, 0.36))
+			draw_circle(shell_pos, 4.2, _color)
+			draw_circle(shell_pos, 2.0, Color(0.95, 1.0, 0.94, 0.95))
 	else:
 		# Impact blast shockwave + caustic splash scatter
 		var bt: float = clampf((_elapsed - _flight_time) / _blast_duration, 0.0, 1.0)

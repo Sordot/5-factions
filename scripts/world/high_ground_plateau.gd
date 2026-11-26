@@ -1,18 +1,31 @@
 class_name HighGroundPlateau
 extends Node2D
 
-## Procedural 2D elevated terrace (Milestone 3.4).
-## Generates impassable cliff colliders along non-ramp edges while keeping wide
-## walkable ramps open for ArenaNavRegion baking, renders crisp dropped cliff
-## extrusions & ramp chevrons, and feeds one-way high-ground vision into FogOfWar.
+## Procedural 2D elevated terrace (Milestones 3.4 & 3.8).
+## Generates corner-inset impassable cliff colliders along non-ramp edges while keeping
+## wide walkable assault ramps (180-220 px default; 105-125 px opt-in choke ramps) cleanly open
+## for ArenaNavRegion baking, renders dropped cliff extrusions & sloped ramp aprons extending
+## outward from the Level 1 crest line onto Level 0 ground, and feeds SC2-accurate elevation into FogOfWar.
+
+const DEFAULT_WIDE_RAMP_MIN_WIDTH: float = 180.0
+const DEFAULT_WIDE_RAMP_MAX_WIDTH: float = 220.0
+const CHOKE_RAMP_MIN_WIDTH: float = 105.0
+const CHOKE_RAMP_MAX_WIDTH: float = 125.0
+const RAMP_SLOPE_DEPTH: float = 32.0
+const RAMP_CORNER_INSET: float = 5.0
 
 @export var plateau_polygon: PackedVector2Array = PackedVector2Array([
-	Vector2(-110.0, -85.0),
-	Vector2(110.0, -85.0),
-	Vector2(110.0, 85.0),
-	Vector2(-110.0, 85.0),
+	Vector2(-115.0, -105.0),
+	Vector2(85.0, -105.0),
+	Vector2(125.0, -65.0),
+	Vector2(125.0, 115.0),
+	Vector2(-80.0, 115.0),
+	Vector2(-115.0, 85.0),
 ])
 @export var ramp_edge_indices: PackedInt32Array = PackedInt32Array()
+## Opt-in narrow choke ramp override for specialized hand-crafted map chokes (105-125 px).
+## Empty by default: standard plateau ramps use wide assault geometry (180-220 px).
+@export var choke_ramp_edge_indices: PackedInt32Array = PackedInt32Array()
 @export var elevation_level: int = 1
 @export var biome_tint: Color = Color(0.14, 0.20, 0.26, 1.0)
 @export var cliff_thickness: float = 12.0
@@ -31,6 +44,10 @@ func _ready() -> void:
 	add_to_group("high_ground_plateaus")
 	_rebuild_geometry()
 	queue_redraw()
+
+
+func is_edge_choke_ramp(edge_idx: int) -> bool:
+	return choke_ramp_edge_indices.has(edge_idx)
 
 
 func _rebuild_geometry() -> void:
@@ -76,37 +93,66 @@ func _rebuild_geometry() -> void:
 		# Outward normal in Y-down coordinates: for CW polygon, outward is (dir.y, -dir.x)
 		var out_n: Vector2 = Vector2(dir.y, -dir.x) if is_cw else Vector2(-dir.y, dir.x)
 		var seg_info: Dictionary = {
+			"edge_idx": i,
 			"a": a,
 			"b": b,
 			"dir": dir,
 			"len": edge_len,
 			"out_normal": out_n,
+			"is_choke": is_edge_choke_ramp(i),
 		}
 		if ramp_lookup.has(i):
 			_ramp_segments.append(seg_info)
 		else:
 			_cliff_segments.append(seg_info)
-			_spawn_cliff_collider(a, b, edge_len, dir, i)
+			var prev_idx: int = (i - 1 + n) % n
+			var next_idx: int = (i + 1) % n
+			var start_inset: float = RAMP_CORNER_INSET if ramp_lookup.has(prev_idx) else -2.0
+			var end_inset: float = RAMP_CORNER_INSET if ramp_lookup.has(next_idx) else -2.0
+			_spawn_cliff_collider(a, b, edge_len, dir, i, start_inset, end_inset)
 
 
-func _spawn_cliff_collider(a: Vector2, b: Vector2, edge_len: float, dir: Vector2, edge_idx: int) -> void:
+func _spawn_cliff_collider(
+	a: Vector2,
+	b: Vector2,
+	edge_len: float,
+	dir: Vector2,
+	edge_idx: int,
+	start_inset: float = -2.0,
+	end_inset: float = -2.0
+) -> void:
+	# Inset cliff endpoints near ramp corners by RAMP_CORNER_INSET so heavy walkers pushing
+	# 3-4 abreast up wide ramps never snag on protruding corner colliders.
+	var trimmed_len: float = edge_len - start_inset - end_inset
+	if trimmed_len <= 4.0:
+		return
+	var ca: Vector2 = a + dir * start_inset
+	var cb: Vector2 = b - dir * end_inset
+
 	var body: StaticBody2D = StaticBody2D.new()
 	body.name = "CliffWall_%d" % edge_idx
 	body.collision_layer = 1
 	body.collision_mask = 0
-	body.position = (a + b) * 0.5
+	body.position = (ca + cb) * 0.5
 	body.rotation = dir.angle()
 	body.add_to_group("nav_bake_obstacles")
 	body.add_to_group("high_ground_cliffs")
 
 	var col_shape: CollisionShape2D = CollisionShape2D.new()
 	var rect_shape: RectangleShape2D = RectangleShape2D.new()
-	rect_shape.size = Vector2(edge_len + 4.0, maxf(6.0, cliff_thickness))
+	rect_shape.size = Vector2(trimmed_len, maxf(6.0, cliff_thickness))
 	col_shape.shape = rect_shape
 	body.add_child(col_shape)
 
 	add_child(body)
 	_cliff_bodies.append(body)
+
+
+## Exact ramp-crest elevation query:
+## - Inside plateau_polygon (upper crest & plateau surface) => elevation_level (1).
+## - Outside plateau_polygon (including the ~32 px outward lower ramp approach apron) => 0.
+func get_world_elevation_at(world_pos: Vector2) -> int:
+	return elevation_level if contains_world_point(world_pos) else 0
 
 
 func contains_world_point(world_pos: Vector2) -> bool:
@@ -123,6 +169,24 @@ func get_world_polygon() -> PackedVector2Array:
 	out.resize(plateau_polygon.size())
 	for i: int in range(plateau_polygon.size()):
 		out[i] = to_global(plateau_polygon[i])
+	return out
+
+
+func get_ramp_segments_world() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for rseg: Dictionary in _ramp_segments:
+		var a_w: Vector2 = to_global(rseg["a"] as Vector2)
+		var b_w: Vector2 = to_global(rseg["b"] as Vector2)
+		var out_n_w: Vector2 = ((to_global(rseg["out_normal"] as Vector2) - to_global(Vector2.ZERO))).normalized()
+		out.append({
+			"edge_idx": int(rseg["edge_idx"]),
+			"a": a_w,
+			"b": b_w,
+			"mid": (a_w + b_w) * 0.5,
+			"out_normal": out_n_w,
+			"len": a_w.distance_to(b_w),
+			"is_choke": bool(rseg["is_choke"]),
+		})
 	return out
 
 
@@ -182,38 +246,57 @@ func _draw() -> void:
 			draw_line(top_p, top_p + drop, wall_stripe, 1.3)
 		draw_line(a + drop, b + drop, rim_dark, 1.8)
 
-	# 3. Sloped walkable ramp aprons + side guide rails + ramp-step chevrons
-	var ramp_depth: float = 24.0
-	var ramp_fill: Color = biome_tint.darkened(0.22)
+	# 3. Sloped walkable ramp aprons (Level 0 approach -> Level 1 crest) + side guide rails + chevrons
+	var ramp_depth: float = RAMP_SLOPE_DEPTH
+	var ramp_fill: Color = biome_tint.darkened(0.24)
 	ramp_fill.a = 0.92
+	var ramp_lower_shade: Color = biome_tint.darkened(0.42)
+	ramp_lower_shade.a = 0.55
 	var rail_col: Color = biome_tint.lightened(0.38)
-	rail_col.a = 0.72
+	rail_col.a = 0.78
 	var step_col: Color = biome_tint.lightened(0.26)
-	step_col.a = 0.48
+	step_col.a = 0.50
+	var crest_col: Color = biome_tint.lightened(0.48)
+	crest_col.a = 0.65
+
 	for rseg: Dictionary in _ramp_segments:
 		var a: Vector2 = rseg["a"] as Vector2
 		var b: Vector2 = rseg["b"] as Vector2
 		var out_n: Vector2 = rseg["out_normal"] as Vector2
 		var edge_dir: Vector2 = rseg["dir"] as Vector2
+		var edge_len: float = float(rseg["len"])
+		var is_choke: bool = bool(rseg["is_choke"])
 		var a_out: Vector2 = a + out_n * ramp_depth
 		var b_out: Vector2 = b + out_n * ramp_depth
+		var a_mid: Vector2 = a + out_n * (ramp_depth * 0.5)
+		var b_mid: Vector2 = b + out_n * (ramp_depth * 0.5)
+
 		var apron: PackedVector2Array = PackedVector2Array([a, b, b_out, a_out])
 		draw_colored_polygon(apron, ramp_fill)
-		# Side guide rails framing the walkable ramp
+		# Lower slope gradient shading (visually distinguishes foot of ramp = Level 0 from upper crest = Level 1)
+		var lower_apron: PackedVector2Array = PackedVector2Array([a_mid, b_mid, b_out, a_out])
+		draw_colored_polygon(lower_apron, ramp_lower_shade)
+
+		# Side guide rails framing the full walkable ramp width
 		draw_line(a, a_out, rail_col, 2.4, true)
 		draw_line(b, b_out, rail_col, 2.4, true)
-		# 3 parallel ramp-step tread lines sloping from Level 0 up to Level 1
-		for st: int in range(1, 4):
-			var d_frac: float = float(st) / 4.0
-			var p0: Vector2 = a.lerp(a_out, d_frac) + edge_dir * 8.0
-			var p1: Vector2 = b.lerp(b_out, d_frac) - edge_dir * 8.0
-			draw_line(p0, p1, step_col, 1.4, true)
-		# Subtle uphill chevron at center of ramp pointing onto plateau (-out_n)
-		var r_mid: Vector2 = (a + b) * 0.5 + out_n * (ramp_depth * 0.52)
-		var tip: Vector2 = r_mid - out_n * 6.5
-		var wing_l: Vector2 = r_mid + out_n * 3.5 - edge_dir * 12.0
-		var wing_r: Vector2 = r_mid + out_n * 3.5 + edge_dir * 12.0
-		draw_polyline(PackedVector2Array([wing_l, tip, wing_r]), rail_col, 1.8, true)
+
+		# 4 parallel ramp-step tread bars spanning the full ramp width
+		for st: int in range(1, 5):
+			var d_frac: float = float(st) / 5.0
+			var p0: Vector2 = a.lerp(a_out, d_frac) + edge_dir * 6.0
+			var p1: Vector2 = b.lerp(b_out, d_frac) - edge_dir * 6.0
+			draw_line(p0, p1, step_col, 1.35, true)
+
+		# Uphill directional chevrons spaced cleanly across wide assault ramps (1 on narrow choke ramps)
+		var chevron_cnt: int = 1 if (is_choke or edge_len < 155.0) else (3 if edge_len >= 205.0 else 2)
+		for ci: int in range(chevron_cnt):
+			var u_along: float = float(ci + 1) / float(chevron_cnt + 1)
+			var r_mid: Vector2 = a.lerp(b, u_along) + out_n * (ramp_depth * 0.52)
+			var tip: Vector2 = r_mid - out_n * 7.0
+			var wing_l: Vector2 = r_mid + out_n * 4.0 - edge_dir * 13.0
+			var wing_r: Vector2 = r_mid + out_n * 4.0 + edge_dir * 13.0
+			draw_polyline(PackedVector2Array([wing_l, tip, wing_r]), rail_col, 1.85, true)
 
 	# 4. Raised Level 1 plateau deck fill
 	draw_colored_polygon(plateau_polygon, biome_tint)
@@ -231,6 +314,13 @@ func _draw() -> void:
 	var inset_col: Color = biome_tint.lightened(0.18)
 	inset_col.a = 0.34
 	draw_polyline(inset_closed, inset_col, 1.2, true)
+
+	# Crisp subtle crest threshold highlight along ramp lips (marks exact Elevation 0 -> 1 vision boundary)
+	for rseg: Dictionary in _ramp_segments:
+		var a: Vector2 = rseg["a"] as Vector2
+		var b: Vector2 = rseg["b"] as Vector2
+		var edge_dir: Vector2 = rseg["dir"] as Vector2
+		draw_line(a + edge_dir * 4.0, b - edge_dir * 4.0, crest_col, 1.6, true)
 
 	# 5. Crisp 2px bevel outline strictly on cliff edges (leaving ramp lips cleanly open)
 	for seg: Dictionary in _cliff_segments:

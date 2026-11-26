@@ -127,7 +127,7 @@ func _has_elevation_sight(target_pos: Vector2) -> bool:
 	var fog: FogOfWarSystem = owner_building.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
 	if fog == null or not fog.fog_enabled:
 		return true
-	return fog.can_team_see_target_elevation(int(owner_building.team), owner_building.global_position, target_pos)
+	return fog.is_world_pos_visible_to_team(int(owner_building.team), target_pos)
 
 
 func is_valid_target(candidate: Variant) -> bool:
@@ -298,17 +298,18 @@ func _fire_at(target: Node2D) -> void:
 	var team_col: Color = TeamManager.get_team_color(int(owner_building.team)) if TeamManager != null else (Color(0.24, 0.96, 0.90, 1.0) if owner_building.team == Unit.Team.PLAYER else Color(1.0, 0.36, 0.28, 1.0))
 
 	if AudioManager != null and _is_audible(origin, end_pos):
+		var sfx_pos: Vector2 = owner_building.global_position if _is_point_visible_local(origin) else end_pos
 		match style:
 			&"rail":
-				AudioManager.play_weapon_for_unit(&"lance_rig", owner_building.global_position)
+				AudioManager.play_weapon_for_unit(&"lance_rig", sfx_pos)
 			&"mortar":
-				AudioManager.play_weapon_for_unit(&"chrysalis_mortar", owner_building.global_position)
+				AudioManager.play_weapon_for_unit(&"chrysalis_mortar", sfx_pos)
 			&"heavy":
-				AudioManager.play_weapon_for_unit(&"goliath_frame", owner_building.global_position)
+				AudioManager.play_weapon_for_unit(&"goliath_frame", sfx_pos)
 			&"heavy_slug":
-				AudioManager.play_sfx(&"weapon_mono_bastion", -4.0, 0.05, owner_building.global_position, true)
+				AudioManager.play_sfx(&"weapon_mono_bastion", -4.0, 0.05, sfx_pos, true)
 			_:
-				AudioManager.play_weapon_for_unit(&"clone_trooper", owner_building.global_position)
+				AudioManager.play_weapon_for_unit(&"clone_trooper", sfx_pos)
 		if AudioManager.has_method("notify_combat_activity"):
 			AudioManager.call("notify_combat_activity", 0.25)
 
@@ -402,15 +403,21 @@ func _apply_splash_damage(
 				bar.call("take_damage", dbar, attacker)
 
 
+func _is_point_visible_local(world_pos: Vector2) -> bool:
+	if owner_building == null or not owner_building.is_inside_tree():
+		return false
+	var fog: FogOfWarSystem = owner_building.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	if fog != null and fog.fog_enabled:
+		return fog.is_world_pos_visible_strict(world_pos)
+	return true
+
+
 func _is_audible(origin: Vector2, target_pos: Vector2) -> bool:
 	if owner_building == null or not owner_building.is_inside_tree():
 		return false
 	if TeamManager != null and TeamManager.is_team_controlled_by_local_human(int(owner_building.team)):
 		return true
-	var fog: Node = owner_building.get_tree().get_first_node_in_group("fog_of_war")
-	if fog != null and fog.has_method("is_world_pos_visible") and fog.get("fog_enabled"):
-		return bool(fog.call("is_world_pos_visible", origin)) or bool(fog.call("is_world_pos_visible", target_pos))
-	return true
+	return _is_point_visible_local(origin) or _is_point_visible_local(target_pos)
 
 
 func _spawn_tracer(origin: Vector2, end_pos: Vector2, col: Color, width: float, duration: float, style: int) -> void:
@@ -419,16 +426,16 @@ func _spawn_tracer(origin: Vector2, end_pos: Vector2, col: Color, width: float, 
 	var host: Node = owner_building.get_parent()
 	if host == null:
 		return
-	var fog: Node = owner_building.get_tree().get_first_node_in_group("fog_of_war")
-	if fog != null and fog.has_method("is_world_pos_visible") and fog.get("fog_enabled"):
-		if not bool(fog.call("is_world_pos_visible", origin)) and not bool(fog.call("is_world_pos_visible", end_pos)):
-			return
+	var from_vis: bool = _is_point_visible_local(origin)
+	var to_vis: bool = _is_point_visible_local(end_pos)
+	if not from_vis and not to_vis:
+		return
 	var tracer: AttackTracer = VFXPool.acquire_attack_tracer(45) if VFXPool != null else null
 	if tracer == null:
 		tracer = ATTACK_TRACER_SCRIPT.new() as AttackTracer
 		tracer.z_index = 45
 		host.add_child(tracer)
-	tracer.setup(origin, end_pos, col, width, duration, 0.0, style)
+	tracer.setup(origin, end_pos, col, width, duration, 0.0, style, not from_vis)
 
 
 func _spawn_heavy_muzzle_shock(origin: Vector2, end_pos: Vector2, col: Color, is_brutalist: bool) -> void:
@@ -449,6 +456,8 @@ func _spawn_heavy_muzzle_shock(origin: Vector2, end_pos: Vector2, col: Color, is
 
 func _spawn_armor_spark(world_pos: Vector2, shot_dir: Vector2, col: Color) -> void:
 	if owner_building == null or not owner_building.is_inside_tree():
+		return
+	if not _is_point_visible_local(world_pos):
 		return
 	var host: Node = owner_building.get_parent()
 	if host == null:

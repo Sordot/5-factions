@@ -371,12 +371,24 @@ func _tick_army_state_machine(core: Building, tick_dt: float) -> void:
 			_tick_staging_state(core)
 
 
+func _is_entity_visible_to_ai(entity: Node2D) -> bool:
+	if entity == null or not is_instance_valid(entity):
+		return false
+	if not is_inside_tree():
+		return true
+	var fog: FogOfWarSystem = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	if fog == null or not fog.fog_enabled:
+		return true
+	return fog.is_entity_visible_to_team(int(ai_team), entity)
+
+
 func _find_base_perimeter_threat(core: Building) -> Variant:
 	var ai_buildings: Array[Building] = _get_team_buildings(ai_team)
 	var threat_unit: Unit = null
 	var best_d_sq: float = INF
 
-	# Check ~650px perimeter around every owned Command Hub and economy drop-off via SpatialGrid
+	# Check ~650px perimeter around every owned Command Hub and economy drop-off via SpatialGrid.
+	# Obeys Fog of War / high-ground vision (only reacts to visible hostiles or those actively firing on AI assets).
 	for b: Building in ai_buildings:
 		var check_r: float = base_defense_radius if (b.is_command_hub() or b.is_resource_dropoff) else 380.0
 		var nearby: Array = SpatialGrid.query_units_in_radius(b.global_position, check_r) if SpatialGrid != null else get_tree().get_nodes_in_group("units")
@@ -388,6 +400,14 @@ func _find_base_perimeter_threat(core: Building) -> Variant:
 			if hostile.is_dead or hostile.is_staffed or not _is_enemy_team(int(hostile.team)):
 				continue
 			if not _is_combat_unit(hostile) and hostile.command_state != Unit.CommandState.ATTACKING_TARGET:
+				continue
+			var attacking_ai_asset: bool = false
+			if hostile.current_target != null and is_instance_valid(hostile.current_target):
+				if hostile.current_target is Unit and _is_allied_team(int((hostile.current_target as Unit).team)):
+					attacking_ai_asset = true
+				elif hostile.current_target is Building and _is_allied_team(int((hostile.current_target as Building).team)):
+					attacking_ai_asset = true
+			if not attacking_ai_asset and not _is_entity_visible_to_ai(hostile):
 				continue
 			var d_sq: float = b.global_position.distance_squared_to(hostile.global_position)
 			if d_sq <= r_sq and d_sq < best_d_sq:
@@ -401,7 +421,7 @@ func _find_base_perimeter_threat(core: Building) -> Variant:
 			if is_instance_valid(item) and item is Unit:
 				var u: Unit = item as Unit
 				if not u.is_dead and not u.is_staffed and _is_enemy_team(int(u.team)):
-					if u.global_position.distance_to(core.global_position) <= base_defense_radius:
+					if u.global_position.distance_to(core.global_position) <= base_defense_radius and _is_entity_visible_to_ai(u):
 						threat_unit = u
 						break
 
@@ -701,7 +721,7 @@ func _find_hostile_near_squad(squad: Array[Unit], radius: float) -> Variant:
 			if is_instance_valid(item) and item is Unit:
 				var h: Unit = item as Unit
 				if not h.is_dead and not h.is_staffed and _is_enemy_team(int(h.team)) and _is_combat_unit(h):
-					if u.global_position.distance_squared_to(h.global_position) <= r_sq:
+					if u.global_position.distance_squared_to(h.global_position) <= r_sq and _is_entity_visible_to_ai(h):
 						return h.global_position
 	return null
 
@@ -914,7 +934,7 @@ func _scan_vision_circle_for_intel(center: Vector2, radius: float, seen_units: D
 			continue
 		if not _is_enemy_team(int(u.team)):
 			continue
-		if center.distance_squared_to(u.global_position) <= r_sq:
+		if center.distance_squared_to(u.global_position) <= r_sq and _is_entity_visible_to_ai(u):
 			seen_units[u.get_instance_id()] = u
 	for b: Building in SpatialGrid.query_buildings_in_radius(center, radius):
 		if not is_instance_valid(b) or b.is_destroyed:
@@ -922,7 +942,7 @@ func _scan_vision_circle_for_intel(center: Vector2, radius: float, seen_units: D
 		if not _is_enemy_team(int(b.team)):
 			continue
 		var eff_r: float = radius + b.footprint_radius
-		if center.distance_squared_to(b.global_position) <= eff_r * eff_r:
+		if center.distance_squared_to(b.global_position) <= eff_r * eff_r and _is_entity_visible_to_ai(b):
 			seen_buildings[b.get_instance_id()] = b
 
 

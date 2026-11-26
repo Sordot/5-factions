@@ -31,6 +31,9 @@ var _blocker_grid: PackedByteArray = PackedByteArray()
 var _elevation_grid: PackedByteArray = PackedByteArray()
 var _static_building_vision_cells: Dictionary = {}
 var _spotted_buildings: Dictionary = {}
+## Local alliance's high-ground & sensor-relay vision sources captured on each refresh_visibility() pass.
+## Guarantees sub-cell precision at ramp crests so low-ground units cannot see past the crest via 64px cell bleed.
+var _viewer_elevated_sources: Array[Dictionary] = []
 var _update_timer: float = 0.0
 var _blocker_dirty: bool = true
 
@@ -73,6 +76,7 @@ func _initialize_grid() -> void:
 	_elevation_grid.resize(total)
 	_elevation_grid.fill(0)
 	_static_building_vision_cells.clear()
+	_viewer_elevated_sources.clear()
 	_blocker_dirty = true
 
 	fog_image = Image.create(grid_width, grid_height, false, Image.FORMAT_RGBA8)
@@ -108,10 +112,12 @@ func rebuild_blocker_grid() -> void:
 	var cell_w: float = arena_bounds.size.x / float(grid_width)
 	var cell_h: float = arena_bounds.size.y / float(grid_height)
 	var probe_r: float = minf(cell_w, cell_h) * 0.28
+	var qx: float = cell_w * 0.28
+	var qy: float = cell_h * 0.28
 
 	var plateaus: Array = []
 	for p_node: Node in get_tree().get_nodes_in_group("high_ground_plateaus"):
-		if is_instance_valid(p_node) and p_node.has_method("contains_world_point"):
+		if is_instance_valid(p_node) and (p_node.has_method("get_world_elevation_at") or p_node.has_method("contains_world_point")):
 			plateaus.append(p_node)
 
 	var blockers: Array = []
@@ -141,91 +147,190 @@ func rebuild_blocker_grid() -> void:
 				if bool((blk as Node).call("overlaps_circle", pt, probe_r)):
 					_blocker_grid[idx] = 1
 					break
+			# Sample center + 4 sub-quadrants so plateau edges block low-ground LOS cleanly right up to the crest.
 			var best_elev: int = 0
 			for pl: Variant in plateaus:
-				if bool((pl as Node).call("contains_world_point", pt)):
-					best_elev = maxi(best_elev, int((pl as Node).get("elevation_level")))
+				var pl_node: Node = pl as Node
+				var e_val: int = _sample_plateau_elev(pl_node, pt)
+				if e_val == 0:
+					e_val = maxi(
+						maxi(_sample_plateau_elev(pl_node, Vector2(wx - qx, wy - qy)), _sample_plateau_elev(pl_node, Vector2(wx + qx, wy - qy))),
+						maxi(_sample_plateau_elev(pl_node, Vector2(wx - qx, wy + qy)), _sample_plateau_elev(pl_node, Vector2(wx + qx, wy + qy)))
+					)
+				if e_val > best_elev:
+					best_elev = e_val
 			if best_elev > 0:
 				_elevation_grid[idx] = best_elev
 
 
+func _sample_plateau_elev(pl_node: Node, world_pt: Vector2) -> int:
+	if pl_node.has_method("get_world_elevation_at"):
+		return int(pl_node.call("get_world_elevation_at", world_pt))
+	if pl_node.has_method("contains_world_point") and bool(pl_node.call("contains_world_point", world_pt)):
+		return int(pl_node.get("elevation_level"))
+	return 0
+
+
+## Exact continuous world elevation query aligned with HighGroundPlateau upper crest lines.
+## Never falls back to the coarse 64px grid while in-tree so standing at the foot of a ramp
+## always evaluates strictly as Elevation 0.
 func get_elevation_at(world_pos: Vector2) -> int:
 	if is_inside_tree():
 		var best_elev: int = 0
 		for p_node: Node in get_tree().get_nodes_in_group("high_ground_plateaus"):
-			if is_instance_valid(p_node) and p_node.has_method("contains_world_point"):
-				if bool(p_node.call("contains_world_point", world_pos)):
-					best_elev = maxi(best_elev, int(p_node.get("elevation_level")))
-		if best_elev > 0:
-			return best_elev
+			if is_instance_valid(p_node):
+				var ev: int = _sample_plateau_elev(p_node, world_pos)
+				if ev > best_elev:
+					best_elev = ev
+		return best_elev
 	if _elevation_grid.is_empty():
 		return 0
 	var cell: Vector2i = world_to_cell(world_pos)
 	return int(_elevation_grid[cell.y * grid_width + cell.x])
 
 
-func can_team_see_target_elevation(attacker_team: int, attacker_pos: Vector2, target_pos: Vector2) -> bool:
+## Strict local-viewer visibility check with sub-cell ramp-crest precision:
+## Prevents 64px fog grid cells straddling a cliff/ramp crest from leaking an Elevation 1
+## enemy to a low-ground unit standing below the crest.
+func is_world_pos_visible_strict(world_pos: Vector2) -> bool:
 	if post_match_reveal or not fog_enabled or (GameConfig != null and GameConfig.mutator_no_fog):
 		return true
-	var target_elev: int = get_elevation_at(target_pos)
+	if not is_world_pos_visible(world_pos):
+		return false
+	var target_elev: int = get_elevation_at(world_pos)
 	if target_elev <= 0:
 		return true
-	if get_elevation_at(attacker_pos) >= target_elev:
+	var target_cell: Vector2i = world_to_cell(world_pos)
+	for src: Dictionary in _viewer_elevated_sources:
+		var src_pos: Vector2 = src["pos"] as Vector2
+		var src_r: float = float(src["radius"])
+		if src_pos.distance_squared_to(world_pos) > src_r * src_r:
+			continue
+		if bool(src["ignores_los"]):
+			return true
+		var src_elev: int = int(src["elev"])
+		if src_elev < target_elev:
+			continue
+		var src_cell: Vector2i = src["cell"] as Vector2i
+		if not los_shadowing_enabled or _has_line_of_sight(src_cell.x, src_cell.y, target_cell.x, target_cell.y, src_elev):
+			return true
+	return false
+
+
+## Team-agnostic SC2-accurate visibility query (zero AI map-hacking).
+## - For the local human's alliance (non-spectator): uses live visibility grid + sub-cell ramp-crest spotter check.
+## - For AI / FFA / Spectator teams: queries allied units, buildings & SensorRelays with exact elevation + LOS raycast.
+func is_world_pos_visible_to_team(observer_team: int, world_pos: Vector2) -> bool:
+	if post_match_reveal or not fog_enabled or (GameConfig != null and GameConfig.mutator_no_fog):
 		return true
 
-	# Fast O(1) check for local human's alliance using live visibility grid.
-	var local_t: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
-	if local_t >= 0:
-		var is_local_ally: bool = TeamManager.are_allies(local_t, attacker_team) if TeamManager != null else (attacker_team == local_t)
-		if is_local_ally:
-			return is_world_pos_visible(target_pos)
+	var spectator: bool = TeamManager != null and TeamManager.is_spectator_mode()
+	if not spectator:
+		var local_t: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+		if local_t >= 0:
+			var is_local_ally: bool = TeamManager.are_allies(local_t, observer_team) if TeamManager != null else (observer_team == local_t)
+			if is_local_ally:
+				return is_world_pos_visible_strict(world_pos)
 
-	# Symmetric non-local (AI / FFA) spotter check — zero AI map-hacking.
 	if not is_inside_tree():
 		return false
+
+	var target_elev: int = get_elevation_at(world_pos)
+	var target_cell: Vector2i = world_to_cell(world_pos)
+
+	# 1. Active allied Sensor Relays
 	for relay_node: Node in get_tree().get_nodes_in_group("sensor_relays"):
 		if not is_instance_valid(relay_node) or not (relay_node is Node2D):
 			continue
 		if not relay_node.has_method("is_active") or not bool(relay_node.call("is_active")):
 			continue
 		var ctrl_t: int = int(relay_node.get("controlling_team"))
-		var ally_ok: bool = ctrl_t >= 0 and (TeamManager.are_allies(attacker_team, ctrl_t) if TeamManager != null else (ctrl_t == attacker_team))
+		var ally_ok: bool = ctrl_t >= 0 and (TeamManager.are_allies(observer_team, ctrl_t) if TeamManager != null else (ctrl_t == observer_team))
 		if not ally_ok:
 			continue
+		var relay_pos: Vector2 = (relay_node as Node2D).global_position
 		var r_vis: float = float(relay_node.get("vision_radius"))
-		if (relay_node as Node2D).global_position.distance_squared_to(target_pos) <= r_vis * r_vis:
-			return true
+		if relay_pos.distance_squared_to(world_pos) <= r_vis * r_vis:
+			if bool(relay_node.get("ignores_los_blockers")) or not los_shadowing_enabled:
+				return true
+			var r_elev: int = get_elevation_at(relay_pos)
+			var r_cell: Vector2i = world_to_cell(relay_pos)
+			if r_elev >= target_elev and _has_line_of_sight(r_cell.x, r_cell.y, target_cell.x, target_cell.y, r_elev):
+				return true
 
-	var spot_units: Array = SpatialGrid.query_units_in_radius(target_pos, 560.0) if SpatialGrid != null else get_tree().get_nodes_in_group("units")
+	# 2. Living allied units within vision range, >= target elevation, and unobstructed LOS
+	var spot_units: Array = SpatialGrid.query_units_in_radius(world_pos, 560.0) if SpatialGrid != null else get_tree().get_nodes_in_group("units")
 	for node: Variant in spot_units:
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
 		var u: Unit = node as Unit
 		if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
 			continue
-		var u_ally: bool = TeamManager.are_allies(attacker_team, int(u.team)) if TeamManager != null else (int(u.team) == attacker_team)
+		var u_ally: bool = TeamManager.are_allies(observer_team, int(u.team)) if TeamManager != null else (int(u.team) == observer_team)
 		if not u_ally:
 			continue
-		if get_elevation_at(u.global_position) >= target_elev:
-			var vr: float = u.get_vision_range()
-			if u.global_position.distance_squared_to(target_pos) <= vr * vr:
-				return true
+		var vr: float = u.get_vision_range()
+		if u.global_position.distance_squared_to(world_pos) > vr * vr:
+			continue
+		var u_elev: int = get_elevation_at(u.global_position)
+		if u_elev < target_elev:
+			continue
+		if not los_shadowing_enabled:
+			return true
+		var u_cell: Vector2i = world_to_cell(u.global_position)
+		if _has_line_of_sight(u_cell.x, u_cell.y, target_cell.x, target_cell.y, u_elev):
+			return true
 
-	var spot_bldgs: Array = SpatialGrid.query_buildings_in_radius(target_pos, 560.0) if SpatialGrid != null else get_tree().get_nodes_in_group("buildings")
+	# 3. Living allied buildings within vision range, >= target elevation, and unobstructed LOS
+	var spot_bldgs: Array = SpatialGrid.query_buildings_in_radius(world_pos, 560.0) if SpatialGrid != null else get_tree().get_nodes_in_group("buildings")
 	for node_b: Variant in spot_bldgs:
 		if not is_instance_valid(node_b) or not (node_b is Building):
 			continue
 		var b: Building = node_b as Building
 		if b.is_destroyed or b.is_queued_for_deletion():
 			continue
-		var b_ally: bool = TeamManager.are_allies(attacker_team, int(b.team)) if TeamManager != null else (int(b.team) == attacker_team)
+		var b_ally: bool = TeamManager.are_allies(observer_team, int(b.team)) if TeamManager != null else (int(b.team) == observer_team)
 		if not b_ally:
 			continue
-		if get_elevation_at(b.global_position) >= target_elev:
-			var bvr: float = b.get_vision_range()
-			if b.global_position.distance_squared_to(target_pos) <= bvr * bvr:
-				return true
+		var bvr: float = b.get_vision_range()
+		if b.global_position.distance_squared_to(world_pos) > bvr * bvr:
+			continue
+		var b_elev: int = get_elevation_at(b.global_position)
+		if b_elev < target_elev:
+			continue
+		if not los_shadowing_enabled:
+			return true
+		var b_cell: Vector2i = world_to_cell(b.global_position)
+		if _has_line_of_sight(b_cell.x, b_cell.y, target_cell.x, target_cell.y, b_elev):
+			return true
+
 	return false
+
+
+func is_entity_visible_to_team(observer_team: int, target_node: Node2D) -> bool:
+	if target_node == null or not is_instance_valid(target_node):
+		return false
+	if post_match_reveal or not fog_enabled or (GameConfig != null and GameConfig.mutator_no_fog):
+		return true
+	if target_node is Unit:
+		var u: Unit = target_node as Unit
+		if u.is_dead or u.is_staffed:
+			return false
+		var is_ally: bool = TeamManager.are_allies(observer_team, int(u.team)) if TeamManager != null else (int(u.team) == observer_team)
+		if is_ally:
+			return true
+	elif target_node is Building:
+		var b: Building = target_node as Building
+		if b.is_destroyed:
+			return false
+		var is_ally_b: bool = TeamManager.are_allies(observer_team, int(b.team)) if TeamManager != null else (int(b.team) == observer_team)
+		if is_ally_b:
+			return true
+	return is_world_pos_visible_to_team(observer_team, target_node.global_position)
+
+
+func can_team_see_target_elevation(attacker_team: int, _attacker_pos: Vector2, target_pos: Vector2) -> bool:
+	return is_world_pos_visible_to_team(attacker_team, target_pos)
 
 
 func set_fog_enabled(enabled: bool) -> void:
@@ -246,6 +351,7 @@ func set_post_match_reveal(enabled: bool) -> void:
 func reset_fog() -> void:
 	_spotted_buildings.clear()
 	_static_building_vision_cells.clear()
+	_viewer_elevated_sources.clear()
 	_grid.fill(VisibilityState.UNEXPLORED)
 	_prev_grid.fill(255)
 	rebuild_blocker_grid()
@@ -260,6 +366,7 @@ func refresh_visibility() -> void:
 	if post_match_reveal or not fog_enabled or (GameConfig != null and GameConfig.mutator_no_fog):
 		for i: int in range(total):
 			_grid[i] = VisibilityState.VISIBLE
+		_viewer_elevated_sources.clear()
 		_sync_texture_if_dirty()
 		_apply_enemy_visibility(true)
 		visibility_updated.emit()
@@ -269,6 +376,7 @@ func refresh_visibility() -> void:
 	for i: int in range(total):
 		if _grid[i] == VisibilityState.VISIBLE:
 			_grid[i] = VisibilityState.EXPLORED
+	_viewer_elevated_sources.clear()
 
 	var spectator: bool = TeamManager != null and TeamManager.is_spectator_mode()
 	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
@@ -283,7 +391,17 @@ func refresh_visibility() -> void:
 		var grants_vision: bool = spectator or (TeamManager.are_allies(viewer_team, int(unit.team)) if TeamManager != null else (unit.team == Unit.Team.PLAYER))
 		if not grants_vision:
 			continue
-		_reveal_circle_los(unit.global_position, unit.get_vision_range())
+		var u_vr: float = unit.get_vision_range()
+		var u_elev: int = get_elevation_at(unit.global_position)
+		if u_elev > 0:
+			_viewer_elevated_sources.append({
+				"pos": unit.global_position,
+				"cell": world_to_cell(unit.global_position),
+				"radius": u_vr,
+				"elev": u_elev,
+				"ignores_los": false,
+			})
+		_reveal_circle_los(unit.global_position, u_vr, u_elev)
 
 	# Stamp cached static LOS vision for all living allied buildings.
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
@@ -295,13 +413,23 @@ func refresh_visibility() -> void:
 		var grants_vision_b: bool = spectator or (TeamManager.are_allies(viewer_team, int(building.team)) if TeamManager != null else (building.team == Unit.Team.PLAYER))
 		if not grants_vision_b:
 			continue
+		var b_vr: float = building.get_vision_range()
+		var b_elev: int = get_elevation_at(building.global_position)
+		if b_elev > 0:
+			_viewer_elevated_sources.append({
+				"pos": building.global_position,
+				"cell": world_to_cell(building.global_position),
+				"radius": b_vr,
+				"elev": b_elev,
+				"ignores_los": false,
+			})
 		var b_id: int = building.get_instance_id()
 		var cache_key: int = b_id * 2 + (1 if building.is_constructed else 0)
 		var stamped: PackedInt32Array
 		if _static_building_vision_cells.has(cache_key):
 			stamped = _static_building_vision_cells[cache_key]
 		else:
-			stamped = _compute_los_cells(building.global_position, building.get_vision_range())
+			stamped = _compute_los_cells(building.global_position, b_vr, b_elev)
 			_static_building_vision_cells[cache_key] = stamped
 		for idx: int in stamped:
 			_grid[idx] = VisibilityState.VISIBLE
@@ -320,10 +448,20 @@ func refresh_visibility() -> void:
 			continue
 		var relay_pos: Vector2 = (node as Node2D).global_position
 		var relay_r: float = float(node.get("vision_radius"))
-		if bool(node.get("ignores_los_blockers")):
+		var ignore_los: bool = bool(node.get("ignores_los_blockers"))
+		var r_elev: int = get_elevation_at(relay_pos)
+		if ignore_los or r_elev > 0:
+			_viewer_elevated_sources.append({
+				"pos": relay_pos,
+				"cell": world_to_cell(relay_pos),
+				"radius": relay_r,
+				"elev": maxi(1, r_elev),
+				"ignores_los": ignore_los,
+			})
+		if ignore_los:
 			_reveal_circle_unobstructed(relay_pos, relay_r)
 		else:
-			_reveal_circle_los(relay_pos, relay_r)
+			_reveal_circle_los(relay_pos, relay_r, r_elev)
 
 	_sync_texture_if_dirty()
 	_apply_enemy_visibility(spectator)
@@ -362,24 +500,26 @@ func is_world_pos_explored(world_pos: Vector2) -> bool:
 func _reveal_circle_unobstructed(world_center: Vector2, radius: float) -> void:
 	if radius <= 0.0:
 		return
+	var cell_w: float = arena_bounds.size.x / float(grid_width)
+	var cell_h: float = arena_bounds.size.y / float(grid_height)
 	var min_c: Vector2i = world_to_cell(world_center - Vector2(radius, radius))
 	var max_c: Vector2i = world_to_cell(world_center + Vector2(radius, radius))
 	var r_sq: float = radius * radius
 
 	for cy: int in range(min_c.y, max_c.y + 1):
 		var row_offset: int = cy * grid_width
-		var wy: float = arena_bounds.position.y + (float(cy) + 0.5) * cell_size
+		var wy: float = arena_bounds.position.y + (float(cy) + 0.5) * cell_h
 		var dy: float = wy - world_center.y
 		var dy_sq: float = dy * dy
 		for cx: int in range(min_c.x, max_c.x + 1):
-			var wx: float = arena_bounds.position.x + (float(cx) + 0.5) * cell_size
+			var wx: float = arena_bounds.position.x + (float(cx) + 0.5) * cell_w
 			var dx: float = wx - world_center.x
 			if dx * dx + dy_sq > r_sq:
 				continue
 			_grid[row_offset + cx] = VisibilityState.VISIBLE
 
 
-func _reveal_circle_los(world_center: Vector2, radius: float) -> void:
+func _reveal_circle_los(world_center: Vector2, radius: float, viewer_elev: int = -1) -> void:
 	if radius <= 0.0:
 		return
 	var cell_w: float = arena_bounds.size.x / float(grid_width)
@@ -388,7 +528,7 @@ func _reveal_circle_los(world_center: Vector2, radius: float) -> void:
 	var eff_radius_sq: float = eff_radius * eff_radius
 
 	var origin_cell: Vector2i = world_to_cell(world_center)
-	var viewer_elev: int = get_elevation_at(world_center)
+	var elev_v: int = viewer_elev if viewer_elev >= 0 else get_elevation_at(world_center)
 	var min_cell: Vector2i = world_to_cell(world_center - Vector2(eff_radius, eff_radius))
 	var max_cell: Vector2i = world_to_cell(world_center + Vector2(eff_radius, eff_radius))
 	var check_los: bool = los_shadowing_enabled and (not _blocker_grid.is_empty() or not _elevation_grid.is_empty())
@@ -403,11 +543,11 @@ func _reveal_circle_los(world_center: Vector2, radius: float) -> void:
 			var dx: float = wx - world_center.x
 			if dx * dx + dy_sq > eff_radius_sq:
 				continue
-			if not check_los or _has_line_of_sight(origin_cell.x, origin_cell.y, cx, cy, viewer_elev):
+			if not check_los or _has_line_of_sight(origin_cell.x, origin_cell.y, cx, cy, elev_v):
 				_grid[row_offset + cx] = VisibilityState.VISIBLE
 
 
-func _compute_los_cells(world_center: Vector2, radius: float) -> PackedInt32Array:
+func _compute_los_cells(world_center: Vector2, radius: float, viewer_elev: int = -1) -> PackedInt32Array:
 	var out: PackedInt32Array = PackedInt32Array()
 	if radius <= 0.0:
 		return out
@@ -417,7 +557,7 @@ func _compute_los_cells(world_center: Vector2, radius: float) -> PackedInt32Arra
 	var eff_radius_sq: float = eff_radius * eff_radius
 
 	var origin_cell: Vector2i = world_to_cell(world_center)
-	var viewer_elev: int = get_elevation_at(world_center)
+	var elev_v: int = viewer_elev if viewer_elev >= 0 else get_elevation_at(world_center)
 	var min_cell: Vector2i = world_to_cell(world_center - Vector2(eff_radius, eff_radius))
 	var max_cell: Vector2i = world_to_cell(world_center + Vector2(eff_radius, eff_radius))
 	var check_los: bool = los_shadowing_enabled and (not _blocker_grid.is_empty() or not _elevation_grid.is_empty())
@@ -432,7 +572,7 @@ func _compute_los_cells(world_center: Vector2, radius: float) -> PackedInt32Arra
 			var dx: float = wx - world_center.x
 			if dx * dx + dy_sq > eff_radius_sq:
 				continue
-			if not check_los or _has_line_of_sight(origin_cell.x, origin_cell.y, cx, cy, viewer_elev):
+			if not check_los or _has_line_of_sight(origin_cell.x, origin_cell.y, cx, cy, elev_v):
 				out.append(row_offset + cx)
 	return out
 
@@ -459,13 +599,13 @@ func _has_line_of_sight(x0: int, y0: int, x1: int, y1: int, viewer_elev: int = 0
 		if e2 < dx:
 			err += dx
 			cy += sy
-		# Target cell itself is always revealed (unless higher elevation, checked above).
+		# Target cell itself is revealed unless higher elevation (already checked above).
 		if cx == x1 and cy == y1:
 			return true
 		if cx < 0 or cx >= grid_width or cy < 0 or cy >= grid_height:
 			return false
 		var step_idx: int = cy * grid_width + cx
-		# An intermediate opaque wall or higher plateau blocks sight to everything behind it.
+		# An intermediate opaque wall or higher plateau terminates the ray immediately.
 		if _blocker_grid[step_idx] != 0:
 			return false
 		if has_elev and int(_elevation_grid[step_idx]) > viewer_elev:
@@ -506,7 +646,7 @@ func _apply_enemy_visibility(force_reveal_all: bool) -> void:
 		if not is_hostile:
 			unit.visible = true
 			continue
-		unit.visible = true if force_reveal_all else is_world_pos_visible(unit.global_position)
+		unit.visible = true if force_reveal_all else is_world_pos_visible_strict(unit.global_position)
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node) or not (node is Building):
@@ -521,13 +661,12 @@ func _apply_enemy_visibility(force_reveal_all: bool) -> void:
 		if force_reveal_all:
 			building.visible = true
 			continue
-		var vis_state: int = get_visibility_at_world_pos(building.global_position)
 		var b_id: int = building.get_instance_id()
-		if vis_state == VisibilityState.VISIBLE:
+		if is_world_pos_visible_strict(building.global_position):
 			_spotted_buildings[b_id] = true
 			building.has_been_spotted = true
 			building.visible = true
-		elif vis_state == VisibilityState.EXPLORED and (_spotted_buildings.has(b_id) or building.has_been_spotted):
+		elif is_world_pos_explored(building.global_position) and (_spotted_buildings.has(b_id) or building.has_been_spotted):
 			building.visible = true
 		else:
 			building.visible = false

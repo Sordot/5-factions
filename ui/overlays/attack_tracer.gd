@@ -21,6 +21,7 @@ var end_world: Vector2 = Vector2.ZERO
 var _arc_height: float = 0.0
 var _style: int = TracerStyle.PULSE_BOLT
 var _elapsed: float = 0.0
+var _hide_origin_muzzle: bool = false
 var is_pooled: bool = false
 
 
@@ -33,6 +34,7 @@ func reset_for_pool() -> void:
 	_arc_height = 0.0
 	_style = TracerStyle.PULSE_BOLT
 	_elapsed = 0.0
+	_hide_origin_muzzle = false
 	global_position = Vector2.ZERO
 
 
@@ -50,7 +52,8 @@ func setup(
 	width: float = 2.5,
 	tracer_duration: float = 0.12,
 	arc_height: float = 0.0,
-	style: int = TracerStyle.PULSE_BOLT
+	style: int = TracerStyle.PULSE_BOLT,
+	hide_origin_muzzle: bool = false
 ) -> void:
 	start_world = from_world
 	end_world = to_world
@@ -59,6 +62,7 @@ func setup(
 	duration = maxf(0.05, tracer_duration)
 	_arc_height = arc_height
 	_style = TracerStyle.ARC_SHELL if arc_height > 1.0 else style
+	_hide_origin_muzzle = hide_origin_muzzle
 	_elapsed = 0.0
 	queue_redraw()
 
@@ -77,7 +81,8 @@ func _draw() -> void:
 	var alpha: float = fade * color.a
 	var draw_col: Color = Color(color.r, color.g, color.b, alpha)
 
-	var p0: Vector2 = to_local(start_world)
+	var effective_start: Vector2 = start_world.lerp(end_world, 0.28) if _hide_origin_muzzle else start_world
+	var p0: Vector2 = to_local(effective_start)
 	var p1: Vector2 = to_local(end_world)
 
 	if _style == TracerStyle.ARC_SHELL or _arc_height > 1.0:
@@ -106,7 +111,7 @@ func _draw() -> void:
 			draw_line(p0, p1, Color(color.r, color.g, color.b, alpha * 0.42), line_width * 2.2, true)
 			draw_line(p0, p1, draw_col, line_width, true)
 			draw_line(p0, p1, Color(1.0, 0.98, 0.90, alpha * 0.95), maxf(1.2, line_width * 0.42), true)
-			if t < 0.45:
+			if not _hide_origin_muzzle and t < 0.45:
 				var mf: float = 1.0 - (t / 0.45)
 				draw_circle(p0, 5.5 * mf, Color(1.0, 0.95, 0.72, mf * 0.85))
 			draw_circle(p1, lerpf(line_width * 2.1, 1.6, t), Color(1.0, 0.94, 0.72, alpha))
@@ -124,7 +129,8 @@ func _draw() -> void:
 					var mp: Vector2 = p0.lerp(p1, frac)
 					var half_tick: float = (8.0 + float(k) * 1.5) * fade
 					draw_line(mp - perp * half_tick, mp + perp * half_tick, Color(0.90, 1.0, 1.0, alpha * 0.72), 1.6, true)
-			draw_circle(p0, lerpf(7.5, 2.5, t), Color(0.86, 1.0, 1.0, alpha * 0.82))
+			if not _hide_origin_muzzle:
+				draw_circle(p0, lerpf(7.5, 2.5, t), Color(0.86, 1.0, 1.0, alpha * 0.82))
 			draw_circle(p1, lerpf(9.0, 2.0, t), draw_col)
 
 		TracerStyle.TWIN_SLUG:
@@ -140,7 +146,7 @@ func _draw() -> void:
 				draw_line(b0, b1, Color(color.r, color.g, color.b, alpha * 0.48), line_width * 1.6, true)
 				draw_line(b0, b1, draw_col, line_width, true)
 				draw_line(b0, b1, Color(1.0, 0.98, 0.92, alpha * 0.9), maxf(1.1, line_width * 0.4), true)
-				if t < 0.40:
+				if not _hide_origin_muzzle and t < 0.40:
 					var mf_g: float = 1.0 - (t / 0.40)
 					draw_circle(s0, 4.8 * mf_g, Color(1.0, 0.88, 0.58, mf_g * 0.88))
 			draw_circle(p1, lerpf(7.0, 2.0, t), draw_col)
@@ -158,7 +164,7 @@ func _draw() -> void:
 				draw_line(hb0, hb1, Color(0.06, 0.07, 0.09, alpha * 0.72), line_width * 1.9, true)
 				draw_line(hb0, hb1, draw_col, line_width * 1.25, true)
 				draw_line(hb0, hb1, Color(0.96, 0.95, 0.91, alpha * 0.96), maxf(1.4, line_width * 0.50), true)
-			if t < 0.38:
+			if not _hide_origin_muzzle and t < 0.38:
 				var mf_h: float = 1.0 - (t / 0.38)
 				var flash_r: float = 7.5 * mf_h
 				if flash_r > 0.8:
@@ -185,7 +191,7 @@ func _draw() -> void:
 					var mp: Vector2 = p0.lerp(p1, frac)
 					var bar_half: float = (7.5 + float(k) * 1.2) * fade
 					draw_line(mp - perp * bar_half, mp + perp * bar_half, Color(1.0, 0.72, 0.22, alpha * 0.82), 1.8, true)
-			if t < 0.45:
+			if not _hide_origin_muzzle and t < 0.45:
 				var mf_r: float = 1.0 - (t / 0.45)
 				draw_circle(p0, 7.2 * mf_r, Color(0.98, 0.96, 0.90, mf_r * 0.92))
 			draw_circle(p1, lerpf(9.5, 2.0, t), Color(1.0, 0.68, 0.18, alpha))
@@ -218,7 +224,7 @@ func _draw() -> void:
 			draw_line(p0, p1, Color(color.r, color.g, color.b, alpha * 0.25), maxf(1.0, line_width * 0.65), true)
 			draw_line(bp0, bp1, draw_col, line_width, true)
 			draw_line(bp0, bp1, Color(0.95, 1.0, 1.0, alpha * 0.85), maxf(1.0, line_width * 0.42), true)
-			if t < 0.35:
+			if not _hide_origin_muzzle and t < 0.35:
 				var mf_p: float = 1.0 - (t / 0.35)
 				draw_circle(p0, 4.2 * mf_p, Color(0.95, 1.0, 0.98, mf_p * 0.82))
 			draw_circle(p1, lerpf(line_width * 1.8, 1.4, t), draw_col)
