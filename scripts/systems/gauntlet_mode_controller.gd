@@ -16,6 +16,13 @@ const SCENES: Dictionary = {
 	&"aegis_relay": "res://scenes/units/monolith_aegis_relay.tscn",
 	&"anvil_walker": "res://scenes/units/monolith_anvil_siege_walker.tscn",
 	&"dreadnought": "res://scenes/units/monolith_monolith_dreadnought.tscn",
+	&"votary": "res://scenes/units/prisma_votary.tscn",
+	&"lumen_skiff": "res://scenes/units/prisma_lumen_skiff.tscn",
+	&"cantor": "res://scenes/units/prisma_cantor.tscn",
+	&"lens_adjudicator": "res://scenes/units/prisma_lens_adjudicator.tscn",
+	&"prism_weaver": "res://scenes/units/prisma_prism_weaver.tscn",
+	&"seraph_cruiser": "res://scenes/units/prisma_seraph_cruiser.tscn",
+	&"solstice_lance": "res://scenes/units/prisma_solstice_lance.tscn",
 	&"nexus_vat": "res://scenes/buildings/nexus_vat.tscn",
 	&"defense_turret": "res://scenes/buildings/defense_turret.tscn",
 	&"barricade": "res://scenes/world/destructible_barricade.tscn",
@@ -60,6 +67,10 @@ func setup(match_mgr: MatchManager) -> void:
 			_setup_stutter_step_drill()
 		GameConfig.DRILL_SIEGE_BREACH:
 			_setup_siege_breach_drill()
+		GameConfig.DRILL_TETHER_WEAVING:
+			_setup_tether_weaving_drill()
+		GameConfig.DRILL_ESCALATING_BEAM:
+			_setup_escalating_beam_drill()
 		_:
 			_setup_optimal_boom_drill()
 
@@ -156,6 +167,10 @@ func _clear_sandbox_arena_entities() -> void:
 	var fog: FogOfWarSystem = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
 	if fog != null:
 		fog.set_fog_enabled(false)
+
+	var tether_sys: Node = get_tree().get_first_node_in_group("optical_tether_system")
+	if tether_sys != null and tether_sys is OpticalTetherSystem:
+		(tether_sys as OpticalTetherSystem).active_links.clear()
 
 	if econ != null:
 		econ.reset_economy()
@@ -285,6 +300,91 @@ func _setup_optimal_boom_drill() -> void:
 	_target_building = null
 
 
+func _setup_tether_weaving_drill() -> void:
+	_clear_sandbox_arena_entities()
+	_player_units.clear()
+	_enemy_units.clear()
+	_target_building = null
+
+	# Player PRISMA_DEI squad (9 units): 5x Votary + 2x Cantor + 2x Prism Weaver
+	var votary_positions: Array[Vector2] = [
+		Vector2(-290.0, -100.0), Vector2(-280.0, -50.0), Vector2(-275.0, 0.0),
+		Vector2(-280.0, 50.0), Vector2(-290.0, 100.0),
+	]
+	for p: Vector2 in votary_positions:
+		var u: Unit = _spawn_unit(&"votary", Unit.Team.PLAYER, p)
+		if u != null:
+			_player_units.append(u)
+	for p: Vector2 in [Vector2(-385.0, -58.0), Vector2(-385.0, 58.0)]:
+		var u: Unit = _spawn_unit(&"cantor", Unit.Team.PLAYER, p)
+		if u != null:
+			_player_units.append(u)
+	for p: Vector2 in [Vector2(-345.0, -110.0), Vector2(-345.0, 110.0)]:
+		var u: Unit = _spawn_unit(&"prism_weaver", Unit.Team.PLAYER, p)
+		if u != null:
+			_player_units.append(u)
+
+	# Hostile GENESIS_V2 force (11 units): 3x Chrysalis Mortar (rear) + 2x Goliath Frame + 6x Clone Trooper
+	for y_off: float in [-130.0, 0.0, 130.0]:
+		var m: Unit = _spawn_unit(&"chrysalis_mortar", Unit.Team.ENEMY, Vector2(390.0, y_off))
+		if m != null:
+			m.stance = Unit.Stance.HOLD_POSITION
+			_enemy_units.append(m)
+	for y_off: float in [-64.0, 64.0]:
+		var g: Unit = _spawn_unit(&"goliath_frame", Unit.Team.ENEMY, Vector2(215.0, y_off))
+		if g != null:
+			_enemy_units.append(g)
+	for y_off: float in [-125.0, -75.0, -25.0, 25.0, 75.0, 125.0]:
+		var ct: Unit = _spawn_unit(&"clone_trooper", Unit.Team.ENEMY, Vector2(145.0, y_off))
+		if ct != null:
+			_enemy_units.append(ct)
+
+	_center_camera(Vector2(25.0, 0.0))
+	call_deferred("_select_player_squad")
+
+
+func _setup_escalating_beam_drill() -> void:
+	_clear_sandbox_arena_entities()
+	_player_units.clear()
+	_enemy_units.clear()
+	_target_building = null
+
+	# Player PRISMA_DEI squad (9 units): 3x Lens Adjudicator + 2x Seraph Cruiser + 2x Cantor + 2x Lumen Skiff
+	for y_off: float in [-82.0, 0.0, 82.0]:
+		var u: Unit = _spawn_unit(&"lens_adjudicator", Unit.Team.PLAYER, Vector2(-305.0, y_off))
+		if u != null:
+			_player_units.append(u)
+	for y_off: float in [-44.0, 44.0]:
+		var u: Unit = _spawn_unit(&"seraph_cruiser", Unit.Team.PLAYER, Vector2(-245.0, y_off))
+		if u != null:
+			_player_units.append(u)
+	for y_off: float in [-56.0, 56.0]:
+		var u: Unit = _spawn_unit(&"cantor", Unit.Team.PLAYER, Vector2(-385.0, y_off))
+		if u != null:
+			_player_units.append(u)
+	for y_off: float in [-132.0, 132.0]:
+		var u: Unit = _spawn_unit(&"lumen_skiff", Unit.Team.PLAYER, Vector2(-285.0, y_off))
+		if u != null:
+			_player_units.append(u)
+
+	# Hostile MONOLITH_OS armored column (8 units): 3x Monolith Dreadnought + 3x Bulwark Automaton + 2x Aegis Relay
+	for y_off: float in [-100.0, 0.0, 100.0]:
+		var b: Unit = _spawn_unit(&"bulwark", Unit.Team.ENEMY, Vector2(195.0, y_off))
+		if b != null:
+			_enemy_units.append(b)
+	for y_off: float in [-115.0, 0.0, 115.0]:
+		var d: Unit = _spawn_unit(&"dreadnought", Unit.Team.ENEMY, Vector2(285.0, y_off))
+		if d != null:
+			_enemy_units.append(d)
+	for y_off: float in [-64.0, 64.0]:
+		var a: Unit = _spawn_unit(&"aegis_relay", Unit.Team.ENEMY, Vector2(365.0, y_off))
+		if a != null:
+			_enemy_units.append(a)
+
+	_center_camera(Vector2(20.0, 0.0))
+	call_deferred("_select_player_squad")
+
+
 func _spawn_banner() -> void:
 	if not is_inside_tree():
 		return
@@ -342,7 +442,7 @@ func _process(delta: float) -> void:
 	_elapsed += delta
 
 	match drill_id:
-		GameConfig.DRILL_STUTTER_STEP:
+		GameConfig.DRILL_STUTTER_STEP, GameConfig.DRILL_TETHER_WEAVING, GameConfig.DRILL_ESCALATING_BEAM:
 			_process_stutter_step(delta)
 		GameConfig.DRILL_SIEGE_BREACH:
 			_process_siege_breach(delta)
@@ -400,6 +500,59 @@ func _tick_drill_enemy_ai() -> void:
 		for eu: Unit in _enemy_units:
 			if is_instance_valid(eu) and not eu.is_dead:
 				eu.command_attack_move(centroid, false)
+	elif drill_id == GameConfig.DRILL_TETHER_WEAVING:
+		if _player_units.is_empty():
+			return
+		var centroid_tw: Vector2 = Vector2.ZERO
+		for pu: Unit in _player_units:
+			centroid_tw += pu.global_position
+		centroid_tw /= float(_player_units.size())
+		# Pick densest player cluster target for rear mortars
+		var best_mortar_target: Unit = _player_units[0]
+		var best_near: int = -1
+		for cand: Unit in _player_units:
+			var near_c: int = 0
+			for other: Unit in _player_units:
+				if cand.global_position.distance_squared_to(other.global_position) <= 135.0 * 135.0:
+					near_c += 1
+			if near_c > best_near:
+				best_near = near_c
+				best_mortar_target = cand
+		for eu: Unit in _enemy_units:
+			if not is_instance_valid(eu) or eu.is_dead or eu.data == null:
+				continue
+			if eu.data.unit_type_id == &"chrysalis_mortar":
+				if eu.global_position.distance_to(best_mortar_target.global_position) <= eu.get_effective_attack_range() + 40.0:
+					eu.command_attack_target(best_mortar_target, false)
+			else:
+				eu.command_attack_move(centroid_tw, false)
+	elif drill_id == GameConfig.DRILL_ESCALATING_BEAM:
+		if _player_units.is_empty():
+			return
+		var centroid_eb: Vector2 = Vector2.ZERO
+		for pu: Unit in _player_units:
+			centroid_eb += pu.global_position
+		centroid_eb /= float(_player_units.size())
+		var armed_enemy_sum: Vector2 = Vector2.ZERO
+		var armed_enemy_cnt: int = 0
+		for eu_a: Unit in _enemy_units:
+			if is_instance_valid(eu_a) and not eu_a.is_dead and eu_a.data != null and eu_a.data.attack_damage > 0.0:
+				armed_enemy_sum += eu_a.global_position
+				armed_enemy_cnt += 1
+		var escort_anchor: Vector2 = (armed_enemy_sum / float(armed_enemy_cnt)) + Vector2(68.0, 0.0) if armed_enemy_cnt > 0 else centroid_eb
+		for eu: Unit in _enemy_units:
+			if not is_instance_valid(eu) or eu.is_dead or eu.data == null:
+				continue
+			if eu.data.unit_type_id == &"aegis_relay" or eu.data.attack_damage <= 0.0:
+				if eu.global_position.distance_to(escort_anchor) > 85.0 or eu.command_state == Unit.CommandState.IDLE:
+					eu.command_move(escort_anchor, false)
+			else:
+				eu.command_attack_move(centroid_eb, false)
+				for ab: AbilityData in eu.data.abilities:
+					if ab != null and ab.ability_id == &"kinetic_barrier" and eu.is_ability_ready(ab):
+						if eu.current_shield <= eu.max_shield * 0.25 or eu.current_hp < eu.get_max_hp() * 0.78:
+							eu.command_cast_ability(ab, eu.global_position, eu)
+							break
 	elif drill_id == GameConfig.DRILL_SIEGE_BREACH:
 		# Keep mortars engaging approaching siege force from range
 		if _player_units.is_empty():
@@ -431,18 +584,41 @@ func _prune_squads() -> void:
 	_enemy_units = e_alive
 
 
+func _count_surviving_player_cantors() -> int:
+	var cnt: int = 0
+	for u: Unit in _player_units:
+		if is_instance_valid(u) and not u.is_dead and u.data != null and u.data.unit_type_id == &"cantor":
+			cnt += 1
+	return cnt
+
+
 func _finish_combat_drill(succeeded: bool) -> void:
 	state = State.ENDED
 	if _banner != null:
 		_banner.set_banner_visible(false)
 
 	var survivors: int = _player_units.size()
+	var cantors_alive: int = _count_surviving_player_cantors()
 	var medal: int = ModeRecords.Medal.NONE
 	if succeeded:
 		if drill_id == GameConfig.DRILL_STUTTER_STEP:
 			if _elapsed <= 32.0 and survivors >= 7:
 				medal = ModeRecords.Medal.GOLD
 			elif _elapsed <= 45.0 and survivors >= 4:
+				medal = ModeRecords.Medal.SILVER
+			else:
+				medal = ModeRecords.Medal.BRONZE
+		elif drill_id == GameConfig.DRILL_TETHER_WEAVING:
+			if _elapsed <= 42.0 and survivors >= 6 and cantors_alive >= 1:
+				medal = ModeRecords.Medal.GOLD
+			elif _elapsed <= 58.0 and survivors >= 4:
+				medal = ModeRecords.Medal.SILVER
+			else:
+				medal = ModeRecords.Medal.BRONZE
+		elif drill_id == GameConfig.DRILL_ESCALATING_BEAM:
+			if _elapsed <= 45.0 and survivors >= 6:
+				medal = ModeRecords.Medal.GOLD
+			elif _elapsed <= 60.0 and survivors >= 4:
 				medal = ModeRecords.Medal.SILVER
 			else:
 				medal = ModeRecords.Medal.BRONZE
@@ -501,7 +677,7 @@ func _compute_boom_metrics() -> Dictionary:
 			continue
 		if u.data.is_combat_unit():
 			army_value += maxi(0, u.data.biomass_cost) + maxi(0, u.data.silica_cost) + maxi(0, u.data.compute_cost)
-		else:
+		elif u.data.is_worker_class():
 			worker_count += 1
 
 	var has_tier2: bool = false
@@ -513,7 +689,7 @@ func _compute_boom_metrics() -> Dictionary:
 		var b: Building = b_node as Building
 		if b.is_destroyed or b.is_queued_for_deletion() or int(b.team) != int(Unit.Team.PLAYER) or not b.is_constructed:
 			continue
-		if b.get_tech_tier() >= 2:
+		if b.is_military_production_building() and b.get_tech_tier() >= 2:
 			has_tier2 = true
 			t2_count += 1
 		elif not b.is_command_hub():
@@ -611,6 +787,35 @@ func _refresh_banner() -> void:
 			m_col.lerp(Color.WHITE, 0.25)
 		)
 		_banner.set_progress(1.0 - (_elapsed / _time_limit), m_col, true)
+	elif drill_id == GameConfig.DRILL_TETHER_WEAVING:
+		var rem_tw: float = maxf(0.0, _time_limit - _elapsed)
+		var cantors_tw: int = _count_surviving_player_cantors()
+		var live_tw: int = ModeRecords.Medal.GOLD if (_elapsed <= 42.0 and _player_units.size() >= 6 and cantors_tw >= 1) else (ModeRecords.Medal.SILVER if (_elapsed <= 58.0 and _player_units.size() >= 4) else ModeRecords.Medal.BRONZE)
+		var m_col_tw: Color = ModeRecords.get_medal_color(live_tw)
+		_banner.set_header(
+			"TETHER WEAVING  •  HOSTILES: %d/11" % _enemy_units.size(),
+			"%.1fs" % _elapsed,
+			m_col_tw
+		)
+		_banner.set_subtitle(
+			"ALIVE: %d/9 (CANTORS: %d)  •  TARGET: %s  •  LEFT: %.0fs" % [_player_units.size(), cantors_tw, ModeRecords.get_medal_label(live_tw), rem_tw],
+			m_col_tw.lerp(Color.WHITE, 0.25)
+		)
+		_banner.set_progress(1.0 - (_elapsed / _time_limit), m_col_tw, true)
+	elif drill_id == GameConfig.DRILL_ESCALATING_BEAM:
+		var rem_eb: float = maxf(0.0, _time_limit - _elapsed)
+		var live_eb: int = ModeRecords.Medal.GOLD if (_elapsed <= 45.0 and _player_units.size() >= 6) else (ModeRecords.Medal.SILVER if (_elapsed <= 60.0 and _player_units.size() >= 4) else ModeRecords.Medal.BRONZE)
+		var m_col_eb: Color = ModeRecords.get_medal_color(live_eb)
+		_banner.set_header(
+			"BEAM FOCUS-FIRE  •  HOSTILES: %d/8" % _enemy_units.size(),
+			"%.1fs" % _elapsed,
+			m_col_eb
+		)
+		_banner.set_subtitle(
+			"ALIVE: %d/9  •  TARGET: %s  •  LEFT: %.0fs" % [_player_units.size(), ModeRecords.get_medal_label(live_eb), rem_eb],
+			m_col_eb.lerp(Color.WHITE, 0.25)
+		)
+		_banner.set_progress(1.0 - (_elapsed / _time_limit), m_col_eb, true)
 	elif drill_id == GameConfig.DRILL_SIEGE_BREACH:
 		var rem_t2: float = maxf(0.0, _time_limit - _elapsed)
 		var vat_pct: int = 0

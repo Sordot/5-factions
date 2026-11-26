@@ -12,15 +12,15 @@ const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.
 @onready var holdout_config_box: VBoxContainer = %HoldoutConfigBox
 @onready var btn_holdout_fac_gen: Button = %BtnHoldoutFacGen
 @onready var btn_holdout_fac_mono: Button = %BtnHoldoutFacMono
+@onready var btn_holdout_fac_prisma: Button = %BtnHoldoutFacPrisma
 @onready var btn_holdout_fac_mixed: Button = %BtnHoldoutFacMixed
 @onready var btn_holdout_diff_relaxed: Button = %BtnHoldoutDiffRelaxed
 @onready var btn_holdout_diff_standard: Button = %BtnHoldoutDiffStandard
 @onready var btn_holdout_diff_brutal: Button = %BtnHoldoutDiffBrutal
 @onready var holdout_record_label: Label = %HoldoutRecordLabel
 @onready var gauntlet_config_box: VBoxContainer = %GauntletConfigBox
-@onready var btn_drill_0: Button = %BtnDrill0
-@onready var btn_drill_1: Button = %BtnDrill1
-@onready var btn_drill_2: Button = %BtnDrill2
+@onready var gauntlet_drill_scroll: ScrollContainer = %GauntletDrillScroll
+@onready var gauntlet_drill_list: VBoxContainer = %GauntletDrillList
 @onready var gauntlet_detail_label: Label = %GauntletDetailLabel
 @onready var map_option: OptionButton = %MapOption
 @onready var proc_map_options_box: VBoxContainer = %ProcMapOptionsBox
@@ -101,6 +101,7 @@ var _selected_mode: int = GameConfig.GameMode.SKIRMISH
 var _holdout_enemy_faction_id: StringName = &"monolith_os"
 var _holdout_difficulty: int = int(GameConfig.AIDifficulty.STANDARD)
 var _selected_drill_id: StringName = GameConfig.DRILL_STUTTER_STEP
+var _gauntlet_drill_buttons: Array[Button] = []
 var _proc_seed: int = 0
 var _proc_chokes: int = 1
 var _proc_high_ground: int = 1
@@ -288,6 +289,12 @@ func _ready() -> void:
 			_holdout_enemy_faction_id = &"monolith_os"
 			_refresh_ui()
 		)
+	if btn_holdout_fac_prisma != null:
+		btn_holdout_fac_prisma.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_holdout_enemy_faction_id = &"prisma_dei"
+			_refresh_ui()
+		)
 	if btn_holdout_fac_mixed != null:
 		btn_holdout_fac_mixed.pressed.connect(func() -> void:
 			AudioManager.play_ui_click()
@@ -312,33 +319,16 @@ func _ready() -> void:
 			_holdout_difficulty = int(GameConfig.AIDifficulty.BRUTAL)
 			_refresh_ui()
 		)
-	if btn_drill_0 != null:
-		btn_drill_0.pressed.connect(func() -> void:
-			AudioManager.play_ui_click()
-			_selected_drill_id = GameConfig.DRILL_STUTTER_STEP
-			_refresh_ui()
-		)
-	if btn_drill_1 != null:
-		btn_drill_1.pressed.connect(func() -> void:
-			AudioManager.play_ui_click()
-			_selected_drill_id = GameConfig.DRILL_SIEGE_BREACH
-			_refresh_ui()
-		)
-	if btn_drill_2 != null:
-		btn_drill_2.pressed.connect(func() -> void:
-			AudioManager.play_ui_click()
-			_selected_drill_id = GameConfig.DRILL_OPTIMAL_BOOM
-			_refresh_ui()
-		)
+	_build_gauntlet_drill_cards()
 
 	# Milestone 3.6: Procedural Skirmish Map controls
 	_init_procedural_map_controls()
 
 	_wire_hover_audio([
 		btn_audio_mute, btn_mode_skirmish, btn_mode_holdout, btn_mode_gauntlet,
-		btn_holdout_fac_gen, btn_holdout_fac_mono, btn_holdout_fac_mixed,
+		btn_holdout_fac_gen, btn_holdout_fac_mono, btn_holdout_fac_prisma, btn_holdout_fac_mixed,
 		btn_holdout_diff_relaxed, btn_holdout_diff_standard, btn_holdout_diff_brutal,
-		btn_drill_0, btn_drill_1, btn_drill_2, btn_roll_seed,
+		btn_roll_seed,
 		opt_proc_biome, opt_proc_chokes, opt_proc_high_ground, opt_proc_richness,
 		map_option, btn_players_2, btn_players_3, btn_players_4,
 		opt_team_preset, btn_ai_standard, btn_ai_passive, btn_res_standard, btn_res_fast,
@@ -346,6 +336,7 @@ func _ready() -> void:
 		btn_launch, btn_settings, btn_quit,
 		locked_slot_2, locked_slot_3, locked_slot_4, locked_slot_5,
 	])
+	_wire_hover_audio(_gauntlet_drill_buttons)
 
 	_clamp_player_count_for_map()
 	_rebuild_preset_options()
@@ -1073,11 +1064,42 @@ func _refresh_mode_tabs_and_panels() -> void:
 		_refresh_gauntlet_panel()
 
 
+func _build_gauntlet_drill_cards() -> void:
+	_gauntlet_drill_buttons.clear()
+	if gauntlet_drill_list == null:
+		return
+	for child: Node in gauntlet_drill_list.get_children():
+		child.queue_free()
+	for i: int in range(GameConfig.GAUNTLET_DRILLS.size()):
+		var info: Dictionary = GameConfig.GAUNTLET_DRILLS[i] as Dictionary
+		var did: StringName = info["id"] as StringName
+		var btn: Button = Button.new()
+		btn.name = "BtnDrill%d" % i
+		btn.custom_minimum_size = Vector2(0.0, 56.0)
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.clip_text = true
+		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		btn.add_theme_font_size_override("font_size", 10)
+		var captured_id: StringName = did
+		btn.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_selected_drill_id = captured_id
+			GameConfig.selected_gauntlet_drill_id = captured_id
+			_refresh_ui()
+		)
+		gauntlet_drill_list.add_child(btn)
+		_gauntlet_drill_buttons.append(btn)
+
+
 func _refresh_holdout_panel() -> void:
 	if btn_holdout_fac_gen != null:
 		btn_holdout_fac_gen.modulate = Color(0.32, 1.0, 0.88, 1.0) if _holdout_enemy_faction_id == &"genesis_v2" else Color(0.66, 0.74, 0.80, 0.78)
 	if btn_holdout_fac_mono != null:
 		btn_holdout_fac_mono.modulate = Color(1.0, 0.68, 0.24, 1.0) if _holdout_enemy_faction_id == &"monolith_os" else Color(0.66, 0.74, 0.80, 0.78)
+	if btn_holdout_fac_prisma != null:
+		btn_holdout_fac_prisma.modulate = Color(0.98, 0.80, 0.14, 1.0) if _holdout_enemy_faction_id == &"prisma_dei" else Color(0.66, 0.74, 0.80, 0.78)
 	if btn_holdout_fac_mixed != null:
 		btn_holdout_fac_mixed.modulate = Color(0.96, 0.44, 0.88, 1.0) if _holdout_enemy_faction_id == GameConfig.HOLDOUT_ENEMY_MIXED else Color(0.66, 0.74, 0.80, 0.78)
 
@@ -1091,7 +1113,7 @@ func _refresh_holdout_panel() -> void:
 	if holdout_record_label != null:
 		var player_fd: FactionData = _find_faction_data(_featured_faction_id)
 		var player_fac_code: String = player_fd.short_code if (player_fd != null and not player_fd.short_code.is_empty()) else String(_featured_faction_id).to_upper()
-		var enemy_code: String = "MIXED ASSAULT"
+		var enemy_code: String = "MIXED ASSAULT (3-FACTION)"
 		if _holdout_enemy_faction_id != GameConfig.HOLDOUT_ENEMY_MIXED:
 			var enemy_fd: FactionData = _find_faction_data(_holdout_enemy_faction_id)
 			enemy_code = enemy_fd.short_code if (enemy_fd != null and not enemy_fd.short_code.is_empty()) else String(_holdout_enemy_faction_id).to_upper()
@@ -1112,10 +1134,9 @@ func _refresh_holdout_panel() -> void:
 
 
 func _refresh_gauntlet_panel() -> void:
-	var btns: Array[Button] = [btn_drill_0, btn_drill_1, btn_drill_2]
-	for i: int in range(mini(btns.size(), GameConfig.GAUNTLET_DRILLS.size())):
-		var btn: Button = btns[i]
-		if btn == null:
+	for i: int in range(mini(_gauntlet_drill_buttons.size(), GameConfig.GAUNTLET_DRILLS.size())):
+		var btn: Button = _gauntlet_drill_buttons[i]
+		if btn == null or not is_instance_valid(btn):
 			continue
 		var info: Dictionary = GameConfig.GAUNTLET_DRILLS[i] as Dictionary
 		var did: StringName = info["id"] as StringName
@@ -1125,20 +1146,23 @@ func _refresh_gauntlet_panel() -> void:
 		var best_str: String = ""
 		if bool(rec.get("has_record", false)) and float(rec.get("best_value", -1.0)) >= 0.0:
 			if bool(info.get("lower_is_better", true)):
-				best_str = " (%.1fs)" % float(rec["best_value"])
+				best_str = " %.1fs" % float(rec["best_value"])
 			else:
-				best_str = " (%s pts)" % InspectionHelper.format_number(int(round(float(rec["best_value"]))))
-		btn.text = "%d. %s  [%s%s]\n%s — %s" % [
+				best_str = " %s" % InspectionHelper.format_number(int(round(float(rec["best_value"]))))
+		var fac_badge: String = String(info.get("faction_badge", "[ANY]"))
+		var gold_hint: String = String(info.get("gold_hint", ""))
+		btn.text = "%d. %s %s  [%s%s]\n%s  •  %s" % [
 			i + 1,
 			String(info["title"]),
+			fac_badge,
 			medal_tag,
 			best_str,
 			String(info["tag"]),
-			String(info["summary"]),
+			gold_hint,
 		]
 		var is_sel: bool = (did == _selected_drill_id)
 		if is_sel:
-			btn.modulate = Color(0.42, 1.0, 0.92, 1.0)
+			btn.modulate = Color(0.98, 0.84, 0.28, 1.0) if fac_badge == "[PRIS]" else Color(0.42, 1.0, 0.92, 1.0)
 		elif medal > ModeRecords.Medal.NONE:
 			btn.modulate = ModeRecords.get_medal_color(medal).lerp(Color.WHITE, 0.25)
 		else:
@@ -1151,12 +1175,15 @@ func _refresh_gauntlet_panel() -> void:
 		if fixed_f == &"":
 			var p_fd: FactionData = _find_faction_data(_featured_faction_id)
 			var pcode: String = p_fd.display_name.split("—")[0].strip_edges() if p_fd != null else String(_featured_faction_id).to_upper()
-			fac_note = "ACTIVE FACTION: %s (change on left dossier)" % pcode
+			fac_note = "ACTIVE FACTION: %s (change on left)" % pcode
 		else:
 			fac_note = "PRESET SQUAD: %s" % String(fixed_f).to_upper()
-		gauntlet_detail_label.text = "MEDALS: %s\n%s  •  Instant Retry: [R]" % [
+		var retry_hint: String = "[Ctrl+R]" if _selected_drill_id == GameConfig.DRILL_OPTIMAL_BOOM else "[R]"
+		gauntlet_detail_label.text = "%s\n%s\n%s  •  Retry: %s" % [
+			String(sel_info["summary"]),
 			String(sel_info["thresholds"]),
 			fac_note,
+			retry_hint,
 		]
 
 

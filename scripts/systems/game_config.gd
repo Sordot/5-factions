@@ -55,12 +55,16 @@ const HOLDOUT_ENEMY_MIXED: StringName = &"mixed"
 const DRILL_STUTTER_STEP: StringName = &"stutter_step_bulwarks"
 const DRILL_SIEGE_BREACH: StringName = &"siege_line_breach"
 const DRILL_OPTIMAL_BOOM: StringName = &"optimal_3min_boom"
+const DRILL_TETHER_WEAVING: StringName = &"tether_weaving_mortars"
+const DRILL_ESCALATING_BEAM: StringName = &"escalating_beam_focus"
 
 const GAUNTLET_DRILLS: Array = [
 	{
 		"id": DRILL_STUTTER_STEP,
 		"title": "Stutter-Step vs. Bulwarks",
-		"tag": "60s Tactical Micro",
+		"tag": "60s Micro",
+		"faction_badge": "[GEN]",
+		"gold_hint": "GOLD <=32s (7+ alive)",
 		"time_limit": 60.0,
 		"scene_path": MAP_SANDBOX_TESTBED,
 		"fixed_faction": &"genesis_v2",
@@ -72,7 +76,9 @@ const GAUNTLET_DRILLS: Array = [
 	{
 		"id": DRILL_SIEGE_BREACH,
 		"title": "Siege-Line Breach",
-		"tag": "90s Assault Micro",
+		"tag": "90s Assault",
+		"faction_badge": "[MONO]",
+		"gold_hint": "GOLD <=50s (5+ alive)",
 		"time_limit": 90.0,
 		"scene_path": MAP_SANDBOX_TESTBED,
 		"fixed_faction": &"monolith_os",
@@ -84,7 +90,9 @@ const GAUNTLET_DRILLS: Array = [
 	{
 		"id": DRILL_OPTIMAL_BOOM,
 		"title": "Optimal 3-Minute Boom",
-		"tag": "180s Macro Economy",
+		"tag": "180s Macro",
+		"faction_badge": "[ANY]",
+		"gold_hint": "GOLD >=4,200 + T2",
 		"time_limit": 180.0,
 		"scene_path": MAP_SKIRMISH_01,
 		"fixed_faction": &"",
@@ -92,6 +100,34 @@ const GAUNTLET_DRILLS: Array = [
 		"lower_is_better": false,
 		"summary": "Maximize gathered resources, army value & Tier 2 tech in 3:00 with zero supply block.",
 		"thresholds": "GOLD >=4,200 + T2 • SILVER >=3,000 • BRONZE >=1,800",
+	},
+	{
+		"id": DRILL_TETHER_WEAVING,
+		"title": "Tether Weaving vs. Mortar Splash",
+		"tag": "75s Micro",
+		"faction_badge": "[PRIS]",
+		"gold_hint": "GOLD <=42s (6+ alive, 1+ Cantor)",
+		"time_limit": 75.0,
+		"scene_path": MAP_SANDBOX_TESTBED,
+		"fixed_faction": &"prisma_dei",
+		"enemy_faction": &"genesis_v2",
+		"lower_is_better": true,
+		"summary": "Dodge mortar splash with Solar Step, keep Votaries tethered without clumping, and shut down fire with Blinding Glare.",
+		"thresholds": "GOLD <=42s (6+ alive, 1+ Cantor) • SILVER <=58s (4+ alive) • BRONZE <=75s",
+	},
+	{
+		"id": DRILL_ESCALATING_BEAM,
+		"title": "Escalating Beam Focus-Fire",
+		"tag": "75s Micro",
+		"faction_badge": "[PRIS]",
+		"gold_hint": "GOLD <=45s (6+ alive)",
+		"time_limit": 75.0,
+		"scene_path": MAP_SANDBOX_TESTBED,
+		"fixed_faction": &"prisma_dei",
+		"enemy_faction": &"monolith_os",
+		"lower_is_better": true,
+		"summary": "Radiant Mark priority targets, ramp Adjudicator & Seraph beams with Focus Alignment + Aureole Surge, and snipe Aegis Relays.",
+		"thresholds": "GOLD <=45s (6+ alive) • SILVER <=60s (4+ alive) • BRONZE <=75s",
 	},
 ]
 

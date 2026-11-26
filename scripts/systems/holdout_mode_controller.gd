@@ -36,6 +36,13 @@ const UNIT_SCENES: Dictionary = {
 	&"anvil_walker": "res://scenes/units/monolith_anvil_siege_walker.tscn",
 	&"dreadnought": "res://scenes/units/monolith_monolith_dreadnought.tscn",
 	&"null_grid": "res://scenes/units/monolith_null_grid_projector.tscn",
+	&"votary": "res://scenes/units/prisma_votary.tscn",
+	&"lumen_skiff": "res://scenes/units/prisma_lumen_skiff.tscn",
+	&"cantor": "res://scenes/units/prisma_cantor.tscn",
+	&"lens_adjudicator": "res://scenes/units/prisma_lens_adjudicator.tscn",
+	&"prism_weaver": "res://scenes/units/prisma_prism_weaver.tscn",
+	&"seraph_cruiser": "res://scenes/units/prisma_seraph_cruiser.tscn",
+	&"solstice_lance": "res://scenes/units/prisma_solstice_lance.tscn",
 }
 
 enum State {
@@ -186,7 +193,7 @@ func _process(delta: float) -> void:
 		State.ACTIVE_WAVE:
 			_prune_dead_wave_units()
 			_ai_steer_timer += delta
-			if _ai_steer_timer >= 1.1:
+			if _ai_steer_timer >= 1.0:
 				_ai_steer_timer = 0.0
 				_steer_wave_units()
 			if _wave_units.is_empty():
@@ -323,9 +330,27 @@ func _spawn_next_wave() -> void:
 	_wave_initial_count = _wave_units.size()
 	_ai_steer_timer = 0.0
 	_steer_wave_units()
+	_emit_prisma_wave_transmission(current_wave, lanes)
 	if AudioManager != null:
 		AudioManager.play_sfx(&"uplink_contested", -4.0, 0.0)
 	_refresh_banner()
+
+
+func _emit_prisma_wave_transmission(wave_num: int, lanes: Array[Dictionary]) -> void:
+	if _match_mgr == null or _enemy_faction_mode != &"prisma_dei":
+		return
+	if SettingsManager != null and not SettingsManager.show_ai_transmissions:
+		return
+	var line: String = ""
+	if wave_num == 1:
+		line = "// PRISMA_DEI: The Choir advances in harmonic convergence. Surrender the Hyper-Uplink."
+	elif wave_num == 5:
+		line = "// PRISMA_DEI: Refraction Cloisters aligned. No armor endures our focusing lenses."
+	elif wave_num == 10:
+		line = "// PRISMA_DEI: DIVINE CONVERGENCE. Seraphs and Solstice Lances descend upon your sanctum."
+	if not line.is_empty():
+		var origin: Vector2 = (lanes[0]["pos"] as Vector2) if not lanes.is_empty() else LANE_MAIN
+		_match_mgr.emit_tactical_event(&"ai_transmission", line, origin, Color(0.98, 0.80, 0.14, 1.0))
 
 
 func _on_wave_unit_died(unit: Unit) -> void:
@@ -458,6 +483,15 @@ func _steer_wave_units() -> void:
 			if not b.is_destroyed and int(b.team) == int(Unit.Team.PLAYER):
 				player_buildings.append(b)
 
+	# Compute armed centroid so 0-damage support anchors (Cantor, Symbiote, Aegis Relay) escort cleanly
+	var armed_sum: Vector2 = Vector2.ZERO
+	var armed_cnt: int = 0
+	for u_a: Unit in _wave_units:
+		if is_instance_valid(u_a) and not u_a.is_dead and u_a.data != null and u_a.data.attack_damage > 0.0:
+			armed_sum += u_a.global_position
+			armed_cnt += 1
+	var armed_centroid: Vector2 = (armed_sum / float(armed_cnt)) if armed_cnt > 0 else hub_pos
+
 	for u: Unit in _wave_units:
 		if not is_instance_valid(u) or u.is_dead:
 			continue
@@ -473,11 +507,73 @@ func _steer_wave_units() -> void:
 				u.toggle_deploy_mode()
 				continue
 
+		# Keep 0-damage support units advancing tightly behind their armed wave cohort
+		if u.data != null and u.data.attack_damage <= 0.0 and armed_cnt > 0:
+			var back_dir: Vector2 = (LANE_MAIN - armed_centroid).normalized() if armed_centroid.distance_squared_to(LANE_MAIN) > 100.0 else Vector2.RIGHT
+			var escort_pos: Vector2 = armed_centroid + back_dir * 62.0
+			if u.global_position.distance_to(escort_pos) > 95.0 or u.command_state == Unit.CommandState.IDLE:
+				u.command_move(escort_pos, false)
+			continue
+
 		if u.command_state == Unit.CommandState.IDLE:
 			var target: Vector2 = hub_pos
 			if uplink_held and u.global_position.distance_to(Vector2.ZERO) < u.global_position.distance_to(hub_pos) and u.global_position.distance_to(Vector2.ZERO) > 150.0:
 				target = Vector2.ZERO
 			u.command_attack_move(target, false)
+
+		_try_trigger_wave_unit_abilities(u, player_buildings)
+
+
+func _try_trigger_wave_unit_abilities(u: Unit, player_buildings: Array[Building]) -> void:
+	if u.data == null or u.data.abilities.is_empty():
+		return
+	var has_target: bool = u.current_target != null and is_instance_valid(u.current_target)
+	var dist: float = u.global_position.distance_to(u.current_target.global_position) if has_target else INF
+
+	for ab: AbilityData in u.data.abilities:
+		if ab == null or ab.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
+			continue
+		if ab.ability_id == &"luminous_mend" or ab.ability_id == &"monolith_shield_overcharge":
+			continue
+		if not u.is_ability_ready(ab):
+			continue
+		match ab.ability_id:
+			&"solar_step":
+				if has_target and (dist > u.get_effective_attack_range() * 0.85 or u.current_hp < u.get_max_hp() * 0.72):
+					u.command_cast_ability(ab, u.global_position, u)
+					return
+			&"radiant_mark":
+				if has_target and u.current_target is Unit and dist <= ab.cast_range:
+					var tu: Unit = u.current_target as Unit
+					if not tu.has_status_effect(&"radiant_mark"):
+						u.command_cast_ability(ab, tu.global_position, tu)
+						return
+			&"focus_alignment":
+				if has_target and dist <= u.get_effective_attack_range() + 45.0:
+					var armored_or_b: bool = (u.current_target is Building) or (u.current_target is Unit and (u.current_target as Unit).data != null and (u.current_target as Unit).data.is_armored)
+					if armored_or_b:
+						u.command_cast_ability(ab, u.global_position, u)
+						return
+			&"blinding_glare":
+				if has_target and dist <= ab.cast_range:
+					u.command_cast_ability(ab, u.current_target.global_position)
+					return
+			&"aureole_surge":
+				if has_target and dist <= u.get_effective_attack_range() + 45.0 and u.current_hp >= u.get_max_hp() * 0.45:
+					u.command_cast_ability(ab, u.global_position, u)
+					return
+			&"solar_convergence":
+				var conv_target: Variant = null
+				if has_target and dist <= ab.cast_range:
+					conv_target = u.current_target.global_position
+				else:
+					for pb: Building in player_buildings:
+						if is_instance_valid(pb) and not pb.is_destroyed and u.global_position.distance_to(pb.global_position) <= ab.cast_range:
+							conv_target = pb.global_position
+							break
+				if conv_target is Vector2:
+					u.command_cast_ability(ab, conv_target as Vector2)
+					return
 
 
 func _is_player_defeated() -> bool:
@@ -506,6 +602,12 @@ func _get_player_hub_position() -> Vector2:
 func _get_lanes_for_wave(wave_num: int) -> Array[Dictionary]:
 	if wave_num <= 3:
 		return [{"pos": LANE_MAIN, "name": "Omega Basin"}]
+	if wave_num > TARGET_VICTORY_WAVE:
+		var rot: int = (wave_num - TARGET_VICTORY_WAVE) % 3
+		if rot == 1:
+			return [{"pos": LANE_NORTH, "name": "North Conduit"}, {"pos": LANE_MAIN, "name": "Omega Basin"}, {"pos": LANE_SOUTH, "name": "South Trench"}]
+		if rot == 2:
+			return [{"pos": LANE_SOUTH, "name": "South Trench"}, {"pos": LANE_NORTH, "name": "North Conduit"}, {"pos": LANE_MAIN, "name": "Omega Basin"}]
 	if wave_num == 4 or wave_num == 7:
 		return [{"pos": LANE_MAIN, "name": "Omega Basin"}, {"pos": LANE_NORTH, "name": "North Conduit"}]
 	if wave_num == 5 or wave_num == 8:
@@ -519,20 +621,66 @@ func _get_lanes_for_wave(wave_num: int) -> Array[Dictionary]:
 
 func _build_wave_composition(wave_num: int) -> Array[Dictionary]:
 	var fac: StringName = _enemy_faction_mode
-	if fac == GameConfig.HOLDOUT_ENEMY_MIXED:
-		if wave_num >= 10:
-			return [
-				{"unit": &"goliath_frame", "count": 2},
-				{"unit": &"dreadnought", "count": 2},
-				{"unit": &"arc_lancer", "count": 2},
-				{"unit": &"anvil_walker", "count": 2},
-				{"unit": &"chrysalis_mortar", "count": 2},
-				{"unit": &"aegis_relay", "count": 2},
-				{"unit": &"clone_trooper", "count": 6},
-			]
-		fac = &"genesis_v2" if (wave_num % 2 == 1) else &"monolith_os"
-
 	var w: int = mini(wave_num, 10)
+	if fac == GameConfig.HOLDOUT_ENEMY_MIXED:
+		# 3-Faction Mixed Assault waves blending GENESIS_V2, MONOLITH_OS, and PRISMA_DEI
+		match w:
+			1:
+				return [{"unit": &"clone_trooper", "count": 3}, {"unit": &"votary", "count": 2}, {"unit": &"bulwark", "count": 1}]
+			2:
+				return [{"unit": &"votary", "count": 3}, {"unit": &"bulwark", "count": 2}, {"unit": &"stinger", "count": 2}, {"unit": &"cantor", "count": 1}]
+			3:
+				return [{"unit": &"clone_trooper", "count": 4}, {"unit": &"bulwark", "count": 2}, {"unit": &"lens_adjudicator", "count": 2}, {"unit": &"cantor", "count": 1}]
+			4:
+				return [{"unit": &"bulwark", "count": 3}, {"unit": &"prism_weaver", "count": 2}, {"unit": &"lance_rig", "count": 2}, {"unit": &"aegis_relay", "count": 1}, {"unit": &"cantor", "count": 1}]
+			5:
+				return [{"unit": &"clone_trooper", "count": 5}, {"unit": &"rail_sentinel", "count": 2}, {"unit": &"lens_adjudicator", "count": 2}, {"unit": &"prism_weaver", "count": 2}, {"unit": &"cantor", "count": 1}, {"unit": &"symbiote", "count": 1}]
+			6:
+				return [{"unit": &"bulwark", "count": 4}, {"unit": &"votary", "count": 3}, {"unit": &"rail_sentinel", "count": 2}, {"unit": &"seraph_cruiser", "count": 1}, {"unit": &"goliath_frame", "count": 1}, {"unit": &"cantor", "count": 1}, {"unit": &"aegis_relay", "count": 1}]
+			7:
+				return [{"unit": &"clone_trooper", "count": 4}, {"unit": &"prism_weaver", "count": 2}, {"unit": &"anvil_walker", "count": 2}, {"unit": &"seraph_cruiser", "count": 1}, {"unit": &"solstice_lance", "count": 1}, {"unit": &"cantor", "count": 2}]
+			8:
+				return [{"unit": &"goliath_frame", "count": 2}, {"unit": &"dreadnought", "count": 1}, {"unit": &"seraph_cruiser", "count": 2}, {"unit": &"chrysalis_mortar", "count": 2}, {"unit": &"solstice_lance", "count": 1}, {"unit": &"aegis_relay", "count": 2}, {"unit": &"cantor", "count": 1}]
+			9:
+				return [{"unit": &"dreadnought", "count": 2}, {"unit": &"goliath_frame", "count": 2}, {"unit": &"seraph_cruiser", "count": 2}, {"unit": &"anvil_walker", "count": 2}, {"unit": &"solstice_lance", "count": 2}, {"unit": &"prism_weaver", "count": 2}, {"unit": &"cantor", "count": 2}, {"unit": &"aegis_relay", "count": 1}]
+			_:
+				return [
+					{"unit": &"goliath_frame", "count": 2},
+					{"unit": &"dreadnought", "count": 2},
+					{"unit": &"seraph_cruiser", "count": 2},
+					{"unit": &"arc_lancer", "count": 2},
+					{"unit": &"anvil_walker", "count": 2},
+					{"unit": &"solstice_lance", "count": 2},
+					{"unit": &"chrysalis_mortar", "count": 2},
+					{"unit": &"aegis_relay", "count": 2},
+					{"unit": &"cantor", "count": 2},
+					{"unit": &"votary", "count": 4},
+					{"unit": &"clone_trooper", "count": 4},
+				]
+
+	if fac == &"prisma_dei":
+		match w:
+			1:
+				return [{"unit": &"votary", "count": 4}, {"unit": &"lumen_skiff", "count": 2}]
+			2:
+				return [{"unit": &"votary", "count": 5}, {"unit": &"lumen_skiff", "count": 2}, {"unit": &"cantor", "count": 1}]
+			3:
+				return [{"unit": &"votary", "count": 6}, {"unit": &"lens_adjudicator", "count": 2}, {"unit": &"cantor", "count": 1}]
+			4:
+				return [{"unit": &"votary", "count": 6}, {"unit": &"lumen_skiff", "count": 3}, {"unit": &"prism_weaver", "count": 2}, {"unit": &"cantor", "count": 1}]
+			5:
+				return [{"unit": &"votary", "count": 6}, {"unit": &"lens_adjudicator", "count": 3}, {"unit": &"prism_weaver", "count": 2}, {"unit": &"cantor", "count": 2}]
+			6:
+				return [{"unit": &"votary", "count": 8}, {"unit": &"lumen_skiff", "count": 4}, {"unit": &"lens_adjudicator", "count": 3}, {"unit": &"cantor", "count": 2}, {"unit": &"seraph_cruiser", "count": 1}]
+			7:
+				return [{"unit": &"votary", "count": 6}, {"unit": &"prism_weaver", "count": 3}, {"unit": &"seraph_cruiser", "count": 2}, {"unit": &"solstice_lance", "count": 1}, {"unit": &"cantor", "count": 2}]
+			8:
+				return [{"unit": &"votary", "count": 8}, {"unit": &"lens_adjudicator", "count": 4}, {"unit": &"seraph_cruiser", "count": 2}, {"unit": &"solstice_lance", "count": 2}, {"unit": &"cantor", "count": 2}]
+			9:
+				return [{"unit": &"votary", "count": 8}, {"unit": &"prism_weaver", "count": 4}, {"unit": &"seraph_cruiser", "count": 3}, {"unit": &"solstice_lance", "count": 2}, {"unit": &"cantor", "count": 3}]
+			_:
+				return [{"unit": &"votary", "count": 10}, {"unit": &"lens_adjudicator", "count": 4}, {"unit": &"prism_weaver", "count": 3}, {"unit": &"seraph_cruiser", "count": 4}, {"unit": &"solstice_lance", "count": 3}, {"unit": &"cantor", "count": 3}]
+
 	if fac == &"monolith_os":
 		match w:
 			1:

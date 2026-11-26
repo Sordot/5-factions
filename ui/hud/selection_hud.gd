@@ -2,6 +2,7 @@ class_name SelectionHUD
 extends Control
 
 const COMMAND_ICON_BUTTON_SCRIPT: GDScript = preload("res://ui/hud/command_icon_button.gd")
+const WIREFRAME_GRID_SCRIPT: GDScript = preload("res://ui/hud/selection_wireframe_grid.gd")
 
 @export var selection_controller_path: NodePath
 
@@ -55,10 +56,14 @@ var _active_hud_faction_id: StringName = &""
 var _active_hud_accent: Color = Color(0.20, 0.96, 0.86, 1.0)
 var _active_hud_primary: Color = Color(0.90, 0.96, 0.98, 1.0)
 var _faction_frame_overlay: Control = null
+var _wireframe_grid: SelectionWireframeGrid = null
+var _last_unit_subgroups: Array[Dictionary] = []
+var _last_active_subgroup_idx: int = 0
 
 
 func _ready() -> void:
 	_setup_dynamic_bar_styles()
+	_setup_wireframe_selection_grid()
 	_selection_controller = get_node_or_null(selection_controller_path) as SelectionController
 	if _selection_controller != null:
 		_selection_controller.selection_changed.connect(_on_selection_changed)
@@ -103,10 +108,10 @@ func _adjust_layout_for_minimap() -> void:
 	var vp_width: float = get_viewport_rect().size.x
 	var minimap_node: Node = get_tree().get_first_node_in_group("tactical_minimap")
 	var minimap_clearance: float = 248.0 if minimap_node != null else 12.0
-	var desired_half_w: float = 370.0
+	var desired_half_w: float = 376.0
 	var center_x: float = vp_width * 0.5
 	if center_x - desired_half_w < minimap_clearance:
-		var avail_w: float = clampf(vp_width - minimap_clearance - 12.0, 680.0, 748.0)
+		var avail_w: float = clampf(vp_width - minimap_clearance - 12.0, 680.0, 756.0)
 		var shift_center: float = minimap_clearance + avail_w * 0.5
 		bottom_stack.offset_left = (shift_center - avail_w * 0.5) - center_x
 		bottom_stack.offset_right = (shift_center + avail_w * 0.5) - center_x
@@ -202,6 +207,9 @@ func _apply_faction_hud_theme(force: bool = false) -> void:
 		for child: Node in command_grid.get_children():
 			if child is CommandIconButton:
 				(child as CommandIconButton).apply_faction_theme(_active_hud_faction_id, _active_hud_accent, _active_hud_primary)
+
+	if _wireframe_grid != null:
+		_wireframe_grid.apply_faction_theme(_active_hud_faction_id, _active_hud_accent)
 
 
 func _get_compact_action_badge(action_name: StringName, fallback: String) -> String:
@@ -488,8 +496,16 @@ func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Diction
 	_connect_unit_signals(_active_subgroup_units)
 
 	var is_single_unit: bool = (selected_units.size() == 1 and is_instance_valid(selected_units[0]))
+	_last_unit_subgroups = subgroups
+	_last_active_subgroup_idx = safe_idx
 	subgroup_tabs_row.visible = not is_single_unit
-	unit_badges_grid.visible = not is_single_unit
+	unit_badges_grid.visible = false
+	if _wireframe_grid != null:
+		_wireframe_grid.visible = not is_single_unit
+		if not is_single_unit:
+			_wireframe_grid.set_unit_subgroups(subgroups, safe_idx)
+		else:
+			_wireframe_grid.clear_grid()
 	telemetry_grid.visible = is_single_unit
 	production_queue_box.visible = false
 
@@ -503,7 +519,6 @@ func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Diction
 	else:
 		_refresh_squad_left_column(active_group)
 		_rebuild_subgroup_tabs(subgroups, safe_idx)
-		_rebuild_unit_badges(_active_subgroup_units)
 
 	_rebuild_unit_command_card(active_group)
 	_refresh_all_ability_states()
@@ -565,19 +580,27 @@ func _render_inspected_entity(entity: Node, rebuild_actions: bool) -> void:
 			else:
 				info["title"] = "%s (+%d)" % [lead_b.display_name, _selected_buildings.size() - 1]
 			info["subtitle"] = "MULTI-PRODUCTION (%d QUEUED)" % total_queued
+	var is_multi_building: bool = (entity is Building and _selected_buildings.size() > 1)
 	bottom_panel.visible = true
 	subgroup_tabs_row.visible = show_building_tabs
 	if show_building_tabs:
 		_rebuild_building_subgroup_tabs(_building_subgroups, _active_building_subgroup_index)
 	unit_badges_grid.visible = false
-	telemetry_grid.visible = true
+	if _wireframe_grid != null:
+		_wireframe_grid.visible = is_multi_building
+		if is_multi_building:
+			_wireframe_grid.set_building_subgroups(_building_subgroups, _active_building_subgroup_index, _selected_buildings)
+		else:
+			_wireframe_grid.clear_grid()
+	telemetry_grid.visible = not is_multi_building
 
 	_unit_cmd_tiles.clear()
 	_ability_buttons.clear()
 	_active_abilities.clear()
 
 	_apply_left_column(info)
-	_rebuild_telemetry_grid(info["stats"])
+	if not is_multi_building:
+		_rebuild_telemetry_grid(info["stats"])
 	_refresh_production_queue_ui(entity)
 
 	var post_match_inspect: bool = _is_post_match_inspection()
@@ -1711,7 +1734,8 @@ func _refresh_selected_units_display() -> void:
 		_rebuild_telemetry_grid(lead_info["stats"])
 	else:
 		_refresh_squad_left_column(active_group)
-		_rebuild_unit_badges(_active_subgroup_units)
+		if _wireframe_grid != null and _wireframe_grid.visible:
+			_wireframe_grid.redraw_visible_tiles()
 	_refresh_stance_button()
 	_refresh_deploy_button()
 
@@ -1790,7 +1814,7 @@ func _rebuild_subgroup_tabs(subgroups: Array[Dictionary], active_index: int) -> 
 
 
 func _shorten_building_name(full_name: String) -> String:
-	return full_name.replace("Assembly Bay", "Assembly").replace("Ballistics Lab", "Ballistics").replace("Siege Gantry", "Gantry").replace("Foundry Core", "Foundry").replace("Cloning Vat", "Cloning").replace("Calibration Foundry", "Calibration").replace("Synthetics Fabricator", "Synthetics").replace("Nexus Vat", "Nexus").replace("Logic Monolith", "Logic").replace("Wetware Mainframe", "Mainframe").replace("Silica Smelter", "Smelter").replace("Silica Condenser", "Condenser").replace("Capacitor Pylon", "Capacitor").replace("Synapse Pylon", "Synapse").replace("Bastion Emplacement", "Bastion").replace("Defense Turret", "Turret")
+	return full_name.replace("Assembly Bay", "Assembly").replace("Ballistics Lab", "Ballistics").replace("Siege Gantry", "Gantry").replace("Foundry Core", "Foundry").replace("Cloning Vat", "Cloning").replace("Calibration Foundry", "Calibration").replace("Synthetics Fabricator", "Synthetics").replace("Nexus Vat", "Nexus").replace("Logic Monolith", "Logic").replace("Wetware Mainframe", "Mainframe").replace("Silica Smelter", "Smelter").replace("Silica Condenser", "Condenser").replace("Capacitor Pylon", "Capacitor").replace("Synapse Pylon", "Synapse").replace("Bastion Emplacement", "Bastion").replace("Defense Turret", "Turret").replace("Sanctum Core", "Sanctum").replace("Halo Spire", "Spire").replace("Alabaster Kiln", "Kiln").replace("Oracle Reliquary", "Reliquary").replace("Choir Basilica", "Basilica").replace("Refraction Cloister", "Cloister").replace("Solar Obelisk", "Obelisk").replace("Cathedral Foundry", "Cathedral")
 
 
 func _rebuild_building_subgroup_tabs(b_subgroups: Array[Dictionary], active_index: int) -> void:
@@ -1832,63 +1856,102 @@ func _rebuild_building_subgroup_tabs(b_subgroups: Array[Dictionary], active_inde
 			subgroup_tabs_row.add_child(hint)
 
 
-func _rebuild_unit_badges(units: Array[Unit]) -> void:
-	for child: Node in unit_badges_grid.get_children():
-		child.queue_free()
+func _setup_wireframe_selection_grid() -> void:
+	if unit_badges_grid == null or _wireframe_grid != null:
+		return
+	var center_panel: Node = unit_badges_grid.get_parent()
+	if center_panel == null:
+		return
+	unit_badges_grid.visible = false
+	_wireframe_grid = WIREFRAME_GRID_SCRIPT.new() as SelectionWireframeGrid
+	_wireframe_grid.name = "SelectionWireframeGrid"
+	_wireframe_grid.visible = false
+	_wireframe_grid.entity_tile_clicked.connect(_on_wireframe_tile_clicked)
+	_wireframe_grid.entity_tile_hovered.connect(_on_wireframe_tile_hovered)
+	_wireframe_grid.entity_tile_unhovered.connect(_on_wireframe_tile_unhovered)
+	center_panel.add_child(_wireframe_grid)
+	center_panel.move_child(_wireframe_grid, unit_badges_grid.get_index())
 
-	var max_badges: int = mini(units.size(), 12)
-	for i: int in range(max_badges):
-		var unit: Unit = units[i]
-		if not is_instance_valid(unit) or unit.is_dead:
-			continue
-		var max_hp: float = maxf(1.0, unit.get_max_hp())
-		var hp_ratio: float = clampf(unit.current_hp / max_hp, 0.0, 1.0)
-		var pct: int = int(round(hp_ratio * 100.0))
-		if unit.has_shields():
-			var tile: VBoxContainer = VBoxContainer.new()
-			tile.add_theme_constant_override("separation", 1)
-			tile.custom_minimum_size = Vector2(36.0, 0.0)
 
-			var shd_ratio: float = clampf(unit.current_shield / maxf(1.0, unit.max_shield), 0.0, 1.0)
-			var shd_bg: ColorRect = ColorRect.new()
-			shd_bg.custom_minimum_size = Vector2(36.0, 2.0)
-			shd_bg.color = Color(0.05, 0.08, 0.12, 0.90)
-			var shd_fill: ColorRect = ColorRect.new()
-			shd_fill.position = Vector2.ZERO
-			shd_fill.size = Vector2(36.0 * shd_ratio, 2.0)
-			shd_fill.color = Color(0.220, 0.741, 0.973, 1.0)
-			shd_bg.add_child(shd_fill)
-			tile.add_child(shd_bg)
+func _on_wireframe_tile_clicked(entity: Node, shift_held: bool, ctrl_held: bool, is_double_click: bool) -> void:
+	if _selection_controller == null or entity == null or not is_instance_valid(entity):
+		return
+	if command_tooltip != null:
+		command_tooltip.hide_tooltip()
+	if ctrl_held and shift_held:
+		_selection_controller.remove_entity_type_from_selection(entity)
+	elif ctrl_held or is_double_click:
+		_selection_controller.filter_selection_to_entity_type(entity)
+	elif shift_held:
+		_selection_controller.deselect_entity(entity)
+	else:
+		_selection_controller.select_only_entity(entity)
 
-			var hp_bg: ColorRect = ColorRect.new()
-			hp_bg.custom_minimum_size = Vector2(36.0, 2.0)
-			hp_bg.color = Color(0.05, 0.08, 0.12, 0.90)
-			var hp_fill: ColorRect = ColorRect.new()
-			hp_fill.position = Vector2.ZERO
-			hp_fill.size = Vector2(36.0 * hp_ratio, 2.0)
-			hp_fill.color = Color(0.32, 0.96, 0.76, 1.0) if pct > 50 else Color(1.0, 0.56, 0.28, 1.0)
-			hp_bg.add_child(hp_fill)
-			tile.add_child(hp_bg)
 
-			var badge: Label = Label.new()
-			badge.text = "[%d%%]" % pct
-			badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			badge.add_theme_font_size_override("font_size", 9)
-			badge.modulate = Color(0.32, 0.96, 0.76, 1.0) if pct > 50 else Color(1.0, 0.56, 0.28, 1.0)
-			tile.add_child(badge)
-			unit_badges_grid.add_child(tile)
-		else:
-			var badge: Label = Label.new()
-			badge.text = "[%d%%]" % pct
-			badge.add_theme_font_size_override("font_size", 10)
-			badge.modulate = Color(0.32, 0.96, 0.76, 1.0) if pct > 50 else Color(1.0, 0.56, 0.28, 1.0)
-			unit_badges_grid.add_child(badge)
+func _on_wireframe_tile_hovered(entity: Node, _tile_global_rect: Rect2) -> void:
+	if command_tooltip == null or entity == null or not is_instance_valid(entity):
+		return
+	var title: String = "Entity"
+	var badge: String = ""
+	var meta_parts: PackedStringArray = PackedStringArray()
+	if entity is Unit:
+		var u: Unit = entity as Unit
+		if u.is_dead:
+			return
+		title = u.data.display_name if u.data != null else "Unit"
+		meta_parts.append("HP %s/%s" % [
+			InspectionHelper.format_number(int(round(u.current_hp))),
+			InspectionHelper.format_number(int(round(u.get_max_hp()))),
+		])
+		if u.max_shield > 0.0:
+			meta_parts.append("SHD %s/%s" % [
+				InspectionHelper.format_number(int(round(u.current_shield))),
+				InspectionHelper.format_number(int(round(u.max_shield))),
+			])
+		if u.veterancy_rank > 0:
+			badge = "RANK %d" % u.veterancy_rank
+		var t_stacks: int = u.get_optical_tether_stacks()
+		if t_stacks > 0:
+			meta_parts.append("Lattice x%d" % t_stacks)
+		if u.is_deployed():
+			meta_parts.append("Deployed")
+	elif entity is Building:
+		var b: Building = entity as Building
+		if b.is_destroyed:
+			return
+		title = b.display_name
+		meta_parts.append("HP %s/%s" % [
+			InspectionHelper.format_number(int(round(b.current_hp))),
+			InspectionHelper.format_number(int(round(b.max_hp))),
+		])
+		if b.max_shield > 0.0:
+			meta_parts.append("SHD %s/%s" % [
+				InspectionHelper.format_number(int(round(b.current_shield))),
+				InspectionHelper.format_number(int(round(b.max_shield))),
+			])
+		if b.is_constructed and b.requires_power_grid and not b.is_powered:
+			badge = "UNPOWERED"
+			meta_parts.append("Needs Power Lattice")
+		elif b.is_overclocked():
+			badge = "OVERCLOCK"
+		elif b.is_actively_producing():
+			meta_parts.append("Producing (%d)" % b.get_training_queue_size())
+	command_tooltip.show_tooltip(
+		title,
+		badge,
+		" • ".join(meta_parts),
+		"LMB Isolate • Shift Remove • Ctrl / 2xLMB Type • Ctrl+Shift Drop Type"
+	)
 
-	if units.size() > max_badges:
-		var more: Label = Label.new()
-		more.text = "+%d" % (units.size() - max_badges)
-		more.add_theme_font_size_override("font_size", 10)
-		unit_badges_grid.add_child(more)
+
+func _on_wireframe_tile_unhovered(_entity: Node) -> void:
+	if command_tooltip != null:
+		command_tooltip.hide_tooltip()
+
+
+func _rebuild_unit_badges(_units: Array[Unit]) -> void:
+	if _wireframe_grid != null and _wireframe_grid.visible:
+		_wireframe_grid.redraw_visible_tiles()
 
 
 func _toggle_subgroup_autocast(ability_id: StringName) -> void:

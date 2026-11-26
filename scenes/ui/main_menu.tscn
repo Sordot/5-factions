@@ -723,7 +723,7 @@ text = "OPPOSING WAVE FACTION"
 
 [node name="HoldoutFacRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 5
 
 [node name="BtnHoldoutFacGen" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutFacRow"]
 unique_name_in_owner = true
@@ -731,7 +731,7 @@ custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 focus_mode = 0
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "GEN-V2"
 
 [node name="BtnHoldoutFacMono" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutFacRow"]
@@ -740,8 +740,17 @@ custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 focus_mode = 0
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "MONO-OS"
+
+[node name="BtnHoldoutFacPrisma" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutFacRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 10
+text = "PRIS-DEI"
 
 [node name="BtnHoldoutFacMixed" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutFacRow"]
 unique_name_in_owner = true
@@ -749,8 +758,8 @@ custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 focus_mode = 0
-theme_override_font_sizes/font_size = 11
-text = "MIXED ASSAULT"
+theme_override_font_sizes/font_size = 10
+text = "MIXED"
 
 [node name="HoldoutDiffLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox"]
 layout_mode = 2
@@ -811,40 +820,20 @@ theme_override_constants/separation = 6
 layout_mode = 2
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
 theme_override_font_sizes/font_size = 10
-text = "CURATED TACTICAL DRILLS (MEDAL TIMERS)"
+text = "CURATED TACTICAL DRILLS (5 DRILLS • MEDAL TIMERS)"
 
-[node name="BtnDrill0" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox"]
+[node name="GauntletDrillScroll" type="ScrollContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 68)
+custom_minimum_size = Vector2(0, 244)
 layout_mode = 2
-focus_mode = 0
-theme_override_font_sizes/font_size = 11
-alignment = 0
-clip_text = true
-autowrap_mode = 3
-text = "1. Stutter-Step vs. Bulwarks (60s Micro)"
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 
-[node name="BtnDrill1" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox"]
+[node name="GauntletDrillList" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox/GauntletDrillScroll"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 68)
 layout_mode = 2
-focus_mode = 0
-theme_override_font_sizes/font_size = 11
-alignment = 0
-clip_text = true
-autowrap_mode = 3
-text = "2. Siege-Line Breach (90s Assault)"
-
-[node name="BtnDrill2" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 68)
-layout_mode = 2
-focus_mode = 0
-theme_override_font_sizes/font_size = 11
-alignment = 0
-clip_text = true
-autowrap_mode = 3
-text = "3. Optimal 3-Minute Boom (180s Macro)"
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
 
 [node name="GauntletDetailPanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox"]
 layout_mode = 2

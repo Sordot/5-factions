@@ -2139,7 +2139,7 @@ func _find_visible_buildings_of_type(type_id: StringName, target_team: Unit.Team
 	return matches
 
 
-func _set_selected_buildings(buildings: Array[Building], preserve_subgroup: bool = false) -> void:
+func _set_selected_buildings(buildings: Array[Building], preserve_subgroup: bool = false, play_audio: bool = true) -> void:
 	var prev_type_id: StringName = &""
 	if preserve_subgroup:
 		var prev_grp: Dictionary = get_active_building_subgroup()
@@ -2183,10 +2183,147 @@ func _set_selected_buildings(buildings: Array[Building], preserve_subgroup: bool
 	for b: Building in selected_buildings:
 		if is_instance_valid(b):
 			b.set_selected(true)
-	if AudioManager != null:
+	if play_audio and AudioManager != null:
 		AudioManager.play_selection_audio(active_bldgs if not active_bldgs.is_empty() else selected_buildings)
 	building_subgroups_changed.emit(building_subgroups, active_building_subgroup_index)
 	buildings_selection_changed.emit(selected_buildings)
+
+
+# =============================================================================
+# WIREFRAME SELECTION GRID MUTATION API (MILESTONE 4.1)
+# =============================================================================
+
+func select_only_entity(entity: Node) -> void:
+	if entity == null or not is_instance_valid(entity):
+		return
+	var local_t: Unit.Team = _get_local_human_team_enum()
+	if entity is Unit:
+		var u: Unit = entity as Unit
+		if u.is_dead or u.is_staffed or u.is_queued_for_deletion() or u.team != local_t:
+			return
+		cancel_ability_targeting()
+		cancel_attack_move_targeting()
+		cancel_patrol_targeting()
+		cancel_overclock_targeting()
+		if not selected_buildings.is_empty() or inspected_entity != null:
+			_set_selected_buildings([], false, false)
+		var single_u: Array[Unit] = [u]
+		_set_selected_units(single_u, true, true)
+	elif entity is Building:
+		var b: Building = entity as Building
+		if b.is_destroyed or b.is_queued_for_deletion() or b.team != local_t:
+			return
+		cancel_ability_targeting()
+		cancel_attack_move_targeting()
+		cancel_patrol_targeting()
+		cancel_overclock_targeting()
+		if not selected_units.is_empty():
+			_set_selected_units([], true, false)
+		var single_b: Array[Building] = [b]
+		_set_selected_buildings(single_b, false, true)
+
+
+func deselect_entity(entity: Node) -> void:
+	if entity == null or not is_instance_valid(entity):
+		return
+	if entity is Unit:
+		var u: Unit = entity as Unit
+		if not selected_units.has(u):
+			return
+		u.set_selected(false)
+		var rem_u: Array[Unit] = []
+		for item: Unit in selected_units:
+			if is_instance_valid(item) and item != u and not item.is_dead and not item.is_staffed:
+				rem_u.append(item)
+		if rem_u.is_empty():
+			clear_selection()
+		else:
+			_set_selected_units(rem_u, false, false)
+		if AudioManager != null:
+			AudioManager.play_ui_click()
+	elif entity is Building:
+		var b: Building = entity as Building
+		if not selected_buildings.has(b):
+			return
+		b.set_selected(false)
+		var rem_b: Array[Building] = []
+		for item: Building in selected_buildings:
+			if is_instance_valid(item) and item != b and not item.is_destroyed:
+				rem_b.append(item)
+		if rem_b.is_empty():
+			clear_selection()
+		else:
+			_set_selected_buildings(rem_b, true, false)
+		if AudioManager != null:
+			AudioManager.play_ui_click()
+
+
+func filter_selection_to_entity_type(entity: Node) -> void:
+	if entity == null or not is_instance_valid(entity):
+		return
+	if entity is Unit:
+		var u: Unit = entity as Unit
+		if u.is_dead or u.is_staffed:
+			return
+		var target_type: StringName = u.get_unit_type_id()
+		var filtered_u: Array[Unit] = []
+		for item: Unit in selected_units:
+			if is_instance_valid(item) and not item.is_dead and not item.is_staffed and item.get_unit_type_id() == target_type:
+				filtered_u.append(item)
+		if not filtered_u.is_empty():
+			cancel_ability_targeting()
+			_set_selected_units(filtered_u, true, true)
+	elif entity is Building:
+		var b: Building = entity as Building
+		if b.is_destroyed:
+			return
+		var target_b_type: StringName = b.building_type_id
+		var filtered_b: Array[Building] = []
+		for item: Building in selected_buildings:
+			if is_instance_valid(item) and not item.is_destroyed and item.building_type_id == target_b_type:
+				filtered_b.append(item)
+		if not filtered_b.is_empty():
+			cancel_overclock_targeting()
+			_set_selected_buildings(filtered_b, false, true)
+
+
+func remove_entity_type_from_selection(entity: Node) -> void:
+	if entity == null or not is_instance_valid(entity):
+		return
+	if entity is Unit:
+		var u: Unit = entity as Unit
+		var drop_type: StringName = u.get_unit_type_id()
+		var kept_u: Array[Unit] = []
+		for item: Unit in selected_units:
+			if not is_instance_valid(item) or item.is_dead or item.is_staffed:
+				continue
+			if item.get_unit_type_id() == drop_type:
+				item.set_selected(false)
+			else:
+				kept_u.append(item)
+		if kept_u.is_empty():
+			clear_selection()
+		else:
+			_set_selected_units(kept_u, false, false)
+		if AudioManager != null:
+			AudioManager.play_ui_click()
+	elif entity is Building:
+		var b: Building = entity as Building
+		var drop_b_type: StringName = b.building_type_id
+		var kept_b: Array[Building] = []
+		for item: Building in selected_buildings:
+			if not is_instance_valid(item) or item.is_destroyed:
+				continue
+			if item.building_type_id == drop_b_type:
+				item.set_selected(false)
+			else:
+				kept_b.append(item)
+		if kept_b.is_empty():
+			clear_selection()
+		else:
+			_set_selected_buildings(kept_b, true, false)
+		if AudioManager != null:
+			AudioManager.play_ui_click()
 
 
 func _on_selected_building_destroyed(dead_b: Building) -> void:
