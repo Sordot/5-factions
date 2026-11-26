@@ -7,6 +7,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"picket_drone"
 display_name = "Picket Drone"
+short_display_name = "Picket"
 max_hp = 115.0
 max_shield = 35.0
 shield_regen_rate = 7.0

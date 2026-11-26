@@ -6,6 +6,8 @@
 script = ExtResource("1_bdata")
 building_id = &"capacitor_pylon"
 display_name = "Capacitor Pylon"
+short_display_name = "Cap. Pylon"
+hud_accent_color = Color(0.22, 0.741, 0.973, 1)
 scene_path = "res://scenes/buildings/monolith_capacitor_pylon.tscn"
 biomass_cost = 75
 silica_cost = 40

@@ -6,6 +6,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"ore_crawler"
 display_name = "Ore-Crawler"
+short_display_name = "Crawler"
 max_hp = 115.0
 max_shield = 30.0
 shield_regen_rate = 6.0

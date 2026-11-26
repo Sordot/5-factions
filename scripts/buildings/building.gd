@@ -12,24 +12,6 @@ const HIT_FLASH_DURATION: float = 0.08
 const SHIELD_HIT_FLASH_DURATION: float = 0.14
 const COMPLETION_FLASH_DURATION: float = 0.22
 const SALVAGE_DURATION: float = 4.0
-const DEFAULT_BUILDING_COSTS: Dictionary = {
-	&"nexus_vat": {"biomass": 400, "silica": 100, "compute": 0},
-	&"silica_condenser": {"biomass": 75, "silica": 0, "compute": 0},
-	&"wetware_mainframe": {"biomass": 100, "silica": 50, "compute": 0},
-	&"synapse_pylon": {"biomass": 100, "silica": 0, "compute": 0},
-	&"cloning_vat": {"biomass": 150, "silica": 50, "compute": 0},
-	&"calibration_foundry": {"biomass": 125, "silica": 75, "compute": 0},
-	&"synthetics_fabricator": {"biomass": 150, "silica": 100, "compute": 50},
-	&"defense_turret": {"biomass": 100, "silica": 50, "compute": 0},
-	&"foundry_core": {"biomass": 300, "silica": 150, "compute": 0},
-	&"capacitor_pylon": {"biomass": 75, "silica": 40, "compute": 0},
-	&"silica_smelter": {"biomass": 100, "silica": 60, "compute": 0},
-	&"logic_monolith": {"biomass": 110, "silica": 90, "compute": 0},
-	&"assembly_bay": {"biomass": 140, "silica": 95, "compute": 0},
-	&"ballistics_lab": {"biomass": 120, "silica": 130, "compute": 25},
-	&"bastion_emplacement": {"biomass": 80, "silica": 110, "compute": 0},
-	&"siege_gantry": {"biomass": 150, "silica": 175, "compute": 45},
-}
 
 signal selection_changed(building: Building, selected: bool)
 signal health_changed(building: Building, current_hp: float, max_hp: float)
@@ -1328,16 +1310,20 @@ func _complete_salvage() -> void:
 
 
 func _get_default_costs_for_type(type_id: StringName) -> Dictionary:
-	if DEFAULT_BUILDING_COSTS.has(type_id):
-		var raw: Dictionary = DEFAULT_BUILDING_COSTS[type_id]
-		var out: Dictionary = {}
-		if int(raw.get("biomass", 0)) > 0:
-			out[EconomyManager.RESOURCE_BIOMASS] = int(raw["biomass"])
-		if int(raw.get("silica", 0)) > 0:
-			out[EconomyManager.RESOURCE_SILICA] = int(raw["silica"])
-		if int(raw.get("compute", 0)) > 0:
-			out[EconomyManager.RESOURCE_COMPUTE] = int(raw["compute"])
-		return out
+	if type_id == &"" or TeamManager == null:
+		return {}
+	if TeamManager.has_method("get_team_faction_data"):
+		var fdata: FactionData = TeamManager.get_team_faction_data(int(team))
+		if fdata != null:
+			var bdata: BuildingData = fdata.get_building_by_id(type_id)
+			if bdata != null:
+				return bdata.get_cost_dict()
+	if TeamManager.has_method("get_playable_factions"):
+		for fd: FactionData in TeamManager.get_playable_factions():
+			if fd != null:
+				var bdata2: BuildingData = fd.get_building_by_id(type_id)
+				if bdata2 != null:
+					return bdata2.get_cost_dict()
 	return {}
 
 
@@ -1454,24 +1440,19 @@ func _trigger_shield_shatter_feedback(impact_dir: Vector2 = Vector2.ZERO) -> voi
 
 func get_inspection_data() -> Dictionary:
 	var accent: Color = Color(0.22, 0.88, 0.94, 1.0)
-	if building_type_id == &"silica_condenser":
-		accent = Color(0.98, 0.78, 0.28, 1.0)
-	elif building_type_id == &"wetware_mainframe":
-		accent = Color(0.32, 0.84, 1.0, 1.0)
-	elif building_type_id == &"synapse_pylon":
-		accent = Color(0.76, 0.58, 1.0, 1.0)
-	elif building_type_id == &"cloning_vat":
-		accent = Color(0.24, 0.94, 0.72, 1.0)
-	elif building_type_id == &"calibration_foundry":
-		accent = Color(0.96, 0.64, 0.26, 1.0)
-	elif building_type_id == &"synthetics_fabricator":
-		accent = Color(0.36, 0.96, 1.0, 1.0)
-	elif building_type_id == &"capacitor_pylon" or building_type_id == &"logic_monolith":
-		accent = Color(0.220, 0.741, 0.973, 1.0)
-	elif building_type_id == &"foundry_core" or building_type_id == &"silica_smelter" or building_type_id == &"assembly_bay" or building_type_id == &"ballistics_lab" or building_type_id == &"bastion_emplacement" or building_type_id == &"siege_gantry":
-		accent = Color(1.0, 0.624, 0.110, 1.0)
+	var bdata: BuildingData = building_data
+	if bdata == null and building_type_id != &"" and TeamManager != null and TeamManager.has_method("get_team_faction_data"):
+		var fdata_b: FactionData = TeamManager.get_team_faction_data(int(team))
+		if fdata_b != null:
+			bdata = fdata_b.get_building_by_id(building_type_id)
+	if bdata != null and bdata.hud_accent_color.a > 0.01:
+		accent = bdata.hud_accent_color
 	elif team == Unit.Team.ENEMY:
 		accent = Color(1.0, 0.36, 0.26, 1.0)
+	elif TeamManager != null and TeamManager.has_method("get_team_faction_data"):
+		var fdata_c: FactionData = TeamManager.get_team_faction_data(int(team))
+		if fdata_c != null:
+			accent = fdata_c.hud_accent_color
 
 	var affil: StringName = &"player" if team == Unit.Team.PLAYER else &"enemy"
 	var stats: Array[Dictionary] = []

@@ -16,6 +16,13 @@ extends Resource
 @export var audio_bark_pitch_bias: float = 1.0
 @export var audio_timbre_profile: StringName = &"technozen_bio"
 
+# Dossier & Radio Metadata (MainMenu & SkirmishAI)
+@export var dossier_slot_number: int = 1
+@export var dossier_subtitle: String = ""
+@export_multiline var dossier_description: String = ""
+@export var signature_badges: PackedStringArray = PackedStringArray()
+@export var ai_transmissions: Dictionary = {}
+
 # Starting Match Loadout
 @export var starting_biomass: int = 200
 @export var starting_silica: int = 50
@@ -53,6 +60,17 @@ func get_bonus_harvesters(res_type: StringName) -> int:
 	if bonus_harvesters_by_resource.has(key_str):
 		return maxi(0, int(bonus_harvesters_by_resource[key_str]))
 	return 0
+
+
+func get_ai_transmission(category: StringName) -> String:
+	if category == &"":
+		return ""
+	if ai_transmissions.has(category):
+		return String(ai_transmissions[category])
+	var key_str: String = String(category)
+	if ai_transmissions.has(key_str):
+		return String(ai_transmissions[key_str])
+	return ""
 
 
 func get_building_by_id(type_id: StringName) -> BuildingData:

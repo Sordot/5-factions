@@ -42,6 +42,17 @@ hud_accent_color = Color(1, 0.624, 0.11, 1)
 boot_banner_text = "// AXIOM KERNEL LOCKED — MONOLITH_OS"
 audio_bark_pitch_bias = 0.82
 audio_timbre_profile = &"monolith_industrial"
+dossier_slot_number = 2
+dossier_subtitle = "Neo-Brutalist Machine-State  •  3x Silica & +1 Compute Cap  •  Core Overclock & Shields"
+dossier_description = "Deploys slow, heavily armored robotics layered with unmitigated regenerating shields. Overclocks production facilities from its Foundry Core and extracts superior Silica and Compute yields."
+signature_badges = PackedStringArray("Core Overclock (2x)", "Bulwark / Picket", "Rail-Sentinel / Aegis", "Anvil Siege-Walker (Deploy)", "Monolith Dreadnought", "Null-Grid Projector", "Bastion Emplacement")
+ai_transmissions = {
+&"barricade_breach": "// AXIOM: Corridor partition cleared. Advancing heavy armor.",
+&"tier2_online": "// AXIOM: Siege Gantry operational. Initiating heavy ordnance assembly.",
+&"under_attack": "// AXIOM: Outpost integrity breached. Recalculating defensive perimeter.",
+&"uplink_contest": "// AXIOM: Securing Hyper-Uplink coordinates. Resistance is inefficient.",
+&"wave_launch": "// AXIOM: Structural demolition column deployed. Proceeding at nominal cadence."
+}
 starting_biomass = 200
 starting_silica = 50
 starting_compute = 0

@@ -10,21 +10,12 @@ const BARRICADE_MIN_MATCH_TIME: float = 150.0
 const TRANSMISSION_GLOBAL_COOLDOWN_MS: int = 45000
 const TRANSMISSION_CATEGORY_COOLDOWN_MS: int = 90000
 
-const AI_TRANSMISSIONS: Dictionary = {
-	&"genesis_v2": {
-		&"wave_launch": "// VAT-BORN: Bio-swarm vector locked. Overwhelming local resistance.",
-		&"barricade_breach": "// VAT-BORN: Structural obstruction dissolved. Flank corridor open.",
-		&"tier2_online": "// VAT-BORN: Synthetics Fabricator online. Deploying heavy wetware frames.",
-		&"uplink_contest": "// VAT-BORN: Converging on Data Hyper-Uplink. Claiming neural priority.",
-		&"under_attack": "// VAT-BORN: Peripheral biomass node compromised. Redirecting swarm.",
-	},
-	&"monolith_os": {
-		&"wave_launch": "// AXIOM: Structural demolition column deployed. Proceeding at nominal cadence.",
-		&"barricade_breach": "// AXIOM: Corridor partition cleared. Advancing heavy armor.",
-		&"tier2_online": "// AXIOM: Siege Gantry operational. Initiating heavy ordnance assembly.",
-		&"uplink_contest": "// AXIOM: Securing Hyper-Uplink coordinates. Resistance is inefficient.",
-		&"under_attack": "// AXIOM: Outpost integrity breached. Recalculating defensive perimeter.",
-	},
+const DEFAULT_AI_TRANSMISSIONS: Dictionary = {
+	&"wave_launch": "// AI COMMAND: Strike column deployed. Engaging hostile perimeter.",
+	&"barricade_breach": "// AI COMMAND: Obstruction cleared. Advancing through flank corridor.",
+	&"tier2_online": "// AI COMMAND: Tier-2 heavy production facility online.",
+	&"uplink_contest": "// AI COMMAND: Converging on Data Hyper-Uplink coordinates.",
+	&"under_attack": "// AI COMMAND: Outpost integrity compromised. Redirecting defense.",
 }
 
 var _last_transmission_ms: int = -999999
@@ -1939,7 +1930,8 @@ func _on_ai_building_completed(building: Building) -> void:
 		_sync_military_rallies()
 	elif _is_military_production_building(building) and _staging_point_valid:
 		building.set_rally_position(_staging_point)
-	if not _tier2_transmission_sent and (building.building_type_id == &"synthetics_fabricator" or building.building_type_id == &"siege_gantry"):
+	var is_heavy_t2: bool = (_heavy_t2_data != null and building.building_type_id == _heavy_t2_data.building_id) or building.building_type_id == &"synthetics_fabricator" or building.building_type_id == &"siege_gantry"
+	if not _tier2_transmission_sent and is_heavy_t2:
 		_tier2_transmission_sent = true
 		_try_emit_ai_transmission(&"tier2_online", Vector2.INF)
 
@@ -1973,9 +1965,12 @@ func _try_emit_ai_transmission(category: StringName, safe_world_pos: Vector2 = V
 	if (now_ms - last_cat_ms) < TRANSMISSION_CATEGORY_COOLDOWN_MS:
 		return
 
-	var fid: StringName = TeamManager.get_team_faction(int(ai_team)) if (TeamManager != null and TeamManager.has_method("get_team_faction")) else &"genesis_v2"
-	var table: Dictionary = AI_TRANSMISSIONS.get(fid, AI_TRANSMISSIONS[&"genesis_v2"]) as Dictionary
-	var line: String = String(table.get(category, ""))
+	var line: String = ""
+	var fdata: FactionData = TeamManager.get_team_faction_data(int(ai_team)) if (TeamManager != null and TeamManager.has_method("get_team_faction_data")) else null
+	if fdata != null:
+		line = fdata.get_ai_transmission(category)
+	if line.is_empty():
+		line = String(DEFAULT_AI_TRANSMISSIONS.get(category, ""))
 	if line.is_empty():
 		return
 

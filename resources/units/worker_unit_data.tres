@@ -13,6 +13,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"worker"
 display_name = "Worker Drone"
+short_display_name = "Worker"
 max_hp = 55.0
 move_speed = 230.0
 acceleration = 1800.0

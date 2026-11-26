@@ -3,6 +3,8 @@ extends Resource
 
 @export var building_id: StringName = &""
 @export var display_name: String = "Building"
+@export var short_display_name: String = ""
+@export var hud_accent_color: Color = Color(0.0, 0.0, 0.0, 0.0)
 @export var scene: PackedScene = null
 @export_file("*.tscn") var scene_path: String = ""
 @export var biomass_cost: int = 0
@@ -58,6 +60,10 @@ extends Resource
 # Optional Passive Shield Regen Aura (Milestone 3.0b — e.g. Capacitor Pylon)
 @export var shield_regen_aura_radius: float = 0.0
 @export var shield_regen_delay_speedup: float = 0.0
+
+
+func get_short_name() -> String:
+	return short_display_name if not short_display_name.is_empty() else display_name
 
 
 func is_hub() -> bool:

@@ -6,6 +6,7 @@
 script = ExtResource("1_upg")
 upgrade_id = &"compute_overdrive"
 display_name = "Compute Overdrive"
+short_display_name = "Overdrive"
 description = "Hardens Goliath Frame neural-chassis integration, granting +20% movement speed and -15% additional incoming damage reduction."
 hotkey_label = "U"
 biomass_cost = 150

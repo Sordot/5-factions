@@ -7,6 +7,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"signal_jammer"
 display_name = "Signal Jammer"
+short_display_name = "Jammer"
 max_hp = 120.0
 move_speed = 215.0
 acceleration = 1600.0

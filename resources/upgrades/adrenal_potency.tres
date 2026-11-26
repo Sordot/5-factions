@@ -6,6 +6,7 @@
 script = ExtResource("1_upg")
 upgrade_id = &"adrenal_potency"
 display_name = "Adrenal Potency"
+short_display_name = "Adrenal Pot."
 description = "Increases Clone Trooper Adrenal Surge duration from 4.0s to 6.0s and adds +15% extra attack speed while active."
 hotkey_label = "I"
 biomass_cost = 100

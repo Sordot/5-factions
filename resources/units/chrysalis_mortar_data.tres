@@ -7,6 +7,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"chrysalis_mortar"
 display_name = "Chrysalis Mortar"
+short_display_name = "Mortar"
 max_hp = 210.0
 move_speed = 165.0
 acceleration = 1250.0

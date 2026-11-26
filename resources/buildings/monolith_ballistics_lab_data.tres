@@ -8,6 +8,8 @@
 script = ExtResource("1_bdata")
 building_id = &"ballistics_lab"
 display_name = "Ballistics Lab"
+short_display_name = "Ballistics"
+hud_accent_color = Color(1, 0.624, 0.11, 1)
 scene_path = "res://scenes/buildings/monolith_ballistics_lab.tscn"
 biomass_cost = 120
 silica_cost = 130

@@ -8,6 +8,8 @@
 script = ExtResource("1_bdata")
 building_id = &"silica_condenser"
 display_name = "Silica Condenser"
+short_display_name = "Condenser"
+hud_accent_color = Color(0.98, 0.78, 0.28, 1)
 scene = ExtResource("2_scene")
 biomass_cost = 100
 silica_cost = 0

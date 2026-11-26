@@ -155,3 +155,52 @@ func get_rail_range_bonus(team: int) -> float:
 	if has_upgrade(team, UPGRADE_HYPER_VELOCITY_RAILS):
 		return 45.0
 	return 0.0
+
+
+## Data-driven modifier queries for FactionData.upgrade_roster (UpgradeData.modifier_key / modifier_value).
+## Allows Faction #3+ upgrades to register numeric bonuses purely via .tres without hardcoding new getters.
+func get_modifier_sum(team: int, modifier_key: StringName) -> float:
+	if modifier_key == &"" or not researched_upgrades.has(team):
+		return 0.0
+	var done: Array = researched_upgrades[team]
+	if done.is_empty() or TeamManager == null or not TeamManager.has_method("get_team_faction_data"):
+		return 0.0
+	var fdata: FactionData = TeamManager.get_team_faction_data(team)
+	if fdata == null:
+		return 0.0
+	var total: float = 0.0
+	for upg: UpgradeData in fdata.upgrade_roster:
+		if upg != null and upg.modifier_key == modifier_key and done.has(upg.upgrade_id):
+			total += upg.modifier_value
+	return total
+
+
+func get_modifier_product(team: int, modifier_key: StringName, default_value: float = 1.0) -> float:
+	if modifier_key == &"" or not researched_upgrades.has(team):
+		return default_value
+	var done: Array = researched_upgrades[team]
+	if done.is_empty() or TeamManager == null or not TeamManager.has_method("get_team_faction_data"):
+		return default_value
+	var fdata: FactionData = TeamManager.get_team_faction_data(team)
+	if fdata == null:
+		return default_value
+	var result: float = default_value
+	for upg: UpgradeData in fdata.upgrade_roster:
+		if upg != null and upg.modifier_key == modifier_key and done.has(upg.upgrade_id):
+			result *= upg.modifier_value
+	return result
+
+
+func has_modifier(team: int, modifier_key: StringName) -> bool:
+	if modifier_key == &"" or not researched_upgrades.has(team):
+		return false
+	var done: Array = researched_upgrades[team]
+	if done.is_empty() or TeamManager == null or not TeamManager.has_method("get_team_faction_data"):
+		return false
+	var fdata: FactionData = TeamManager.get_team_faction_data(team)
+	if fdata == null:
+		return false
+	for upg: UpgradeData in fdata.upgrade_roster:
+		if upg != null and upg.modifier_key == modifier_key and done.has(upg.upgrade_id):
+			return true
+	return false

@@ -6,6 +6,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"rail_sentinel"
 display_name = "Rail-Sentinel"
+short_display_name = "Rail-Snt"
 max_hp = 195.0
 max_shield = 60.0
 shield_regen_rate = 9.0

@@ -12,6 +12,8 @@
 script = ExtResource("1_bdata")
 building_id = &"cloning_vat"
 display_name = "Cloning Vat"
+short_display_name = "Cloning Vat"
+hud_accent_color = Color(0.24, 0.94, 0.72, 1)
 scene = ExtResource("2_scene")
 biomass_cost = 150
 silica_cost = 0

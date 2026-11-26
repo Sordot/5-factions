@@ -661,7 +661,8 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 		if entry_kind == ProductionComponent.KIND_UPGRADE:
 			var upg: UpgradeData = entry.get("data", null) as UpgradeData
 			var upg_name: String = upg.display_name if upg != null else "Upgrade"
-			slot_btn.text = "[%d] %s" % [i + 1, _shorten_unit_name(upg_name)]
+			var upg_short: String = upg.get_short_name() if upg != null else _shorten_unit_name(upg_name)
+			slot_btn.text = "[%d] %s" % [i + 1, upg_short]
 			slot_btn.modulate = Color(1.0, 0.86, 0.42, 1.0) if i == 0 else Color(0.88, 0.78, 0.56, 0.9)
 			var refund_upg: String = String(entry.get("cost_label", "100%"))
 			_attach_tooltip(
@@ -674,7 +675,7 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 		else:
 			var u_data: UnitData = entry.get("data", null) as UnitData
 			var b_cnt: int = int(entry.get("batch_count", 1))
-			var short_name: String = _shorten_unit_name(u_data.display_name) if u_data != null else "Unit"
+			var short_name: String = u_data.get_short_name() if u_data != null else "Unit"
 			slot_btn.text = "[%d] %s%s" % [i + 1, short_name, (" x%d" % b_cnt) if b_cnt > 1 else ""]
 			slot_btn.modulate = Color(0.45, 0.98, 0.92, 1.0) if i == 0 else Color(0.76, 0.86, 0.92, 0.9)
 			var refund_str: String = String(entry.get("cost_label", u_data.get_cost_label() if u_data != null else "100%"))
@@ -689,8 +690,35 @@ func _refresh_production_queue_ui(entity: Node) -> void:
 		queue_slots_row.add_child(slot_btn)
 
 
+var _short_name_cache: Dictionary = {}
+var _short_name_cache_built: bool = false
+
+
+func _ensure_short_name_cache() -> void:
+	if _short_name_cache_built:
+		return
+	_short_name_cache_built = true
+	if TeamManager == null or not TeamManager.has_method("get_playable_factions"):
+		return
+	for fd: FactionData in TeamManager.get_playable_factions():
+		if fd == null:
+			continue
+		for u: UnitData in fd.unit_roster:
+			if u != null and not u.display_name.is_empty():
+				_short_name_cache[u.display_name] = u.get_short_name()
+		for b: BuildingData in fd.building_roster:
+			if b != null and not b.display_name.is_empty():
+				_short_name_cache[b.display_name] = b.get_short_name()
+		for upg: UpgradeData in fd.upgrade_roster:
+			if upg != null and not upg.display_name.is_empty():
+				_short_name_cache[upg.display_name] = upg.get_short_name()
+
+
 func _shorten_unit_name(full_name: String) -> String:
-	return full_name.replace("Worker Drone", "Worker").replace("Systems Engineer", "Engineer").replace("Silica Harvester", "Harvester").replace("Recon Scout", "Scout").replace("Test Unit", "Infantry").replace("Clone Trooper", "Clone").replace("Signal Jammer", "Jammer").replace("Goliath Frame", "Goliath").replace("Chrysalis Mortar", "Mortar").replace("Batch Efficiency", "Batch Eff.").replace("Adrenal Potency", "Adrenal Pot.").replace("Compute Overdrive", "Overdrive").replace("Anvil Siege-Walker", "Anvil").replace("Monolith Dreadnought", "Dreadnought").replace("Null-Grid Projector", "Null-Grid").replace("Hardened Plating", "Plating").replace("Rapid Capacitors", "Capacitors").replace("Hyper-Velocity Rails", "HV Rails").replace("Bulwark Automaton", "Bulwark").replace("Picket Drone", "Picket").replace("Rail-Sentinel", "Rail-Snt").replace("Aegis Relay", "Aegis").replace("Servo-Drone", "Servo").replace("Ore Crawler", "Crawler")
+	_ensure_short_name_cache()
+	if _short_name_cache.has(full_name):
+		return String(_short_name_cache[full_name])
+	return full_name
 
 
 func _build_unit_class_traits_label(u_data: UnitData) -> String:

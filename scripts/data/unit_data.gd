@@ -3,6 +3,7 @@ extends Resource
 
 @export var unit_type_id: StringName = &"clone_trooper"
 @export var display_name: String = "Clone Trooper"
+@export var short_display_name: String = ""
 @export var max_hp: float = 100.0
 @export var max_shield: float = 0.0
 @export var shield_regen_rate: float = 0.0
@@ -67,6 +68,10 @@ extends Resource
 @export var deployed_aoe_radius: float = 0.0
 @export var deployed_damage_reduction_bonus: float = 0.0
 @export var deployed_weapon_tracer_style: StringName = &""
+
+
+func get_short_name() -> String:
+	return short_display_name if not short_display_name.is_empty() else display_name
 
 
 func has_tag(tag: StringName) -> bool:

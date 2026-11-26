@@ -7,6 +7,8 @@
 script = ExtResource("1_bdata")
 building_id = &"defense_turret"
 display_name = "Sentry Pylon"
+short_display_name = "Sentry"
+hud_accent_color = Color(0.22, 0.88, 0.94, 1)
 scene = ExtResource("2_scene")
 biomass_cost = 100
 silica_cost = 50

@@ -6,6 +6,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"engineer"
 display_name = "Systems Engineer"
+short_display_name = "Engineer"
 max_hp = 60.0
 move_speed = 240.0
 acceleration = 1800.0

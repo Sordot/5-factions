@@ -7,6 +7,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"monolith_dreadnought"
 display_name = "Monolith Dreadnought"
+short_display_name = "Dreadnought"
 max_hp = 640.0
 max_shield = 220.0
 shield_regen_rate = 14.0

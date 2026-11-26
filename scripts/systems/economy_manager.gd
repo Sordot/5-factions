@@ -483,3 +483,15 @@ func get_rail_damage_multiplier(team: int) -> float:
 
 func get_rail_range_bonus(team: int) -> float:
 	return upgrade_manager.get_rail_range_bonus(team)
+
+
+func get_upgrade_modifier_sum(team: int, modifier_key: StringName) -> float:
+	return upgrade_manager.get_modifier_sum(team, modifier_key)
+
+
+func get_upgrade_modifier_product(team: int, modifier_key: StringName, default_value: float = 1.0) -> float:
+	return upgrade_manager.get_modifier_product(team, modifier_key, default_value)
+
+
+func has_upgrade_modifier(team: int, modifier_key: StringName) -> bool:
+	return upgrade_manager.has_modifier(team, modifier_key)

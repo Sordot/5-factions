@@ -7,6 +7,8 @@
 script = ExtResource("1_bdata")
 building_id = &"wetware_mainframe"
 display_name = "Wetware Mainframe"
+short_display_name = "Mainframe"
+hud_accent_color = Color(0.32, 0.84, 1, 1)
 scene = ExtResource("2_scene")
 biomass_cost = 100
 silica_cost = 50

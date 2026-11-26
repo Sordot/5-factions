@@ -6,6 +6,8 @@
 script = ExtResource("1_bdata")
 building_id = &"assembly_bay"
 display_name = "Assembly Bay"
+short_display_name = "Assembly Bay"
+hud_accent_color = Color(1, 0.624, 0.11, 1)
 scene_path = "res://scenes/buildings/monolith_assembly_bay.tscn"
 biomass_cost = 140
 silica_cost = 95

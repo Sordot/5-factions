@@ -6,6 +6,8 @@
 script = ExtResource("1_bdata")
 building_id = &"logic_monolith"
 display_name = "Logic Monolith"
+short_display_name = "Logic Mono."
+hud_accent_color = Color(0.22, 0.741, 0.973, 1)
 scene_path = "res://scenes/buildings/monolith_logic_monolith.tscn"
 biomass_cost = 110
 silica_cost = 90

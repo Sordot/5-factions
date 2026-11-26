@@ -3,11 +3,12 @@ extends Node
 signal mute_changed(is_muted: bool)
 signal volume_changed(volume_linear: float)
 
-const SAMPLE_RATE: int = 22050
+const SAMPLE_RATE: int = SynthPrimitives.SAMPLE_RATE
 const COMBAT_POOL_SIZE: int = 10
 const UI_POOL_SIZE: int = 8
 const BARK_SELECT_DEBOUNCE_MS: int = 120
 const BARK_ORDER_DEBOUNCE_MS: int = 450
+const DEFAULT_AUDIO_PROFILE: StringName = &"technozen_bio"
 
 const AMB_BASE_CEILING_DB: float = -16.0
 const AMB_COMBAT_CEILING_DB: float = -14.0
@@ -67,6 +68,7 @@ var ui_volume_linear: float = 0.85
 var ambience_volume_linear: float = 0.35
 
 var _unfocused_muted: bool = false
+var _audio_profiles: Dictionary = {} # StringName -> FactionAudioProfile
 var _streams: Dictionary = {}
 var _combat_players: Array[AudioStreamPlayer] = []
 var _combat_start_ms: Array[int] = []
@@ -79,6 +81,8 @@ var _last_bark_order_ms: int = -9999
 var _amb_base_player: AudioStreamPlayer = null
 var _amb_combat_player: AudioStreamPlayer = null
 var _amb_uplink_player: AudioStreamPlayer = null
+var _amb_profile_cache: Dictionary = {}
+var _active_amb_profile: StringName = DEFAULT_AUDIO_PROFILE
 var _combat_intensity: float = 0.0
 var _combat_target: float = 0.0
 var _combat_hold_until_ms: int = 0
@@ -99,23 +103,6 @@ var _cooldowns_ms: Dictionary = {
 	&"unit_ready": 90,
 	&"error_insufficient": 160,
 	&"bandwidth_near_cap": 1000,
-	&"weapon_rifle": 75,
-	&"weapon_slash": 80,
-	&"weapon_rail": 90,
-	&"weapon_mortar": 105,
-	&"weapon_mono_slug": 85,
-	&"weapon_mono_rail": 100,
-	&"weapon_mono_tether": 75,
-	&"weapon_mono_bastion": 105,
-	&"weapon_mono_siege": 120,
-	&"ability_adrenal": 90,
-	&"ability_static": 100,
-	&"ability_slam": 110,
-	&"ability_barrage": 110,
-	&"ability_shield_overcharge": 110,
-	&"ability_suppressive_lock": 95,
-	&"ability_kinetic_barrier": 110,
-	&"ability_grav_pulse": 120,
 	&"entity_destroyed": 95,
 	&"shield_shatter": 85,
 	&"alert_under_attack": 1800,
@@ -125,7 +112,6 @@ var _cooldowns_ms: Dictionary = {
 	&"salvage_claimed": 180,
 	&"autocast_toggle": 60,
 	&"relay_captured": 450,
-	&"overclock_activate": 180,
 	&"deploy_lock": 90,
 	&"deploy_release": 90,
 	&"match_victory": 500,
@@ -158,6 +144,7 @@ func _ready() -> void:
 	_bark_player.bus = &"Master"
 	add_child(_bark_player)
 
+	_register_builtin_profiles()
 	_generate_procedural_library()
 	_setup_ambience_players()
 	_sync_from_settings()
@@ -166,6 +153,25 @@ func _ready() -> void:
 	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and not TeamManager.teams_reconfigured.is_connected(refresh_faction_ambience_profile):
 		TeamManager.teams_reconfigured.connect(refresh_faction_ambience_profile)
 	_apply_master_bus_settings()
+
+
+func _register_builtin_profiles() -> void:
+	register_audio_profile(GenesisAudioProfile.new(), false)
+	register_audio_profile(MonolithAudioProfile.new(), false)
+
+
+func register_audio_profile(profile: FactionAudioProfile, populate_immediately: bool = true) -> void:
+	if profile == null:
+		return
+	var pid: StringName = profile.get_profile_id()
+	if pid == &"":
+		return
+	_audio_profiles[pid] = profile
+	_amb_profile_cache.erase(pid)
+	if populate_immediately:
+		profile.register_cooldowns(_cooldowns_ms)
+		profile.build_weapon_and_ability_sfx(_streams)
+		profile.build_bark_sfx(_streams)
 
 
 func _ensure_master_bus_limiter() -> void:
@@ -248,39 +254,25 @@ func _slider_to_db(linear_val: float) -> float:
 	return linear_to_db(pow(v, 1.6))
 
 
-var _amb_profile_cache: Dictionary = {}
-var _active_amb_profile: StringName = &"technozen_bio"
-
-
 func _resolve_desired_ambience_profile() -> StringName:
 	if not is_inside_tree():
-		return &"technozen_bio"
+		return DEFAULT_AUDIO_PROFILE
 	var in_match: bool = get_tree().get_first_node_in_group("match_manager") != null
 	if not in_match:
-		return &"technozen_bio"
+		return DEFAULT_AUDIO_PROFILE
 	if TeamManager != null and TeamManager.has_method("is_spectator_mode") and TeamManager.is_spectator_mode():
-		return &"technozen_bio"
+		return DEFAULT_AUDIO_PROFILE
 	var prof: StringName = _get_local_faction_timbre_profile()
-	return &"monolith_industrial" if prof == &"monolith_industrial" else &"technozen_bio"
+	return prof if _audio_profiles.has(prof) else DEFAULT_AUDIO_PROFILE
 
 
-func _get_or_build_ambience_profile(profile: StringName) -> Dictionary:
-	if _amb_profile_cache.has(profile):
-		return _amb_profile_cache[profile] as Dictionary
-	var pack: Dictionary = {}
-	if profile == &"monolith_industrial":
-		pack = {
-			"base": _synth_ambience_monolith_base_loop(),
-			"combat": _synth_ambience_monolith_combat_loop(),
-			"uplink": _synth_ambience_monolith_uplink_loop(),
-		}
-	else:
-		pack = {
-			"base": _synth_ambience_base_loop(),
-			"combat": _synth_ambience_combat_loop(),
-			"uplink": _synth_ambience_uplink_loop(),
-		}
-	_amb_profile_cache[profile] = pack
+func _get_or_build_ambience_profile(profile_id: StringName) -> Dictionary:
+	var resolved_id: StringName = profile_id if _audio_profiles.has(profile_id) else DEFAULT_AUDIO_PROFILE
+	if _amb_profile_cache.has(resolved_id):
+		return _amb_profile_cache[resolved_id] as Dictionary
+	var profile: FactionAudioProfile = _audio_profiles.get(resolved_id, null) as FactionAudioProfile
+	var pack: Dictionary = profile.build_ambient_layers() if profile != null else {}
+	_amb_profile_cache[resolved_id] = pack
 	return pack
 
 
@@ -292,6 +284,8 @@ func refresh_faction_ambience_profile() -> void:
 		return
 	_active_amb_profile = desired
 	var pack: Dictionary = _get_or_build_ambience_profile(desired)
+	if pack.is_empty():
+		return
 	_amb_base_player.stream = pack["base"] as AudioStreamWAV
 	_amb_combat_player.stream = pack["combat"] as AudioStreamWAV
 	_amb_uplink_player.stream = pack["uplink"] as AudioStreamWAV
@@ -302,12 +296,12 @@ func refresh_faction_ambience_profile() -> void:
 
 
 func _setup_ambience_players() -> void:
-	_active_amb_profile = &"technozen_bio"
+	_active_amb_profile = DEFAULT_AUDIO_PROFILE
 	var initial_pack: Dictionary = _get_or_build_ambience_profile(_active_amb_profile)
 	_amb_base_player = AudioStreamPlayer.new()
 	_amb_base_player.name = "AmbBasePlayer"
 	_amb_base_player.bus = &"Master"
-	_amb_base_player.stream = initial_pack["base"] as AudioStreamWAV
+	_amb_base_player.stream = initial_pack.get("base", null) as AudioStreamWAV
 	_amb_base_player.volume_db = -80.0
 	add_child(_amb_base_player)
 	_amb_base_player.play()
@@ -315,7 +309,7 @@ func _setup_ambience_players() -> void:
 	_amb_combat_player = AudioStreamPlayer.new()
 	_amb_combat_player.name = "AmbCombatPlayer"
 	_amb_combat_player.bus = &"Master"
-	_amb_combat_player.stream = initial_pack["combat"] as AudioStreamWAV
+	_amb_combat_player.stream = initial_pack.get("combat", null) as AudioStreamWAV
 	_amb_combat_player.volume_db = -80.0
 	add_child(_amb_combat_player)
 	_amb_combat_player.play()
@@ -323,7 +317,7 @@ func _setup_ambience_players() -> void:
 	_amb_uplink_player = AudioStreamPlayer.new()
 	_amb_uplink_player.name = "AmbUplinkPlayer"
 	_amb_uplink_player.bus = &"Master"
-	_amb_uplink_player.stream = initial_pack["uplink"] as AudioStreamWAV
+	_amb_uplink_player.stream = initial_pack.get("uplink", null) as AudioStreamWAV
 	_amb_uplink_player.volume_db = -80.0
 	add_child(_amb_uplink_player)
 	_amb_uplink_player.play()
@@ -550,21 +544,25 @@ func _get_local_faction_pitch_bias() -> float:
 
 func _get_local_faction_timbre_profile() -> StringName:
 	if TeamManager == null:
-		return &"technozen_bio"
+		return DEFAULT_AUDIO_PROFILE
 	var local_team: int = TeamManager.get_local_human_team()
 	if local_team < 0:
-		return &"technozen_bio"
+		return DEFAULT_AUDIO_PROFILE
 	var fdata: FactionData = TeamManager.get_team_faction_data(local_team)
 	if fdata != null and fdata.audio_timbre_profile != &"":
 		return fdata.audio_timbre_profile
-	return &"technozen_bio"
+	return DEFAULT_AUDIO_PROFILE
 
 
 func _resolve_timbre_stream_key(base_key: StringName) -> StringName:
-	if _get_local_faction_timbre_profile() == &"monolith_industrial":
-		var mono_key: StringName = StringName("mono_%s" % String(base_key))
-		if _streams.has(mono_key):
-			return mono_key
+	var prof_id: StringName = _get_local_faction_timbre_profile()
+	var profile: FactionAudioProfile = _audio_profiles.get(prof_id, null) as FactionAudioProfile
+	if profile != null:
+		var prefix: String = profile.get_stream_prefix()
+		if not prefix.is_empty():
+			var prefixed_key: StringName = StringName("%s%s" % [prefix, String(base_key)])
+			if _streams.has(prefixed_key):
+				return prefixed_key
 	return base_key
 
 
@@ -713,54 +711,28 @@ func play_weapon_for_unit_data(unit_data: UnitData, world_pos: Vector2 = Vector2
 		play_sfx(&"weapon_rifle", -7.5, 0.06, world_pos, true)
 		return
 	var sfx: StringName = unit_data.weapon_sfx_id
-	match sfx:
-		&"weapon_mono_slug":
-			play_sfx(&"weapon_mono_slug", -5.0, 0.05, world_pos, true)
-		&"weapon_mono_rail":
-			play_sfx(&"weapon_mono_rail", -4.2, 0.04, world_pos, true)
-		&"weapon_mono_tether":
-			play_sfx(&"weapon_mono_tether", -6.2, 0.05, world_pos, true)
-		&"weapon_mono_bastion":
-			play_sfx(&"weapon_mono_bastion", -4.0, 0.05, world_pos, true)
-		&"weapon_mono_siege":
-			play_sfx(&"weapon_mono_siege", -3.0, 0.04, world_pos, true)
-		&"weapon_slash", &"acid_slash", &"melee_slash", &"bio_slash":
-			play_sfx(&"weapon_slash", -6.5, 0.06, world_pos, true)
-		&"weapon_rail", &"rail_shot", &"rail_beam", &"arc_lance":
-			play_sfx(&"weapon_rail", -5.0, 0.06, world_pos, true)
-		&"weapon_mortar", &"mortar_thud", &"siege_mortar":
-			play_sfx(&"weapon_mortar", -3.5, 0.06, world_pos, true)
-		&"heavy_cannon", &"twin_cannon", &"autocannon":
-			play_sfx(&"weapon_mortar", -6.0, 0.06, world_pos, true)
-		&"weapon_rifle", &"pulse_rifle", &"pulse_bolt":
-			play_sfx(&"weapon_rifle", -7.5, 0.06, world_pos, true)
-		_:
-			if _streams.has(sfx):
-				play_sfx(sfx, -6.5, 0.06, world_pos, true)
-			else:
-				play_weapon_for_unit(unit_data.unit_type_id, world_pos)
+	for profile_val: Variant in _audio_profiles.values():
+		var profile: FactionAudioProfile = profile_val as FactionAudioProfile
+		if profile != null:
+			var resolved: Dictionary = profile.resolve_weapon_sfx(sfx, &"")
+			if not resolved.is_empty():
+				play_sfx(resolved["sfx_id"] as StringName, float(resolved["db"]), float(resolved["jitter"]), world_pos, true)
+				return
+	if sfx != &"" and _streams.has(sfx):
+		play_sfx(sfx, -6.5, 0.06, world_pos, true)
+	else:
+		play_weapon_for_unit(unit_data.unit_type_id, world_pos)
 
 
 func play_weapon_for_unit(unit_type_id: StringName, world_pos: Vector2 = Vector2.INF) -> void:
-	match unit_type_id:
-		&"bulwark_automaton", &"monolith_dreadnought":
-			play_sfx(&"weapon_mono_slug", -5.0, 0.05, world_pos, true)
-		&"anvil_siege_walker":
-			play_sfx(&"weapon_mono_siege", -3.2, 0.04, world_pos, true)
-		&"rail_sentinel":
-			play_sfx(&"weapon_mono_rail", -4.2, 0.04, world_pos, true)
-		&"picket_drone", &"null_grid_projector":
-			play_sfx(&"weapon_mono_tether", -6.2, 0.05, world_pos, true)
-		&"stinger", &"symbiote":
-			play_sfx(&"weapon_slash", -6.5, 0.06, world_pos, true)
-		&"lance_rig", &"arc_lancer":
-			play_sfx(&"weapon_rail", -5.0, 0.06, world_pos, true)
-		&"chrysalis_mortar":
-			play_sfx(&"weapon_mortar", -3.5, 0.06, world_pos, true)
-		&"goliath_frame":
-			play_sfx(&"weapon_mortar", -6.0, 0.06, world_pos, true)
-		_:
-			play_sfx(&"weapon_rifle", -7.5, 0.06, world_pos, true)
+	for profile_val: Variant in _audio_profiles.values():
+		var profile: FactionAudioProfile = profile_val as FactionAudioProfile
+		if profile != null:
+			var resolved: Dictionary = profile.resolve_weapon_sfx(&"", unit_type_id)
+			if not resolved.is_empty():
+				play_sfx(resolved["sfx_id"] as StringName, float(resolved["db"]), float(resolved["jitter"]), world_pos, true)
+				return
+	play_sfx(&"weapon_rifle", -7.5, 0.06, world_pos, true)
 
 
 func play_explosion_sfx(world_pos: Vector2 = Vector2.INF, volume_db_offset: float = -5.0, is_major_global: bool = false) -> void:
@@ -775,25 +747,18 @@ func play_build_sfx(sfx_id: StringName = &"build_complete", world_pos: Vector2 =
 
 
 func play_ability_sfx(ability_id: StringName, world_pos: Vector2 = Vector2.INF) -> void:
-	match ability_id:
-		&"adrenal_surge":
-			play_sfx(&"ability_adrenal", -3.5, 0.04, world_pos, true)
-		&"static_pulse":
-			play_sfx(&"ability_static", -3.0, 0.03, world_pos, true)
-		&"monolith_suppressive_lock":
-			play_sfx(&"ability_suppressive_lock", -3.2, 0.04, world_pos, true)
-		&"monolith_shield_overcharge":
-			play_sfx(&"ability_shield_overcharge", -2.8, 0.03, world_pos, true)
-		&"kinetic_barrier":
-			play_sfx(&"ability_kinetic_barrier", -2.4, 0.03, world_pos, true)
-		&"grav_pulse":
-			play_sfx(&"ability_grav_pulse", -2.2, 0.04, world_pos, true)
-		&"seismic_slam":
-			play_sfx(&"ability_slam", -2.0, 0.04, world_pos, true)
-		&"spore_barrage":
-			play_sfx(&"ability_barrage", -2.5, 0.04, world_pos, true)
-		_:
-			play_sfx(&"ability_adrenal", -4.0, 0.04, world_pos, true)
+	for profile_val: Variant in _audio_profiles.values():
+		var profile: FactionAudioProfile = profile_val as FactionAudioProfile
+		if profile != null:
+			var resolved: Dictionary = profile.resolve_ability_sfx(ability_id)
+			if not resolved.is_empty():
+				play_sfx(resolved["sfx_id"] as StringName, float(resolved["db"]), float(resolved["jitter"]), world_pos, true)
+				return
+	var direct_key: StringName = StringName("ability_%s" % String(ability_id))
+	if _streams.has(direct_key):
+		play_sfx(direct_key, -3.0, 0.04, world_pos, true)
+	else:
+		play_sfx(&"ability_adrenal", -4.0, 0.04, world_pos, true)
 
 
 func play_tactical_alert(alert_type: StringName) -> void:
@@ -848,972 +813,43 @@ func _apply_master_bus_settings() -> void:
 
 
 func _generate_procedural_library() -> void:
-	# UI & Command Feedback
-	_streams[&"ui_click"] = _synth_glass_click()
-	_streams[&"unit_select"] = _synth_chime(PackedFloat32Array([740.0, 1110.0]), 0.055, 0.24)
-	_streams[&"inspect_tick"] = _synth_chime(PackedFloat32Array([920.0]), 0.035, 0.18)
-	_streams[&"bldg_select_production"] = _synth_chord_swell(PackedFloat32Array([261.63, 392.0, 523.25]), 0.20, 0.24)
-	_streams[&"bldg_select_hub"] = _synth_chord_swell(PackedFloat32Array([146.83, 220.0, 329.63]), 0.24, 0.28)
-	_streams[&"bldg_select_tech"] = _synth_chime(PackedFloat32Array([587.33, 880.0]), 0.05, 0.20)
-	_streams[&"bldg_select_defense"] = _synth_chirp(420.0, 680.0, 0.12, 0.22)
-	_streams[&"bldg_select_utility"] = _synth_chime(PackedFloat32Array([493.88, 739.99]), 0.045, 0.18)
-	_streams[&"order_move"] = _synth_chirp(520.0, 780.0, 0.085, 0.24)
-	_streams[&"order_attack"] = _synth_double_chirp(660.0, 440.0, 0.095, 0.28)
-	_streams[&"order_gather"] = _synth_chime(PackedFloat32Array([440.0, 660.0]), 0.065, 0.24)
-
-	# Completion & Economy Alerts
-	_streams[&"build_complete"] = _synth_chime(PackedFloat32Array([523.25, 659.25, 783.99, 1046.5]), 0.075, 0.28)
-	_streams[&"upgrade_complete"] = _synth_chord_swell(PackedFloat32Array([440.0, 554.37, 659.25, 880.0]), 0.42, 0.26)
-	_streams[&"unit_ready"] = _synth_chime(PackedFloat32Array([622.25, 932.33]), 0.065, 0.23)
-	_streams[&"error_insufficient"] = _synth_error_buzz()
-	_streams[&"bandwidth_near_cap"] = _synth_chime(PackedFloat32Array([587.33, 523.25]), 0.075, 0.19)
-
-	# Combat & Ability SFX
-	_streams[&"weapon_rifle"] = _synth_rifle_burst()
-	_streams[&"weapon_slash"] = _synth_acid_snap()
-	_streams[&"weapon_rail"] = _synth_rail_zap()
-	_streams[&"weapon_mortar"] = _synth_mortar_thud()
-	_streams[&"weapon_mono_slug"] = _synth_mono_slug()
-	_streams[&"weapon_mono_rail"] = _synth_mono_rail()
-	_streams[&"weapon_mono_tether"] = _synth_mono_tether()
-	_streams[&"weapon_mono_bastion"] = _synth_mono_bastion()
-	_streams[&"weapon_mono_siege"] = _synth_mono_siege()
-	_streams[&"ability_adrenal"] = _synth_adrenal_hum()
-	_streams[&"ability_static"] = _synth_static_pulse()
-	_streams[&"ability_slam"] = _synth_seismic_slam()
-	_streams[&"ability_barrage"] = _synth_mortar_thud()
-	_streams[&"ability_shield_overcharge"] = _synth_mono_shield_overcharge()
-	_streams[&"ability_suppressive_lock"] = _synth_mono_suppressive_lock()
-	_streams[&"ability_kinetic_barrier"] = _synth_mono_kinetic_barrier()
-	_streams[&"ability_grav_pulse"] = _synth_mono_grav_pulse()
-	_streams[&"entity_destroyed"] = _synth_destruction_boom()
-	_streams[&"explosion_heavy"] = _synth_explosion_heavy()
-	_streams[&"shield_shatter"] = _synth_shield_shatter()
-
-	# Tactical Alerts, Veterancy, Salvage & Auto-Cast
-	_streams[&"alert_under_attack"] = _synth_alert_under_attack()
-	_streams[&"alert_uplink"] = _synth_alert_uplink()
-	_streams[&"alert_complete"] = _synth_alert_complete()
-	_streams[&"veterancy_rank_up"] = _synth_rank_up_chime()
-	_streams[&"salvage_claimed"] = _synth_chime(PackedFloat32Array([587.33, 783.99, 1174.66, 1567.98]), 0.045, 0.25)
-	_streams[&"autocast_toggle"] = _synth_chime(PackedFloat32Array([880.0, 1318.5]), 0.04, 0.20)
-	_streams[&"relay_captured"] = _synth_chime(PackedFloat32Array([659.25, 987.77, 1318.51]), 0.06, 0.22)
-	_streams[&"overclock_activate"] = _synth_mono_overclock()
-	_streams[&"deploy_lock"] = _synth_double_chirp(320.0, 145.0, 0.14, 0.28)
-	_streams[&"deploy_anchor_lock"] = _synth_deploy_anchor_lock()
-	_streams[&"deploy_release"] = _synth_double_chirp(185.0, 380.0, 0.13, 0.24)
-	_streams[&"ai_transmission"] = _synth_chime(PackedFloat32Array([740.0, 1110.0]), 0.042, 0.16)
-
-	# Unit-Class Procedural Synth Barks (150–240ms) — GENESIS_V2 baseline
-	_streams[&"bark_worker_select"] = _synth_bark_worker(false)
-	_streams[&"bark_worker_order"] = _synth_bark_worker(true)
-	_streams[&"bark_swarm_select"] = _synth_bark_swarm(false)
-	_streams[&"bark_swarm_order"] = _synth_bark_swarm(true)
-	_streams[&"bark_counter_select"] = _synth_bark_counter(false)
-	_streams[&"bark_counter_order"] = _synth_bark_counter(true)
-	_streams[&"bark_support_select"] = _synth_bark_support(false)
-	_streams[&"bark_support_order"] = _synth_bark_support(true)
-	_streams[&"bark_heavy_select"] = _synth_bark_heavy(false)
-	_streams[&"bark_heavy_order"] = _synth_bark_heavy(true)
-
-	# MONOLITH_OS Industrial Timbre Barks & Building Selects (&"monolith_industrial")
-	_streams[&"mono_bark_worker_select"] = _synth_mono_bark(PackedFloat32Array([311.13, 466.16]), false)
-	_streams[&"mono_bark_worker_order"] = _synth_mono_bark(PackedFloat32Array([349.23, 523.25]), true)
-	_streams[&"mono_bark_swarm_select"] = _synth_mono_bark(PackedFloat32Array([392.0, 587.33]), false)
-	_streams[&"mono_bark_swarm_order"] = _synth_mono_bark(PackedFloat32Array([440.0, 659.25]), true)
-	_streams[&"mono_bark_counter_select"] = _synth_mono_bark(PackedFloat32Array([261.63, 392.0, 523.25]), false)
-	_streams[&"mono_bark_counter_order"] = _synth_mono_bark(PackedFloat32Array([293.66, 440.0, 587.33]), true)
-	_streams[&"mono_bark_support_select"] = _synth_mono_bark(PackedFloat32Array([329.63, 493.88, 659.25]), false)
-	_streams[&"mono_bark_support_order"] = _synth_mono_bark(PackedFloat32Array([392.0, 587.33, 783.99]), true)
-	_streams[&"mono_bark_heavy_select"] = _synth_mono_bark(PackedFloat32Array([146.83, 220.0]), false)
-	_streams[&"mono_bark_heavy_order"] = _synth_mono_bark(PackedFloat32Array([164.81, 246.94]), true)
-	_streams[&"mono_bldg_select_hub"] = _synth_mono_bark(PackedFloat32Array([110.0, 164.81, 220.0]), false)
-	_streams[&"mono_bldg_select_production"] = _synth_mono_bark(PackedFloat32Array([146.83, 220.0, 293.66]), false)
-	_streams[&"mono_bldg_select_tech"] = _synth_mono_bark(PackedFloat32Array([220.0, 329.63, 440.0]), false)
-	_streams[&"mono_bldg_select_defense"] = _synth_mono_bark(PackedFloat32Array([174.61, 261.63]), true)
-	_streams[&"mono_bldg_select_utility"] = _synth_mono_bark(PackedFloat32Array([196.0, 293.66]), false)
-
-	# Match Flow
-	_streams[&"match_victory"] = _synth_chime(PackedFloat32Array([523.25, 659.25, 783.99, 1046.5, 1318.5]), 0.11, 0.30)
-	_streams[&"match_defeat"] = _synth_chime(PackedFloat32Array([440.0, 392.0, 329.63, 246.94]), 0.14, 0.30)
-
-
-func _make_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
-	var wav: AudioStreamWAV = AudioStreamWAV.new()
-	wav.format = AudioStreamWAV.FORMAT_16_BITS
-	wav.mix_rate = SAMPLE_RATE
-	wav.stereo = false
-	var bytes: PackedByteArray = PackedByteArray()
-	bytes.resize(samples.size() * 2)
-	for i: int in range(samples.size()):
-		var clamped: float = clampf(samples[i], -0.95, 0.95)
-		var pcm: int = int(round(clamped * 32767.0))
-		if pcm < 0:
-			pcm += 65536
-		bytes[i * 2] = pcm & 0xFF
-		bytes[i * 2 + 1] = (pcm >> 8) & 0xFF
-	wav.data = bytes
-	return wav
-
-
-func _synth_glass_click() -> AudioStreamWAV:
-	var count: int = int(SAMPLE_RATE * 0.055)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var env: float = minf(1.0, t / 0.002) * exp(-t * 68.0)
-		var s: float = sin(TAU * 1380.0 * t) * 0.6 + sin(TAU * 2760.0 * t) * 0.32 + sin(TAU * 4140.0 * t) * 0.08
-		out[i] = s * env * 0.32
-	return _make_wav(out)
-
-
-func _synth_chime(freqs: PackedFloat32Array, step_dur: float, amp: float) -> AudioStreamWAV:
-	var tail: float = 0.16
-	var total_dur: float = step_dur * float(freqs.size()) + tail
-	var count: int = int(SAMPLE_RATE * total_dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	out.fill(0.0)
-	for idx: int in range(freqs.size()):
-		var f: float = freqs[idx]
-		var start_t: float = float(idx) * step_dur
-		var start_i: int = int(start_t * float(SAMPLE_RATE))
-		var note_len: int = int((step_dur + tail) * float(SAMPLE_RATE))
-		for j: int in range(note_len):
-			var pos: int = start_i + j
-			if pos >= count:
-				break
-			var lt: float = float(j) / float(SAMPLE_RATE)
-			var env: float = minf(1.0, lt / 0.005) * exp(-lt * 14.0)
-			var wave: float = sin(TAU * f * lt) * 0.75 + sin(TAU * f * 2.0 * lt) * 0.25
-			out[pos] += wave * env * amp
-	return _make_wav(out)
-
-
-func _synth_chord_swell(freqs: PackedFloat32Array, duration: float, amp: float) -> AudioStreamWAV:
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var inv_n: float = 1.0 / maxf(1.0, float(freqs.size()))
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var norm: float = t / duration
-		var env: float = sin(PI * norm) * exp(-norm * 1.4)
-		var sum: float = 0.0
-		for f: float in freqs:
-			sum += sin(TAU * f * t) * 0.8 + sin(TAU * f * 2.0 * t) * 0.2
-		out[i] = sum * inv_n * env * amp
-	return _make_wav(out)
-
-
-func _synth_chirp(f0: float, f1: float, duration: float, amp: float) -> AudioStreamWAV:
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / duration
-		var freq: float = lerpf(f0, f1, u)
-		phase += TAU * freq / float(SAMPLE_RATE)
-		var env: float = minf(1.0, t / 0.004) * exp(-u * 4.5)
-		out[i] = (sin(phase) * 0.78 + sin(phase * 2.0) * 0.22) * env * amp
-	return _make_wav(out)
-
-
-func _synth_double_chirp(f0: float, f1: float, duration: float, amp: float) -> AudioStreamWAV:
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / duration
-		var pulse_u: float = fmod(u * 2.0, 1.0)
-		var freq: float = lerpf(f0, f1, pulse_u)
-		phase += TAU * freq / float(SAMPLE_RATE)
-		var env: float = minf(1.0, pulse_u / 0.08) * exp(-pulse_u * 4.2) * (1.0 - 0.25 * u)
-		out[i] = (sin(phase) * 0.7 + clampf(sin(phase * 1.5) * 1.3, -1.0, 1.0) * 0.3) * env * amp
-	return _make_wav(out)
-
-
-func _synth_error_buzz() -> AudioStreamWAV:
-	var duration: float = 0.22
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var second_half: bool = t >= 0.105
-		var lt: float = (t - 0.105) if second_half else t
-		var f: float = 175.0 if second_half else 220.0
-		var env: float = minf(1.0, lt / 0.005) * exp(-lt * 16.0)
-		if t > 0.088 and t < 0.105:
-			env = 0.0
-		var saw: float = 2.0 * fmod(lt * f, 1.0) - 1.0
-		var soft_wave: float = sin(TAU * f * lt) * 0.65 + saw * 0.35
-		out[i] = soft_wave * env * 0.30
-	return _make_wav(out)
-
-
-func _synth_rifle_burst() -> AudioStreamWAV:
-	var duration: float = 0.09
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var seed_val: int = 1337
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / duration
-		var freq: float = lerpf(420.0, 110.0, u)
-		phase += TAU * freq / float(SAMPLE_RATE)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		lp = lerpf(lp, noise, 0.35)
-		var env: float = minf(1.0, t / 0.002) * exp(-u * 6.5)
-		out[i] = (sin(phase) * 0.55 + lp * 0.45) * env * 0.30
-	return _make_wav(out)
-
-
-func _synth_acid_snap() -> AudioStreamWAV:
-	var duration: float = 0.095
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var seed_val: int = 4242
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / duration
-		var freq: float = lerpf(1180.0, 260.0, u * u)
-		phase += TAU * freq / float(SAMPLE_RATE)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		var env: float = minf(1.0, t / 0.002) * exp(-u * 7.0)
-		out[i] = (sin(phase) * 0.62 + noise * 0.38) * env * 0.28
-	return _make_wav(out)
-
-
-func _synth_rail_zap() -> AudioStreamWAV:
-	var duration: float = 0.18
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var phase_sub: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / duration
-		var freq: float = lerpf(1680.0, 190.0, pow(u, 0.65))
-		var mod: float = sin(TAU * 95.0 * t) * 180.0
-		phase += TAU * (freq + mod) / float(SAMPLE_RATE)
-		var sub_f: float = lerpf(84.0, 48.0, minf(1.0, t / 0.085))
-		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
-		var sub_env: float = minf(1.0, t / 0.0025) * exp(-t * 28.0)
-		var env: float = minf(1.0, t / 0.003) * exp(-u * 4.8)
-		out[i] = clampf(clampf(sin(phase) * 1.4, -1.0, 1.0) * env * 0.28 + sin(phase_sub) * sub_env * 0.22, -0.92, 0.92)
-	return _make_wav(out)
-
-
-func _synth_mortar_thud() -> AudioStreamWAV:
-	var duration: float = 0.29
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var phase_sub: float = 0.0
-	var seed_val: int = 9001
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / duration
-		var freq: float = lerpf(155.0, 38.0, pow(u, 0.55))
-		phase += TAU * freq / float(SAMPLE_RATE)
-		var sub_f: float = lerpf(82.0, 46.0, minf(1.0, t / 0.105))
-		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
-		var sub_env: float = minf(1.0, t / 0.003) * exp(-t * 22.0)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		lp = lerpf(lp, noise, 0.16)
-		var env: float = minf(1.0, t / 0.004) * exp(-u * 4.6)
-		out[i] = clampf((sin(phase) * 0.62 + lp * 0.46) * env * 0.34 + sin(phase_sub) * sub_env * 0.24, -0.92, 0.92)
-	return _make_wav(out)
-
-
-func _synth_adrenal_hum() -> AudioStreamWAV:
-	var duration: float = 0.26
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / duration
-		var freq: float = lerpf(280.0, 680.0, u)
-		phase += TAU * freq / float(SAMPLE_RATE)
-		var env: float = sin(PI * u)
-		out[i] = (sin(phase) * 0.65 + sin(phase * 1.5) * 0.35) * env * 0.28
-	return _make_wav(out)
-
-
-func _synth_static_pulse() -> AudioStreamWAV:
-	var duration: float = 0.30
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var seed_val: int = 7711
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / duration
-		var freq: float = lerpf(720.0, 210.0, u) + sin(TAU * 42.0 * t) * 120.0
-		phase += TAU * freq / float(SAMPLE_RATE)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		var env: float = minf(1.0, t / 0.008) * exp(-u * 3.6)
-		out[i] = (sin(phase) * 0.6 + noise * 0.25) * env * 0.28
-	return _make_wav(out)
-
-
-func _synth_seismic_slam() -> AudioStreamWAV:
-	var duration: float = 0.36
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var seed_val: int = 5150
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / duration
-		var freq: float = lerpf(135.0, 28.0, pow(u, 0.5))
-		phase += TAU * freq / float(SAMPLE_RATE)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		lp = lerpf(lp, noise, 0.12)
-		var env: float = minf(1.0, t / 0.003) * exp(-u * 4.0)
-		out[i] = clampf((sin(phase) * 0.8 + lp * 0.65) * 1.15, -1.0, 1.0) * env * 0.38
-	return _make_wav(out)
-
-
-func _synth_destruction_boom() -> AudioStreamWAV:
-	var duration: float = 0.34
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var seed_val: int = 2026
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / duration
-		var freq: float = lerpf(120.0, 32.0, u)
-		phase += TAU * freq / float(SAMPLE_RATE)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		lp = lerpf(lp, noise, 0.18)
-		var env: float = minf(1.0, t / 0.005) * exp(-u * 4.5)
-		out[i] = (sin(phase) * 0.5 + lp * 0.65) * env * 0.32
-	return _make_wav(out)
-
-
-func _synth_alert_under_attack() -> AudioStreamWAV:
-	# Urgent two-tone low-mid pulse (non-shrill Technozen warning)
-	var duration: float = 0.28
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var second: bool = t >= 0.135
-		var lt: float = (t - 0.135) if second else t
-		var freq: float = 340.0 if second else 440.0
-		var env: float = minf(1.0, lt / 0.006) * exp(-lt * 15.0)
-		if t > 0.105 and t < 0.135:
-			env = 0.0
-		var wave: float = sin(TAU * freq * lt) * 0.72 + sin(TAU * freq * 1.5 * lt) * 0.28
-		out[i] = wave * env * 0.28
-	return _make_wav(out)
-
-
-func _synth_alert_uplink() -> AudioStreamWAV:
-	# Resonant ascending sonar ping
-	var duration: float = 0.34
-	var count: int = int(SAMPLE_RATE * duration)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / duration
-		var freq: float = lerpf(520.0, 980.0, pow(u, 0.7))
-		phase += TAU * freq / float(SAMPLE_RATE)
-		var env: float = minf(1.0, t / 0.01) * exp(-u * 3.8)
-		out[i] = (sin(phase) * 0.76 + sin(phase * 2.0) * 0.24) * env * 0.26
-	return _make_wav(out)
-
-
-func _synth_alert_complete() -> AudioStreamWAV:
-	return _synth_chime(PackedFloat32Array([587.33, 880.0, 1174.66]), 0.065, 0.23)
-
-
-func _synth_rank_up_chime() -> AudioStreamWAV:
-	return _synth_chime(PackedFloat32Array([659.25, 880.0, 1318.5]), 0.055, 0.22)
-
-
-func _make_loop_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
-	var wav: AudioStreamWAV = _make_wav(samples)
-	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
-	wav.loop_begin = 0
-	wav.loop_end = samples.size()
-	return wav
-
-
-func _synth_ambience_base_loop() -> AudioStreamWAV:
-	# 4.0s exact harmonic cycle: warm Y2K/Technozen D-minor9 low-pass pad + soft crystalline pulse
-	var dur: float = 4.0
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var freqs: PackedFloat32Array = PackedFloat32Array([73.5, 110.25, 147.0, 220.5, 294.0])
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var lfo: float = 0.72 + 0.28 * sin(TAU * 0.25 * t)
-		var pulse: float = 0.5 + 0.5 * sin(TAU * 0.5 * t)
-		var pad: float = 0.0
-		for f: float in freqs:
-			pad += sin(TAU * f * t)
-		pad *= 0.16 * lfo
-		var shimmer: float = sin(TAU * 588.0 * t) * (0.045 * pulse * pulse)
-		lp = lerpf(lp, pad + shimmer, 0.12)
-		out[i] = lp * 0.65
-	return _make_loop_wav(out)
-
-
-func _synth_ambience_combat_loop() -> AudioStreamWAV:
-	# 4.0s exact cycle: subtle rhythmic sub-bass pulse + filtered Technozen 16th-note arpeggio
-	var dur: float = 4.0
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var arp_notes: PackedFloat32Array = PackedFloat32Array([147.0, 174.5, 220.5, 261.5, 220.5, 174.5, 147.0, 130.75])
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var beat_u: float = fmod(t * 2.0, 1.0)
-		var sub_env: float = exp(-beat_u * 4.2)
-		var sub: float = sin(TAU * 55.0 * t) * sub_env * 0.34
-		var step_idx: int = int(floor(t * 4.0)) % arp_notes.size()
-		var step_u: float = fmod(t * 4.0, 1.0)
-		var arp_env: float = minf(1.0, step_u / 0.06) * exp(-step_u * 5.0)
-		var arp_f: float = arp_notes[step_idx]
-		var arp: float = (sin(TAU * arp_f * t) * 0.7 + sin(TAU * arp_f * 2.0 * t) * 0.3) * arp_env * 0.18
-		lp = lerpf(lp, sub + arp, 0.22)
-		out[i] = lp * 0.72
-	return _make_loop_wav(out)
-
-
-func _synth_ambience_uplink_loop() -> AudioStreamWAV:
-	# 4.0s exact cycle: ethereal crystalline harmonic shimmer for Data Hyper-Uplink tension
-	var dur: float = 4.0
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var swell: float = 0.55 + 0.45 * sin(TAU * 0.5 * t)
-		var s: float = sin(TAU * 441.0 * t) * 0.35 + sin(TAU * 661.5 * t) * 0.30 + sin(TAU * 882.0 * t) * 0.20
-		out[i] = s * swell * 0.26
-	return _make_loop_wav(out)
-
-
-func _synth_ambience_monolith_base_loop() -> AudioStreamWAV:
-	# 4.0s exact cycle: cold industrial sub-bass turbine hum (55/82.5 Hz fifths) + metallic filter swell + clock ticks
-	var dur: float = 4.0
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var swell: float = 0.65 + 0.35 * sin(TAU * 0.25 * t)
-		var turbine: float = sin(TAU * 55.0 * t) * 0.44 + sin(TAU * 82.5 * t) * 0.28 + sin(TAU * 110.0 * t) * 0.16
-		var metal_ring: float = sin(TAU * 247.5 * t) * (0.055 * (0.5 + 0.5 * sin(TAU * 0.5 * t)))
-		var tick_u: float = fmod(t * 2.0, 1.0)
-		var clock_tick: float = sin(TAU * 880.0 * t) * exp(-tick_u * 48.0) * 0.06
-		lp = lerpf(lp, turbine * swell + metal_ring + clock_tick, 0.10)
-		out[i] = lp * 0.62
-	return _make_loop_wav(out)
-
-
-func _synth_ambience_monolith_combat_loop() -> AudioStreamWAV:
-	# 4.0s exact cycle: tight low-mid mechanical piston pulse + muted dark brass/anvil harmonic tension
-	var dur: float = 4.0
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var piston_u: float = fmod(t * 2.0, 1.0)
-		var piston_env: float = exp(-piston_u * 6.5)
-		var piston: float = (sin(TAU * 55.0 * t) * 0.55 + sin(TAU * 110.0 * t) * 0.25) * piston_env * 0.42
-		var anvil_u: float = fmod(t * 1.0 + 0.5, 1.0)
-		var anvil_env: float = exp(-anvil_u * 10.0)
-		var brass_f: float = 137.5 if (int(floor(t * 0.5)) % 2 == 0) else 123.75
-		var anvil: float = (sin(TAU * brass_f * t) * 0.55 + sin(TAU * brass_f * 1.5 * t) * 0.28) * anvil_env * 0.22
-		lp = lerpf(lp, piston + anvil, 0.18)
-		out[i] = lp * 0.70
-	return _make_loop_wav(out)
-
-
-func _synth_ambience_monolith_uplink_loop() -> AudioStreamWAV:
-	# 4.0s exact cycle: cold high-voltage transformer hum + deliberate radar-ping overtones
-	var dur: float = 4.0
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var xform: float = (sin(TAU * 120.0 * t) * 0.26 + sin(TAU * 240.0 * t) * 0.14) * (0.72 + 0.28 * sin(TAU * 0.5 * t))
-		var ping_u: float = fmod(t * 0.5, 1.0)
-		var ping_env: float = exp(-ping_u * 9.5)
-		var ping: float = (sin(TAU * 528.0 * t) * 0.30 + sin(TAU * 792.0 * t) * 0.18) * ping_env
-		out[i] = (xform + ping) * 0.26
-	return _make_loop_wav(out)
-
-
-func _synth_bark_worker(is_order: bool) -> AudioStreamWAV:
-	# Nimble dual-tone telemetry beep (160ms)
-	var f0: float = 780.0 if is_order else 660.0
-	var f1: float = 1170.0 if is_order else 990.0
-	return _synth_chime(PackedFloat32Array([f0, f1]), 0.055, 0.20)
-
-
-func _synth_bark_swarm(is_order: bool) -> AudioStreamWAV:
-	# Tight high-energy metallic chirp cadence (165ms)
-	var dur: float = 0.165
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var f_start: float = 640.0 if is_order else 520.0
-		var f_end: float = 1080.0 if is_order else 820.0
-		var pulse_u: float = fmod(u * 2.0, 1.0)
-		var freq: float = lerpf(f_start, f_end, pulse_u)
-		phase += TAU * freq / float(SAMPLE_RATE)
-		var env: float = minf(1.0, pulse_u / 0.08) * exp(-pulse_u * 4.8)
-		out[i] = (sin(phase) * 0.68 + sin(phase * 2.5) * 0.32) * env * 0.22
-	return _make_wav(out)
-
-
-func _synth_bark_counter(is_order: bool) -> AudioStreamWAV:
-	# Crisp ionized harmonic lock-on tone (190ms)
-	var dur: float = 0.19
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var freq: float = lerpf(920.0, 1380.0, u) if is_order else lerpf(1240.0, 860.0, u)
-		phase += TAU * (freq + sin(TAU * 55.0 * t) * 45.0) / float(SAMPLE_RATE)
-		var env: float = minf(1.0, t / 0.008) * exp(-u * 3.8)
-		out[i] = (sin(phase) * 0.72 + sin(phase * 1.5) * 0.28) * env * 0.22
-	return _make_wav(out)
-
-
-func _synth_bark_support(is_order: bool) -> AudioStreamWAV:
-	# Warm airy bio-synth chime (210ms)
-	var notes: PackedFloat32Array = PackedFloat32Array([523.25, 659.25, 987.77]) if is_order else PackedFloat32Array([440.0, 659.25])
-	return _synth_chime(notes, 0.055, 0.20)
-
-
-func _synth_bark_heavy(is_order: bool) -> AudioStreamWAV:
-	# Deep resonant sub-bass servo thrum + metallic confirmation ping (230ms)
-	var dur: float = 0.23
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var base_f: float = lerpf(115.0, 82.0, u) if is_order else lerpf(92.0, 128.0, u)
-		phase += TAU * base_f / float(SAMPLE_RATE)
-		var sub_env: float = minf(1.0, t / 0.012) * exp(-u * 3.2)
-		var ping_t: float = maxf(0.0, t - 0.065)
-		var ping_env: float = (minf(1.0, ping_t / 0.004) * exp(-ping_t * 20.0)) if t >= 0.065 else 0.0
-		var ping_f: float = 620.0 if is_order else 490.0
-		var ping: float = sin(TAU * ping_f * ping_t) * ping_env * 0.35
-		out[i] = (sin(phase) * 0.65 + sin(phase * 2.0) * 0.20) * sub_env * 0.32 + ping * 0.28
-	return _make_wav(out)
-
-
-# =============================================================================
-# MONOLITH_OS — INDUSTRIAL PROCEDURAL SYNTHS
-# =============================================================================
-
-func _synth_mono_slug() -> AudioStreamWAV:
-	# Heavy low-mid mechanical thump + crisp metallic bolt clack
-	var dur: float = 0.15
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var seed_val: int = 31337
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var freq: float = lerpf(210.0, 58.0, pow(u, 0.55))
-		phase += TAU * freq / float(SAMPLE_RATE)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		lp = lerpf(lp, noise, 0.28)
-		var thump_env: float = minf(1.0, t / 0.002) * exp(-u * 6.0)
-		var clack_t: float = maxf(0.0, t - 0.042)
-		var clack_env: float = (minf(1.0, clack_t / 0.0015) * exp(-clack_t * 62.0)) if t >= 0.042 else 0.0
-		var clack: float = (sin(TAU * 1420.0 * clack_t) * 0.5 + sin(TAU * 2380.0 * clack_t) * 0.35 + noise * 0.25) * clack_env
-		out[i] = clampf((sin(phase) * 0.72 + lp * 0.40) * thump_env * 0.36 + clack * 0.22, -0.95, 0.95)
-	return _make_wav(out)
-
-
-func _synth_mono_rail() -> AudioStreamWAV:
-	# Rising high-voltage capacitor whine -> crisp sub-bass crack + metallic ring
-	var dur: float = 0.25
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase_whine: float = 0.0
-	var phase_crack: float = 0.0
-	var phase_sub: float = 0.0
-	var seed_val: int = 8088
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var sample: float = 0.0
-		if t < 0.045:
-			var uw: float = t / 0.045
-			var fw: float = lerpf(620.0, 2100.0, uw * uw)
-			phase_whine += TAU * fw / float(SAMPLE_RATE)
-			sample += sin(phase_whine) * (0.14 * uw)
-		else:
-			var lt: float = t - 0.045
-			var uc: float = lt / (dur - 0.045)
-			var fc: float = lerpf(260.0, 46.0, pow(uc, 0.45))
-			phase_crack += TAU * fc / float(SAMPLE_RATE)
-			var f_sub: float = lerpf(85.0, 48.0, minf(1.0, lt / 0.09))
-			phase_sub += TAU * f_sub / float(SAMPLE_RATE)
-			var sub_env: float = minf(1.0, lt / 0.002) * exp(-lt * 26.0)
-			seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-			var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-			var crack_env: float = minf(1.0, lt / 0.0015) * exp(-uc * 5.2)
-			var ring_env: float = exp(-lt * 16.0)
-			var ring: float = (sin(TAU * 1180.0 * lt) * 0.55 + sin(TAU * 1770.0 * lt) * 0.45) * ring_env * 0.16
-			sample += (clampf(sin(phase_crack) * 1.35, -1.0, 1.0) * 0.62 + noise * 0.34 * exp(-lt * 40.0)) * crack_env * 0.34 + sin(phase_sub) * sub_env * 0.24 + ring
-		out[i] = clampf(sample, -0.92, 0.92)
-	return _make_wav(out)
-
-
-func _synth_mono_tether() -> AudioStreamWAV:
-	# Tight rhythmic electrical zap / stun pulse (Picket Drone)
-	var dur: float = 0.12
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var pulse_u: float = fmod(u * 3.0, 1.0)
-		var freq: float = lerpf(1260.0, 440.0, pulse_u) + sin(TAU * 120.0 * t) * 110.0
-		phase += TAU * freq / float(SAMPLE_RATE)
-		var env: float = minf(1.0, pulse_u / 0.08) * exp(-pulse_u * 4.5) * (1.0 - 0.35 * u)
-		var sq: float = clampf(sin(phase) * 1.6, -1.0, 1.0)
-		out[i] = sq * env * 0.25
-	return _make_wav(out)
-
-
-func _synth_mono_bastion() -> AudioStreamWAV:
-	# Deep pneumatic autocannon boom + sub-bass transient punch (Bastion Emplacement)
-	var dur: float = 0.27
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var phase_sub: float = 0.0
-	var seed_val: int = 55101
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var freq: float = lerpf(165.0, 42.0, pow(u, 0.48))
-		phase += TAU * freq / float(SAMPLE_RATE)
-		var sub_f: float = lerpf(82.0, 48.0, minf(1.0, t / 0.095))
-		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
-		var sub_env: float = minf(1.0, t / 0.0025) * exp(-t * 25.0)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		lp = lerpf(lp, noise, 0.20)
-		var boom_env: float = minf(1.0, t / 0.0025) * exp(-u * 4.8)
-		var hiss_t: float = maxf(0.0, t - 0.07)
-		var hiss_env: float = (minf(1.0, hiss_t / 0.01) * exp(-hiss_t * 22.0)) if t >= 0.07 else 0.0
-		var hiss: float = (noise - lp) * hiss_env * 0.14
-		out[i] = clampf((sin(phase) * 0.72 + lp * 0.44) * boom_env * 0.36 + sin(phase_sub) * sub_env * 0.24 + hiss, -0.92, 0.92)
-	return _make_wav(out)
-
-
-func _synth_mono_overclock() -> AudioStreamWAV:
-	# Deep industrial turbine spin-up + resonant quantized Axiom chime
-	var dur: float = 0.42
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase_turb: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var turb_f: float = lerpf(95.0, 340.0, pow(u, 0.72))
-		phase_turb += TAU * turb_f / float(SAMPLE_RATE)
-		var turb_env: float = sin(PI * u) * 0.75
-		var turb: float = (sin(phase_turb) * 0.65 + sin(phase_turb * 2.0) * 0.25) * turb_env * 0.26
-		var chime: float = 0.0
-		if t >= 0.14:
-			var ct: float = t - 0.14
-			var c_env: float = minf(1.0, ct / 0.006) * exp(-ct * 7.5)
-			chime = (sin(TAU * 440.0 * ct) * 0.5 + sin(TAU * 659.25 * ct) * 0.35 + sin(TAU * 880.0 * ct) * 0.15) * c_env * 0.24
-		out[i] = clampf(turb + chime, -0.95, 0.95)
-	return _make_wav(out)
-
-
-func _synth_mono_shield_overcharge() -> AudioStreamWAV:
-	# Resonant harmonic shield-capacitor surge + crisp barrier lock chime (Aegis Relay)
-	var dur: float = 0.32
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var f_sweep: float = lerpf(260.0, 780.0, pow(u, 0.6))
-		phase += TAU * f_sweep / float(SAMPLE_RATE)
-		var env: float = minf(1.0, t / 0.012) * exp(-u * 3.2)
-		var lock: float = 0.0
-		if t >= 0.10:
-			var lt: float = t - 0.10
-			var l_env: float = minf(1.0, lt / 0.004) * exp(-lt * 11.0)
-			lock = (sin(TAU * 587.33 * lt) * 0.55 + sin(TAU * 880.0 * lt) * 0.45) * l_env * 0.22
-		out[i] = clampf((sin(phase) * 0.65 + sin(phase * 1.5) * 0.35) * env * 0.24 + lock, -0.95, 0.95)
-	return _make_wav(out)
-
-
-func _synth_mono_suppressive_lock() -> AudioStreamWAV:
-	# Quantized downward clamp-lock stun pulse (Picket Drone)
-	var dur: float = 0.22
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var step_f: float = 780.0 if u < 0.33 else (520.0 if u < 0.66 else 260.0)
-		phase += TAU * (step_f + sin(TAU * 64.0 * t) * 55.0) / float(SAMPLE_RATE)
-		var env: float = minf(1.0, t / 0.004) * exp(-u * 4.2)
-		out[i] = clampf(sin(phase) * 1.3, -1.0, 1.0) * env * 0.26
-	return _make_wav(out)
-
-
-func _synth_mono_bark(notes: PackedFloat32Array, is_order: bool) -> AudioStreamWAV:
-	# Lower-pitched quantized harmonic tones + crisp mechanical relay click (170-220ms)
-	var step_dur: float = 0.050 if is_order else 0.058
-	var tail: float = 0.095
-	var total_dur: float = step_dur * float(notes.size()) + tail
-	var count: int = int(SAMPLE_RATE * total_dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	out.fill(0.0)
-	var seed_val: int = 4409
-	# Initial crisp mechanical relay click (first 16ms)
-	var click_len: int = mini(count, int(SAMPLE_RATE * 0.016))
-	for c: int in range(click_len):
-		var ct: float = float(c) / float(SAMPLE_RATE)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var n: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		var c_env: float = exp(-ct * 190.0)
-		out[c] += (sin(TAU * 1650.0 * ct) * 0.55 + n * 0.45) * c_env * 0.22
-	# Quantized harmonic industrial steps
-	for idx: int in range(notes.size()):
-		var f: float = notes[idx]
-		var start_i: int = int((0.012 + float(idx) * step_dur) * float(SAMPLE_RATE))
-		var note_len: int = int((step_dur + tail) * float(SAMPLE_RATE))
-		for j: int in range(note_len):
-			var pos: int = start_i + j
-			if pos >= count:
-				break
-			var lt: float = float(j) / float(SAMPLE_RATE)
-			var env: float = minf(1.0, lt / 0.004) * exp(-lt * 18.0)
-			var wave: float = sin(TAU * f * lt) * 0.68 + clampf(sin(TAU * f * 2.0 * lt) * 1.2, -1.0, 1.0) * 0.22 + sin(TAU * f * 0.5 * lt) * 0.10
-			out[pos] = clampf(out[pos] + wave * env * 0.22, -0.95, 0.95)
-	return _make_wav(out)
-
-
-func _synth_mono_siege() -> AudioStreamWAV:
-	# Deep heavy deployed artillery boom + sub-bass transient punch + metallic breech clang (Anvil Siege-Walker)
-	var dur: float = 0.40
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var phase_sub: float = 0.0
-	var seed_val: int = 88321
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var freq: float = lerpf(135.0, 32.0, pow(u, 0.42))
-		phase += TAU * freq / float(SAMPLE_RATE)
-		var sub_f: float = lerpf(80.0, 45.0, minf(1.0, t / 0.11))
-		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
-		var sub_env: float = minf(1.0, t / 0.0025) * exp(-t * 20.0)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		lp = lerpf(lp, noise, 0.15)
-		var boom_env: float = minf(1.0, t / 0.003) * exp(-u * 3.8)
-		var clang: float = 0.0
-		if t >= 0.06:
-			var ct: float = t - 0.06
-			var c_env: float = minf(1.0, ct / 0.004) * exp(-ct * 16.0)
-			clang = (sin(TAU * 480.0 * ct) * 0.5 + sin(TAU * 725.0 * ct) * 0.35 + (noise - lp) * 0.25) * c_env * 0.15
-		out[i] = clampf((sin(phase) * 0.74 + lp * 0.46) * boom_env * 0.40 + sin(phase_sub) * sub_env * 0.26 + clang, -0.92, 0.92)
-	return _make_wav(out)
-
-
-func _synth_explosion_heavy() -> AudioStreamWAV:
-	# Deep Tier 2 heavy unit / structure detonation with layered 48-84Hz sub-bass drop
-	var dur: float = 0.44
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var phase_sub: float = 0.0
-	var seed_val: int = 60214
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var freq: float = lerpf(118.0, 28.0, pow(u, 0.52))
-		phase += TAU * freq / float(SAMPLE_RATE)
-		var sub_f: float = lerpf(84.0, 44.0, minf(1.0, t / 0.12))
-		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
-		var sub_env: float = minf(1.0, t / 0.003) * exp(-t * 17.5)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		lp = lerpf(lp, noise, 0.14)
-		var env: float = minf(1.0, t / 0.004) * exp(-u * 3.8)
-		out[i] = clampf((sin(phase) * 0.54 + lp * 0.62) * env * 0.36 + sin(phase_sub) * sub_env * 0.28, -0.92, 0.92)
-	return _make_wav(out)
-
-
-func _synth_deploy_anchor_lock() -> AudioStreamWAV:
-	# Crisp pneumatic anchor lock-in thud + metallic clamp click (Anvil Siege-Walker DEPLOYED frame)
-	var dur: float = 0.24
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase_sub: float = 0.0
-	var seed_val: int = 33719
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var sub_f: float = lerpf(86.0, 46.0, minf(1.0, t / 0.095))
-		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
-		var sub_env: float = minf(1.0, t / 0.002) * exp(-t * 24.0)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		lp = lerpf(lp, noise, 0.22)
-		var clamp_click: float = (sin(TAU * 680.0 * t) * 0.55 + sin(TAU * 1340.0 * t) * 0.30 + (noise - lp) * 0.25) * exp(-t * 48.0) * 0.24
-		var air_hiss: float = (noise - lp) * (minf(1.0, maxf(0.0, t - 0.03) / 0.01) * exp(-maxf(0.0, t - 0.03) * 24.0) if t >= 0.03 else 0.0) * 0.12
-		out[i] = clampf(sin(phase_sub) * sub_env * 0.34 + lp * exp(-u * 6.0) * 0.14 + clamp_click + air_hiss, -0.92, 0.92)
-	return _make_wav(out)
-
-
-func _synth_mono_kinetic_barrier() -> AudioStreamWAV:
-	# Heavy metallic hydraulic lock + harmonic cyan barrier hum (Monolith Dreadnought)
-	var dur: float = 0.36
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var clank: float = 0.0
-		if t < 0.055:
-			var c_env: float = exp(-t * 58.0)
-			clank = (sin(TAU * 190.0 * t) * 0.6 + sin(TAU * 620.0 * t) * 0.4) * c_env * 0.34
-		var sweep_f: float = lerpf(210.0, 520.0, pow(u, 0.55))
-		phase += TAU * sweep_f / float(SAMPLE_RATE)
-		var hum_env: float = minf(1.0, t / 0.020) * exp(-u * 2.9)
-		var hum: float = (sin(phase) * 0.58 + sin(phase * 1.5) * 0.28 + sin(phase * 2.0) * 0.14) * hum_env * 0.26
-		out[i] = clampf(clank + hum, -0.95, 0.95)
-	return _make_wav(out)
-
-
-func _synth_mono_grav_pulse() -> AudioStreamWAV:
-	# Resonant downward gravity-well compression wave + sub-bass thump (Null-Grid Projector)
-	var dur: float = 0.42
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase: float = 0.0
-	var phase_sub: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var f_drop: float = lerpf(640.0, 88.0, pow(u, 0.58)) + sin(TAU * 28.0 * t) * 42.0
-		var f_sub: float = lerpf(110.0, 38.0, u)
-		phase += TAU * f_drop / float(SAMPLE_RATE)
-		phase_sub += TAU * f_sub / float(SAMPLE_RATE)
-		var env: float = minf(1.0, t / 0.015) * exp(-u * 3.1)
-		var wave: float = (sin(phase) * 0.55 + clampf(sin(phase * 1.5) * 1.3, -1.0, 1.0) * 0.20 + sin(phase_sub) * 0.45) * env * 0.34
-		out[i] = clampf(wave, -0.95, 0.95)
-	return _make_wav(out)
-
-
-func _synth_shield_shatter() -> AudioStreamWAV:
-	# Crisp crystalline high-frequency shield snap + rapid downward sweep + brief electric crackle (~0.22s)
-	var dur: float = 0.22
-	var count: int = int(SAMPLE_RATE * dur)
-	var out: PackedFloat32Array = PackedFloat32Array()
-	out.resize(count)
-	var phase_hi: float = 0.0
-	var phase_sw: float = 0.0
-	var seed_val: int = 91827
-	var lp: float = 0.0
-	for i: int in range(count):
-		var t: float = float(i) / float(SAMPLE_RATE)
-		var u: float = t / dur
-		var f_hi: float = lerpf(2450.0, 1180.0, pow(u, 0.45))
-		var f_sw: float = lerpf(1320.0, 290.0, pow(u, 0.52))
-		phase_hi += TAU * f_hi / float(SAMPLE_RATE)
-		phase_sw += TAU * f_sw / float(SAMPLE_RATE)
-		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
-		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
-		lp = lerpf(lp, noise, 0.35)
-		var hp_crackle: float = noise - lp
-		var snap_env: float = minf(1.0, t / 0.0018) * exp(-u * 6.2)
-		var crackle_env: float = minf(1.0, t / 0.004) * exp(-u * 8.5)
-		var sig: float = (sin(phase_hi) * 0.45 + sin(phase_sw) * 0.55) * snap_env * 0.32 + hp_crackle * crackle_env * 0.24
-		out[i] = clampf(sig, -0.95, 0.95)
-	return _make_wav(out)
+	# Shared UI & Command Feedback
+	_streams[&"ui_click"] = SynthPrimitives.synth_glass_click()
+	_streams[&"unit_select"] = SynthPrimitives.synth_chime(PackedFloat32Array([740.0, 1110.0]), 0.055, 0.24)
+	_streams[&"inspect_tick"] = SynthPrimitives.synth_chime(PackedFloat32Array([920.0]), 0.035, 0.18)
+	_streams[&"order_move"] = SynthPrimitives.synth_chirp(520.0, 780.0, 0.085, 0.24)
+	_streams[&"order_attack"] = SynthPrimitives.synth_double_chirp(660.0, 440.0, 0.095, 0.28)
+	_streams[&"order_gather"] = SynthPrimitives.synth_chime(PackedFloat32Array([440.0, 660.0]), 0.065, 0.24)
+
+	# Shared Completion & Economy Alerts
+	_streams[&"build_complete"] = SynthPrimitives.synth_chime(PackedFloat32Array([523.25, 659.25, 783.99, 1046.5]), 0.075, 0.28)
+	_streams[&"upgrade_complete"] = SynthPrimitives.synth_chord_swell(PackedFloat32Array([440.0, 554.37, 659.25, 880.0]), 0.42, 0.26)
+	_streams[&"unit_ready"] = SynthPrimitives.synth_chime(PackedFloat32Array([622.25, 932.33]), 0.065, 0.23)
+	_streams[&"error_insufficient"] = SynthPrimitives.synth_error_buzz()
+	_streams[&"bandwidth_near_cap"] = SynthPrimitives.synth_chime(PackedFloat32Array([587.33, 523.25]), 0.075, 0.19)
+
+	# Shared Destruction, Alerts, Veterancy, Salvage & Match Flow
+	_streams[&"entity_destroyed"] = SynthPrimitives.synth_destruction_boom()
+	_streams[&"explosion_heavy"] = SynthPrimitives.synth_explosion_heavy()
+	_streams[&"shield_shatter"] = SynthPrimitives.synth_shield_shatter()
+	_streams[&"alert_under_attack"] = SynthPrimitives.synth_alert_under_attack()
+	_streams[&"alert_uplink"] = SynthPrimitives.synth_alert_uplink()
+	_streams[&"alert_complete"] = SynthPrimitives.synth_alert_complete()
+	_streams[&"veterancy_rank_up"] = SynthPrimitives.synth_rank_up_chime()
+	_streams[&"salvage_claimed"] = SynthPrimitives.synth_chime(PackedFloat32Array([587.33, 783.99, 1174.66, 1567.98]), 0.045, 0.25)
+	_streams[&"autocast_toggle"] = SynthPrimitives.synth_chime(PackedFloat32Array([880.0, 1318.5]), 0.04, 0.20)
+	_streams[&"relay_captured"] = SynthPrimitives.synth_chime(PackedFloat32Array([659.25, 987.77, 1318.51]), 0.06, 0.22)
+	_streams[&"deploy_lock"] = SynthPrimitives.synth_double_chirp(320.0, 145.0, 0.14, 0.28)
+	_streams[&"deploy_release"] = SynthPrimitives.synth_double_chirp(185.0, 380.0, 0.13, 0.24)
+	_streams[&"ai_transmission"] = SynthPrimitives.synth_chime(PackedFloat32Array([740.0, 1110.0]), 0.042, 0.16)
+	_streams[&"match_victory"] = SynthPrimitives.synth_chime(PackedFloat32Array([523.25, 659.25, 783.99, 1046.5, 1318.5]), 0.11, 0.30)
+	_streams[&"match_defeat"] = SynthPrimitives.synth_chime(PackedFloat32Array([440.0, 392.0, 329.63, 246.94]), 0.14, 0.30)
+
+	# Pluggable Faction Audio Profiles (weapons, abilities, barks, cooldowns)
+	for profile_val: Variant in _audio_profiles.values():
+		var profile: FactionAudioProfile = profile_val as FactionAudioProfile
+		if profile == null:
+			continue
+		profile.register_cooldowns(_cooldowns_ms)
+		profile.build_weapon_and_ability_sfx(_streams)
+		profile.build_bark_sfx(_streams)

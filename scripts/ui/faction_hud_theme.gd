@@ -1,8 +1,82 @@
 class_name FactionHudTheme
 extends RefCounted
 
-## Centralized procedural faction OS HUD theme helper shared across
-## SelectionHUD, ResourceHUD, ProductionTicker, TacticalMinimap, and TacticalEventFeed.
+## Centralized procedural faction OS HUD theme helper & pluggable provider registry shared across
+## SelectionHUD, ResourceHUD, ProductionTicker, TacticalMinimap, TacticalEventFeed, and CommandIconButton.
+## Register new faction HUD themes via FactionHudTheme.register_theme_provider(faction_id, palette_dict).
+
+static var _theme_providers: Dictionary = {} # StringName -> Dictionary
+static var _builtins_registered: bool = false
+
+
+static func _ensure_builtin_providers() -> void:
+	if _builtins_registered:
+		return
+	_builtins_registered = true
+	register_theme_provider(&"monolith_os", {
+		"faction_id": &"monolith_os",
+		"style": &"brutalist",
+		"bg": Color(0.150, 0.165, 0.185, 0.96),
+		"bg_hover": Color(0.205, 0.222, 0.248, 0.98),
+		"bg_row": Color(0.125, 0.138, 0.156, 0.96),
+		"border": Color(0.039, 0.051, 0.071, 0.98), # #0A0D12 thick ink
+		"inner_trim": Color(0.949, 0.937, 0.914, 0.88), # #F2EFE9 off-white
+		"accent": Color(1.0, 0.624, 0.110, 1.0), # #FF9F1C Hazard Amber
+		"secondary": Color(0.220, 0.741, 0.973, 1.0), # #38BDF8 Shield Cyan
+		"primary": Color(0.949, 0.937, 0.914, 1.0),
+		"corner_radius": 0,
+		"border_width": 3,
+		"shadow_size": 1,
+		"shadow_offset": Vector2(3.0, 3.0),
+		"shadow_color": Color(0.03, 0.04, 0.06, 0.80),
+	})
+	register_theme_provider(&"spectator", {
+		"faction_id": &"spectator",
+		"style": &"technozen",
+		"bg": Color(0.050, 0.070, 0.100, 0.92),
+		"bg_hover": Color(0.085, 0.120, 0.170, 0.96),
+		"bg_row": Color(0.042, 0.062, 0.092, 0.90),
+		"border": Color(0.360, 0.780, 0.960, 0.82),
+		"inner_trim": Color(0.420, 0.880, 1.000, 0.45),
+		"accent": Color(0.420, 0.880, 1.000, 1.0),
+		"secondary": Color(0.760, 0.880, 0.960, 1.0),
+		"primary": Color(0.900, 0.960, 1.000, 1.0),
+		"corner_radius": 4,
+		"border_width": 1,
+		"shadow_size": 4,
+		"shadow_offset": Vector2(0.0, 2.0),
+		"shadow_color": Color(0.0, 0.02, 0.05, 0.50),
+	})
+	register_theme_provider(&"genesis_v2", {
+		"faction_id": &"genesis_v2",
+		"style": &"technozen",
+		"bg": Color(0.040, 0.080, 0.120, 0.92),
+		"bg_hover": Color(0.065, 0.130, 0.185, 0.96),
+		"bg_row": Color(0.035, 0.072, 0.110, 0.90),
+		"border": Color(0.125, 0.961, 0.863, 0.88), # #20F5DC
+		"inner_trim": Color(0.200, 0.960, 0.860, 0.45),
+		"accent": Color(0.200, 0.960, 0.860, 1.0),
+		"secondary": Color(0.280, 0.980, 0.620, 1.0),
+		"primary": Color(0.900, 0.960, 0.980, 1.0),
+		"corner_radius": 6,
+		"border_width": 2,
+		"shadow_size": 6,
+		"shadow_offset": Vector2(0.0, 2.0),
+		"shadow_color": Color(0.0, 0.03, 0.06, 0.55),
+	})
+
+
+static func register_theme_provider(faction_id: StringName, provider: Dictionary) -> void:
+	if faction_id == &"" or provider.is_empty():
+		return
+	var entry: Dictionary = provider.duplicate(true)
+	entry["faction_id"] = faction_id
+	_theme_providers[faction_id] = entry
+
+
+static func has_theme_provider(faction_id: StringName) -> bool:
+	_ensure_builtin_providers()
+	return _theme_providers.has(faction_id)
 
 
 static func resolve_local_faction_id() -> StringName:
@@ -19,73 +93,21 @@ static func resolve_local_faction_id() -> StringName:
 
 
 static func get_palette(faction_id: StringName) -> Dictionary:
-	if faction_id == &"monolith_os":
-		return {
-			"faction_id": &"monolith_os",
-			"style": &"brutalist",
-			"bg": Color(0.150, 0.165, 0.185, 0.96),
-			"bg_hover": Color(0.205, 0.222, 0.248, 0.98),
-			"bg_row": Color(0.125, 0.138, 0.156, 0.96),
-			"border": Color(0.039, 0.051, 0.071, 0.98), # #0A0D12 thick ink
-			"inner_trim": Color(0.949, 0.937, 0.914, 0.88), # #F2EFE9 off-white
-			"accent": Color(1.0, 0.624, 0.110, 1.0), # #FF9F1C Hazard Amber
-			"secondary": Color(0.220, 0.741, 0.973, 1.0), # #38BDF8 Shield Cyan
-			"primary": Color(0.949, 0.937, 0.914, 1.0),
-			"corner_radius": 0,
-			"border_width": 3,
-			"shadow_size": 1,
-			"shadow_offset": Vector2(3.0, 3.0),
-			"shadow_color": Color(0.03, 0.04, 0.06, 0.80),
-		}
+	_ensure_builtin_providers()
+	var resolved_id: StringName = &"genesis_v2" if faction_id == &"" else faction_id
+	if _theme_providers.has(resolved_id):
+		return _theme_providers[resolved_id] as Dictionary
 
-	if faction_id == &"spectator":
-		return {
-			"faction_id": &"spectator",
-			"style": &"technozen",
-			"bg": Color(0.050, 0.070, 0.100, 0.92),
-			"bg_hover": Color(0.085, 0.120, 0.170, 0.96),
-			"bg_row": Color(0.042, 0.062, 0.092, 0.90),
-			"border": Color(0.360, 0.780, 0.960, 0.82),
-			"inner_trim": Color(0.420, 0.880, 1.000, 0.45),
-			"accent": Color(0.420, 0.880, 1.000, 1.0),
-			"secondary": Color(0.760, 0.880, 0.960, 1.0),
-			"primary": Color(0.900, 0.960, 1.000, 1.0),
-			"corner_radius": 4,
-			"border_width": 1,
-			"shadow_size": 4,
-			"shadow_offset": Vector2(0.0, 2.0),
-			"shadow_color": Color(0.0, 0.02, 0.05, 0.50),
-		}
-
-	if faction_id == &"genesis_v2" or faction_id == &"":
-		return {
-			"faction_id": &"genesis_v2",
-			"style": &"technozen",
-			"bg": Color(0.040, 0.080, 0.120, 0.92),
-			"bg_hover": Color(0.065, 0.130, 0.185, 0.96),
-			"bg_row": Color(0.035, 0.072, 0.110, 0.90),
-			"border": Color(0.125, 0.961, 0.863, 0.88), # #20F5DC
-			"inner_trim": Color(0.200, 0.960, 0.860, 0.45),
-			"accent": Color(0.200, 0.960, 0.860, 1.0),
-			"secondary": Color(0.280, 0.980, 0.620, 1.0),
-			"primary": Color(0.900, 0.960, 0.980, 1.0),
-			"corner_radius": 6,
-			"border_width": 2,
-			"shadow_size": 6,
-			"shadow_offset": Vector2(0.0, 2.0),
-			"shadow_color": Color(0.0, 0.03, 0.06, 0.55),
-		}
-
-	# Future factions (#3-#5): dynamic Technozen palette tinted from FactionData
+	# Future factions (#3-#5) without a custom provider: dynamic Technozen palette tinted from FactionData
 	var accent_col: Color = Color(0.20, 0.96, 0.86, 1.0)
 	var prim_col: Color = Color(0.90, 0.96, 0.98, 1.0)
 	if TeamManager != null and TeamManager.has_method("get_faction_data"):
-		var fac: FactionData = TeamManager.get_faction_data(faction_id) as FactionData
+		var fac: FactionData = TeamManager.get_faction_data(resolved_id) as FactionData
 		if fac != null:
 			accent_col = fac.hud_accent_color
 			prim_col = fac.primary_color
 	return {
-		"faction_id": faction_id,
+		"faction_id": resolved_id,
 		"style": &"technozen",
 		"bg": Color(0.045, 0.078, 0.115, 0.92),
 		"bg_hover": Color(0.075, 0.125, 0.175, 0.96),
@@ -191,19 +213,28 @@ class _HudFrameOverlay extends Control:
 	var _accent: Color = Color(0.20, 0.96, 0.86, 1.0)
 	var _inner_trim: Color = Color(0.95, 0.94, 0.91, 0.85)
 	var _ink: Color = Color(0.04, 0.05, 0.07, 0.96)
+	var _palette: Dictionary = {}
+	var _custom_drawer: Callable = Callable()
 
 	func configure(pal: Dictionary, variant: StringName) -> void:
+		_palette = pal
 		_style = pal.get("style", &"technozen") as StringName
 		_variant = variant
 		_accent = pal.get("accent", Color(0.20, 0.96, 0.86, 1.0)) as Color
 		_inner_trim = pal.get("inner_trim", Color(0.95, 0.94, 0.91, 0.85)) as Color
 		_ink = pal.get("border", Color(0.04, 0.05, 0.07, 0.96)) as Color
+		var drawer_val: Variant = pal.get("frame_drawer", Callable())
+		_custom_drawer = drawer_val as Callable if drawer_val is Callable else Callable()
 		queue_redraw()
 
 	func _draw() -> void:
 		var w: float = size.x
 		var h: float = size.y
 		if w < 24.0 or h < 18.0:
+			return
+
+		if _custom_drawer.is_valid():
+			_custom_drawer.call(self, size, _variant, _palette)
 			return
 
 		if _style == &"brutalist":

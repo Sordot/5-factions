@@ -6,6 +6,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"anvil_siege_walker"
 display_name = "Anvil Siege-Walker"
+short_display_name = "Anvil"
 max_hp = 340.0
 max_shield = 100.0
 shield_regen_rate = 10.0

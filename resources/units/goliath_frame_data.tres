@@ -7,6 +7,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"goliath_frame"
 display_name = "Goliath Frame"
+short_display_name = "Goliath"
 max_hp = 420.0
 move_speed = 175.0
 acceleration = 1300.0

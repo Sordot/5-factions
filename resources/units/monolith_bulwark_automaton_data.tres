@@ -6,6 +6,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"bulwark_automaton"
 display_name = "Bulwark Automaton"
+short_display_name = "Bulwark"
 max_hp = 230.0
 max_shield = 55.0
 shield_regen_rate = 8.0

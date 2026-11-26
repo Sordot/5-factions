@@ -3,6 +3,7 @@ extends Resource
 
 @export var upgrade_id: StringName = &""
 @export var display_name: String = "Upgrade"
+@export var short_display_name: String = ""
 @export_multiline var description: String = ""
 @export var hotkey_label: String = ""
 @export var biomass_cost: int = 0
@@ -11,6 +12,10 @@ extends Resource
 @export var research_time: float = 12.0
 @export var modifier_key: StringName = &""
 @export var modifier_value: float = 0.0
+
+
+func get_short_name() -> String:
+	return short_display_name if not short_display_name.is_empty() else display_name
 
 
 func get_cost_dict() -> Dictionary:

@@ -7,6 +7,8 @@
 script = ExtResource("1_bdata")
 building_id = &"synapse_pylon"
 display_name = "Synapse Pylon"
+short_display_name = "Pylon"
+hud_accent_color = Color(0.76, 0.58, 1, 1)
 scene = ExtResource("2_scene")
 biomass_cost = 75
 silica_cost = 0

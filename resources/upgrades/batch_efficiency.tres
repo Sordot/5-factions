@@ -6,6 +6,7 @@
 script = ExtResource("1_upg")
 upgrade_id = &"batch_efficiency"
 display_name = "Batch Efficiency"
+short_display_name = "Batch Eff."
 description = "Reduces Cloning Vat parallel batch cost multiplier from 1.75x to 1.50x single-unit cost and trims batch build time by 10%."
 hotkey_label = "U"
 biomass_cost = 100

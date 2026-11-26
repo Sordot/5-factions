@@ -11,6 +11,8 @@
 script = ExtResource("1_bdata")
 building_id = &"synthetics_fabricator"
 display_name = "Synthetics Fabricator"
+short_display_name = "Fabricator"
+hud_accent_color = Color(0.36, 0.96, 1, 1)
 scene = ExtResource("2_scene")
 biomass_cost = 200
 silica_cost = 150

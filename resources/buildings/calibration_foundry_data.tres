@@ -9,6 +9,8 @@
 script = ExtResource("1_bdata")
 building_id = &"calibration_foundry"
 display_name = "Calibration Foundry"
+short_display_name = "Foundry"
+hud_accent_color = Color(0.96, 0.64, 0.26, 1)
 scene = ExtResource("2_scene")
 biomass_cost = 150
 silica_cost = 75

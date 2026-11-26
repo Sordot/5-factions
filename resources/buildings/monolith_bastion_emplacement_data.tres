@@ -6,6 +6,8 @@
 script = ExtResource("1_bdata")
 building_id = &"bastion_emplacement"
 display_name = "Bastion Emplacement"
+short_display_name = "Bastion"
+hud_accent_color = Color(1, 0.624, 0.11, 1)
 scene_path = "res://scenes/buildings/monolith_bastion_emplacement.tscn"
 biomass_cost = 80
 silica_cost = 110

@@ -6,6 +6,8 @@
 script = ExtResource("1_bdata")
 building_id = &"foundry_core"
 display_name = "Foundry Core"
+short_display_name = "Foundry Core"
+hud_accent_color = Color(1, 0.624, 0.11, 1)
 scene_path = "res://scenes/buildings/monolith_foundry_core.tscn"
 biomass_cost = 300
 silica_cost = 150

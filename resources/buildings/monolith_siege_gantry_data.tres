@@ -7,6 +7,8 @@
 script = ExtResource("1_bdata")
 building_id = &"siege_gantry"
 display_name = "Siege Gantry"
+short_display_name = "Siege Gantry"
+hud_accent_color = Color(1, 0.624, 0.11, 1)
 scene_path = "res://scenes/buildings/monolith_siege_gantry.tscn"
 biomass_cost = 150
 silica_cost = 175

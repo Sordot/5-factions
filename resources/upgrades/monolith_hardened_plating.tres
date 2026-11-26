@@ -6,6 +6,7 @@
 script = ExtResource("1_upg")
 upgrade_id = &"monolith_hardened_plating"
 display_name = "Hardened Plating"
+short_display_name = "Plating"
 description = "Reinforces all MONOLITH_OS chassis and structures with laminated industrial composites, granting +10% permanent hull Damage Reduction."
 hotkey_label = "U"
 biomass_cost = 100

@@ -6,6 +6,8 @@
 script = ExtResource("1_bdata")
 building_id = &"nexus_vat"
 display_name = "Nexus Vat"
+short_display_name = "Nexus"
+hud_accent_color = Color(0.22, 0.88, 0.94, 1)
 scene_path = "res://scenes/buildings/nexus_vat.tscn"
 biomass_cost = 400
 silica_cost = 0

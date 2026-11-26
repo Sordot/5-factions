@@ -65,50 +65,38 @@ const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.
 @onready var locked_slot_4: Button = %LockedSlot4
 @onready var locked_slot_5: Button = %LockedSlot5
 
-const FACTION_DOSSIER_PROFILES: Dictionary = {
-	&"genesis_v2": {
-		"title": "01 // GENESIS_V2  —  THE VAT-BORN",
-		"tagline": "Bio-Synth Swarm  •  1.75x Parallel Batch Cloning  •  Heavy Synthetics Pivot",
-		"desc": "Exponentially scales early-game infantry through Twin-Chamber Cloning Vats (2 units per cycle at 1.75x cost), pivots through Calibration Foundry counters, and closes matches with high-Compute Synthetics.",
-		"accent": Color(0.20, 0.96, 0.86, 1.0),
-		"tagline_color": Color(0.32, 0.98, 0.86, 0.95),
-		"bg_color": Color(0.06, 0.12, 0.16, 0.94),
-		"badge_bg": Color(0.08, 0.18, 0.22, 0.92),
-		"badge_border": Color(0.22, 0.82, 0.84, 0.72),
-		"switch_text": "01 // GENESIS_V2 — The Vat-Born\nBio-Synth Swarm & Batch Cloning  •  PLAYABLE — CLICK TO SELECT",
-		"badges": [
-			"Clone Trooper (x2 Batch)",
-			"Stinger",
-			"Symbiote (Heal Aura)",
-			"Lance-Rig / Signal Jammer",
-			"Goliath Frame",
-			"Arc-Lancer (Colossus Stride)",
-			"Chrysalis Mortar",
-		],
+const LOCKED_TEASER_DOSSIERS: Array[Dictionary] = [
+	{
+		"slot_number": 3,
+		"button_text": "03 // IRON_CONSENSUS — The Foundry Bloc\nHeavy Automata Armor  •  LOCKED — IN DEVELOPMENT",
+		"title": "03 // IRON_CONSENSUS",
+		"briefing": "Heavy Automata Armor — Modular siege walkers & kinetic bastion walls engineered to outlast attrition pushes and hold choke points.",
+		"accent": Color(1.0, 0.76, 0.42, 1.0),
+		"idle": Color(0.84, 0.78, 0.72, 0.78),
+		"hi": Color(1.0, 0.84, 0.56, 1.0),
 	},
-	&"monolith_os": {
-		"title": "02 // MONOLITH_OS  —  THE IRON AXIOM",
-		"tagline": "Neo-Brutalist Machine-State  •  3x Silica & +1 Compute Cap  •  Core Overclock & Shields",
-		"desc": "Deploys slow, heavily armored robotics layered with unmitigated regenerating shields. Overclocks production facilities from its Foundry Core and extracts superior Silica and Compute yields.",
-		"accent": Color(1.0, 0.624, 0.110, 1.0),
-		"tagline_color": Color(1.0, 0.74, 0.30, 0.98),
-		"bg_color": Color(0.11, 0.095, 0.075, 0.95),
-		"badge_bg": Color(0.16, 0.125, 0.085, 0.92),
-		"badge_border": Color(1.0, 0.624, 0.110, 0.78),
-		"switch_text": "02 // MONOLITH_OS — The Iron Axiom\nNeo-Brutalist Robotics & Shields  •  PLAYABLE — CLICK TO SELECT",
-		"badges": [
-			"Core Overclock (2x)",
-			"Bulwark / Picket",
-			"Rail-Sentinel / Aegis",
-			"Anvil Siege-Walker (Deploy)",
-			"Monolith Dreadnought",
-			"Null-Grid Projector",
-			"Bastion Emplacement",
-		],
+	{
+		"slot_number": 4,
+		"button_text": "04 // NULL_VECTOR — The Whisper Net\nElectronic Warfare & Disruption  •  LOCKED — IN DEVELOPMENT",
+		"title": "04 // NULL_VECTOR",
+		"briefing": "Electronic Warfare & Disruption — Signal-spoofing arrays & EMP disruptors designed to sever enemy Compute networks.",
+		"accent": Color(0.84, 0.66, 1.0, 1.0),
+		"idle": Color(0.80, 0.74, 0.90, 0.78),
+		"hi": Color(0.92, 0.78, 1.0, 1.0),
 	},
-}
+	{
+		"slot_number": 5,
+		"button_text": "05 // VERDANT_OS — The Canopy Mesh\nAdaptive Bio-Lattice  •  LOCKED — IN DEVELOPMENT",
+		"title": "05 // VERDANT_OS",
+		"briefing": "Adaptive Bio-Lattice — Living creep networks & regenerative symbiote spires that turn contested territory into self-healing strongholds.",
+		"accent": Color(0.42, 0.98, 0.72, 1.0),
+		"idle": Color(0.72, 0.86, 0.78, 0.78),
+		"hi": Color(0.56, 1.0, 0.80, 1.0),
+	},
+]
 
 var _featured_faction_id: StringName = &"genesis_v2"
+var _dossier_slot_entries: Array[Dictionary] = []
 var _selected_mode: int = GameConfig.GameMode.SKIRMISH
 var _holdout_enemy_faction_id: StringName = &"monolith_os"
 var _holdout_difficulty: int = int(GameConfig.AIDifficulty.STANDARD)
@@ -266,26 +254,12 @@ func _ready() -> void:
 	if faction_section_header != null:
 		faction_section_header.text = "AI LORD FACTION DOSSIERS (%d / 5 ACTIVE)" % maxi(1, _playable_factions.size())
 
-	if locked_slot_2 != null:
-		locked_slot_2.pressed.connect(_on_playable_switcher_pressed)
-	_wire_locked_card(
-		locked_slot_3,
-		"03 // IRON_CONSENSUS",
-		"Heavy Automata Armor — Modular siege walkers & kinetic bastion walls engineered to outlast attrition pushes and hold choke points.",
-		Color(1.0, 0.76, 0.42, 1.0)
-	)
-	_wire_locked_card(
-		locked_slot_4,
-		"04 // NULL_VECTOR",
-		"Electronic Warfare & Disruption — Signal-spoofing arrays & EMP disruptors designed to sever enemy Compute networks.",
-		Color(0.84, 0.66, 1.0, 1.0)
-	)
-	_wire_locked_card(
-		locked_slot_5,
-		"05 // VERDANT_OS",
-		"Adaptive Bio-Lattice — Living creep networks & regenerative symbiote spires that turn contested territory into self-healing strongholds.",
-		Color(0.42, 0.98, 0.72, 1.0)
-	)
+	var slot_btns: Array[Button] = _get_dossier_slot_buttons()
+	for si: int in range(slot_btns.size()):
+		var sb: Button = slot_btns[si]
+		if sb != null:
+			var captured_si: int = si
+			sb.pressed.connect(func() -> void: _on_dossier_slot_pressed(captured_si))
 
 	if btn_launch != null:
 		btn_launch.pressed.connect(_on_launch_pressed)
@@ -388,6 +362,11 @@ func _build_slot_roster_widgets() -> void:
 		child.queue_free()
 	_slot_row_widgets.clear()
 	_playable_factions = TeamManager.get_playable_factions() if (TeamManager != null and TeamManager.has_method("get_playable_factions")) else []
+	_playable_factions.sort_custom(func(a: FactionData, b: FactionData) -> bool:
+		if a.dossier_slot_number != b.dossier_slot_number:
+			return a.dossier_slot_number < b.dossier_slot_number
+		return String(a.faction_id) < String(b.faction_id)
+	)
 
 	for i: int in range(4):
 		var row: HBoxContainer = HBoxContainer.new()
@@ -649,17 +628,25 @@ func _get_local_human_faction_id() -> StringName:
 	return GameConfig.selected_faction_id if GameConfig != null else &"genesis_v2"
 
 
-func _get_other_playable_faction_id(current_id: StringName) -> StringName:
-	for fdata: FactionData in _playable_factions:
-		if fdata != null and fdata.faction_id != current_id:
-			return fdata.faction_id
-	return &"monolith_os" if current_id == &"genesis_v2" else &"genesis_v2"
+func _get_dossier_slot_buttons() -> Array[Button]:
+	return [locked_slot_2, locked_slot_3, locked_slot_4, locked_slot_5]
 
 
-func _on_playable_switcher_pressed() -> void:
-	AudioManager.play_ui_click()
+func _find_faction_data(faction_id: StringName) -> FactionData:
+	for fd: FactionData in _playable_factions:
+		if fd != null and fd.faction_id == faction_id:
+			return fd
+	if TeamManager != null and TeamManager.has_method("get_faction_data"):
+		var fetched: FactionData = TeamManager.get_faction_data(faction_id) as FactionData
+		if fetched != null:
+			return fetched
+	if not _playable_factions.is_empty():
+		return _playable_factions[0]
+	return null
+
+
+func _select_featured_faction(next_fid: StringName) -> void:
 	_inspected_locked_btn = null
-	var next_fid: StringName = _get_other_playable_faction_id(_featured_faction_id)
 	_featured_faction_id = next_fid
 	var target_slot: int = _get_local_human_slot_index()
 	if target_slot < 0:
@@ -670,14 +657,110 @@ func _on_playable_switcher_pressed() -> void:
 	_refresh_ui()
 
 
+func _on_dossier_slot_pressed(slot_idx: int) -> void:
+	if slot_idx < 0 or slot_idx >= _dossier_slot_entries.size():
+		return
+	AudioManager.play_ui_click()
+	var entry: Dictionary = _dossier_slot_entries[slot_idx]
+	var kind: StringName = entry.get("kind", &"locked") as StringName
+	if kind == &"playable":
+		var next_fid: StringName = entry.get("faction_id", &"genesis_v2") as StringName
+		_select_featured_faction(next_fid)
+		return
+	var btns: Array[Button] = _get_dossier_slot_buttons()
+	_inspected_locked_btn = btns[slot_idx] if slot_idx < btns.size() else null
+	_refresh_dossier_slot_highlights()
+	if dossier_notice_label != null:
+		var active_fid: StringName = _get_local_human_faction_id()
+		var active_fac: FactionData = _find_faction_data(active_fid)
+		var active_name: String = active_fac.short_code if (active_fac != null and not active_fac.short_code.is_empty()) else String(active_fid).to_upper()
+		dossier_notice_label.text = "[CLASSIFIED PREVIEW] %s — %s (Locked; %s remains selected for launch.)" % [
+			String(entry.get("title", "CLASSIFIED")),
+			String(entry.get("briefing", "")),
+			active_name,
+		]
+		dossier_notice_label.modulate = entry.get("accent", Color(0.84, 0.88, 0.96, 1.0)) as Color
+
+
+func _refresh_dossier_grid(featured_id: StringName) -> void:
+	_dossier_slot_entries.clear()
+	var occupied_slots: Dictionary = {}
+	var alternate_factions: Array[FactionData] = []
+	for fd: FactionData in _playable_factions:
+		if fd == null:
+			continue
+		occupied_slots[fd.dossier_slot_number] = true
+		if fd.faction_id != featured_id:
+			alternate_factions.append(fd)
+
+	for fd: FactionData in alternate_factions:
+		var pal: Dictionary = FactionHudTheme.get_palette(fd.faction_id)
+		var accent: Color = pal.get("accent", fd.hud_accent_color) as Color
+		var sub_raw: String = fd.dossier_subtitle if not fd.dossier_subtitle.is_empty() else fd.tagline
+		var short_sub: String = sub_raw.split("•")[0].strip_edges()
+		if short_sub.is_empty():
+			short_sub = fd.short_code
+		var btn_txt: String = "%02d // %s\n%s  •  PLAYABLE — CLICK TO SELECT" % [fd.dossier_slot_number, fd.display_name, short_sub]
+		_dossier_slot_entries.append({
+			"kind": &"playable",
+			"faction_id": fd.faction_id,
+			"button_text": btn_txt,
+			"accent": accent,
+			"idle": accent.lerp(Color.WHITE, 0.16),
+			"hi": accent.lerp(Color.WHITE, 0.28),
+		})
+
+	for teaser: Dictionary in LOCKED_TEASER_DOSSIERS:
+		if _dossier_slot_entries.size() >= 4:
+			break
+		var s_num: int = int(teaser.get("slot_number", 0))
+		if occupied_slots.has(s_num):
+			continue
+		var t_entry: Dictionary = teaser.duplicate(true)
+		t_entry["kind"] = &"locked"
+		_dossier_slot_entries.append(t_entry)
+
+	var btns: Array[Button] = _get_dossier_slot_buttons()
+	for i: int in range(btns.size()):
+		var b: Button = btns[i]
+		if b == null:
+			continue
+		if i < _dossier_slot_entries.size():
+			b.visible = true
+			b.text = String(_dossier_slot_entries[i].get("button_text", ""))
+		else:
+			b.visible = false
+	_refresh_dossier_slot_highlights()
+
+
+func _refresh_dossier_slot_highlights() -> void:
+	var btns: Array[Button] = _get_dossier_slot_buttons()
+	for i: int in range(mini(btns.size(), _dossier_slot_entries.size())):
+		var b: Button = btns[i]
+		if b == null:
+			continue
+		var entry: Dictionary = _dossier_slot_entries[i]
+		var idle_c: Color = entry.get("idle", Color(0.80, 0.84, 0.90, 0.80)) as Color
+		var hi_c: Color = entry.get("hi", Color.WHITE) as Color
+		b.modulate = hi_c if (b == _inspected_locked_btn) else idle_c
+
+
 func _apply_featured_faction_dossier(faction_id: StringName, update_notice: bool = true) -> void:
-	var key: StringName = faction_id if FACTION_DOSSIER_PROFILES.has(faction_id) else &"genesis_v2"
-	var prof: Dictionary = FACTION_DOSSIER_PROFILES[key] as Dictionary
-	var accent: Color = prof["accent"] as Color
-	var tag_col: Color = prof["tagline_color"] as Color
-	var bg_col: Color = prof["bg_color"] as Color
-	var badge_bg: Color = prof["badge_bg"] as Color
-	var badge_border: Color = prof["badge_border"] as Color
+	var fdata: FactionData = _find_faction_data(faction_id)
+	var key: StringName = fdata.faction_id if fdata != null else &"genesis_v2"
+	var pal: Dictionary = FactionHudTheme.get_palette(key)
+	var accent: Color = pal.get("accent", fdata.hud_accent_color if fdata != null else Color(0.20, 0.96, 0.86, 1.0)) as Color
+	var tag_col: Color = accent.lerp(Color.WHITE, 0.22)
+	tag_col.a = 0.96
+	var is_brutal: bool = (pal.get("style", &"technozen") == &"brutalist")
+	var bg_col: Color = Color(0.11, 0.095, 0.075, 0.95) if is_brutal else Color(0.06, 0.12, 0.16, 0.94).lerp(Color(accent.r * 0.16, accent.g * 0.16, accent.b * 0.16, 0.94), 0.35)
+	var badge_bg: Color = Color(0.16, 0.125, 0.085, 0.92) if is_brutal else bg_col.lightened(0.06)
+	var badge_border: Color = Color(accent.r, accent.g, accent.b, 0.76)
+
+	var slot_num: int = fdata.dossier_slot_number if fdata != null else 1
+	var title_txt: String = "%02d // %s" % [slot_num, fdata.display_name] if fdata != null else "01 // GENESIS_V2 — The Vat-Born"
+	var tagline_txt: String = (fdata.dossier_subtitle if not fdata.dossier_subtitle.is_empty() else fdata.tagline) if fdata != null else ""
+	var desc_txt: String = (fdata.dossier_description if not fdata.dossier_description.is_empty() else fdata.tagline) if fdata != null else ""
 
 	if active_faction_card != null:
 		var card_sb: StyleBoxFlat = StyleBoxFlat.new()
@@ -691,21 +774,21 @@ func _apply_featured_faction_dossier(faction_id: StringName, update_notice: bool
 		card_sb.border_width_right = 2
 		card_sb.border_width_bottom = 2
 		card_sb.border_color = accent
-		card_sb.corner_radius_top_left = 6
-		card_sb.corner_radius_top_right = 6
-		card_sb.corner_radius_bottom_right = 6
-		card_sb.corner_radius_bottom_left = 6
+		card_sb.corner_radius_top_left = 0 if is_brutal else 6
+		card_sb.corner_radius_top_right = 0 if is_brutal else 6
+		card_sb.corner_radius_bottom_right = 0 if is_brutal else 6
+		card_sb.corner_radius_bottom_left = 0 if is_brutal else 6
 		active_faction_card.add_theme_stylebox_override("panel", card_sb)
 
 	if faction_color_swatch != null:
 		faction_color_swatch.color = accent
 	if faction_name_label != null:
-		faction_name_label.text = String(prof["title"])
+		faction_name_label.text = title_txt
 	if faction_tagline_label != null:
-		faction_tagline_label.text = String(prof["tagline"])
+		faction_tagline_label.text = tagline_txt
 		faction_tagline_label.add_theme_color_override("font_color", tag_col)
 	if faction_desc_label != null:
-		faction_desc_label.text = String(prof["desc"])
+		faction_desc_label.text = desc_txt
 
 	var pill_sb: StyleBoxFlat = StyleBoxFlat.new()
 	pill_sb.content_margin_left = 7.0
@@ -718,10 +801,10 @@ func _apply_featured_faction_dossier(faction_id: StringName, update_notice: bool
 	pill_sb.border_width_right = 1
 	pill_sb.border_width_bottom = 1
 	pill_sb.border_color = badge_border
-	pill_sb.corner_radius_top_left = 3
-	pill_sb.corner_radius_top_right = 3
-	pill_sb.corner_radius_bottom_right = 3
-	pill_sb.corner_radius_bottom_left = 3
+	pill_sb.corner_radius_top_left = 0 if is_brutal else 3
+	pill_sb.corner_radius_top_right = 0 if is_brutal else 3
+	pill_sb.corner_radius_bottom_right = 0 if is_brutal else 3
+	pill_sb.corner_radius_bottom_left = 0 if is_brutal else 3
 
 	if faction_active_badge != null:
 		faction_active_badge.add_theme_stylebox_override("panel", pill_sb)
@@ -731,38 +814,28 @@ func _apply_featured_faction_dossier(faction_id: StringName, update_notice: bool
 	if faction_badge_row != null:
 		for child: Node in faction_badge_row.get_children():
 			child.queue_free()
-		var badges: Array = prof.get("badges", []) as Array
-		for b_txt: Variant in badges:
+		var badges: PackedStringArray = fdata.signature_badges if fdata != null else PackedStringArray()
+		for b_txt: String in badges:
 			var p: PanelContainer = PanelContainer.new()
 			p.add_theme_stylebox_override("panel", pill_sb)
 			var l: Label = Label.new()
 			l.add_theme_font_size_override("font_size", 11)
-			l.text = String(b_txt)
+			l.text = b_txt
 			p.add_child(l)
 			faction_badge_row.add_child(p)
 
-	# Update Slot 2 live playable switcher to display the alternate playable faction
-	var other_fid: StringName = _get_other_playable_faction_id(key)
-	var other_key: StringName = other_fid if FACTION_DOSSIER_PROFILES.has(other_fid) else &"monolith_os"
-	var other_prof: Dictionary = FACTION_DOSSIER_PROFILES[other_key] as Dictionary
-	if locked_slot_2 != null:
-		locked_slot_2.text = String(other_prof["switch_text"])
-		var other_acc: Color = other_prof["accent"] as Color
-		locked_slot_2.modulate = other_acc.lerp(Color.WHITE, 0.16)
-	_refresh_locked_card_highlights()
+	_refresh_dossier_grid(key)
 
 	if update_notice and dossier_notice_label != null:
-		var fac_res: Resource = TeamManager.get_faction_data(key) if (TeamManager != null and TeamManager.has_method("get_faction_data")) else null
-		if fac_res != null:
-			var fac_name: String = String(fac_res.get("display_name"))
-			var fac_tag: String = String(fac_res.get("tagline"))
-			var b_roster: Variant = fac_res.get("building_roster")
-			var u_roster: Variant = fac_res.get("unit_roster")
-			var b_cnt: int = (b_roster as Array).size() if b_roster is Array else 7
-			var u_cnt: int = (u_roster as Array).size() if u_roster is Array else 7
-			dossier_notice_label.text = "%s (%d Structures • %d Units): %s" % [fac_name, b_cnt, u_cnt, fac_tag]
+		if fdata != null:
+			dossier_notice_label.text = "%s (%d Structures • %d Units): %s" % [
+				fdata.display_name,
+				fdata.building_roster.size(),
+				fdata.unit_roster.size(),
+				fdata.tagline,
+			]
 		else:
-			dossier_notice_label.text = "%s selected for deployment." % String(prof["title"])
+			dossier_notice_label.text = "%s selected for deployment." % title_txt
 		dossier_notice_label.modulate = tag_col
 
 
@@ -794,7 +867,8 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, sz), Color(0.032, 0.048, 0.068, 1.0), true)
 
 	# Subtle radial bloom behind active dossier (tinted to active featured faction)
-	var bloom_col: Color = Color(0.95, 0.56, 0.12, 1.0) if _featured_faction_id == &"monolith_os" else Color(0.12, 0.88, 0.84, 1.0)
+	var pal_bloom: Dictionary = FactionHudTheme.get_palette(_featured_faction_id)
+	var bloom_col: Color = pal_bloom.get("accent", Color(0.12, 0.88, 0.84, 1.0)) as Color
 	var glow_center: Vector2 = Vector2(sz.x * 0.30, sz.y * 0.42)
 	for i: int in range(5):
 		var r: float = (120.0 + float(i) * 95.0) + sin(_bg_time * 0.8 + float(i)) * 12.0
@@ -839,37 +913,6 @@ func _draw() -> void:
 	draw_line(Vector2(m, sz.y - m), Vector2(m, sz.y - m - b), frame_col, 2.0)
 	draw_line(Vector2(sz.x - m, sz.y - m), Vector2(sz.x - m - b, sz.y - m), frame_col, 2.0)
 	draw_line(Vector2(sz.x - m, sz.y - m), Vector2(sz.x - m, sz.y - m - b), frame_col, 2.0)
-
-
-func _wire_locked_card(btn: Button, dossier_name: String, briefing: String, accent: Color) -> void:
-	if btn == null:
-		return
-	btn.pressed.connect(func() -> void:
-		AudioManager.play_ui_click()
-		_inspected_locked_btn = btn
-		_refresh_locked_card_highlights()
-		if dossier_notice_label != null:
-			var active_fid: StringName = _get_local_human_faction_id()
-			var active_name: String = String(active_fid).to_upper()
-			if TeamManager != null and TeamManager.has_method("get_faction_data"):
-				var active_fac: FactionData = TeamManager.get_faction_data(active_fid) as FactionData
-				if active_fac != null:
-					active_name = active_fac.short_code if not active_fac.short_code.is_empty() else active_fac.display_name
-			dossier_notice_label.text = "[CLASSIFIED PREVIEW] %s — %s (Locked; %s remains selected for launch.)" % [dossier_name, briefing, active_name]
-			dossier_notice_label.modulate = accent
-	)
-
-
-func _refresh_locked_card_highlights() -> void:
-	var cards: Array = [
-		{"btn": locked_slot_3, "idle": Color(0.84, 0.78, 0.72, 0.78), "hi": Color(1.0, 0.84, 0.56, 1.0)},
-		{"btn": locked_slot_4, "idle": Color(0.80, 0.74, 0.90, 0.78), "hi": Color(0.92, 0.78, 1.0, 1.0)},
-		{"btn": locked_slot_5, "idle": Color(0.72, 0.86, 0.78, 0.78), "hi": Color(0.56, 1.0, 0.80, 1.0)},
-	]
-	for item: Dictionary in cards:
-		var b: Button = item["btn"] as Button
-		if b != null:
-			b.modulate = (item["hi"] as Color) if b == _inspected_locked_btn else (item["idle"] as Color)
 
 
 func _on_map_selected(index: int) -> void:
@@ -1046,12 +1089,12 @@ func _refresh_holdout_panel() -> void:
 		btn_holdout_diff_brutal.modulate = Color(1.0, 0.38, 0.30, 1.0) if _holdout_difficulty == int(GameConfig.AIDifficulty.BRUTAL) else Color(0.66, 0.74, 0.80, 0.78)
 
 	if holdout_record_label != null:
-		var player_fac_code: String = "MON-OS" if _featured_faction_id == &"monolith_os" else "GEN-V2"
+		var player_fd: FactionData = _find_faction_data(_featured_faction_id)
+		var player_fac_code: String = player_fd.short_code if (player_fd != null and not player_fd.short_code.is_empty()) else String(_featured_faction_id).to_upper()
 		var enemy_code: String = "MIXED ASSAULT"
-		if _holdout_enemy_faction_id == &"genesis_v2":
-			enemy_code = "GEN-V2"
-		elif _holdout_enemy_faction_id == &"monolith_os":
-			enemy_code = "MONO-OS"
+		if _holdout_enemy_faction_id != GameConfig.HOLDOUT_ENEMY_MIXED:
+			var enemy_fd: FactionData = _find_faction_data(_holdout_enemy_faction_id)
+			enemy_code = enemy_fd.short_code if (enemy_fd != null and not enemy_fd.short_code.is_empty()) else String(_holdout_enemy_faction_id).to_upper()
 		var diff_str: String = GameConfig.get_difficulty_label(_holdout_difficulty)
 		var best_w: int = ModeRecords.get_holdout_best_wave(_featured_faction_id, _holdout_difficulty)
 		var overall_w: int = ModeRecords.get_holdout_overall_best_wave(_featured_faction_id)
@@ -1106,7 +1149,8 @@ func _refresh_gauntlet_panel() -> void:
 		var fixed_f: StringName = sel_info.get("fixed_faction", &"") as StringName
 		var fac_note: String = ""
 		if fixed_f == &"":
-			var pcode: String = "MONOLITH_OS" if _featured_faction_id == &"monolith_os" else "GENESIS_V2"
+			var p_fd: FactionData = _find_faction_data(_featured_faction_id)
+			var pcode: String = p_fd.display_name.split("—")[0].strip_edges() if p_fd != null else String(_featured_faction_id).to_upper()
 			fac_note = "ACTIVE FACTION: %s (change on left dossier)" % pcode
 		else:
 			fac_note = "PRESET SQUAD: %s" % String(fixed_f).to_upper()

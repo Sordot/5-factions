@@ -6,6 +6,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"silica_harvester"
 display_name = "Silica Harvester"
+short_display_name = "Harvester"
 max_hp = 160.0
 move_speed = 190.0
 acceleration = 1400.0
