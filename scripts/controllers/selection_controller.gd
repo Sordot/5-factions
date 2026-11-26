@@ -4,6 +4,8 @@ extends Node2D
 const COMMAND_ROUTER_SCRIPT: GDScript = preload("res://scripts/controllers/command_router.gd")
 const RALLY_POINT_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/rally_point_overlay.gd")
 const COMMAND_QUEUE_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/command_queue_overlay.gd")
+const TACTICAL_GLANCE_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/tactical_glance_overlay.gd")
+const HIT_FEEDBACK_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/hit_feedback_overlay.gd")
 const DOUBLE_TAP_WINDOW_MS: int = 350
 
 signal selection_updated(selected_count: int)
@@ -104,6 +106,18 @@ func _ready() -> void:
 		add_child(command_queue_overlay)
 	if command_queue_overlay != null and command_queue_overlay.has_method("bind_selection_controller"):
 		command_queue_overlay.call("bind_selection_controller", self)
+
+	if get_tree().get_first_node_in_group("tactical_glance_overlay") == null:
+		var glance_ov: Node2D = TACTICAL_GLANCE_OVERLAY_SCRIPT.new() as Node2D
+		glance_ov.name = "TacticalGlanceOverlay"
+		add_child(glance_ov)
+		if glance_ov.has_method("bind_selection_controller"):
+			glance_ov.call("bind_selection_controller", self)
+
+	if get_tree().get_first_node_in_group("hit_feedback_overlay") == null:
+		var hit_ov: Node2D = HIT_FEEDBACK_OVERLAY_SCRIPT.new() as Node2D
+		hit_ov.name = "HitFeedbackOverlay"
+		add_child(hit_ov)
 
 	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.connect(_on_settings_changed)

@@ -163,6 +163,8 @@ func _ready() -> void:
 	_sync_from_settings()
 	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.connect(_on_settings_changed)
+	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and not TeamManager.teams_reconfigured.is_connected(refresh_faction_ambience_profile):
+		TeamManager.teams_reconfigured.connect(refresh_faction_ambience_profile)
 	_apply_master_bus_settings()
 
 
@@ -207,6 +209,7 @@ func _process(_delta: float) -> void:
 	var uplink_target: float = 0.0
 	if _amb_poll_acc_s >= 0.35 and is_inside_tree():
 		_amb_poll_acc_s = 0.0
+		refresh_faction_ambience_profile()
 		var mm: Node = get_tree().get_first_node_in_group("match_manager")
 		var in_match: bool = mm != null and is_instance_valid(mm)
 		if not in_match:
@@ -245,11 +248,66 @@ func _slider_to_db(linear_val: float) -> float:
 	return linear_to_db(pow(v, 1.6))
 
 
+var _amb_profile_cache: Dictionary = {}
+var _active_amb_profile: StringName = &"technozen_bio"
+
+
+func _resolve_desired_ambience_profile() -> StringName:
+	if not is_inside_tree():
+		return &"technozen_bio"
+	var in_match: bool = get_tree().get_first_node_in_group("match_manager") != null
+	if not in_match:
+		return &"technozen_bio"
+	if TeamManager != null and TeamManager.has_method("is_spectator_mode") and TeamManager.is_spectator_mode():
+		return &"technozen_bio"
+	var prof: StringName = _get_local_faction_timbre_profile()
+	return &"monolith_industrial" if prof == &"monolith_industrial" else &"technozen_bio"
+
+
+func _get_or_build_ambience_profile(profile: StringName) -> Dictionary:
+	if _amb_profile_cache.has(profile):
+		return _amb_profile_cache[profile] as Dictionary
+	var pack: Dictionary = {}
+	if profile == &"monolith_industrial":
+		pack = {
+			"base": _synth_ambience_monolith_base_loop(),
+			"combat": _synth_ambience_monolith_combat_loop(),
+			"uplink": _synth_ambience_monolith_uplink_loop(),
+		}
+	else:
+		pack = {
+			"base": _synth_ambience_base_loop(),
+			"combat": _synth_ambience_combat_loop(),
+			"uplink": _synth_ambience_uplink_loop(),
+		}
+	_amb_profile_cache[profile] = pack
+	return pack
+
+
+func refresh_faction_ambience_profile() -> void:
+	if _amb_base_player == null:
+		return
+	var desired: StringName = _resolve_desired_ambience_profile()
+	if desired == _active_amb_profile:
+		return
+	_active_amb_profile = desired
+	var pack: Dictionary = _get_or_build_ambience_profile(desired)
+	_amb_base_player.stream = pack["base"] as AudioStreamWAV
+	_amb_combat_player.stream = pack["combat"] as AudioStreamWAV
+	_amb_uplink_player.stream = pack["uplink"] as AudioStreamWAV
+	_amb_base_player.play()
+	_amb_combat_player.play()
+	_amb_uplink_player.play()
+	_update_ambience_mix(is_inside_tree() and get_tree().paused)
+
+
 func _setup_ambience_players() -> void:
+	_active_amb_profile = &"technozen_bio"
+	var initial_pack: Dictionary = _get_or_build_ambience_profile(_active_amb_profile)
 	_amb_base_player = AudioStreamPlayer.new()
 	_amb_base_player.name = "AmbBasePlayer"
 	_amb_base_player.bus = &"Master"
-	_amb_base_player.stream = _synth_ambience_base_loop()
+	_amb_base_player.stream = initial_pack["base"] as AudioStreamWAV
 	_amb_base_player.volume_db = -80.0
 	add_child(_amb_base_player)
 	_amb_base_player.play()
@@ -257,7 +315,7 @@ func _setup_ambience_players() -> void:
 	_amb_combat_player = AudioStreamPlayer.new()
 	_amb_combat_player.name = "AmbCombatPlayer"
 	_amb_combat_player.bus = &"Master"
-	_amb_combat_player.stream = _synth_ambience_combat_loop()
+	_amb_combat_player.stream = initial_pack["combat"] as AudioStreamWAV
 	_amb_combat_player.volume_db = -80.0
 	add_child(_amb_combat_player)
 	_amb_combat_player.play()
@@ -265,7 +323,7 @@ func _setup_ambience_players() -> void:
 	_amb_uplink_player = AudioStreamPlayer.new()
 	_amb_uplink_player.name = "AmbUplinkPlayer"
 	_amb_uplink_player.bus = &"Master"
-	_amb_uplink_player.stream = _synth_ambience_uplink_loop()
+	_amb_uplink_player.stream = initial_pack["uplink"] as AudioStreamWAV
 	_amb_uplink_player.volume_db = -80.0
 	add_child(_amb_uplink_player)
 	_amb_uplink_player.play()
@@ -842,6 +900,7 @@ func _generate_procedural_library() -> void:
 	_streams[&"overclock_activate"] = _synth_mono_overclock()
 	_streams[&"deploy_lock"] = _synth_double_chirp(320.0, 145.0, 0.14, 0.28)
 	_streams[&"deploy_release"] = _synth_double_chirp(185.0, 380.0, 0.13, 0.24)
+	_streams[&"ai_transmission"] = _synth_chime(PackedFloat32Array([740.0, 1110.0]), 0.042, 0.16)
 
 	# Unit-Class Procedural Synth Barks (150–240ms) — GENESIS_V2 baseline
 	_streams[&"bark_worker_select"] = _synth_bark_worker(false)
@@ -1259,6 +1318,62 @@ func _synth_ambience_uplink_loop() -> AudioStreamWAV:
 		var swell: float = 0.55 + 0.45 * sin(TAU * 0.5 * t)
 		var s: float = sin(TAU * 441.0 * t) * 0.35 + sin(TAU * 661.5 * t) * 0.30 + sin(TAU * 882.0 * t) * 0.20
 		out[i] = s * swell * 0.26
+	return _make_loop_wav(out)
+
+
+func _synth_ambience_monolith_base_loop() -> AudioStreamWAV:
+	# 4.0s exact cycle: cold industrial sub-bass turbine hum (55/82.5 Hz fifths) + metallic filter swell + clock ticks
+	var dur: float = 4.0
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var lp: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var swell: float = 0.65 + 0.35 * sin(TAU * 0.25 * t)
+		var turbine: float = sin(TAU * 55.0 * t) * 0.44 + sin(TAU * 82.5 * t) * 0.28 + sin(TAU * 110.0 * t) * 0.16
+		var metal_ring: float = sin(TAU * 247.5 * t) * (0.055 * (0.5 + 0.5 * sin(TAU * 0.5 * t)))
+		var tick_u: float = fmod(t * 2.0, 1.0)
+		var clock_tick: float = sin(TAU * 880.0 * t) * exp(-tick_u * 48.0) * 0.06
+		lp = lerpf(lp, turbine * swell + metal_ring + clock_tick, 0.10)
+		out[i] = lp * 0.62
+	return _make_loop_wav(out)
+
+
+func _synth_ambience_monolith_combat_loop() -> AudioStreamWAV:
+	# 4.0s exact cycle: tight low-mid mechanical piston pulse + muted dark brass/anvil harmonic tension
+	var dur: float = 4.0
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var lp: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var piston_u: float = fmod(t * 2.0, 1.0)
+		var piston_env: float = exp(-piston_u * 6.5)
+		var piston: float = (sin(TAU * 55.0 * t) * 0.55 + sin(TAU * 110.0 * t) * 0.25) * piston_env * 0.42
+		var anvil_u: float = fmod(t * 1.0 + 0.5, 1.0)
+		var anvil_env: float = exp(-anvil_u * 10.0)
+		var brass_f: float = 137.5 if (int(floor(t * 0.5)) % 2 == 0) else 123.75
+		var anvil: float = (sin(TAU * brass_f * t) * 0.55 + sin(TAU * brass_f * 1.5 * t) * 0.28) * anvil_env * 0.22
+		lp = lerpf(lp, piston + anvil, 0.18)
+		out[i] = lp * 0.70
+	return _make_loop_wav(out)
+
+
+func _synth_ambience_monolith_uplink_loop() -> AudioStreamWAV:
+	# 4.0s exact cycle: cold high-voltage transformer hum + deliberate radar-ping overtones
+	var dur: float = 4.0
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var xform: float = (sin(TAU * 120.0 * t) * 0.26 + sin(TAU * 240.0 * t) * 0.14) * (0.72 + 0.28 * sin(TAU * 0.5 * t))
+		var ping_u: float = fmod(t * 0.5, 1.0)
+		var ping_env: float = exp(-ping_u * 9.5)
+		var ping: float = (sin(TAU * 528.0 * t) * 0.30 + sin(TAU * 792.0 * t) * 0.18) * ping_env
+		out[i] = (xform + ping) * 0.26
 	return _make_loop_wav(out)
 
 

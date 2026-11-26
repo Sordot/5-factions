@@ -364,7 +364,7 @@ unique_name_in_owner = true
 visible = false
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/separation = 10
+theme_override_constants/separation = 6
 
 [node name="HealthBarModeRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
 layout_mode = 2
@@ -488,6 +488,36 @@ unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Snap building placement ghost to a 32px tactical grid. Hold Alt during placement to temporarily invert snap."
 focus_mode = 0
+text = "Enabled"
+
+[node name="HitFeedbackRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/HitFeedbackRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Combat Hit Feedback (Shield / Armor Pips)"
+
+[node name="ChkCombatHitFeedback" type="CheckButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/HitFeedbackRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+button_pressed = true
+text = "Enabled"
+
+[node name="AITransmissionsRow" type="HBoxContainer" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/AITransmissionsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "AI Commander Terminal Transmissions"
+
+[node name="ChkAITransmissions" type="CheckButton" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay/AITransmissionsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+button_pressed = true
 text = "Enabled"
 
 [node name="GameplayHint" type="Label" parent="RootControl/CenterContainer/ModalPanel/VBox/ContentArea/PanelGameplay"]

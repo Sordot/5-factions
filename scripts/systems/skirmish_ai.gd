@@ -7,6 +7,29 @@ const AIBuildPlannerScript = preload("res://scripts/systems/ai_build_planner.gd"
 const INTEL_SCAN_INTERVAL: float = 1.5
 const INTEL_TTL_SECONDS: float = 90.0
 const BARRICADE_MIN_MATCH_TIME: float = 150.0
+const TRANSMISSION_GLOBAL_COOLDOWN_MS: int = 45000
+const TRANSMISSION_CATEGORY_COOLDOWN_MS: int = 90000
+
+const AI_TRANSMISSIONS: Dictionary = {
+	&"genesis_v2": {
+		&"wave_launch": "// VAT-BORN: Bio-swarm vector locked. Overwhelming local resistance.",
+		&"barricade_breach": "// VAT-BORN: Structural obstruction dissolved. Flank corridor open.",
+		&"tier2_online": "// VAT-BORN: Synthetics Fabricator online. Deploying heavy wetware frames.",
+		&"uplink_contest": "// VAT-BORN: Converging on Data Hyper-Uplink. Claiming neural priority.",
+		&"under_attack": "// VAT-BORN: Peripheral biomass node compromised. Redirecting swarm.",
+	},
+	&"monolith_os": {
+		&"wave_launch": "// AXIOM: Structural demolition column deployed. Proceeding at nominal cadence.",
+		&"barricade_breach": "// AXIOM: Corridor partition cleared. Advancing heavy armor.",
+		&"tier2_online": "// AXIOM: Siege Gantry operational. Initiating heavy ordnance assembly.",
+		&"uplink_contest": "// AXIOM: Securing Hyper-Uplink coordinates. Resistance is inefficient.",
+		&"under_attack": "// AXIOM: Outpost integrity breached. Recalculating defensive perimeter.",
+	},
+}
+
+var _last_transmission_ms: int = -999999
+var _last_transmission_by_cat: Dictionary = {}
+var _tier2_transmission_sent: bool = false
 const BASE_DEFENSE_CLEAR_TIME: float = 3.0
 const RETREAT_REGROUP_DURATION: float = 8.0
 
@@ -533,6 +556,7 @@ func _tick_staging_state(core: Building) -> void:
 					u.command_attack_target(_breach_target, false)
 				else:
 					u.command_move(_breach_target.global_position.lerp(_staging_point, 0.25), false)
+			_try_emit_ai_transmission(&"barricade_breach", _sanitize_transmission_pos(_breach_target.global_position, false))
 			return
 
 	if _wave_cooldown_timer > 0.0:
@@ -558,6 +582,11 @@ func _launch_wave_from_units(squad: Array[Unit], core: Building, allow_flank: bo
 	_wave_launch_strength = _compute_units_strength(_wave_units)
 	_current_attack_target = _select_wave_target(_wave_number, core)
 	army_state = ArmyState.ATTACKING
+	var uplink_node: Node2D = get_tree().get_first_node_in_group("hyper_uplinks") as Node2D
+	if uplink_node != null and is_instance_valid(uplink_node) and _current_attack_target.distance_squared_to(uplink_node.global_position) <= 140.0 * 140.0:
+		_try_emit_ai_transmission(&"uplink_contest", uplink_node.global_position)
+	else:
+		_try_emit_ai_transmission(&"wave_launch", Vector2.INF)
 
 	var router: CommandRouter = _get_command_router()
 	var destinations: Array[Vector2] = router.assign_group_destinations(_wave_units, _current_attack_target) if router != null else []
@@ -1903,11 +1932,61 @@ func _instantiate_ai_building(data: BuildingData, spot: Vector2, worker: Unit, v
 func _on_ai_building_completed(building: Building) -> void:
 	if building == null or not is_instance_valid(building) or building.is_destroyed:
 		return
+	if not building.destroyed.is_connected(_on_ai_building_destroyed_radio):
+		building.destroyed.connect(_on_ai_building_destroyed_radio)
 	if building.is_command_hub():
 		_compute_staging_point(building)
 		_sync_military_rallies()
 	elif _is_military_production_building(building) and _staging_point_valid:
 		building.set_rally_position(_staging_point)
+	if not _tier2_transmission_sent and (building.building_type_id == &"synthetics_fabricator" or building.building_type_id == &"siege_gantry"):
+		_tier2_transmission_sent = true
+		_try_emit_ai_transmission(&"tier2_online", Vector2.INF)
+
+
+func _on_ai_building_destroyed_radio(building: Building) -> void:
+	if building == null or not is_instance_valid(building):
+		return
+	_try_emit_ai_transmission(&"under_attack", _sanitize_transmission_pos(building.global_position, false))
+
+
+func _sanitize_transmission_pos(world_pos: Vector2, is_neutral_objective: bool) -> Vector2:
+	if is_neutral_objective:
+		return world_pos
+	if not is_inside_tree():
+		return Vector2.INF
+	var fog: FogOfWarSystem = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	if fog == null or not fog.fog_enabled or fog.is_world_pos_explored(world_pos):
+		return world_pos
+	return Vector2.INF
+
+
+func _try_emit_ai_transmission(category: StringName, safe_world_pos: Vector2 = Vector2.INF) -> void:
+	if not is_inside_tree() or not enabled:
+		return
+	if SettingsManager != null and not SettingsManager.show_ai_transmissions:
+		return
+	var now_ms: int = Time.get_ticks_msec()
+	if (now_ms - _last_transmission_ms) < TRANSMISSION_GLOBAL_COOLDOWN_MS:
+		return
+	var last_cat_ms: int = int(_last_transmission_by_cat.get(category, -999999))
+	if (now_ms - last_cat_ms) < TRANSMISSION_CATEGORY_COOLDOWN_MS:
+		return
+
+	var fid: StringName = TeamManager.get_team_faction(int(ai_team)) if (TeamManager != null and TeamManager.has_method("get_team_faction")) else &"genesis_v2"
+	var table: Dictionary = AI_TRANSMISSIONS.get(fid, AI_TRANSMISSIONS[&"genesis_v2"]) as Dictionary
+	var line: String = String(table.get(category, ""))
+	if line.is_empty():
+		return
+
+	_last_transmission_ms = now_ms
+	_last_transmission_by_cat[category] = now_ms
+	var mm: Node = get_tree().get_first_node_in_group("match_manager")
+	if mm != null and mm.has_method("emit_tactical_event"):
+		var team_col: Color = TeamManager.get_team_color(int(ai_team)) if TeamManager != null else Color(1.0, 0.56, 0.36, 1.0)
+		mm.call("emit_tactical_event", &"transmission", line, safe_world_pos, team_col)
+	if AudioManager != null:
+		AudioManager.play_sfx(&"ai_transmission", -8.0, 0.03)
 
 
 func _find_valid_build_position(data: BuildingData, preferred_pos: Vector2, fallback_origin: Vector2) -> Vector2:

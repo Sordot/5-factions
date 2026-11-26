@@ -42,6 +42,8 @@ signal closed
 @onready var chk_camera_shake: CheckButton = %ChkCameraShake
 @onready var chk_battle_scars: CheckButton = %ChkBattleScars
 @onready var chk_build_grid_snap: CheckButton = %ChkBuildGridSnap
+@onready var chk_combat_hit_feedback: CheckButton = %ChkCombatHitFeedback
+@onready var chk_ai_transmissions: CheckButton = %ChkAITransmissions
 
 @onready var sld_master_vol: HSlider = %SldMasterVol
 @onready var val_master_vol: Label = %ValMasterVol
@@ -423,6 +425,10 @@ func _wire_gameplay_controls() -> void:
 	chk_camera_shake.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 	chk_battle_scars.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 	chk_build_grid_snap.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
+	if chk_combat_hit_feedback != null:
+		chk_combat_hit_feedback.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
+	if chk_ai_transmissions != null:
+		chk_ai_transmissions.toggled.connect(func(_on: bool) -> void: _push_gameplay_settings())
 
 
 func _push_gameplay_settings() -> void:
@@ -439,7 +445,9 @@ func _push_gameplay_settings() -> void:
 		am_mode,
 		chk_smart_box_select.button_pressed,
 		chk_battle_scars.button_pressed,
-		chk_build_grid_snap.button_pressed
+		chk_build_grid_snap.button_pressed,
+		chk_combat_hit_feedback.button_pressed if chk_combat_hit_feedback != null else true,
+		chk_ai_transmissions.button_pressed if chk_ai_transmissions != null else true
 	)
 	AudioManager.play_ui_click()
 
@@ -548,6 +556,10 @@ func _sync_all_from_manager() -> void:
 	chk_camera_shake.button_pressed = SettingsManager.camera_shake_enabled
 	chk_battle_scars.button_pressed = SettingsManager.battle_scars_enabled
 	chk_build_grid_snap.button_pressed = SettingsManager.build_grid_snap_enabled
+	if chk_combat_hit_feedback != null:
+		chk_combat_hit_feedback.button_pressed = SettingsManager.show_combat_hit_feedback
+	if chk_ai_transmissions != null:
+		chk_ai_transmissions.button_pressed = SettingsManager.show_ai_transmissions
 
 	sld_master_vol.value = SettingsManager.master_volume * 100.0
 	sld_sfx_vol.value = SettingsManager.sfx_volume * 100.0

@@ -493,18 +493,40 @@ func _apply_damage_to_target(owner_unit: Unit, target: Variant, base_dmg: float,
 	if not is_valid_target(owner_unit, target):
 		return
 	var total_dmg: float = base_dmg
+	var anti_armor_triggered: bool = false
 	if target is Building:
-		total_dmg += bonus_vs_armored
-		(target as Building).take_damage(total_dmg, owner_unit)
+		var tb: Building = target as Building
+		if bonus_vs_armored > 0.0:
+			total_dmg += bonus_vs_armored
+			anti_armor_triggered = true
+		tb.take_damage(total_dmg, owner_unit)
+		if anti_armor_triggered:
+			_emit_anti_armor_pip(owner_unit, tb)
 	elif target is Unit:
 		var u: Unit = target
-		if u.data != null and u.data.is_armored:
+		if u.data != null and u.data.is_armored and bonus_vs_armored > 0.0:
 			total_dmg += bonus_vs_armored
+			anti_armor_triggered = true
 		u.take_damage(total_dmg, owner_unit)
+		if anti_armor_triggered:
+			_emit_anti_armor_pip(owner_unit, u)
 	elif target is Node and (target as Node).is_in_group("destructible_barricades"):
-		if bool((target as Node).get("is_armored")):
+		if bool((target as Node).get("is_armored")) and bonus_vs_armored > 0.0:
 			total_dmg += bonus_vs_armored
+			anti_armor_triggered = true
 		(target as Node).call("take_damage", total_dmg, owner_unit)
+		if anti_armor_triggered and target is Node2D:
+			_emit_anti_armor_pip(owner_unit, target as Node2D)
+
+
+func _emit_anti_armor_pip(owner_unit: Unit, target: Node2D) -> void:
+	if owner_unit == null or not owner_unit.is_inside_tree() or target == null or not is_instance_valid(target):
+		return
+	if not target.visible:
+		return
+	var ov: Node = owner_unit.get_tree().get_first_node_in_group("hit_feedback_overlay")
+	if ov != null and ov.has_method("push_hit_pip"):
+		ov.call("push_hit_pip", target.global_position, HitFeedbackOverlay.KIND_ANTI_ARMOR, 0, target.get_instance_id())
 
 
 func _apply_aoe_damage(owner_unit: Unit, center: Vector2, radius: float, base_dmg: float, bonus_vs_armored: float) -> void:

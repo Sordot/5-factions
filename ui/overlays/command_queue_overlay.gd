@@ -45,6 +45,12 @@ func _draw() -> void:
 	var font: Font = ThemeDB.fallback_font
 	var font_size: int = 10
 
+	# Collect ordered focus-fire kill list across selected friendly units (Shift+RMB queue)
+	var kill_list: Array[Node2D] = _collect_ordered_kill_list(selected)
+	var kill_lookup: Dictionary = {}
+	for k_node: Node2D in kill_list:
+		kill_lookup[k_node.get_instance_id()] = true
+
 	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 	for item: Variant in selected:
 		if not is_instance_valid(item) or not (item is Unit):
@@ -67,7 +73,8 @@ func _draw() -> void:
 			var active_col: Color = _color_for_command(unit.active_command)
 			draw_line(prev_pt, first_pt, Color(active_col.r, active_col.g, active_col.b, 0.55), 1.8, true)
 			_draw_segment_chevrons(prev_pt, first_pt, Color(active_col.r, active_col.g, active_col.b, 0.78))
-			_draw_waypoint_diamond(first_pt, 5.5, Color(active_col.r, active_col.g, active_col.b, 0.85))
+			if not (unit.active_command.get("type", &"") == &"attack_target" and kill_list.size() >= 2):
+				_draw_waypoint_diamond(first_pt, 5.5, Color(active_col.r, active_col.g, active_col.b, 0.85))
 			prev_pt = first_pt
 
 		var step_idx: int = 1
@@ -78,6 +85,13 @@ func _draw() -> void:
 				continue
 			var next_pt: Vector2 = to_local(target_world as Vector2)
 			var col: Color = _color_for_command(cmd)
+
+			if cmd_type == &"attack_target" and kill_list.size() >= 2:
+				var atk_t: Variant = cmd.get("target", null)
+				if atk_t is Node2D and is_instance_valid(atk_t) and kill_lookup.has((atk_t as Node2D).get_instance_id()):
+					prev_pt = next_pt
+					step_idx += 1
+					continue
 
 			# Glow underlay + crisp segment + directional chevrons
 			if prev_pt.distance_squared_to(next_pt) > 4.0:
@@ -116,6 +130,10 @@ func _draw() -> void:
 
 			prev_pt = next_pt
 			step_idx += 1
+
+	# Render numbered crimson focus-fire kill list (1, 2, 3...) + dashed sightlines
+	if kill_list.size() >= 2:
+		_draw_focus_fire_kill_list(kill_list, font)
 
 
 func _draw_waypoint_diamond(center: Vector2, radius: float, col: Color, fill_backdrop: bool = false) -> void:
@@ -230,3 +248,115 @@ func _color_for_command(cmd: Dictionary) -> Color:
 			return Color(0.376, 0.647, 0.980, 0.95) # Azure #60A5FA
 		_:
 			return Color(0.220, 0.741, 0.973, 0.94) # Cyan #38BDF8
+
+
+func _is_valid_kill_target(node: Variant) -> bool:
+	if node == null or not is_instance_valid(node) or not (node is Node2D):
+		return false
+	var n2: Node2D = node as Node2D
+	if n2.is_queued_for_deletion() or not n2.visible:
+		return false
+	if n2 is Unit and (n2 as Unit).is_dead:
+		return false
+	if n2 is Building and (n2 as Building).is_destroyed:
+		return false
+	if n2.is_in_group("destructible_barricades") and bool(n2.get("is_destroyed")):
+		return false
+	return true
+
+
+func _collect_ordered_kill_list(selected: Array) -> Array[Node2D]:
+	var out: Array[Node2D] = []
+	var seen: Dictionary = {}
+	var has_queued_attack: bool = false
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+
+	for item: Variant in selected:
+		if not is_instance_valid(item) or not (item is Unit):
+			continue
+		var unit: Unit = item as Unit
+		if unit.is_dead or unit.is_staffed or (local_team >= 0 and int(unit.team) != local_team):
+			continue
+		var unit_has_q_atk: bool = false
+		for cmd: Dictionary in unit.command_queue:
+			if cmd.get("type", &"") == &"attack_target" and _is_valid_kill_target(cmd.get("target", null)):
+				unit_has_q_atk = true
+				break
+		if not unit_has_q_atk:
+			continue
+		has_queued_attack = true
+
+		# Include current active target first in priority order
+		if unit.command_state == Unit.CommandState.ATTACKING_TARGET and _is_valid_kill_target(unit.current_target):
+			var cur_t: Node2D = unit.current_target
+			var cid: int = cur_t.get_instance_id()
+			if not seen.has(cid) and out.size() < 9:
+				seen[cid] = true
+				out.append(cur_t)
+
+		for cmd: Dictionary in unit.command_queue:
+			if cmd.get("type", &"") != &"attack_target":
+				continue
+			var qt: Variant = cmd.get("target", null)
+			if not _is_valid_kill_target(qt):
+				continue
+			var q_node: Node2D = qt as Node2D
+			var qid: int = q_node.get_instance_id()
+			if not seen.has(qid) and out.size() < 9:
+				seen[qid] = true
+				out.append(q_node)
+
+	if not has_queued_attack:
+		return []
+	return out
+
+
+func _draw_focus_fire_kill_list(kill_list: Array[Node2D], font: Font) -> void:
+	var crimson: Color = Color(1.0, 0.302, 0.427, 0.96)
+	var line_col: Color = Color(1.0, 0.302, 0.427, 0.55)
+	var pulse: float = 0.5 + 0.5 * sin(_pulse_time * 6.5)
+
+	# 1. Dashed crimson sightlines connecting T1 -> T2 -> T3...
+	for i: int in range(kill_list.size() - 1):
+		var p0: Vector2 = to_local(kill_list[i].global_position)
+		var p1: Vector2 = to_local(kill_list[i + 1].global_position)
+		var diff: Vector2 = p1 - p0
+		var total: float = diff.length()
+		if total > 12.0:
+			var dir: Vector2 = diff / total
+			var dist: float = 12.0
+			while dist < total - 12.0:
+				var seg_end: float = minf(total - 12.0, dist + 10.0)
+				draw_line(p0 + dir * dist, p0 + dir * seg_end, line_col, 1.8, true)
+				dist += 17.0
+
+	# 2. Crimson corner-bracket crosshair + numbered priority badge (1..9) on each target
+	for i: int in range(kill_list.size()):
+		var t_node: Node2D = kill_list[i]
+		var center: Vector2 = to_local(t_node.global_position)
+		var rad: float = 20.0
+		if t_node is Unit:
+			var u: Unit = t_node as Unit
+			rad = (u.data.collision_radius if u.data != null else 16.0) + 6.0
+		elif t_node is Building:
+			rad = (t_node as Building).footprint_radius + 6.0
+		elif t_node.has_method("get_footprint_radius"):
+			rad = float(t_node.call("get_footprint_radius")) + 6.0
+
+		var r_pulse: float = rad + (2.0 * pulse if i == 0 else 0.0)
+		var arm: float = clampf(r_pulse * 0.38, 6.0, 12.0)
+		var b_col: Color = Color(1.0, 0.38, 0.48, 0.98) if i == 0 else crimson
+		# 4 crisp corner brackets
+		draw_polyline(PackedVector2Array([center + Vector2(-r_pulse, -r_pulse + arm), center + Vector2(-r_pulse, -r_pulse), center + Vector2(-r_pulse + arm, -r_pulse)]), b_col, 2.2)
+		draw_polyline(PackedVector2Array([center + Vector2(r_pulse - arm, -r_pulse), center + Vector2(r_pulse, -r_pulse), center + Vector2(r_pulse, -r_pulse + arm)]), b_col, 2.2)
+		draw_polyline(PackedVector2Array([center + Vector2(-r_pulse, r_pulse - arm), center + Vector2(-r_pulse, r_pulse), center + Vector2(-r_pulse + arm, r_pulse)]), b_col, 2.2)
+		draw_polyline(PackedVector2Array([center + Vector2(r_pulse - arm, r_pulse), center + Vector2(r_pulse, r_pulse), center + Vector2(r_pulse, r_pulse - arm)]), b_col, 2.2)
+
+		# High-contrast priority badge offset above-right of target
+		var badge_center: Vector2 = center + Vector2(r_pulse + 4.0, -r_pulse - 4.0)
+		var badge_rect: Rect2 = Rect2(badge_center - Vector2(9.0, 9.0), Vector2(18.0, 18.0))
+		draw_rect(badge_rect, Color(0.06, 0.08, 0.12, 0.92), true)
+		draw_rect(badge_rect, b_col, false, 1.6)
+		var digit: String = str(i + 1)
+		var d_sz: Vector2 = font.get_string_size(digit, HORIZONTAL_ALIGNMENT_CENTER, -1, 11)
+		draw_string(font, badge_center + Vector2(-d_sz.x * 0.5, d_sz.y * 0.34), digit, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.98, 0.99, 1.0, 1.0))

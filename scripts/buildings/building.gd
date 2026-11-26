@@ -106,6 +106,7 @@ var is_hovered: bool = false
 var is_marquee_highlighted: bool = false
 var completion_flash_timer: float = 0.0
 var is_destroyed: bool = false
+var last_attacker_team: int = -1
 var has_been_spotted: bool = false
 var construction_progress: float = 1.0
 var claimed_vent: ResourceNode = null
@@ -1343,6 +1344,11 @@ func _get_default_costs_for_type(type_id: StringName) -> Dictionary:
 func take_damage(amount: float, attacker: Node = null) -> void:
 	if is_destroyed or amount <= 0.0:
 		return
+	if attacker != null and is_instance_valid(attacker):
+		if attacker is Unit:
+			last_attacker_team = int((attacker as Unit).team)
+		elif attacker is Building:
+			last_attacker_team = int((attacker as Building).team)
 
 	var econ: EconomyManager = _get_economy_manager()
 	if max_shield > 0.0:
@@ -1365,6 +1371,7 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 		shield_changed.emit(self, current_shield, max_shield)
 		if had_native_shield and current_shield <= 0.001:
 			_trigger_shield_shatter_feedback()
+		_emit_hit_feedback_pip(HitFeedbackOverlay.KIND_SHIELD_ABSORB, int(round(absorbed_native)))
 
 	# Layer 3 — Hull HP (Mitigated)
 	var hull_damaged: bool = false
@@ -1378,12 +1385,19 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 			if is_node_ready() and body_visual != null:
 				body_visual.modulate = Color(1.9, 2.2, 2.3, 1.0)
 			health_changed.emit(self, current_hp, max_hp)
+			if mitigation >= 0.25 and remaining <= 24.0:
+				_emit_hit_feedback_pip(HitFeedbackOverlay.KIND_ARMOR_BLUNTED, int(round(effective_damage)))
 	elif shield_absorbed and is_node_ready() and body_visual != null and _hit_flash_timer <= 0.0:
 		body_visual.modulate = Color(0.82, 1.48, 2.15, 1.0)
 
 	if not hull_damaged and not shield_absorbed:
 		status_changed.emit(self)
 		return
+
+	if is_inside_tree():
+		var mm_hm: Node = get_tree().get_first_node_in_group("match_manager")
+		if mm_hm != null and mm_hm.has_method("record_combat_heatmap_damage"):
+			mm_hm.call("record_combat_heatmap_damage", global_position, int(team))
 
 	_update_health_bar()
 	queue_redraw()
@@ -1400,6 +1414,17 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 			if not killer.is_dead and is_enemy_killer:
 				killer.register_kill(self)
 		_destroy()
+
+
+func _emit_hit_feedback_pip(kind: StringName, val: int = 0) -> void:
+	if not is_inside_tree():
+		return
+	var is_local_view: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Unit.Team.PLAYER)
+	if not is_local_view and not visible:
+		return
+	var ov: Node = get_tree().get_first_node_in_group("hit_feedback_overlay")
+	if ov != null and ov.has_method("push_hit_pip"):
+		ov.call("push_hit_pip", global_position, kind, val, get_instance_id())
 
 
 func _trigger_shield_shatter_feedback() -> void:

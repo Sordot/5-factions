@@ -1,0 +1,38 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://ui/hud/spectator_comparison_bar.gd" id="1_spec_bar_script"]
+[ext_resource type="Theme" path="res://resources/themes/technozen_theme.tres" id="2_theme"]
+
+[node name="SpectatorComparisonBar" type="CanvasLayer"]
+layer = 3
+script = ExtResource("1_spec_bar_script")
+
+[node name="RootControl" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 3
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -362.0
+offset_top = 62.0
+offset_right = 362.0
+offset_bottom = 118.0
+grow_horizontal = 2
+mouse_filter = 2
+theme = ExtResource("2_theme")
+
+[node name="MainPanel" type="PanelContainer" parent="RootControl"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ContentHost" type="HBoxContainer" parent="RootControl/MainPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+alignment = 1

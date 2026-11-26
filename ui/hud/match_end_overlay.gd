@@ -20,6 +20,7 @@ extends CanvasLayer
 @onready var btn_main_menu: Button = %BtnMainMenu
 @onready var btn_sandbox_mode: Button = %BtnSandboxMode
 @onready var inspection_banner: Control = %InspectionBanner
+@onready var btn_toggle_heatmap: Button = %BtnToggleHeatmap
 @onready var btn_return_scoreboard: Button = %BtnReturnScoreboard
 @onready var btn_banner_rematch: Button = %BtnBannerRematch
 @onready var btn_banner_main_menu: Button = %BtnBannerMainMenu
@@ -76,6 +77,9 @@ func _ready() -> void:
 		btn_main_menu.pressed.connect(_on_main_menu_pressed)
 	if btn_sandbox_mode != null:
 		btn_sandbox_mode.pressed.connect(_on_sandbox_mode_pressed)
+	if btn_toggle_heatmap != null:
+		btn_toggle_heatmap.pressed.connect(_on_toggle_heatmap_pressed)
+		_sync_heatmap_button(false)
 	if btn_return_scoreboard != null:
 		btn_return_scoreboard.pressed.connect(return_to_scoreboard)
 	if btn_banner_rematch != null:
@@ -92,6 +96,30 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("cmd_cancel"):
 		get_viewport().set_input_as_handled()
 		return_to_scoreboard()
+	elif event is InputEventKey:
+		var kev: InputEventKey = event as InputEventKey
+		if kev.pressed and kev.keycode == KEY_H:
+			get_viewport().set_input_as_handled()
+			_on_toggle_heatmap_pressed()
+
+
+func _on_toggle_heatmap_pressed() -> void:
+	if not _is_inspecting_battlefield or not is_inside_tree():
+		return
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	var match_mgr: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+	var is_on: bool = false
+	if match_mgr != null and match_mgr.has_method("toggle_post_match_heatmap"):
+		is_on = bool(match_mgr.call("toggle_post_match_heatmap"))
+	_sync_heatmap_button(is_on)
+
+
+func _sync_heatmap_button(is_on: bool) -> void:
+	if btn_toggle_heatmap == null:
+		return
+	btn_toggle_heatmap.text = "Heatmap: ON [H]" if is_on else "Heatmap: OFF [H]"
+	btn_toggle_heatmap.modulate = Color(1.0, 0.72, 0.28, 1.0) if is_on else Color(0.76, 0.88, 0.94, 0.92)
 
 
 func _set_active_tab(tab: StringName) -> void:
@@ -133,6 +161,7 @@ func return_to_scoreboard() -> void:
 	if AudioManager != null:
 		AudioManager.play_ui_click()
 	_is_inspecting_battlefield = false
+	_sync_heatmap_button(false)
 	if inspection_banner != null:
 		inspection_banner.visible = false
 	if is_inside_tree():
@@ -293,6 +322,42 @@ func _populate_scoreboard(stats: Dictionary) -> void:
 		up_highlights.append(max_up > 0.5 and absf(v - max_up) <= 0.5)
 	_add_multi_custom_row("Hyper-Uplink Control", team_entries, up_texts, up_highlights)
 
+	# Milestone 3.5a: Macro Efficiency Grade rows
+	var sb_texts: Array[String] = []
+	var sb_vals: Array[float] = []
+	var min_sb: float = 999999.0
+	var sb_all_equal: bool = true
+	for i: int in range(team_entries.size()):
+		var sb_s: float = float(team_entries[i].get("supply_blocked_seconds", 0.0))
+		sb_vals.append(sb_s)
+		min_sb = minf(min_sb, sb_s)
+		if i > 0 and absf(sb_s - sb_vals[0]) > 0.5:
+			sb_all_equal = false
+		sb_texts.append(String(team_entries[i].get("supply_blocked_formatted", "00:00")))
+	var sb_highlights: Array[bool] = []
+	for v: float in sb_vals:
+		sb_highlights.append(not sb_all_equal and absf(v - min_sb) <= 0.5)
+	_add_multi_custom_row("Supply Blocked", team_entries, sb_texts, sb_highlights)
+
+	_add_multi_int_row("Avg Unspent Float", team_entries, "avg_unspent_float", false)
+
+	var tr_texts: Array[String] = []
+	var tr_vals: Array[float] = []
+	var max_tr: float = -1.0
+	var tr_all_equal: bool = true
+	for i: int in range(team_entries.size()):
+		var tr_v: float = float(team_entries[i].get("trade_ratio", 1.0))
+		var grade_s: String = String(team_entries[i].get("macro_grade", "B"))
+		tr_vals.append(tr_v)
+		max_tr = maxf(max_tr, tr_v)
+		if i > 0 and absf(tr_v - tr_vals[0]) > 0.02:
+			tr_all_equal = false
+		tr_texts.append("%.2fx [%s]" % [tr_v, grade_s])
+	var tr_highlights: Array[bool] = []
+	for v: float in tr_vals:
+		tr_highlights.append(not tr_all_equal and absf(v - max_tr) <= 0.02)
+	_add_multi_custom_row("Trade Ratio / Grade", team_entries, tr_texts, tr_highlights)
+
 
 func _add_multi_int_row(metric: String, entries: Array[Dictionary], key: String, higher_is_better: bool) -> void:
 	var vals: Array[int] = []
@@ -320,7 +385,7 @@ func _add_multi_custom_row(metric: String, entries: Array[Dictionary], texts: Ar
 	var m_lbl: Label = Label.new()
 	m_lbl.text = metric
 	m_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	m_lbl.add_theme_font_size_override("font_size", 12)
+	m_lbl.add_theme_font_size_override("font_size", 11)
 	m_lbl.add_theme_color_override("font_color", Color(0.68, 0.82, 0.88, 0.92))
 	scoreboard_grid.add_child(m_lbl)
 
@@ -328,7 +393,7 @@ func _add_multi_custom_row(metric: String, entries: Array[Dictionary], texts: Ar
 		var lbl: Label = Label.new()
 		lbl.text = texts[i] if i < texts.size() else "--"
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		lbl.add_theme_font_size_override("font_size", 12)
+		lbl.add_theme_font_size_override("font_size", 11)
 		var base_col: Color = entries[i].get("color", Color(0.26, 1.0, 0.88, 1.0)) as Color
 		var is_hi: bool = i < highlights.size() and highlights[i]
 		lbl.add_theme_color_override(
@@ -340,6 +405,7 @@ func _add_multi_custom_row(metric: String, entries: Array[Dictionary], texts: Ar
 
 func hide_summary() -> void:
 	_is_inspecting_battlefield = false
+	_sync_heatmap_button(false)
 	if root_control != null:
 		root_control.visible = false
 	if inspection_banner != null:
@@ -352,6 +418,7 @@ func _on_view_battlefield_pressed() -> void:
 	if AudioManager != null:
 		AudioManager.play_ui_click()
 	_is_inspecting_battlefield = true
+	_sync_heatmap_button(false)
 	if root_control != null:
 		root_control.visible = false
 	if inspection_banner != null:

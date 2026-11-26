@@ -58,6 +58,15 @@ var _pause_menu: PauseMenu = null
 var current_game_speed: float = 1.0
 var timeline_samples: Array[Dictionary] = []
 var _timeline_sample_timer: float = 0.0
+var combat_heatmap_events: Array[Dictionary] = []
+var _heatmap_damage_throttle: Dictionary = {}
+var _macro_sample_timer: float = 0.0
+var _battle_heatmap_overlay: Node2D = null
+var _spectator_comparison_bar: CanvasLayer = null
+
+const BATTLE_HEATMAP_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/battle_heatmap_overlay.gd")
+const SPECTATOR_BAR_SCENE_PATH: String = "res://ui/hud/spectator_comparison_bar.tscn"
+const MAX_HEATMAP_EVENTS: int = 800
 
 
 func _ready() -> void:
@@ -99,6 +108,11 @@ func _ensure_team_stat_bucket(tid: int) -> Dictionary:
 			"buildings_lost": 0,
 			"peak_bandwidth": 0,
 			"uplink_seconds": 0.0,
+			"supply_blocked_seconds": 0.0,
+			"resource_float_sum": 0.0,
+			"resource_float_samples": 0,
+			"resources_lost_value": 0,
+			"resources_destroyed_value": 0,
 		}
 	return _team_stats[tid] as Dictionary
 
@@ -112,6 +126,7 @@ func _initialize_match_runtime() -> void:
 	_ensure_ai_commanders()
 	_hook_initial_entities()
 	_hook_economy_manager()
+	_ensure_spectator_comparison_bar()
 	_record_timeline_sample()
 	_schedule_starting_worker_dispatch()
 	_play_match_start_boot_sequence()
@@ -773,6 +788,11 @@ func _process(delta: float) -> void:
 		_timeline_sample_timer -= TIMELINE_SAMPLE_INTERVAL
 		_record_timeline_sample()
 
+	_macro_sample_timer += delta
+	if _macro_sample_timer >= 1.0:
+		_macro_sample_timer -= 1.0
+		_sample_macro_efficiency()
+
 	_eval_timer += delta
 	if _eval_timer >= 0.5:
 		_eval_timer = 0.0
@@ -868,6 +888,7 @@ func enter_post_match_inspection() -> void:
 	var fog: FogOfWarSystem = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
 	if fog != null:
 		fog.set_post_match_reveal(true)
+	_ensure_battle_heatmap_overlay()
 	if SettingsManager != null:
 		SettingsManager.set_gameplay_cursor_active(true)
 
@@ -876,6 +897,8 @@ func exit_post_match_inspection() -> void:
 	if not is_inside_tree():
 		return
 	is_inspecting_post_match = false
+	if _battle_heatmap_overlay != null and is_instance_valid(_battle_heatmap_overlay):
+		_battle_heatmap_overlay.call("set_heatmap_visible", false)
 	_set_inspection_nodes_process_mode(Node.PROCESS_MODE_INHERIT)
 	var sel: SelectionController = get_tree().get_first_node_in_group("selection_controller") as SelectionController
 	if sel != null:
@@ -899,6 +922,12 @@ func return_to_main_menu() -> void:
 
 func _prepare_clean_scene_transition() -> void:
 	is_inspecting_post_match = false
+	if _battle_heatmap_overlay != null and is_instance_valid(_battle_heatmap_overlay):
+		_battle_heatmap_overlay.queue_free()
+		_battle_heatmap_overlay = null
+	if _spectator_comparison_bar != null and is_instance_valid(_spectator_comparison_bar):
+		_spectator_comparison_bar.queue_free()
+		_spectator_comparison_bar = null
 	_set_inspection_nodes_process_mode(Node.PROCESS_MODE_INHERIT)
 	Engine.time_scale = 1.0
 	if is_inside_tree():
@@ -1111,6 +1140,13 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 		var totals: Dictionary = econ.get_all_totals_gathered(tid) if econ != null else {}
 		var up_s: float = float(bucket.get("uplink_seconds", 0.0))
 		var up_pct: float = clampf((up_s / safe_duration) * 100.0, 0.0, 100.0)
+		var sb_s: float = float(bucket.get("supply_blocked_seconds", 0.0))
+		var flt_n: int = maxi(1, int(bucket.get("resource_float_samples", 0)))
+		var avg_flt: int = int(round(float(bucket.get("resource_float_sum", 0.0)) / float(flt_n)))
+		var lost_v: int = int(bucket.get("resources_lost_value", 0))
+		var dest_v: int = int(bucket.get("resources_destroyed_value", 0))
+		var trade_r: float = float(dest_v) / float(maxi(1, lost_v)) if (dest_v > 0 or lost_v > 0) else 1.0
+		var m_grade: String = _compute_macro_grade(sb_s, safe_duration, avg_flt, trade_r)
 		teams_stats_out[tid] = {
 			"team_id": tid,
 			"alliance_id": TeamManager.get_team_alliance(tid) if TeamManager != null else tid,
@@ -1129,6 +1165,13 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 			"uplink_seconds": up_s,
 			"uplink_formatted": _format_duration(up_s),
 			"uplink_pct": up_pct,
+			"supply_blocked_seconds": sb_s,
+			"supply_blocked_formatted": _format_duration(sb_s),
+			"avg_unspent_float": avg_flt,
+			"resources_lost_value": lost_v,
+			"resources_destroyed_value": dest_v,
+			"trade_ratio": trade_r,
+			"macro_grade": m_grade,
 		}
 
 	var player_uplink_pct: float = clampf((player_uplink_time / safe_duration) * 100.0, 0.0, 100.0)
@@ -1150,6 +1193,7 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 		"enemies_destroyed": enemy_units_destroyed,
 		"structures_destroyed": enemy_structures_destroyed,
 		"timeline_samples": timeline_samples.duplicate(true),
+		"combat_heatmap_events": combat_heatmap_events.duplicate(true),
 		"active_mutators": GameConfig.get_active_mutator_labels() if (GameConfig != null and GameConfig.has_method("get_active_mutator_labels")) else PackedStringArray(),
 		"active_teams": active_teams,
 		"teams": teams_stats_out,
@@ -1291,12 +1335,24 @@ func _on_unit_died(unit: Unit) -> void:
 	var tid: int = int(unit.team)
 	var bucket: Dictionary = _ensure_team_stat_bucket(tid)
 	bucket["units_lost"] = int(bucket["units_lost"]) + 1
-	# Credit kill count for 2-team / legacy counters and multi-team summaries
-	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
-	if active_teams.size() == 2:
-		var other_tid: int = active_teams[1] if tid == active_teams[0] else active_teams[0]
-		var other_b: Dictionary = _ensure_team_stat_bucket(other_tid)
-		other_b["enemies_destroyed"] = int(other_b["enemies_destroyed"]) + 1
+	var u_val: int = 0
+	if unit.data != null:
+		u_val = maxi(0, unit.data.biomass_cost) + maxi(0, unit.data.silica_cost) + maxi(0, unit.data.compute_cost)
+	bucket["resources_lost_value"] = int(bucket["resources_lost_value"]) + u_val
+	var is_heavy_u: bool = unit.data != null and unit.data.is_heavy_unit()
+	_push_heatmap_event(unit.global_position, 2.4 if is_heavy_u else 1.0, tid, &"heavy_unit_death" if is_heavy_u else &"unit_death")
+
+	# Credit kill count & trade value to killer team (or opponent in 2-team matches)
+	var active_teams: Array[int] = [0, 1]
+	if TeamManager != null:
+		active_teams = TeamManager.get_active_teams()
+	var killer_tid: int = unit.last_attacker_team
+	if killer_tid < 0 and active_teams.size() == 2:
+		killer_tid = active_teams[1] if tid == active_teams[0] else active_teams[0]
+	if killer_tid >= 0 and killer_tid != tid:
+		var killer_b: Dictionary = _ensure_team_stat_bucket(killer_tid)
+		killer_b["enemies_destroyed"] = int(killer_b["enemies_destroyed"]) + 1
+		killer_b["resources_destroyed_value"] = int(killer_b["resources_destroyed_value"]) + u_val
 	if tid == int(Unit.Team.PLAYER):
 		player_units_lost += 1
 	elif tid == int(Unit.Team.ENEMY):
@@ -1318,6 +1374,21 @@ func _on_building_destroyed(building: Building) -> void:
 		var tid: int = int(building.team)
 		var bucket: Dictionary = _ensure_team_stat_bucket(tid)
 		bucket["buildings_lost"] = int(bucket["buildings_lost"]) + 1
+		var b_val: int = 150
+		if building.building_data != null:
+			b_val = maxi(0, building.building_data.biomass_cost) + maxi(0, building.building_data.silica_cost) + maxi(0, building.building_data.compute_cost)
+		bucket["resources_lost_value"] = int(bucket["resources_lost_value"]) + b_val
+		var active_teams_b: Array[int] = [0, 1]
+		if TeamManager != null:
+			active_teams_b = TeamManager.get_active_teams()
+		var b_killer: int = building.last_attacker_team
+		if b_killer < 0 and active_teams_b.size() == 2:
+			b_killer = active_teams_b[1] if tid == active_teams_b[0] else active_teams_b[0]
+		if b_killer >= 0 and b_killer != tid:
+			var kb: Dictionary = _ensure_team_stat_bucket(b_killer)
+			kb["resources_destroyed_value"] = int(kb["resources_destroyed_value"]) + b_val
+		var is_hub_b: bool = building.is_command_hub()
+		_push_heatmap_event(building.global_position, 4.5 if is_hub_b else 3.0, tid, &"hub_destroyed" if is_hub_b else &"building_destroyed")
 		if tid == int(Unit.Team.ENEMY):
 			enemy_structures_destroyed += 1
 		elif tid == int(Unit.Team.PLAYER):
@@ -1349,6 +1420,137 @@ func _format_duration(seconds: float) -> String:
 	var mins: int = total_s / 60
 	var secs: int = total_s % 60
 	return "%02d:%02d" % [mins, secs]
+
+
+func record_combat_heatmap_damage(world_pos: Vector2, victim_team: int) -> void:
+	if is_match_over or sandbox_mode_active:
+		return
+	var cx: int = int(floor(world_pos.x / 180.0))
+	var cy: int = int(floor(world_pos.y / 180.0))
+	var key: int = (cx + 2048) * 4096 + (cy + 2048)
+	var last_t: float = float(_heatmap_damage_throttle.get(key, -10.0))
+	if (match_elapsed - last_t) < 1.5:
+		return
+	_heatmap_damage_throttle[key] = match_elapsed
+	_push_heatmap_event(world_pos, 0.45, victim_team, &"damage")
+
+
+func _push_heatmap_event(world_pos: Vector2, weight: float, team_id: int, kind: StringName) -> void:
+	if combat_heatmap_events.size() >= MAX_HEATMAP_EVENTS:
+		# Merge into nearest low-weight damage sample to preserve memory cap cleanly
+		for ev: Dictionary in combat_heatmap_events:
+			if (ev.get("kind", &"") as StringName) == &"damage":
+				var ep: Vector2 = ev.get("pos", Vector2.ZERO) as Vector2
+				if ep.distance_squared_to(world_pos) <= 180.0 * 180.0:
+					ev["weight"] = minf(3.0, float(ev["weight"]) + weight * 0.5)
+					return
+		if kind == &"damage":
+			return
+		combat_heatmap_events.pop_front()
+	combat_heatmap_events.append({
+		"pos": world_pos,
+		"weight": weight,
+		"team": team_id,
+		"kind": kind,
+	})
+
+
+func _sample_macro_efficiency() -> void:
+	if not is_inside_tree() or is_match_over or sandbox_mode_active:
+		return
+	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	if econ == null:
+		return
+	var active_teams: Array[int] = [0, 1]
+	if TeamManager != null:
+		active_teams = TeamManager.get_active_teams()
+	for tid: int in active_teams:
+		if _eliminated_teams.has(tid):
+			continue
+		var bucket: Dictionary = _ensure_team_stat_bucket(tid)
+		var bw_used: int = econ.get_bandwidth_used(tid)
+		var bw_cap: int = econ.get_bandwidth_cap(tid)
+		if bw_cap > 0 and bw_cap < 200 and bw_used >= bw_cap:
+			bucket["supply_blocked_seconds"] = float(bucket["supply_blocked_seconds"]) + 1.0
+		var res: Dictionary = econ.get_resources(tid)
+		var total_flt: float = (
+			float(res.get(EconomyManager.RESOURCE_BIOMASS, 0))
+			+ float(res.get(EconomyManager.RESOURCE_SILICA, 0))
+			+ float(res.get(EconomyManager.RESOURCE_COMPUTE, 0))
+		)
+		bucket["resource_float_sum"] = float(bucket["resource_float_sum"]) + total_flt
+		bucket["resource_float_samples"] = int(bucket["resource_float_samples"]) + 1
+
+
+func _compute_macro_grade(supply_blocked_s: float, match_dur_s: float, avg_float: int, trade_ratio: float) -> String:
+	var blocked_pct: float = clampf(supply_blocked_s / maxf(1.0, match_dur_s), 0.0, 1.0)
+	var supply_score: float = clampf(40.0 - blocked_pct * 200.0, 0.0, 40.0)
+	var float_score: float = clampf(30.0 * (1.0 - maxf(0.0, float(avg_float - 350)) / 1250.0), 0.0, 30.0)
+	var trade_score: float = clampf((trade_ratio / 1.45) * 30.0, 0.0, 30.0)
+	var total: float = supply_score + float_score + trade_score
+	if total >= 84.0:
+		return "S"
+	if total >= 72.0:
+		return "A"
+	if total >= 58.0:
+		return "B"
+	if total >= 42.0:
+		return "C"
+	return "D"
+
+
+func _ensure_battle_heatmap_overlay() -> void:
+	if not is_inside_tree():
+		return
+	if _battle_heatmap_overlay == null or not is_instance_valid(_battle_heatmap_overlay):
+		var existing: Node2D = get_tree().get_first_node_in_group("battle_heatmap_overlay") as Node2D
+		if existing != null:
+			_battle_heatmap_overlay = existing
+		else:
+			_battle_heatmap_overlay = BATTLE_HEATMAP_OVERLAY_SCRIPT.new() as Node2D
+			_battle_heatmap_overlay.name = "BattleHeatmapOverlay"
+			var scene_root: Node = get_tree().current_scene
+			if scene_root != null:
+				scene_root.add_child(_battle_heatmap_overlay)
+			else:
+				add_child(_battle_heatmap_overlay)
+	if _battle_heatmap_overlay != null and _battle_heatmap_overlay.has_method("set_heatmap_events"):
+		_battle_heatmap_overlay.call("set_heatmap_events", combat_heatmap_events)
+		_battle_heatmap_overlay.call("set_heatmap_visible", false)
+
+
+func toggle_post_match_heatmap() -> bool:
+	_ensure_battle_heatmap_overlay()
+	if _battle_heatmap_overlay != null and _battle_heatmap_overlay.has_method("toggle_heatmap"):
+		return bool(_battle_heatmap_overlay.call("toggle_heatmap"))
+	return false
+
+
+func is_post_match_heatmap_visible() -> bool:
+	if _battle_heatmap_overlay != null and is_instance_valid(_battle_heatmap_overlay) and _battle_heatmap_overlay.has_method("is_heatmap_visible"):
+		return bool(_battle_heatmap_overlay.call("is_heatmap_visible"))
+	return false
+
+
+func _ensure_spectator_comparison_bar() -> void:
+	if not is_inside_tree() or sandbox_mode_active:
+		return
+	if TeamManager == null or not TeamManager.is_spectator_mode():
+		return
+	if _spectator_comparison_bar != null and is_instance_valid(_spectator_comparison_bar):
+		return
+	if get_tree().get_first_node_in_group("spectator_comparison_bar") != null:
+		return
+	var packed: PackedScene = load(SPECTATOR_BAR_SCENE_PATH) as PackedScene
+	if packed == null:
+		return
+	_spectator_comparison_bar = packed.instantiate() as CanvasLayer
+	if _spectator_comparison_bar != null:
+		var scene_root: Node = get_tree().current_scene
+		if scene_root != null:
+			scene_root.add_child(_spectator_comparison_bar)
+		else:
+			add_child(_spectator_comparison_bar)
 
 
 class MatchBootVeil extends Control:

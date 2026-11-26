@@ -105,12 +105,13 @@ func push_event(category: StringName, message: String, world_pos: Vector2, accen
 
 
 func _build_event_pill(category: StringName, message: String, world_pos: Vector2, accent: Color) -> PanelContainer:
+	var has_jump: bool = world_pos.is_finite()
 	var panel: PanelContainer = PanelContainer.new()
-	panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	panel.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP if has_jump else Control.MOUSE_FILTER_IGNORE
+	panel.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if has_jump else Control.CURSOR_ARROW
 	panel.custom_minimum_size = Vector2(220.0, 26.0)
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_END
-	panel.tooltip_text = "Click to center camera on event"
+	panel.tooltip_text = "Click to center camera on event" if has_jump else "AI Commander Transmission"
 
 	var sb_norm: StyleBoxFlat = _make_pill_style(accent, false)
 	var sb_hov: StyleBoxFlat = _make_pill_style(accent, true)
@@ -132,6 +133,8 @@ func _build_event_pill(category: StringName, message: String, world_pos: Vector2
 			tag_lbl.text = "OBJ"
 		&"economy":
 			tag_lbl.text = "TECH"
+		&"transmission":
+			tag_lbl.text = "RADIO"
 		_:
 			tag_lbl.text = "SYS"
 	hbox.add_child(tag_lbl)
@@ -147,28 +150,29 @@ func _build_event_pill(category: StringName, message: String, world_pos: Vector2
 	msg_lbl.add_theme_color_override("font_color", Color(0.90, 0.96, 0.99, 0.96))
 	hbox.add_child(msg_lbl)
 
-	var jump_lbl: Label = Label.new()
-	jump_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	jump_lbl.text = "◎"
-	jump_lbl.add_theme_font_size_override("font_size", 11)
-	jump_lbl.add_theme_color_override("font_color", Color(accent.r, accent.g, accent.b, 0.78))
-	hbox.add_child(jump_lbl)
+	if has_jump:
+		var jump_lbl: Label = Label.new()
+		jump_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		jump_lbl.text = "◎"
+		jump_lbl.add_theme_font_size_override("font_size", 11)
+		jump_lbl.add_theme_color_override("font_color", Color(accent.r, accent.g, accent.b, 0.78))
+		hbox.add_child(jump_lbl)
 
-	var target_pos: Vector2 = world_pos
-	var target_col: Color = accent
-	panel.gui_input.connect(func(ev: InputEvent) -> void:
-		if ev is InputEventMouseButton:
-			var mb: InputEventMouseButton = ev
-			if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
-				_jump_to_event(target_pos, target_col)
-				panel.accept_event()
-	)
-	panel.mouse_entered.connect(func() -> void:
-		panel.add_theme_stylebox_override("panel", sb_hov)
-	)
-	panel.mouse_exited.connect(func() -> void:
-		panel.add_theme_stylebox_override("panel", sb_norm)
-	)
+		var target_pos: Vector2 = world_pos
+		var target_col: Color = accent
+		panel.gui_input.connect(func(ev: InputEvent) -> void:
+			if ev is InputEventMouseButton:
+				var mb: InputEventMouseButton = ev
+				if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+					_jump_to_event(target_pos, target_col)
+					panel.accept_event()
+		)
+		panel.mouse_entered.connect(func() -> void:
+			panel.add_theme_stylebox_override("panel", sb_hov)
+		)
+		panel.mouse_exited.connect(func() -> void:
+			panel.add_theme_stylebox_override("panel", sb_norm)
+		)
 
 	return panel
 

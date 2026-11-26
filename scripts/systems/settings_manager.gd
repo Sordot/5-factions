@@ -93,6 +93,8 @@ var show_alert_toasts: bool = true
 var camera_shake_enabled: bool = true
 var battle_scars_enabled: bool = true
 var build_grid_snap_enabled: bool = false
+var show_combat_hit_feedback: bool = true
+var show_ai_transmissions: bool = true
 
 # Audio preferences
 var master_volume: float = 0.72
@@ -191,6 +193,8 @@ func load_settings() -> void:
 	camera_shake_enabled = bool(cfg.get_value("gameplay", "camera_shake_enabled", true))
 	battle_scars_enabled = bool(cfg.get_value("gameplay", "battle_scars_enabled", true))
 	build_grid_snap_enabled = bool(cfg.get_value("gameplay", "build_grid_snap_enabled", false))
+	show_combat_hit_feedback = bool(cfg.get_value("gameplay", "show_combat_hit_feedback", true))
+	show_ai_transmissions = bool(cfg.get_value("gameplay", "show_ai_transmissions", true))
 
 	master_volume = clampf(float(cfg.get_value("audio", "master_volume", 0.72)), 0.0, 1.0)
 	sfx_volume = clampf(float(cfg.get_value("audio", "sfx_volume", 0.85)), 0.0, 1.0)
@@ -273,6 +277,8 @@ func save_settings() -> void:
 	cfg.set_value("gameplay", "camera_shake_enabled", camera_shake_enabled)
 	cfg.set_value("gameplay", "battle_scars_enabled", battle_scars_enabled)
 	cfg.set_value("gameplay", "build_grid_snap_enabled", build_grid_snap_enabled)
+	cfg.set_value("gameplay", "show_combat_hit_feedback", show_combat_hit_feedback)
+	cfg.set_value("gameplay", "show_ai_transmissions", show_ai_transmissions)
 
 	cfg.set_value("audio", "master_volume", master_volume)
 	cfg.set_value("audio", "sfx_volume", sfx_volume)
@@ -333,7 +339,9 @@ func set_gameplay_settings(
 	p_attack_move_mode: Variant = null,
 	p_smart_box_select_enabled: Variant = null,
 	p_battle_scars_enabled: Variant = null,
-	p_build_grid_snap_enabled: Variant = null
+	p_build_grid_snap_enabled: Variant = null,
+	p_show_combat_hit_feedback: Variant = null,
+	p_show_ai_transmissions: Variant = null
 ) -> void:
 	health_bar_mode = clampi(p_health_bar_mode, 0, 2)
 	show_alert_toasts = p_show_alert_toasts
@@ -349,6 +357,10 @@ func set_gameplay_settings(
 		battle_scars_enabled = bool(p_battle_scars_enabled)
 	if p_build_grid_snap_enabled is bool:
 		build_grid_snap_enabled = bool(p_build_grid_snap_enabled)
+	if p_show_combat_hit_feedback is bool:
+		show_combat_hit_feedback = bool(p_show_combat_hit_feedback)
+	if p_show_ai_transmissions is bool:
+		show_ai_transmissions = bool(p_show_ai_transmissions)
 	save_settings()
 	settings_changed.emit(&"gameplay")
 
