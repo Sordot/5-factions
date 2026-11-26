@@ -28,6 +28,14 @@ extends CanvasLayer
 var _active_tab: StringName = &"summary"
 var _active_metric: StringName = TimelineGraph.METRIC_ARMY_VALUE
 var _is_inspecting_battlefield: bool = false
+var _is_mode_result_active: bool = false
+var _active_result_mode: StringName = &""
+var _mode_result_box: VBoxContainer = null
+var _medal_emblem: MedalEmblemControl = null
+var _new_best_label: Label = null
+var _mode_stats_grid: GridContainer = null
+var _btn_continue_endless: Button = null
+var _btn_next_drill: Button = null
 
 
 func _ready() -> void:
@@ -88,10 +96,97 @@ func _ready() -> void:
 		btn_banner_main_menu.pressed.connect(_on_main_menu_pressed)
 	_set_active_tab(&"summary")
 	_set_active_metric(TimelineGraph.METRIC_ARMY_VALUE)
+	_build_mode_result_widgets()
+
+
+func _build_mode_result_widgets() -> void:
+	var modal_vbox: VBoxContainer = get_node_or_null("RootControl/CenterContainer/ModalPanel/VBox") as VBoxContainer
+	if modal_vbox == null:
+		return
+
+	_mode_result_box = VBoxContainer.new()
+	_mode_result_box.name = "ModeResultBox"
+	_mode_result_box.visible = false
+	_mode_result_box.add_theme_constant_override("separation", 6)
+
+	var emblem_row: HBoxContainer = HBoxContainer.new()
+	emblem_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	emblem_row.add_theme_constant_override("separation", 12)
+	_mode_result_box.add_child(emblem_row)
+
+	_medal_emblem = MedalEmblemControl.new()
+	_medal_emblem.custom_minimum_size = Vector2(76.0, 76.0)
+	emblem_row.add_child(_medal_emblem)
+
+	_new_best_label = Label.new()
+	_new_best_label.visible = false
+	_new_best_label.text = "★ NEW PERSONAL BEST!"
+	_new_best_label.add_theme_font_size_override("font_size", 13)
+	_new_best_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.28, 1.0))
+	emblem_row.add_child(_new_best_label)
+
+	_mode_stats_grid = GridContainer.new()
+	_mode_stats_grid.columns = 2
+	_mode_stats_grid.add_theme_constant_override("h_separation", 24)
+	_mode_stats_grid.add_theme_constant_override("v_separation", 4)
+	_mode_result_box.add_child(_mode_stats_grid)
+
+	var grid_idx: int = scoreboard_grid.get_index() if scoreboard_grid != null else modal_vbox.get_child_count()
+	modal_vbox.add_child(_mode_result_box)
+	modal_vbox.move_child(_mode_result_box, grid_idx)
+
+	var btn_row: HBoxContainer = get_node_or_null("RootControl/CenterContainer/ModalPanel/VBox/ButtonRow") as HBoxContainer
+	if btn_row != null:
+		_btn_continue_endless = Button.new()
+		_btn_continue_endless.visible = false
+		_btn_continue_endless.custom_minimum_size = Vector2(148.0, 32.0)
+		_btn_continue_endless.focus_mode = Control.FOCUS_NONE
+		_btn_continue_endless.text = "Continue Endless"
+		_btn_continue_endless.modulate = Color(1.0, 0.82, 0.30, 1.0)
+		_btn_continue_endless.pressed.connect(_on_continue_endless_pressed)
+		btn_row.add_child(_btn_continue_endless)
+		btn_row.move_child(_btn_continue_endless, 0)
+
+		_btn_next_drill = Button.new()
+		_btn_next_drill.visible = false
+		_btn_next_drill.custom_minimum_size = Vector2(132.0, 32.0)
+		_btn_next_drill.focus_mode = Control.FOCUS_NONE
+		_btn_next_drill.text = "Next Drill"
+		_btn_next_drill.modulate = Color(0.36, 0.98, 0.88, 1.0)
+		_btn_next_drill.pressed.connect(_on_next_drill_pressed)
+		btn_row.add_child(_btn_next_drill)
+		btn_row.move_child(_btn_next_drill, 2)
+
+
+func _on_continue_endless_pressed() -> void:
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	if is_inside_tree():
+		var match_mgr: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+		if match_mgr != null and match_mgr.has_method("continue_holdout_endless"):
+			match_mgr.call("continue_holdout_endless")
+
+
+func _on_next_drill_pressed() -> void:
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+	if is_inside_tree():
+		var match_mgr: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+		if match_mgr != null and match_mgr.has_method("launch_next_gauntlet_drill"):
+			match_mgr.call("launch_next_gauntlet_drill")
 
 
 func _input(event: InputEvent) -> void:
-	if not _is_inspecting_battlefield or event.is_echo():
+	if event.is_echo():
+		return
+	if _is_mode_result_active and is_summary_visible() and _active_result_mode == &"gauntlet":
+		if event is InputEventKey:
+			var r_ev: InputEventKey = event as InputEventKey
+			if r_ev.pressed and r_ev.keycode == KEY_R:
+				get_viewport().set_input_as_handled()
+				_on_play_again_pressed()
+				return
+	if not _is_inspecting_battlefield:
 		return
 	if event.is_action_pressed("cmd_cancel"):
 		get_viewport().set_input_as_handled()
@@ -175,6 +270,9 @@ func return_to_scoreboard() -> void:
 
 
 func show_summary(stats: Dictionary) -> void:
+	_set_skirmish_mode_visibility(true)
+	_is_mode_result_active = false
+	_active_result_mode = &""
 	Engine.time_scale = 1.0
 	var is_victory: bool = bool(stats.get("is_victory", false))
 	var is_spectator: bool = bool(stats.get("is_spectator", false))
@@ -210,6 +308,96 @@ func show_summary(stats: Dictionary) -> void:
 	_populate_scoreboard(stats)
 	_populate_timeline_graph(stats)
 	_set_active_tab(&"summary")
+
+	if root_control != null:
+		root_control.visible = true
+	if SettingsManager != null:
+		SettingsManager.refresh_mouse_mode()
+
+
+func _set_skirmish_mode_visibility(is_skirmish: bool) -> void:
+	var meta_strip: Control = get_node_or_null("RootControl/CenterContainer/ModalPanel/VBox/MetaStrip") as Control
+	var tab_row: Control = get_node_or_null("RootControl/CenterContainer/ModalPanel/VBox/TabRow") as Control
+	if meta_strip != null:
+		meta_strip.visible = is_skirmish
+	if tab_row != null:
+		tab_row.visible = is_skirmish
+	if mutators_label != null and not is_skirmish:
+		mutators_label.visible = false
+	if scoreboard_grid != null:
+		scoreboard_grid.visible = is_skirmish
+	if timeline_tab_box != null and not is_skirmish:
+		timeline_tab_box.visible = false
+	if _mode_result_box != null:
+		_mode_result_box.visible = not is_skirmish
+	if btn_view_battlefield != null:
+		btn_view_battlefield.visible = is_skirmish
+	if btn_sandbox_mode != null:
+		btn_sandbox_mode.visible = is_skirmish
+	if _btn_continue_endless != null and is_skirmish:
+		_btn_continue_endless.visible = false
+	if _btn_next_drill != null and is_skirmish:
+		_btn_next_drill.visible = false
+	if btn_play_again != null and is_skirmish:
+		btn_play_again.text = "Rematch"
+
+
+func show_mode_summary(result: Dictionary) -> void:
+	Engine.time_scale = 1.0
+	_set_skirmish_mode_visibility(false)
+	_is_mode_result_active = true
+	_active_result_mode = result.get("mode", &"gauntlet") as StringName
+
+	var is_victory: bool = bool(result.get("is_victory", false))
+	var medal: int = int(result.get("medal", ModeRecords.Medal.NONE))
+	var is_new_best: bool = bool(result.get("is_new_best", false))
+	var can_endless: bool = bool(result.get("can_continue_endless", false))
+
+	if AudioManager != null:
+		AudioManager.play_sfx(&"match_victory" if is_victory else &"match_defeat", -2.0, 0.0)
+
+	if title_label != null:
+		title_label.text = String(result.get("title", "VICTORY" if is_victory else "DEFEAT"))
+		var title_col: Color = ModeRecords.get_medal_color(medal) if medal > ModeRecords.Medal.NONE else (Color(0.22, 0.98, 0.90, 1.0) if is_victory else Color(1.0, 0.36, 0.30, 1.0))
+		title_label.add_theme_color_override("font_color", title_col)
+	if subtitle_label != null:
+		subtitle_label.text = String(result.get("subtitle", ""))
+
+	if _medal_emblem != null:
+		_medal_emblem.medal = medal
+		_medal_emblem.succeeded = is_victory
+		_medal_emblem.queue_redraw()
+	if _new_best_label != null:
+		_new_best_label.visible = is_new_best
+
+	if _mode_stats_grid != null:
+		for child: Node in _mode_stats_grid.get_children():
+			child.queue_free()
+		var rows: Array = result.get("rows", []) as Array
+		for raw_r: Variant in rows:
+			if not (raw_r is Dictionary):
+				continue
+			var r_dict: Dictionary = raw_r as Dictionary
+			var l_lbl: Label = Label.new()
+			l_lbl.text = String(r_dict.get("label", ""))
+			l_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			l_lbl.add_theme_font_size_override("font_size", 12)
+			l_lbl.add_theme_color_override("font_color", Color(0.68, 0.84, 0.90, 0.92))
+			_mode_stats_grid.add_child(l_lbl)
+
+			var v_lbl: Label = Label.new()
+			v_lbl.text = String(r_dict.get("value", "--"))
+			v_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			v_lbl.add_theme_font_size_override("font_size", 12)
+			v_lbl.add_theme_color_override("font_color", Color(0.92, 0.98, 1.0, 0.96))
+			_mode_stats_grid.add_child(v_lbl)
+
+	if _btn_continue_endless != null:
+		_btn_continue_endless.visible = can_endless
+	if _btn_next_drill != null:
+		_btn_next_drill.visible = (_active_result_mode == &"gauntlet")
+	if btn_play_again != null:
+		btn_play_again.text = "Retry Drill [R]" if _active_result_mode == &"gauntlet" else "Rematch"
 
 	if root_control != null:
 		root_control.visible = true
@@ -405,6 +593,7 @@ func _add_multi_custom_row(metric: String, entries: Array[Dictionary], texts: Ar
 
 func hide_summary() -> void:
 	_is_inspecting_battlefield = false
+	_is_mode_result_active = false
 	_sync_heatmap_button(false)
 	if root_control != null:
 		root_control.visible = false
@@ -467,3 +656,48 @@ func _on_sandbox_mode_pressed() -> void:
 		var match_mgr: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
 		if match_mgr != null:
 			match_mgr.enter_sandbox_mode()
+
+
+class MedalEmblemControl extends Control:
+	var medal: int = ModeRecords.Medal.NONE
+	var succeeded: bool = false
+
+	func _draw() -> void:
+		var c: Vector2 = size * 0.5
+		var r: float = minf(size.x, size.y) * 0.44
+		var accent: Color = ModeRecords.get_medal_color(medal)
+		if medal == ModeRecords.Medal.NONE and not succeeded:
+			accent = Color(0.92, 0.36, 0.30, 0.92)
+		var fill_col: Color = Color(accent.r * 0.22, accent.g * 0.22, accent.b * 0.24, 0.94)
+
+		# Octagonal Technozen medal crest
+		var pts: PackedVector2Array = PackedVector2Array()
+		var inner_pts: PackedVector2Array = PackedVector2Array()
+		for i: int in range(8):
+			var ang: float = (TAU * float(i) / 8.0) - (PI / 8.0)
+			pts.append(c + Vector2(cos(ang), sin(ang)) * r)
+			inner_pts.append(c + Vector2(cos(ang), sin(ang)) * (r * 0.78))
+		draw_colored_polygon(pts, fill_col)
+		draw_polyline(pts + PackedVector2Array([pts[0]]), accent, 2.5, true)
+		draw_polyline(inner_pts + PackedVector2Array([inner_pts[0]]), Color(accent.r, accent.g, accent.b, 0.45), 1.2, true)
+
+		# Inner emblem glyph: star for Gold/Silver/Bronze, X for failed
+		if medal > ModeRecords.Medal.NONE:
+			var star: PackedVector2Array = PackedVector2Array()
+			var spikes: int = 5
+			for i: int in range(spikes * 2):
+				var rad: float = (r * 0.44) if (i % 2 == 0) else (r * 0.20)
+				var ang: float = -PI * 0.5 + (TAU * float(i) / float(spikes * 2))
+				star.append(c + Vector2(cos(ang), sin(ang)) * rad)
+			draw_colored_polygon(star, Color(accent.r, accent.g, accent.b, 0.92))
+		elif succeeded:
+			draw_circle(c, r * 0.28, accent)
+		else:
+			var d: float = r * 0.30
+			draw_line(c + Vector2(-d, -d), c + Vector2(d, d), accent, 3.0, true)
+			draw_line(c + Vector2(d, -d), c + Vector2(-d, d), accent, 3.0, true)
+
+		var font: Font = ThemeDB.fallback_font
+		var tag: String = ModeRecords.get_medal_label(medal) if medal > ModeRecords.Medal.NONE else ("CLEAR" if succeeded else "FAIL")
+		var t_sz: Vector2 = font.get_string_size(tag, HORIZONTAL_ALIGNMENT_CENTER, -1, 9)
+		draw_string(font, Vector2(c.x - t_sz.x * 0.5, size.y - 2.0), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, accent)

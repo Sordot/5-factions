@@ -17,6 +17,12 @@ enum MatchMode {
 	AI_VS_AI = 1,
 }
 
+enum GameMode {
+	SKIRMISH = 0,
+	UPLINK_HOLDOUT = 1,
+	MICRO_GAUNTLET = 2,
+}
+
 const MAP_SKIRMISH_01: String = "res://scenes/maps/skirmish_arena_01.tscn"
 const MAP_SKIRMISH_02: String = "res://scenes/maps/skirmish_arena_02.tscn"
 const MAP_SKIRMISH_03: String = "res://scenes/maps/skirmish_arena_03.tscn"
@@ -42,6 +48,56 @@ const TEAM_PRESET_CUSTOM: StringName = &"custom"
 
 const ALLIANCE_LETTERS: Array = ["A", "B", "C", "D"]
 const UPLINK_VICTORY_DURATION: float = 180.0
+
+const HOLDOUT_ENEMY_MIXED: StringName = &"mixed"
+const DRILL_STUTTER_STEP: StringName = &"stutter_step_bulwarks"
+const DRILL_SIEGE_BREACH: StringName = &"siege_line_breach"
+const DRILL_OPTIMAL_BOOM: StringName = &"optimal_3min_boom"
+
+const GAUNTLET_DRILLS: Array = [
+	{
+		"id": DRILL_STUTTER_STEP,
+		"title": "Stutter-Step vs. Bulwarks",
+		"tag": "60s Tactical Micro",
+		"time_limit": 60.0,
+		"scene_path": MAP_SANDBOX_TESTBED,
+		"fixed_faction": &"genesis_v2",
+		"enemy_faction": &"monolith_os",
+		"lower_is_better": true,
+		"summary": "Kite 5 Bulwarks with Clone Troopers, Adrenal Surge, Symbiotes & Lance-Rigs.",
+		"thresholds": "GOLD <=32s (7+ alive) • SILVER <=45s (4+ alive) • BRONZE <=60s",
+	},
+	{
+		"id": DRILL_SIEGE_BREACH,
+		"title": "Siege-Line Breach",
+		"tag": "90s Assault Micro",
+		"time_limit": 90.0,
+		"scene_path": MAP_SANDBOX_TESTBED,
+		"fixed_faction": &"monolith_os",
+		"enemy_faction": &"genesis_v2",
+		"lower_is_better": true,
+		"summary": "Breach barricades, shield-tank turrets/mortars, deploy Anvils & kill Nexus Vat.",
+		"thresholds": "GOLD <=50s (5+ alive) • SILVER <=70s (3+ alive) • BRONZE <=90s",
+	},
+	{
+		"id": DRILL_OPTIMAL_BOOM,
+		"title": "Optimal 3-Minute Boom",
+		"tag": "180s Macro Economy",
+		"time_limit": 180.0,
+		"scene_path": MAP_SKIRMISH_01,
+		"fixed_faction": &"",
+		"enemy_faction": &"monolith_os",
+		"lower_is_better": false,
+		"summary": "Maximize gathered resources, army value & Tier 2 tech in 3:00 with zero supply block.",
+		"thresholds": "GOLD >=4,200 + T2 • SILVER >=3,000 • BRONZE >=1,800",
+	},
+]
+
+# Milestone 3.5b: Alternate game mode state
+var active_game_mode: GameMode = GameMode.SKIRMISH
+var holdout_enemy_faction_id: StringName = &"monolith_os"
+var holdout_difficulty: AIDifficulty = AIDifficulty.STANDARD
+var selected_gauntlet_drill_id: StringName = DRILL_STUTTER_STEP
 
 var selected_faction_id: StringName = &"genesis_v2"
 var selected_map_path: String = MAP_SKIRMISH_01
@@ -364,6 +420,129 @@ func set_lobby_config(
 	mutator_no_fog = p_no_fog
 	mutator_fast_build = p_fast_build
 	uplink_victory_enabled = p_uplink_victory
+	active_game_mode = GameMode.SKIRMISH
+	configured_from_menu = true
+	if TeamManager != null:
+		TeamManager.configure_from_game_config()
+
+
+func is_holdout_mode() -> bool:
+	return active_game_mode == GameMode.UPLINK_HOLDOUT
+
+
+func is_gauntlet_mode() -> bool:
+	return active_game_mode == GameMode.MICRO_GAUNTLET
+
+
+func is_special_mode() -> bool:
+	return active_game_mode != GameMode.SKIRMISH
+
+
+func get_gauntlet_drill_info(drill_id: StringName = &"") -> Dictionary:
+	var target: StringName = selected_gauntlet_drill_id if drill_id == &"" else drill_id
+	for entry: Dictionary in GAUNTLET_DRILLS:
+		if (entry["id"] as StringName) == target:
+			return entry
+	return GAUNTLET_DRILLS[0] as Dictionary
+
+
+func get_next_gauntlet_drill_id(drill_id: StringName = &"") -> StringName:
+	var target: StringName = selected_gauntlet_drill_id if drill_id == &"" else drill_id
+	for i: int in range(GAUNTLET_DRILLS.size()):
+		if ((GAUNTLET_DRILLS[i] as Dictionary)["id"] as StringName) == target:
+			var next_idx: int = (i + 1) % GAUNTLET_DRILLS.size()
+			return (GAUNTLET_DRILLS[next_idx] as Dictionary)["id"] as StringName
+	return DRILL_STUTTER_STEP
+
+
+func set_holdout_config(
+	player_faction_id: StringName,
+	enemy_faction_id: StringName,
+	difficulty: int = AIDifficulty.STANDARD
+) -> void:
+	_ensure_default_slots()
+	active_game_mode = GameMode.UPLINK_HOLDOUT
+	selected_map_path = MAP_SKIRMISH_01
+	selected_faction_id = player_faction_id if player_faction_id != &"" else &"genesis_v2"
+	holdout_enemy_faction_id = enemy_faction_id if enemy_faction_id != &"" else &"monolith_os"
+	holdout_difficulty = clampi(difficulty, 0, 2) as AIDifficulty
+	player_count = 2
+	team_preset = TEAM_PRESET_1V1
+	match_mode = MatchMode.PLAYER_VS_AI
+	aggro_ai_enabled = false
+	resource_preset = PRESET_STANDARD
+	mutator_high_yield = false
+	mutator_no_fog = false
+	mutator_fast_build = false
+	uplink_victory_enabled = false
+
+	var resolved_enemy_fac: StringName = holdout_enemy_faction_id
+	if resolved_enemy_fac == HOLDOUT_ENEMY_MIXED:
+		resolved_enemy_fac = &"monolith_os" if selected_faction_id == &"genesis_v2" else &"genesis_v2"
+	slot_configs[0] = {
+		"team_id": 0,
+		"alliance_id": 0,
+		"controller_type": 0,
+		"faction_id": selected_faction_id,
+		"ai_difficulty": int(holdout_difficulty),
+		"ai_playstyle": int(AIPlaystyle.BALANCED),
+	}
+	slot_configs[1] = {
+		"team_id": 1,
+		"alliance_id": 1,
+		"controller_type": 1,
+		"faction_id": resolved_enemy_fac,
+		"ai_difficulty": int(holdout_difficulty),
+		"ai_playstyle": int(AIPlaystyle.BALANCED),
+	}
+	configured_from_menu = true
+	if TeamManager != null:
+		TeamManager.configure_from_game_config()
+
+
+func set_gauntlet_config(
+	drill_id: StringName,
+	player_faction_id: StringName = &"genesis_v2"
+) -> void:
+	_ensure_default_slots()
+	var info: Dictionary = get_gauntlet_drill_info(drill_id)
+	active_game_mode = GameMode.MICRO_GAUNTLET
+	selected_gauntlet_drill_id = info["id"] as StringName
+	selected_map_path = String(info["scene_path"])
+
+	var fixed_fac: StringName = info.get("fixed_faction", &"") as StringName
+	var resolved_player_fac: StringName = fixed_fac if fixed_fac != &"" else (player_faction_id if player_faction_id != &"" else &"genesis_v2")
+	var resolved_enemy_fac: StringName = info.get("enemy_faction", &"monolith_os") as StringName
+	if selected_gauntlet_drill_id == DRILL_OPTIMAL_BOOM:
+		resolved_enemy_fac = &"monolith_os" if resolved_player_fac == &"genesis_v2" else &"genesis_v2"
+
+	selected_faction_id = resolved_player_fac
+	player_count = 2
+	team_preset = TEAM_PRESET_1V1
+	match_mode = MatchMode.PLAYER_VS_AI
+	aggro_ai_enabled = false
+	resource_preset = PRESET_STANDARD
+	mutator_high_yield = false
+	mutator_no_fog = (selected_gauntlet_drill_id != DRILL_OPTIMAL_BOOM)
+	mutator_fast_build = false
+	uplink_victory_enabled = false
+
+	slot_configs[0] = {
+		"team_id": 0,
+		"alliance_id": 0,
+		"controller_type": 0,
+		"faction_id": resolved_player_fac,
+		"ai_difficulty": int(AIDifficulty.STANDARD),
+		"ai_playstyle": int(AIPlaystyle.BALANCED),
+	}
+	slot_configs[1] = {
+		"team_id": 1,
+		"alliance_id": 1,
+		"controller_type": 1,
+		"faction_id": resolved_enemy_fac,
+		"ai_difficulty": int(AIDifficulty.STANDARD),
+		"ai_playstyle": int(AIPlaystyle.BALANCED),
+	}
 	configured_from_menu = true
 	if TeamManager != null:
 		TeamManager.configure_from_game_config()

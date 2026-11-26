@@ -63,9 +63,13 @@ var _heatmap_damage_throttle: Dictionary = {}
 var _macro_sample_timer: float = 0.0
 var _battle_heatmap_overlay: Node2D = null
 var _spectator_comparison_bar: CanvasLayer = null
+var _special_mode_controller: Node = null
 
 const BATTLE_HEATMAP_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/battle_heatmap_overlay.gd")
 const SPECTATOR_BAR_SCENE_PATH: String = "res://ui/hud/spectator_comparison_bar.tscn"
+const MATCH_END_OVERLAY_SCENE_PATH: String = "res://ui/hud/match_end_overlay.tscn"
+const HOLDOUT_CONTROLLER_SCRIPT: GDScript = preload("res://scripts/systems/holdout_mode_controller.gd")
+const GAUNTLET_CONTROLLER_SCRIPT: GDScript = preload("res://scripts/systems/gauntlet_mode_controller.gd")
 const MAX_HEATMAP_EVENTS: int = 800
 
 
@@ -79,6 +83,8 @@ func _ready() -> void:
 	_team_last_core_pos.clear()
 	_event_dedupe_times.clear()
 	if GameConfig != null and GameConfig.configured_from_menu:
+		if GameConfig.is_special_mode():
+			sandbox_mode_active = false
 		aggro_ai_enabled = GameConfig.aggro_ai_enabled
 		if TeamManager != null:
 			TeamManager.configure_from_game_config()
@@ -121,15 +127,106 @@ func _initialize_match_runtime() -> void:
 	if not is_inside_tree():
 		return
 	_ensure_pause_menu()
-	_bootstrap_skirmish_teams()
-	_center_camera_on_local_base()
-	_ensure_ai_commanders()
+	var is_holdout: bool = GameConfig != null and GameConfig.is_holdout_mode()
+	var is_gauntlet: bool = GameConfig != null and GameConfig.is_gauntlet_mode()
+	var is_boom_drill: bool = is_gauntlet and GameConfig.selected_gauntlet_drill_id == GameConfig.DRILL_OPTIMAL_BOOM
+
+	if is_holdout or is_boom_drill or not is_gauntlet:
+		_bootstrap_skirmish_teams()
+		_center_camera_on_local_base()
+
+	if is_holdout:
+		_start_holdout_controller()
+	elif is_gauntlet:
+		_start_gauntlet_controller()
+	else:
+		_ensure_ai_commanders()
+
 	_hook_initial_entities()
 	_hook_economy_manager()
-	_ensure_spectator_comparison_bar()
+	if not is_holdout and not is_gauntlet:
+		_ensure_spectator_comparison_bar()
 	_record_timeline_sample()
-	_schedule_starting_worker_dispatch()
-	_play_match_start_boot_sequence()
+	if is_holdout or is_boom_drill or not is_gauntlet:
+		_schedule_starting_worker_dispatch()
+	if not is_gauntlet:
+		_play_match_start_boot_sequence()
+
+
+func _start_holdout_controller() -> void:
+	if _special_mode_controller != null and is_instance_valid(_special_mode_controller):
+		_special_mode_controller.queue_free()
+	var ctrl: HoldoutModeController = HOLDOUT_CONTROLLER_SCRIPT.new() as HoldoutModeController
+	ctrl.name = "HoldoutModeController"
+	add_child(ctrl)
+	_special_mode_controller = ctrl
+	ctrl.setup(self)
+
+
+func _start_gauntlet_controller() -> void:
+	if _special_mode_controller != null and is_instance_valid(_special_mode_controller):
+		_special_mode_controller.queue_free()
+	var ctrl: GauntletModeController = GAUNTLET_CONTROLLER_SCRIPT.new() as GauntletModeController
+	ctrl.name = "GauntletModeController"
+	add_child(ctrl)
+	_special_mode_controller = ctrl
+	ctrl.setup(self)
+
+
+func is_special_mode_active() -> bool:
+	return _special_mode_controller != null and is_instance_valid(_special_mode_controller)
+
+
+func get_team_supply_blocked_seconds(tid: int) -> float:
+	if not _team_stats.has(tid):
+		return 0.0
+	return float((_team_stats[tid] as Dictionary).get("supply_blocked_seconds", 0.0))
+
+
+func finish_special_mode(is_victory: bool, result: Dictionary, pause_for_endless: bool = false) -> void:
+	if is_match_over:
+		return
+	is_match_over = true
+	reset_game_speed()
+	if pause_for_endless and is_inside_tree():
+		get_tree().paused = true
+	if SettingsManager != null:
+		SettingsManager.set_gameplay_cursor_active(false)
+	var sel_end: Node = get_tree().get_first_node_in_group("selection_controller") if is_inside_tree() else null
+	if sel_end != null and is_instance_valid(sel_end) and sel_end.has_method("reset_command_cursors"):
+		sel_end.call("reset_command_cursors")
+	else:
+		Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
+		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	var overlay: Node = _get_end_overlay(true)
+	if overlay != null and overlay.has_method("show_mode_summary"):
+		overlay.call("show_mode_summary", result)
+
+
+func resume_from_special_mode_pause() -> void:
+	is_match_over = false
+	if is_inside_tree():
+		get_tree().paused = false
+	var overlay: Node = _get_end_overlay(false)
+	if overlay != null and overlay.has_method("hide_summary"):
+		overlay.call("hide_summary")
+	if SettingsManager != null:
+		SettingsManager.set_gameplay_cursor_active(true)
+
+
+func continue_holdout_endless() -> void:
+	if _special_mode_controller != null and is_instance_valid(_special_mode_controller) and _special_mode_controller.has_method("continue_endless"):
+		_special_mode_controller.call("continue_endless")
+
+
+func launch_next_gauntlet_drill() -> void:
+	if GameConfig == null or not is_inside_tree():
+		return
+	var next_id: StringName = GameConfig.get_next_gauntlet_drill_id(GameConfig.selected_gauntlet_drill_id)
+	var p_fac: StringName = GameConfig.selected_faction_id
+	_prepare_clean_scene_transition()
+	GameConfig.set_gauntlet_config(next_id, p_fac)
+	get_tree().change_scene_to_file(GameConfig.selected_map_path)
 
 
 func _is_sandbox_testbed_scene() -> bool:
@@ -928,6 +1025,9 @@ func _prepare_clean_scene_transition() -> void:
 	if _spectator_comparison_bar != null and is_instance_valid(_spectator_comparison_bar):
 		_spectator_comparison_bar.queue_free()
 		_spectator_comparison_bar = null
+	if _special_mode_controller != null and is_instance_valid(_special_mode_controller):
+		_special_mode_controller.queue_free()
+		_special_mode_controller = null
 	_set_inspection_nodes_process_mode(Node.PROCESS_MODE_INHERIT)
 	Engine.time_scale = 1.0
 	if is_inside_tree():
@@ -967,7 +1067,7 @@ func _set_inspection_nodes_process_mode(mode: Node.ProcessMode) -> void:
 
 
 func evaluate_match_state() -> void:
-	if is_match_over or sandbox_mode_active or not is_inside_tree():
+	if is_match_over or sandbox_mode_active or is_special_mode_active() or not is_inside_tree():
 		return
 
 	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
@@ -1019,7 +1119,7 @@ func evaluate_match_state() -> void:
 
 
 func is_uplink_victory_enabled() -> bool:
-	if sandbox_mode_active:
+	if sandbox_mode_active or is_special_mode_active():
 		return false
 	if GameConfig != null:
 		return GameConfig.uplink_victory_enabled
@@ -1405,13 +1505,26 @@ func _on_building_destroyed(building: Building) -> void:
 	evaluate_match_state()
 
 
-func _get_end_overlay() -> Node:
+func _get_end_overlay(create_if_missing: bool = false) -> Node:
 	if not match_end_overlay_path.is_empty():
 		var direct: Node = get_node_or_null(match_end_overlay_path)
 		if direct != null:
 			return direct
 	if is_inside_tree():
-		return get_tree().get_first_node_in_group("match_end_overlay")
+		var found: Node = get_tree().get_first_node_in_group("match_end_overlay")
+		if found != null:
+			return found
+		if create_if_missing:
+			var packed: PackedScene = load(MATCH_END_OVERLAY_SCENE_PATH) as PackedScene
+			if packed != null:
+				var inst: Node = packed.instantiate()
+				if inst != null:
+					var scene_root: Node = get_tree().current_scene
+					if scene_root != null:
+						scene_root.add_child(inst)
+					else:
+						add_child(inst)
+					return inst
 	return null
 
 

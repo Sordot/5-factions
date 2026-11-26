@@ -358,60 +358,97 @@ size_flags_horizontal = 0
 
 [node name="ConfigVBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel"]
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 3
 
 [node name="ConfigHeader" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.28, 0.94, 0.9, 1)
 theme_override_font_sizes/font_size = 14
 text = "SKIRMISH MATCH SETUP"
 
+[node name="ModeTabRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="BtnModeSkirmish" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/ModeTabRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "SKIRMISH"
+
+[node name="BtnModeHoldout" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/ModeTabRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "HOLDOUT"
+
+[node name="BtnModeGauntlet" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/ModeTabRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "GAUNTLET"
+
 [node name="Sep1" type="HSeparator" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 layout_mode = 2
 
-[node name="MapLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="SkirmishConfigBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="MapLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
 theme_override_font_sizes/font_size = 10
 text = "BATTLEFIELD MAP"
 
-[node name="MapOption" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="MapOption" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 26)
+custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 11
 clip_text = true
 fit_to_longest_item = false
 
-[node name="MatchFormatHeaderRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="MatchFormatHeaderRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="PlayersLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MatchFormatHeaderRow"]
+[node name="PlayersLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/MatchFormatHeaderRow"]
 custom_minimum_size = Vector2(146, 0)
 layout_mode = 2
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
 theme_override_font_sizes/font_size = 10
 text = "PLAYERS"
 
-[node name="PresetLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MatchFormatHeaderRow"]
+[node name="PresetLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/MatchFormatHeaderRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
 theme_override_font_sizes/font_size = 10
 text = "TEAM FORMAT"
 
-[node name="MatchFormatRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="MatchFormatRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="PlayerCountRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MatchFormatRow"]
+[node name="PlayerCountRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/MatchFormatRow"]
 custom_minimum_size = Vector2(146, 0)
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="BtnPlayers2" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MatchFormatRow/PlayerCountRow"]
+[node name="BtnPlayers2" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/MatchFormatRow/PlayerCountRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(44, 24)
 layout_mode = 2
@@ -420,7 +457,7 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "2P"
 
-[node name="BtnPlayers3" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MatchFormatRow/PlayerCountRow"]
+[node name="BtnPlayers3" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/MatchFormatRow/PlayerCountRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(44, 24)
 layout_mode = 2
@@ -429,7 +466,7 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "3P"
 
-[node name="BtnPlayers4" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MatchFormatRow/PlayerCountRow"]
+[node name="BtnPlayers4" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/MatchFormatRow/PlayerCountRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(44, 24)
 layout_mode = 2
@@ -438,7 +475,7 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "4P"
 
-[node name="OptTeamPreset" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MatchFormatRow"]
+[node name="OptTeamPreset" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/MatchFormatRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
@@ -448,18 +485,18 @@ theme_override_font_sizes/font_size = 11
 clip_text = true
 fit_to_longest_item = false
 
-[node name="RosterHeaderRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="RosterHeaderRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="RosterLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/RosterHeaderRow"]
+[node name="RosterLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/RosterHeaderRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
 theme_override_font_sizes/font_size = 10
 text = "TEAM SLOTS (CTRL • TEAM • FAC • DIFF • STYLE)"
 
-[node name="SpectatorBadge" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/RosterHeaderRow"]
+[node name="SpectatorBadge" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/RosterHeaderRow"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -467,17 +504,17 @@ theme_override_colors/font_color = Color(1, 0.82, 0.32, 0.98)
 theme_override_font_sizes/font_size = 10
 text = "SPECTATOR MODE"
 
-[node name="SlotRosterVBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="SlotRosterVBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 3
 
-[node name="AIRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="AIRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="BtnAIStandard" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AIRow"]
+[node name="BtnAIStandard" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/AIRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
@@ -486,7 +523,7 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Skirmish AI (ON)"
 
-[node name="BtnAIPassive" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/AIRow"]
+[node name="BtnAIPassive" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/AIRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
@@ -495,17 +532,17 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Passive / Sandbox"
 
-[node name="ResLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="ResLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
 theme_override_font_sizes/font_size = 10
 text = "STARTING RESOURCES & MUTATORS"
 
-[node name="ResRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="ResRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="BtnResStandard" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/ResRow"]
+[node name="BtnResStandard" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ResRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
@@ -514,7 +551,7 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Standard (200B/50S)"
 
-[node name="BtnResFast" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/ResRow"]
+[node name="BtnResFast" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ResRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
@@ -523,13 +560,13 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Fast-Tech (1000B)"
 
-[node name="MutatorsRow" type="GridContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="MutatorsRow" type="GridContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 layout_mode = 2
 theme_override_constants/h_separation = 8
 theme_override_constants/v_separation = 2
 columns = 2
 
-[node name="ChkMutatorYield" type="CheckBox" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MutatorsRow"]
+[node name="ChkMutatorYield" type="CheckBox" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/MutatorsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -537,7 +574,7 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "2x Yield"
 
-[node name="ChkMutatorNoFog" type="CheckBox" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MutatorsRow"]
+[node name="ChkMutatorNoFog" type="CheckBox" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/MutatorsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -545,7 +582,7 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "No Fog"
 
-[node name="ChkMutatorFastBuild" type="CheckBox" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MutatorsRow"]
+[node name="ChkMutatorFastBuild" type="CheckBox" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/MutatorsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -553,7 +590,7 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 11
 text = "Fast Build"
 
-[node name="ChkUplinkVictory" type="CheckBox" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/MutatorsRow"]
+[node name="ChkUplinkVictory" type="CheckBox" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/MutatorsRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -563,7 +600,7 @@ theme_override_font_sizes/font_size = 11
 button_pressed = true
 text = "Uplink Win (3m)"
 
-[node name="ValidationLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="ValidationLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -572,16 +609,176 @@ theme_override_font_sizes/font_size = 11
 text = "Assign at least 2 opposing teams to launch."
 horizontal_alignment = 1
 
-[node name="SummaryPanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+[node name="SummaryPanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
 
-[node name="MatchSummaryLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SummaryPanel"]
+[node name="MatchSummaryLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/SummaryPanel"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.84, 0.95, 0.98, 0.95)
 theme_override_font_sizes/font_size = 10
 text = "FACTION: GENESIS_V2"
+autowrap_mode = 3
+
+[node name="HoldoutConfigBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 7
+
+[node name="HoldoutBriefPanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="HoldoutBriefLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutBriefPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.82, 0.94, 0.98, 0.95)
+theme_override_font_sizes/font_size = 11
+text = "Defend your Command Hub & central Hyper-Uplink against 10 escalating hostile waves (+ Endless option). Holding the Uplink boosts production +10% and grants inter-wave Compute dividends."
+autowrap_mode = 3
+
+[node name="HoldoutFacLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
+theme_override_font_sizes/font_size = 10
+text = "OPPOSING WAVE FACTION"
+
+[node name="HoldoutFacRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnHoldoutFacGen" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutFacRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "GEN-V2"
+
+[node name="BtnHoldoutFacMono" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutFacRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "MONO-OS"
+
+[node name="BtnHoldoutFacMixed" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutFacRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "MIXED ASSAULT"
+
+[node name="HoldoutDiffLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
+theme_override_font_sizes/font_size = 10
+text = "ASSAULT INTENSITY"
+
+[node name="HoldoutDiffRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnHoldoutDiffRelaxed" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutDiffRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Relaxed"
+
+[node name="BtnHoldoutDiffStandard" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutDiffRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Standard"
+
+[node name="BtnHoldoutDiffBrutal" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutDiffRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+text = "Brutal"
+
+[node name="HoldoutRecordPanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="HoldoutRecordLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/HoldoutConfigBox/HoldoutRecordPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.84, 0.96, 0.98, 0.95)
+theme_override_font_sizes/font_size = 11
+text = "BEST WAVE CLEARED: 0 / 10"
+autowrap_mode = 3
+
+[node name="GauntletConfigBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="GauntletHeaderLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
+theme_override_font_sizes/font_size = 10
+text = "CURATED TACTICAL DRILLS (MEDAL TIMERS)"
+
+[node name="BtnDrill0" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 68)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+alignment = 0
+clip_text = true
+autowrap_mode = 3
+text = "1. Stutter-Step vs. Bulwarks (60s Micro)"
+
+[node name="BtnDrill1" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 68)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+alignment = 0
+clip_text = true
+autowrap_mode = 3
+text = "2. Siege-Line Breach (90s Assault)"
+
+[node name="BtnDrill2" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 68)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 11
+alignment = 0
+clip_text = true
+autowrap_mode = 3
+text = "3. Optimal 3-Minute Boom (180s Macro)"
+
+[node name="GauntletDetailPanel" type="PanelContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_badge")
+
+[node name="GauntletDetailLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/GauntletConfigBox/GauntletDetailPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.84, 0.96, 0.98, 0.95)
+theme_override_font_sizes/font_size = 10
+text = "GOLD <=32s • SILVER <=45s • BRONZE <=60s"
 autowrap_mode = 3
 
 [node name="Spacer" type="Control" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
@@ -590,7 +787,7 @@ size_flags_vertical = 3
 
 [node name="BtnLaunch" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 36)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 focus_mode = 0
 theme_override_colors/font_color = Color(0.96, 1, 1, 1)

@@ -4,6 +4,24 @@ extends Control
 const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.tscn")
 
 @onready var btn_audio_mute: Button = %BtnAudioMute
+@onready var config_header: Label = %ConfigHeader
+@onready var btn_mode_skirmish: Button = %BtnModeSkirmish
+@onready var btn_mode_holdout: Button = %BtnModeHoldout
+@onready var btn_mode_gauntlet: Button = %BtnModeGauntlet
+@onready var skirmish_config_box: VBoxContainer = %SkirmishConfigBox
+@onready var holdout_config_box: VBoxContainer = %HoldoutConfigBox
+@onready var btn_holdout_fac_gen: Button = %BtnHoldoutFacGen
+@onready var btn_holdout_fac_mono: Button = %BtnHoldoutFacMono
+@onready var btn_holdout_fac_mixed: Button = %BtnHoldoutFacMixed
+@onready var btn_holdout_diff_relaxed: Button = %BtnHoldoutDiffRelaxed
+@onready var btn_holdout_diff_standard: Button = %BtnHoldoutDiffStandard
+@onready var btn_holdout_diff_brutal: Button = %BtnHoldoutDiffBrutal
+@onready var holdout_record_label: Label = %HoldoutRecordLabel
+@onready var gauntlet_config_box: VBoxContainer = %GauntletConfigBox
+@onready var btn_drill_0: Button = %BtnDrill0
+@onready var btn_drill_1: Button = %BtnDrill1
+@onready var btn_drill_2: Button = %BtnDrill2
+@onready var gauntlet_detail_label: Label = %GauntletDetailLabel
 @onready var map_option: OptionButton = %MapOption
 @onready var btn_players_2: Button = %BtnPlayers2
 @onready var btn_players_3: Button = %BtnPlayers3
@@ -84,6 +102,10 @@ const FACTION_DOSSIER_PROFILES: Dictionary = {
 }
 
 var _featured_faction_id: StringName = &"genesis_v2"
+var _selected_mode: int = GameConfig.GameMode.SKIRMISH
+var _holdout_enemy_faction_id: StringName = &"monolith_os"
+var _holdout_difficulty: int = int(GameConfig.AIDifficulty.STANDARD)
+var _selected_drill_id: StringName = GameConfig.DRILL_STUTTER_STEP
 
 var _selected_map_path: String = GameConfig.MAP_SKIRMISH_01
 var _player_count: int = 2
@@ -118,6 +140,10 @@ func _ready() -> void:
 	_mutator_no_fog = GameConfig.mutator_no_fog
 	_mutator_fast_build = GameConfig.mutator_fast_build
 	_uplink_victory_enabled = GameConfig.uplink_victory_enabled
+	_selected_mode = int(GameConfig.active_game_mode)
+	_holdout_enemy_faction_id = GameConfig.holdout_enemy_faction_id
+	_holdout_difficulty = int(GameConfig.holdout_difficulty)
+	_selected_drill_id = GameConfig.selected_gauntlet_drill_id
 
 	_slot_configs.clear()
 	for i: int in range(4):
@@ -250,8 +276,75 @@ func _ready() -> void:
 	if btn_quit != null:
 		btn_quit.pressed.connect(_on_quit_pressed)
 
+	# Milestone 3.5b: Mode switcher & Holdout / Gauntlet selectors
+	if btn_mode_skirmish != null:
+		btn_mode_skirmish.pressed.connect(func() -> void: _set_selected_mode(int(GameConfig.GameMode.SKIRMISH)))
+	if btn_mode_holdout != null:
+		btn_mode_holdout.pressed.connect(func() -> void: _set_selected_mode(int(GameConfig.GameMode.UPLINK_HOLDOUT)))
+	if btn_mode_gauntlet != null:
+		btn_mode_gauntlet.pressed.connect(func() -> void: _set_selected_mode(int(GameConfig.GameMode.MICRO_GAUNTLET)))
+
+	if btn_holdout_fac_gen != null:
+		btn_holdout_fac_gen.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_holdout_enemy_faction_id = &"genesis_v2"
+			_refresh_ui()
+		)
+	if btn_holdout_fac_mono != null:
+		btn_holdout_fac_mono.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_holdout_enemy_faction_id = &"monolith_os"
+			_refresh_ui()
+		)
+	if btn_holdout_fac_mixed != null:
+		btn_holdout_fac_mixed.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_holdout_enemy_faction_id = GameConfig.HOLDOUT_ENEMY_MIXED
+			_refresh_ui()
+		)
+	if btn_holdout_diff_relaxed != null:
+		btn_holdout_diff_relaxed.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_holdout_difficulty = int(GameConfig.AIDifficulty.RELAXED)
+			_refresh_ui()
+		)
+	if btn_holdout_diff_standard != null:
+		btn_holdout_diff_standard.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_holdout_difficulty = int(GameConfig.AIDifficulty.STANDARD)
+			_refresh_ui()
+		)
+	if btn_holdout_diff_brutal != null:
+		btn_holdout_diff_brutal.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_holdout_difficulty = int(GameConfig.AIDifficulty.BRUTAL)
+			_refresh_ui()
+		)
+	if btn_drill_0 != null:
+		btn_drill_0.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_selected_drill_id = GameConfig.DRILL_STUTTER_STEP
+			_refresh_ui()
+		)
+	if btn_drill_1 != null:
+		btn_drill_1.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_selected_drill_id = GameConfig.DRILL_SIEGE_BREACH
+			_refresh_ui()
+		)
+	if btn_drill_2 != null:
+		btn_drill_2.pressed.connect(func() -> void:
+			AudioManager.play_ui_click()
+			_selected_drill_id = GameConfig.DRILL_OPTIMAL_BOOM
+			_refresh_ui()
+		)
+
 	_wire_hover_audio([
-		btn_audio_mute, map_option, btn_players_2, btn_players_3, btn_players_4,
+		btn_audio_mute, btn_mode_skirmish, btn_mode_holdout, btn_mode_gauntlet,
+		btn_holdout_fac_gen, btn_holdout_fac_mono, btn_holdout_fac_mixed,
+		btn_holdout_diff_relaxed, btn_holdout_diff_standard, btn_holdout_diff_brutal,
+		btn_drill_0, btn_drill_1, btn_drill_2,
+		map_option, btn_players_2, btn_players_3, btn_players_4,
 		opt_team_preset, btn_ai_standard, btn_ai_passive, btn_res_standard, btn_res_fast,
 		chk_mutator_yield, chk_mutator_no_fog, chk_mutator_fast_build, chk_uplink_victory,
 		btn_launch, btn_settings, btn_quit,
@@ -783,8 +876,136 @@ func _refresh_audio_button() -> void:
 		btn_audio_mute.modulate = Color(0.45, 0.98, 0.90, 1.0)
 
 
+func _set_selected_mode(mode_val: int) -> void:
+	if _selected_mode == mode_val:
+		return
+	AudioManager.play_ui_click()
+	_selected_mode = clampi(mode_val, int(GameConfig.GameMode.SKIRMISH), int(GameConfig.GameMode.MICRO_GAUNTLET))
+	_refresh_ui()
+
+
+func _refresh_mode_tabs_and_panels() -> void:
+	var is_skirmish: bool = (_selected_mode == int(GameConfig.GameMode.SKIRMISH))
+	var is_holdout: bool = (_selected_mode == int(GameConfig.GameMode.UPLINK_HOLDOUT))
+	var is_gauntlet: bool = (_selected_mode == int(GameConfig.GameMode.MICRO_GAUNTLET))
+
+	if config_header != null:
+		if is_holdout:
+			config_header.text = "UPLINK HOLDOUT — WAVE DEFENSE"
+		elif is_gauntlet:
+			config_header.text = "MICRO GAUNTLET — TACTICAL DRILLS"
+		else:
+			config_header.text = "SKIRMISH MATCH SETUP"
+
+	if btn_mode_skirmish != null:
+		btn_mode_skirmish.modulate = Color(0.32, 1.0, 0.90, 1.0) if is_skirmish else Color(0.66, 0.76, 0.84, 0.78)
+	if btn_mode_holdout != null:
+		btn_mode_holdout.modulate = Color(1.0, 0.78, 0.30, 1.0) if is_holdout else Color(0.66, 0.76, 0.84, 0.78)
+	if btn_mode_gauntlet != null:
+		btn_mode_gauntlet.modulate = Color(0.46, 0.88, 1.0, 1.0) if is_gauntlet else Color(0.66, 0.76, 0.84, 0.78)
+
+	if skirmish_config_box != null:
+		skirmish_config_box.visible = is_skirmish
+	if holdout_config_box != null:
+		holdout_config_box.visible = is_holdout
+	if gauntlet_config_box != null:
+		gauntlet_config_box.visible = is_gauntlet
+
+	if is_holdout:
+		_refresh_holdout_panel()
+	elif is_gauntlet:
+		_refresh_gauntlet_panel()
+
+
+func _refresh_holdout_panel() -> void:
+	if btn_holdout_fac_gen != null:
+		btn_holdout_fac_gen.modulate = Color(0.32, 1.0, 0.88, 1.0) if _holdout_enemy_faction_id == &"genesis_v2" else Color(0.66, 0.74, 0.80, 0.78)
+	if btn_holdout_fac_mono != null:
+		btn_holdout_fac_mono.modulate = Color(1.0, 0.68, 0.24, 1.0) if _holdout_enemy_faction_id == &"monolith_os" else Color(0.66, 0.74, 0.80, 0.78)
+	if btn_holdout_fac_mixed != null:
+		btn_holdout_fac_mixed.modulate = Color(0.96, 0.44, 0.88, 1.0) if _holdout_enemy_faction_id == GameConfig.HOLDOUT_ENEMY_MIXED else Color(0.66, 0.74, 0.80, 0.78)
+
+	if btn_holdout_diff_relaxed != null:
+		btn_holdout_diff_relaxed.modulate = Color(0.42, 0.98, 0.72, 1.0) if _holdout_difficulty == int(GameConfig.AIDifficulty.RELAXED) else Color(0.66, 0.74, 0.80, 0.78)
+	if btn_holdout_diff_standard != null:
+		btn_holdout_diff_standard.modulate = Color(0.36, 0.94, 1.0, 1.0) if _holdout_difficulty == int(GameConfig.AIDifficulty.STANDARD) else Color(0.66, 0.74, 0.80, 0.78)
+	if btn_holdout_diff_brutal != null:
+		btn_holdout_diff_brutal.modulate = Color(1.0, 0.38, 0.30, 1.0) if _holdout_difficulty == int(GameConfig.AIDifficulty.BRUTAL) else Color(0.66, 0.74, 0.80, 0.78)
+
+	if holdout_record_label != null:
+		var player_fac_code: String = "MON-OS" if _featured_faction_id == &"monolith_os" else "GEN-V2"
+		var enemy_code: String = "MIXED ASSAULT"
+		if _holdout_enemy_faction_id == &"genesis_v2":
+			enemy_code = "GEN-V2"
+		elif _holdout_enemy_faction_id == &"monolith_os":
+			enemy_code = "MONO-OS"
+		var diff_str: String = GameConfig.get_difficulty_label(_holdout_difficulty)
+		var best_w: int = ModeRecords.get_holdout_best_wave(_featured_faction_id, _holdout_difficulty)
+		var overall_w: int = ModeRecords.get_holdout_overall_best_wave(_featured_faction_id)
+		var best_str: String = ("Wave %d" % best_w) if best_w > 0 else "None Yet"
+		if best_w >= 10:
+			best_str = "Wave %d (CLEARED)" % best_w
+		holdout_record_label.text = "COMMANDER: %s  vs.  %s (%s)\nARENA: Skirmish Arena 01  •  10 Waves + Endless\nPERSONAL BEST (%s): %s   •   FACTION BEST: %d" % [
+			player_fac_code,
+			enemy_code,
+			diff_str,
+			diff_str,
+			best_str,
+			overall_w,
+		]
+
+
+func _refresh_gauntlet_panel() -> void:
+	var btns: Array[Button] = [btn_drill_0, btn_drill_1, btn_drill_2]
+	for i: int in range(mini(btns.size(), GameConfig.GAUNTLET_DRILLS.size())):
+		var btn: Button = btns[i]
+		if btn == null:
+			continue
+		var info: Dictionary = GameConfig.GAUNTLET_DRILLS[i] as Dictionary
+		var did: StringName = info["id"] as StringName
+		var rec: Dictionary = ModeRecords.get_gauntlet_record(did)
+		var medal: int = int(rec.get("medal", ModeRecords.Medal.NONE))
+		var medal_tag: String = ModeRecords.get_medal_label(medal)
+		var best_str: String = ""
+		if bool(rec.get("has_record", false)) and float(rec.get("best_value", -1.0)) >= 0.0:
+			if bool(info.get("lower_is_better", true)):
+				best_str = " (%.1fs)" % float(rec["best_value"])
+			else:
+				best_str = " (%s pts)" % InspectionHelper.format_number(int(round(float(rec["best_value"]))))
+		btn.text = "%d. %s  [%s%s]\n%s — %s" % [
+			i + 1,
+			String(info["title"]),
+			medal_tag,
+			best_str,
+			String(info["tag"]),
+			String(info["summary"]),
+		]
+		var is_sel: bool = (did == _selected_drill_id)
+		if is_sel:
+			btn.modulate = Color(0.42, 1.0, 0.92, 1.0)
+		elif medal > ModeRecords.Medal.NONE:
+			btn.modulate = ModeRecords.get_medal_color(medal).lerp(Color.WHITE, 0.25)
+		else:
+			btn.modulate = Color(0.76, 0.84, 0.90, 0.86)
+
+	if gauntlet_detail_label != null:
+		var sel_info: Dictionary = GameConfig.get_gauntlet_drill_info(_selected_drill_id)
+		var fixed_f: StringName = sel_info.get("fixed_faction", &"") as StringName
+		var fac_note: String = ""
+		if fixed_f == &"":
+			var pcode: String = "MONOLITH_OS" if _featured_faction_id == &"monolith_os" else "GENESIS_V2"
+			fac_note = "ACTIVE FACTION: %s (change on left dossier)" % pcode
+		else:
+			fac_note = "PRESET SQUAD: %s" % String(fixed_f).to_upper()
+		gauntlet_detail_label.text = "MEDALS: %s\n%s  •  Instant Retry: [R]" % [
+			String(sel_info["thresholds"]),
+			fac_note,
+		]
+
+
 func _refresh_ui() -> void:
 	_suppress_callbacks = true
+	_refresh_mode_tabs_and_panels()
 	var max_p: int = GameConfig.get_map_max_players(_selected_map_path)
 	var is_spec: bool = not _has_active_human()
 	var valid_teams: bool = GameConfig.has_opposing_alliances(_slot_configs, _player_count)
@@ -855,13 +1076,20 @@ func _refresh_ui() -> void:
 		validation_label.visible = not valid_teams
 
 	if btn_launch != null:
-		btn_launch.disabled = not valid_teams
-		if not valid_teams:
-			btn_launch.text = "ASSIGN 2+ OPPOSING TEAMS"
-		elif is_spec:
-			btn_launch.text = "LAUNCH AI SPECTATOR (%dP)" % _player_count
+		if _selected_mode == int(GameConfig.GameMode.UPLINK_HOLDOUT):
+			btn_launch.disabled = false
+			btn_launch.text = "LAUNCH UPLINK HOLDOUT"
+		elif _selected_mode == int(GameConfig.GameMode.MICRO_GAUNTLET):
+			btn_launch.disabled = false
+			btn_launch.text = "LAUNCH DRILL"
 		else:
-			btn_launch.text = "LAUNCH %s SKIRMISH" % GameConfig.get_preset_display_label(_team_preset).to_upper()
+			btn_launch.disabled = not valid_teams
+			if not valid_teams:
+				btn_launch.text = "ASSIGN 2+ OPPOSING TEAMS"
+			elif is_spec:
+				btn_launch.text = "LAUNCH AI SPECTATOR (%dP)" % _player_count
+			else:
+				btn_launch.text = "LAUNCH %s SKIRMISH" % GameConfig.get_preset_display_label(_team_preset).to_upper()
 
 	if summary_label != null:
 		var map_name: String = GameConfig.get_map_label(_selected_map_path)
@@ -912,6 +1140,16 @@ func _build_alliance_summary_text() -> String:
 
 
 func _on_launch_pressed() -> void:
+	if _selected_mode == int(GameConfig.GameMode.UPLINK_HOLDOUT):
+		AudioManager.play_sfx(&"build_complete", -3.0, 0.0)
+		GameConfig.set_holdout_config(_featured_faction_id, _holdout_enemy_faction_id, _holdout_difficulty)
+		get_tree().change_scene_to_file(GameConfig.selected_map_path)
+		return
+	if _selected_mode == int(GameConfig.GameMode.MICRO_GAUNTLET):
+		AudioManager.play_sfx(&"build_complete", -3.0, 0.0)
+		GameConfig.set_gauntlet_config(_selected_drill_id, _featured_faction_id)
+		get_tree().change_scene_to_file(GameConfig.selected_map_path)
+		return
 	if not GameConfig.has_opposing_alliances(_slot_configs, _player_count):
 		AudioManager.play_error()
 		return
