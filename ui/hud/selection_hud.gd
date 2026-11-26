@@ -725,7 +725,7 @@ func _build_unit_class_traits_label(u_data: UnitData) -> String:
 	if u_data == null:
 		return ""
 	var tags: PackedStringArray = PackedStringArray()
-	if u_data.unit_type_id == &"goliath_frame" or u_data.unit_type_id == &"arc_lancer" or u_data.unit_type_id == &"monolith_dreadnought" or u_data.unit_type_id == &"anvil_siege_walker":
+	if u_data.unit_type_id == &"goliath_frame" or u_data.unit_type_id == &"arc_lancer" or u_data.unit_type_id == &"monolith_dreadnought" or u_data.unit_type_id == &"anvil_siege_walker" or u_data.unit_type_id == &"seraph_cruiser" or u_data.unit_type_id == &"solstice_lance":
 		tags.append("Heavy Chassis")
 	elif u_data.is_armored:
 		tags.append("Armored")
@@ -736,6 +736,10 @@ func _build_unit_class_traits_label(u_data: UnitData) -> String:
 		tags.append("Deployable")
 	if u_data.max_shield > 0.0:
 		tags.append("Shielded")
+	if u_data.is_continuous_beam:
+		tags.append("Escalating Beam")
+	if u_data.refract_max_bounces > 0:
+		tags.append("Refract")
 	if u_data.bonus_vs_armored > 0.0:
 		tags.append("+vs Armored")
 	if u_data.aoe_attack_radius > 0.0 or u_data.deployed_aoe_radius > 0.0:
@@ -891,13 +895,13 @@ func _get_building_icon_accent(b_data: BuildingData) -> Color:
 	if b_data == null:
 		return _active_hud_accent
 	var bid: StringName = b_data.building_id
-	if bid == &"silica_condenser" or bid == &"silica_smelter":
+	if bid == &"silica_condenser" or bid == &"silica_smelter" or bid == &"alabaster_kiln":
 		return Color(1.0, 0.76, 0.26, 1.0)
-	if bid == &"wetware_mainframe" or bid == &"logic_monolith" or bid == &"capacitor_pylon":
+	if bid == &"wetware_mainframe" or bid == &"logic_monolith" or bid == &"capacitor_pylon" or bid == &"oracle_reliquary":
 		return Color(0.28, 0.84, 1.0, 1.0)
-	if bid == &"synapse_pylon":
+	if bid == &"synapse_pylon" or bid == &"halo_spire":
 		return Color(0.76, 0.58, 1.0, 1.0)
-	if bid == &"defense_turret" or bid == &"bastion_emplacement":
+	if bid == &"defense_turret" or bid == &"bastion_emplacement" or bid == &"solar_obelisk":
 		return Color(1.0, 0.46, 0.26, 1.0)
 	return _active_hud_accent
 

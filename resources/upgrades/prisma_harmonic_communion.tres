@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="UpgradeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/upgrade_data.gd" id="1_upg"]
+
+[resource]
+script = ExtResource("1_upg")
+upgrade_id = &"prisma_harmonic_communion"
+display_name = "Harmonic Communion"
+short_display_name = "Communion"
+description = "Expands the PRISMA_DEI Optical Tether network: grants +1 max Tether link and +35px Tether emit radius on Halo Spire, Cantor, and Prism Weaver."
+hotkey_label = "R"
+biomass_cost = 90
+silica_cost = 120
+compute_cost = 30
+research_time = 18.0
+modifier_key = &"tether_links"
+modifier_value = 1.0

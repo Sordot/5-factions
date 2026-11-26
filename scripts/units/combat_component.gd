@@ -557,6 +557,16 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
 		return true
 
+	if tracer_style == &"prism_beam":
+		var lance_tr: AttackTracer = _spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(3.2, tracer_width), 0.22, 0.0, AttackTracer.TracerStyle.PRISM_BEAM)
+		if lance_tr != null:
+			lance_tr.attach_live_endpoints(owner_unit, target_node, 0.95, owner_unit.data.collision_radius)
+		if _is_armored_target(target_node):
+			var lance_dir: Vector2 = (tracer_end - tracer_origin).normalized() if tracer_end.distance_squared_to(tracer_origin) > 1.0 else Vector2.RIGHT
+			_spawn_armor_pierce_spark_vfx(owner_unit, tracer_end, lance_dir, Color(0.98, 0.80, 0.14, 1.0))
+		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
+		return true
+
 	if tracer_style == &"prism_refract":
 		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(2.2, tracer_width), 0.16, 0.0, AttackTracer.TracerStyle.PRISM_REFRACT)
 		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
@@ -607,6 +617,11 @@ func _apply_refract_split_damage(
 	if owner_unit == null or not is_instance_valid(owner_unit) or not owner_unit.is_inside_tree() or owner_unit.data == null:
 		return
 	var max_bounces: int = owner_unit.data.refract_max_bounces
+	var econ: EconomyManager = owner_unit.get_tree().get_first_node_in_group("economy_manager") as EconomyManager
+	if econ != null:
+		max_bounces += econ.get_bonus_refract_bounces(int(owner_unit.team), owner_unit.data.unit_type_id)
+	if owner_unit.status_effect_component != null:
+		max_bounces += int(owner_unit.status_effect_component.call("get_bonus_refract_bounces"))
 	var radius: float = owner_unit.data.refract_radius
 	if max_bounces <= 0 or radius <= 0.0:
 		return

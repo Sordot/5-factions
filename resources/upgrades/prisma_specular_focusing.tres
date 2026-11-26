@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="UpgradeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/upgrade_data.gd" id="1_upg"]
+
+[resource]
+script = ExtResource("1_upg")
+upgrade_id = &"prisma_specular_focusing"
+display_name = "Specular Focusing"
+short_display_name = "Focusing"
+description = "Refines all PRISMA_DEI crystal lenses: grants +25% continuous beam ramp-up rate across all beam units and +1 refraction bounce on Votary and Prism Weaver."
+hotkey_label = "R"
+biomass_cost = 100
+silica_cost = 145
+compute_cost = 45
+research_time = 20.0
+modifier_key = &"beam_ramp_mult"
+modifier_value = 1.25

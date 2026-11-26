@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="AbilityData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ability_data.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+ability_id = &"aureole_surge"
+display_name = "Aureole Surge"
+hotkey_label = "Q"
+cooldown_duration = 16.0
+cast_range = 0.0
+target_type = 2
+damage_or_value = 1.35
+aoe_radius = 48.0
+effect_duration = 4.0
+move_speed_modifier = 0.0
+attack_speed_modifier = 0.0
+effect_color = Color(0.98, 0.8, 0.14, 0.96)
+cast_on_all_ready = true
+allow_autocast = false
+default_autocast = false
+description = "Ignites an incandescent focus halo for 4.0s: grants +35% beam ramp speed and +1 refraction bounce, while increasing incoming damage taken by +15% (16s CD)."

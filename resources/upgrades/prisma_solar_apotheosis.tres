@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="UpgradeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/upgrade_data.gd" id="1_upg"]
+
+[resource]
+script = ExtResource("1_upg")
+upgrade_id = &"prisma_solar_apotheosis"
+display_name = "Solar Apotheosis"
+short_display_name = "Apotheosis"
+description = "Elevates the PRISMA_DEI host: grants +12% movement speed to all PRISMA_DEI combat units and +25px attack range to Lens Adjudicator, Prism Weaver, Seraph Cruiser, and Solstice Lance."
+hotkey_label = "R"
+biomass_cost = 120
+silica_cost = 175
+compute_cost = 65
+research_time = 24.0
+modifier_key = &"prisma_move_speed_mult"
+modifier_value = 1.12

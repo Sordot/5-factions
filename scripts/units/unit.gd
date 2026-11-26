@@ -1409,10 +1409,12 @@ func get_effective_move_speed() -> float:
 	if data == null or data.move_speed <= 0.0:
 		return 0.0
 	var spd: float = data.move_speed
-	if data.unit_type_id == &"goliath_frame":
-		var econ: EconomyManager = _get_economy_manager()
-		if econ != null:
+	var econ: EconomyManager = _get_economy_manager()
+	if econ != null:
+		if data.unit_type_id == &"goliath_frame":
 			spd *= econ.get_goliath_speed_multiplier(team)
+		if data.is_combat_unit():
+			spd *= econ.get_prisma_move_speed_multiplier(int(team))
 	if status_effect_component != null:
 		spd *= float(status_effect_component.call("get_move_speed_multiplier"))
 	return spd
@@ -1433,19 +1435,25 @@ func get_effective_attack_range() -> float:
 	if data == null:
 		return 0.0
 	var rng: float = data.deployed_attack_range if (is_deployed() and data.deployed_attack_range > 0.0) else data.attack_range
-	if rng > 0.0 and (data.unit_type_id == &"rail_sentinel" or data.unit_type_id == &"anvil_siege_walker"):
+	if rng > 0.0:
 		var econ: EconomyManager = _get_economy_manager()
 		if econ != null:
-			rng += econ.get_rail_range_bonus(int(team))
+			if data.unit_type_id == &"rail_sentinel" or data.unit_type_id == &"anvil_siege_walker":
+				rng += econ.get_rail_range_bonus(int(team))
+			rng += econ.get_prisma_beam_range_bonus(int(team), data.unit_type_id)
 	if rng > 0.0 and status_effect_component != null:
 		rng += float(status_effect_component.call("get_bonus_attack_range"))
 	return rng
 
 
 func get_effective_beam_ramp_speed_multiplier() -> float:
+	var mult: float = 1.0
+	var econ: EconomyManager = _get_economy_manager()
+	if econ != null:
+		mult *= econ.get_beam_ramp_upgrade_multiplier(int(team))
 	if status_effect_component != null:
-		return float(status_effect_component.call("get_beam_ramp_speed_multiplier"))
-	return 1.0
+		mult *= float(status_effect_component.call("get_beam_ramp_speed_multiplier"))
+	return mult
 
 
 func get_optical_tether_stacks() -> int:

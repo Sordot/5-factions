@@ -82,14 +82,15 @@ func _recompute_tethers() -> void:
 
 	var new_links: Array[Dictionary] = []
 	var unit_accum: Dictionary = {} # unit_instance_id -> Dictionary
+	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 
 	for em: Dictionary in emitters:
 		var em_node: Node2D = em["node"] as Node2D
 		var em_pos: Vector2 = em["pos"] as Vector2
 		var em_team: int = int(em["team"])
-		var emit_r: float = float(em["radius"])
+		var emit_r: float = float(em["radius"]) + (econ.get_bonus_tether_radius(em_team) if econ != null else 0.0)
 		var emit_r_sq: float = emit_r * emit_r
-		var max_links: int = int(em["max_links"])
+		var max_links: int = int(em["max_links"]) + (econ.get_bonus_tether_links(em_team) if econ != null else 0)
 		var fr_bonus: float = float(em["fire_rate_bonus"])
 		var rng_bonus: float = float(em["range_bonus"])
 		var ramp_bonus: float = float(em["beam_ramp_bonus"])

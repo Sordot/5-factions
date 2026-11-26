@@ -7,7 +7,7 @@
 script = ExtResource("1_ab")
 ability_id = &"build_monolith_assembly_bay"
 display_name = "Assembly Bay"
-hotkey_label = "R"
+hotkey_label = "T"
 cooldown_duration = 0.0
 cast_range = 0.0
 target_type = 3

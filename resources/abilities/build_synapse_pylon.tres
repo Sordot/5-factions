@@ -7,7 +7,7 @@
 script = ExtResource("1_ab")
 ability_id = &"build_synapse_pylon"
 display_name = "Synapse Pylon"
-hotkey_label = "E"
+hotkey_label = "W"
 cooldown_duration = 0.0
 cast_range = 0.0
 target_type = 3

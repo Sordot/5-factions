@@ -77,6 +77,22 @@ const COMBAT_LAB_PRESETS: Array = [
 		"team0_buildings": [],
 		"team1_buildings": [],
 	},
+	{
+		"label": "PRISMA_DEI Choir (Votary+Cantor+Adjudicator+Seraph) vs. MONOLITH_OS Column",
+		"half_sep": 255.0,
+		"team0_units": [{"id": &"votary", "count": 4}, {"id": &"cantor", "count": 1}, {"id": &"lens_adjudicator", "count": 2}, {"id": &"seraph_cruiser", "count": 1}],
+		"team1_units": [{"id": &"bulwark_automaton", "count": 3}, {"id": &"rail_sentinel", "count": 2}, {"id": &"aegis_relay", "count": 1}, {"id": &"monolith_dreadnought", "count": 1}],
+		"team0_buildings": [],
+		"team1_buildings": [],
+	},
+	{
+		"label": "PRISMA_DEI Tier-2 Host (Seraph+Solstice+Cantor+Weaver) vs. GENESIS_V2 Heavy",
+		"half_sep": 270.0,
+		"team0_units": [{"id": &"seraph_cruiser", "count": 2}, {"id": &"solstice_lance", "count": 1}, {"id": &"prism_weaver", "count": 2}, {"id": &"cantor", "count": 1}],
+		"team1_units": [{"id": &"goliath_frame", "count": 2}, {"id": &"arc_lancer", "count": 2}, {"id": &"chrysalis_mortar", "count": 1}, {"id": &"symbiote", "count": 1}],
+		"team0_buildings": [],
+		"team1_buildings": [],
+	},
 ]
 
 @export var arena_safe_bounds: Rect2 = Rect2(-580.0, -300.0, 1160.0, 600.0)

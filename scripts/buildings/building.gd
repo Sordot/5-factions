@@ -153,6 +153,10 @@ func _ready() -> void:
 		_sync_turret_from_data(building_data)
 		_sync_defense_and_overclock_from_data(building_data)
 		_sync_lattice_and_tether_from_data(building_data)
+		is_resource_dropoff = building_data.is_dropoff
+		var ready_dropoffs: Array[StringName] = building_data.get_dropoff_resources()
+		if not ready_dropoffs.is_empty():
+			accepted_resources = ready_dropoffs.duplicate()
 		if building_data.is_hub():
 			is_core_hub = true
 		if trainable_unit_data.is_empty():

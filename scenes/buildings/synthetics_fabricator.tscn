@@ -27,7 +27,7 @@ build_time = 14.0
 is_constructed = true
 max_staff_slots = 0
 can_set_rally = true
-trainable_unit_data = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("2_goliath_data"), ExtResource("3_arclancer_data"), ExtResource("4_mortar_data")])
+trainable_unit_data = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("2_goliath_data"), ExtResource("4_mortar_data"), ExtResource("3_arclancer_data")])
 researchable_upgrades = Array[Resource("res://scripts/data/upgrade_data.gd")]([ExtResource("5_upg_overdrive")])
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]

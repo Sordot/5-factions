@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="FactionData" load_steps=23 format=3]
+[gd_resource type="Resource" script_class="FactionData" load_steps=29 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/faction_data.gd" id="1_script"]
 [ext_resource type="PackedScene" path="res://scenes/buildings/prisma_sanctum_core.tscn" id="2_hub"]
@@ -14,14 +14,20 @@
 [ext_resource type="Resource" path="res://resources/buildings/prisma_choir_basilica_data.tres" id="12_b_basilica"]
 [ext_resource type="Resource" path="res://resources/buildings/prisma_refraction_cloister_data.tres" id="13_b_cloister"]
 [ext_resource type="Resource" path="res://resources/buildings/prisma_solar_obelisk_data.tres" id="14_b_obelisk"]
-[ext_resource type="Resource" path="res://resources/units/prisma_acolyte_data.tres" id="15_u_acolyte"]
-[ext_resource type="Resource" path="res://resources/units/prisma_prism_dredge_data.tres" id="16_u_dredge"]
-[ext_resource type="Resource" path="res://resources/units/prisma_luminant_data.tres" id="17_u_luminant"]
-[ext_resource type="Resource" path="res://resources/units/prisma_votary_data.tres" id="18_u_votary"]
-[ext_resource type="Resource" path="res://resources/units/prisma_lumen_skiff_data.tres" id="19_u_skiff"]
-[ext_resource type="Resource" path="res://resources/units/prisma_cantor_data.tres" id="20_u_cantor"]
-[ext_resource type="Resource" path="res://resources/units/prisma_lens_adjudicator_data.tres" id="21_u_adjudicator"]
-[ext_resource type="Resource" path="res://resources/units/prisma_prism_weaver_data.tres" id="22_u_weaver"]
+[ext_resource type="Resource" path="res://resources/buildings/prisma_cathedral_foundry_data.tres" id="15_b_cathedral"]
+[ext_resource type="Resource" path="res://resources/units/prisma_acolyte_data.tres" id="16_u_acolyte"]
+[ext_resource type="Resource" path="res://resources/units/prisma_prism_dredge_data.tres" id="17_u_dredge"]
+[ext_resource type="Resource" path="res://resources/units/prisma_luminant_data.tres" id="18_u_luminant"]
+[ext_resource type="Resource" path="res://resources/units/prisma_votary_data.tres" id="19_u_votary"]
+[ext_resource type="Resource" path="res://resources/units/prisma_lumen_skiff_data.tres" id="20_u_skiff"]
+[ext_resource type="Resource" path="res://resources/units/prisma_cantor_data.tres" id="21_u_cantor"]
+[ext_resource type="Resource" path="res://resources/units/prisma_lens_adjudicator_data.tres" id="22_u_adjudicator"]
+[ext_resource type="Resource" path="res://resources/units/prisma_prism_weaver_data.tres" id="23_u_weaver"]
+[ext_resource type="Resource" path="res://resources/units/prisma_seraph_cruiser_data.tres" id="24_u_seraph"]
+[ext_resource type="Resource" path="res://resources/units/prisma_solstice_lance_data.tres" id="25_u_solstice"]
+[ext_resource type="Resource" path="res://resources/upgrades/prisma_harmonic_communion.tres" id="26_upg_communion"]
+[ext_resource type="Resource" path="res://resources/upgrades/prisma_specular_focusing.tres" id="27_upg_focusing"]
+[ext_resource type="Resource" path="res://resources/upgrades/prisma_solar_apotheosis.tres" id="28_upg_apotheosis"]
 
 [resource]
 script = ExtResource("1_script")
@@ -38,14 +44,14 @@ audio_bark_pitch_bias = 1.12
 audio_timbre_profile = &"prisma_cathedral"
 dossier_slot_number = 3
 dossier_subtitle = "Solar Theocracy  •  Consecrated Power Lattice  •  Optical Tethers & Prism Beams"
-dossier_description = "Devoted human acolytes worshiping a radiant orbital AI. Channels visible Optical Tethers between agile glass-ceramic beam craft whose weapons escalate or refract across enemy lines."
-signature_badges = PackedStringArray("Consecrated Power Lattice", "Optical Tethers", "Votary / Lumen Skiff", "Cantor (x4 Tether)", "Lens Adjudicator (Beam)", "Prism Weaver (Refract)", "Solar Obelisk")
+dossier_description = "Devoted human acolytes worshiping a radiant orbital AI. Channels visible Optical Tethers between agile glass-ceramic beam craft whose weapons escalate or refract across enemy lines, culminating in Seraph Cruisers and orbital Solstice Lances."
+signature_badges = PackedStringArray("Consecrated Power Lattice", "Optical Tethers (x4 Cantor)", "Escalating & Refracting Beams", "Seraph Cruiser (Aureole Surge)", "Solstice Lance (Solar Convergence)", "Harmonic Communion / Solar Apotheosis")
 ai_transmissions = {
-&"barricade_breach": "// PRISMA_DEI: Mundane barrier refracted to ash. Proceeding along the radiant path.",
-&"tier2_online": "// PRISMA_DEI: High sanctum illumination achieved. Preparing apex vessels.",
-&"under_attack": "// PRISMA_DEI: Heretical incursion upon the Lattice. Redirecting the Choir.",
-&"uplink_contest": "// PRISMA_DEI: Consecrating the Data Hyper-Uplink in the Light's name.",
-&"wave_launch": "// PRISMA_DEI: The Choir advances in harmonic convergence. Behold the Lattice."
+&"barricade_breach": "// PRISMA_DEI: Shadowed barrier dissolved. The sacred lattice expands.",
+&"tier2_online": "// PRISMA_DEI: Cathedral Foundry consecrated. Seraphs and Lances descend.",
+&"under_attack": "// PRISMA_DEI: Profane incursion detected at the perimeter. Purging.",
+&"uplink_contest": "// PRISMA_DEI: Reclaiming the Central Lens. All geometry bends to the Lattice.",
+&"wave_launch": "// PRISMA_DEI: The Choir advances in harmonic convergence. Witness the Light."
 }
 starting_biomass = 200
 starting_silica = 50
@@ -56,13 +62,14 @@ worker_scene = ExtResource("3_worker")
 harvester_scene = ExtResource("4_harvester")
 engineer_scene = ExtResource("5_engineer")
 extra_starting_units = Array[PackedScene]([ExtResource("6_votary_scn"), ExtResource("7_skiff_scn")])
-building_roster = Array[Resource("res://scripts/data/building_data.gd")]([ExtResource("8_b_sanctum"), ExtResource("9_b_spire"), ExtResource("10_b_kiln"), ExtResource("11_b_reliquary"), ExtResource("12_b_basilica"), ExtResource("13_b_cloister"), ExtResource("14_b_obelisk")])
-unit_roster = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("15_u_acolyte"), ExtResource("16_u_dredge"), ExtResource("17_u_luminant"), ExtResource("18_u_votary"), ExtResource("19_u_skiff"), ExtResource("20_u_cantor"), ExtResource("21_u_adjudicator"), ExtResource("22_u_weaver")])
-upgrade_roster = Array[Resource("res://scripts/data/upgrade_data.gd")]([])
+building_roster = Array[Resource("res://scripts/data/building_data.gd")]([ExtResource("8_b_sanctum"), ExtResource("9_b_spire"), ExtResource("10_b_kiln"), ExtResource("11_b_reliquary"), ExtResource("12_b_basilica"), ExtResource("13_b_cloister"), ExtResource("14_b_obelisk"), ExtResource("15_b_cathedral")])
+unit_roster = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("16_u_acolyte"), ExtResource("17_u_dredge"), ExtResource("18_u_luminant"), ExtResource("19_u_votary"), ExtResource("20_u_skiff"), ExtResource("21_u_cantor"), ExtResource("22_u_adjudicator"), ExtResource("23_u_weaver"), ExtResource("24_u_seraph"), ExtResource("25_u_solstice")])
+upgrade_roster = Array[Resource("res://scripts/data/upgrade_data.gd")]([ExtResource("26_upg_communion"), ExtResource("27_upg_focusing"), ExtResource("28_upg_apotheosis")])
 ai_build_profile = {
 &"barracks_t1": &"choir_basilica",
 &"compute_hub": &"oracle_reliquary",
 &"counter_foundry": &"refraction_cloister",
+&"heavy_t2": &"cathedral_foundry",
 &"hub": &"sanctum_core",
 &"refinery": &"alabaster_kiln",
 &"supply": &"halo_spire"
@@ -70,17 +77,19 @@ ai_build_profile = {
 ai_scout_unit_id = &"lumen_skiff"
 ai_salvage_unit_ids = Array[StringName]([&"luminant", &"acolyte"])
 ai_counter_units = {
-&"ANTI_ARMOR": [&"lens_adjudicator", &"votary", &"prism_weaver"],
-&"ANTI_SIEGE": [&"lumen_skiff", &"votary", &"lens_adjudicator"],
-&"ANTI_SWARM": [&"prism_weaver", &"votary", &"cantor"],
-&"BREACH": [&"lens_adjudicator", &"prism_weaver", &"votary"]
+&"ANTI_ARMOR": [&"lens_adjudicator", &"solstice_lance", &"seraph_cruiser", &"votary"],
+&"ANTI_SIEGE": [&"lumen_skiff", &"seraph_cruiser", &"votary", &"solstice_lance"],
+&"ANTI_SWARM": [&"prism_weaver", &"seraph_cruiser", &"votary", &"cantor"],
+&"BREACH": [&"solstice_lance", &"seraph_cruiser", &"lens_adjudicator", &"prism_weaver"]
 }
 ai_playstyle_weights = {
 &"balanced": {
 &"cantor": 1.1,
-&"lens_adjudicator": 2.1,
-&"lumen_skiff": 1.5,
+&"lens_adjudicator": 2.0,
+&"lumen_skiff": 1.4,
 &"prism_weaver": 1.7,
+&"seraph_cruiser": 2.4,
+&"solstice_lance": 1.8,
 &"votary": 2.8
 },
 &"swarm_rush": {
@@ -88,13 +97,17 @@ ai_playstyle_weights = {
 &"lens_adjudicator": 1.3,
 &"lumen_skiff": 2.6,
 &"prism_weaver": 1.4,
+&"seraph_cruiser": 1.6,
+&"solstice_lance": 1.1,
 &"votary": 3.2
 },
 &"synthetics_tech": {
 &"cantor": 1.4,
-&"lens_adjudicator": 2.8,
-&"lumen_skiff": 1.1,
-&"prism_weaver": 2.4,
-&"votary": 1.8
+&"lens_adjudicator": 2.6,
+&"lumen_skiff": 1.0,
+&"prism_weaver": 2.2,
+&"seraph_cruiser": 3.0,
+&"solstice_lance": 2.4,
+&"votary": 1.7
 }
 }

@@ -7,6 +7,9 @@ const UPGRADE_COMPUTE_OVERDRIVE: StringName = &"compute_overdrive"
 const UPGRADE_HARDENED_PLATING: StringName = &"monolith_hardened_plating"
 const UPGRADE_RAPID_CAPACITORS: StringName = &"monolith_rapid_capacitors"
 const UPGRADE_HYPER_VELOCITY_RAILS: StringName = &"monolith_hyper_velocity_rails"
+const UPGRADE_HARMONIC_COMMUNION: StringName = &"prisma_harmonic_communion"
+const UPGRADE_SPECULAR_FOCUSING: StringName = &"prisma_specular_focusing"
+const UPGRADE_SOLAR_APOTHEOSIS: StringName = &"prisma_solar_apotheosis"
 
 signal upgrade_completed(team: int, upgrade_id: StringName)
 
@@ -154,6 +157,47 @@ func get_rail_damage_multiplier(team: int) -> float:
 func get_rail_range_bonus(team: int) -> float:
 	if has_upgrade(team, UPGRADE_HYPER_VELOCITY_RAILS):
 		return 45.0
+	return 0.0
+
+
+func get_bonus_tether_links(team: int) -> int:
+	if has_upgrade(team, UPGRADE_HARMONIC_COMMUNION):
+		return 1
+	return 0
+
+
+func get_bonus_tether_radius(team: int) -> float:
+	if has_upgrade(team, UPGRADE_HARMONIC_COMMUNION):
+		return 35.0
+	return 0.0
+
+
+func get_beam_ramp_upgrade_multiplier(team: int) -> float:
+	if has_upgrade(team, UPGRADE_SPECULAR_FOCUSING):
+		return 1.25
+	return 1.0
+
+
+func get_bonus_refract_bounces(team: int, unit_type_id: StringName) -> int:
+	if has_upgrade(team, UPGRADE_SPECULAR_FOCUSING) and (unit_type_id == &"votary" or unit_type_id == &"prism_weaver"):
+		return 1
+	return 0
+
+
+func get_prisma_move_speed_multiplier(team: int) -> float:
+	if has_upgrade(team, UPGRADE_SOLAR_APOTHEOSIS):
+		return 1.12
+	return 1.0
+
+
+func get_prisma_beam_range_bonus(team: int, unit_type_id: StringName) -> float:
+	if has_upgrade(team, UPGRADE_SOLAR_APOTHEOSIS) and (
+		unit_type_id == &"lens_adjudicator"
+		or unit_type_id == &"prism_weaver"
+		or unit_type_id == &"seraph_cruiser"
+		or unit_type_id == &"solstice_lance"
+	):
+		return 25.0
 	return 0.0
 
 

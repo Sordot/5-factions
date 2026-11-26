@@ -1,13 +1,14 @@
-[gd_resource type="Resource" script_class="UnitData" load_steps=9 format=3]
+[gd_resource type="Resource" script_class="UnitData" load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
-[ext_resource type="Resource" path="res://resources/abilities/build_prisma_halo_spire.tres" id="2_ab_spire"]
-[ext_resource type="Resource" path="res://resources/abilities/build_prisma_alabaster_kiln.tres" id="3_ab_kiln"]
-[ext_resource type="Resource" path="res://resources/abilities/build_prisma_oracle_reliquary.tres" id="4_ab_reliquary"]
-[ext_resource type="Resource" path="res://resources/abilities/build_prisma_choir_basilica.tres" id="5_ab_basilica"]
-[ext_resource type="Resource" path="res://resources/abilities/build_prisma_refraction_cloister.tres" id="6_ab_cloister"]
-[ext_resource type="Resource" path="res://resources/abilities/build_prisma_solar_obelisk.tres" id="7_ab_obelisk"]
-[ext_resource type="Resource" path="res://resources/abilities/build_prisma_sanctum_core.tres" id="8_ab_sanctum"]
+[ext_resource type="Resource" path="res://resources/abilities/build_prisma_sanctum_core.tres" id="2_ab_sanctum"]
+[ext_resource type="Resource" path="res://resources/abilities/build_prisma_halo_spire.tres" id="3_ab_spire"]
+[ext_resource type="Resource" path="res://resources/abilities/build_prisma_alabaster_kiln.tres" id="4_ab_kiln"]
+[ext_resource type="Resource" path="res://resources/abilities/build_prisma_oracle_reliquary.tres" id="5_ab_reliquary"]
+[ext_resource type="Resource" path="res://resources/abilities/build_prisma_choir_basilica.tres" id="6_ab_basilica"]
+[ext_resource type="Resource" path="res://resources/abilities/build_prisma_refraction_cloister.tres" id="7_ab_cloister"]
+[ext_resource type="Resource" path="res://resources/abilities/build_prisma_solar_obelisk.tres" id="8_ab_obelisk"]
+[ext_resource type="Resource" path="res://resources/abilities/build_prisma_cathedral_foundry.tres" id="9_ab_cathedral"]
 
 [resource]
 script = ExtResource("1_unit_data")
@@ -30,7 +31,7 @@ attack_windup = 0.08
 is_armored = false
 unit_tags = Array[StringName]([&"worker", &"biological"])
 damage_reduction = 0.0
-abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_ab_spire"), ExtResource("3_ab_kiln"), ExtResource("4_ab_reliquary"), ExtResource("5_ab_basilica"), ExtResource("6_ab_cloister"), ExtResource("7_ab_obelisk"), ExtResource("8_ab_sanctum")])
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_ab_sanctum"), ExtResource("3_ab_spire"), ExtResource("4_ab_kiln"), ExtResource("5_ab_reliquary"), ExtResource("6_ab_basilica"), ExtResource("7_ab_cloister"), ExtResource("8_ab_obelisk"), ExtResource("9_ab_cathedral")])
 bandwidth_cost = 1
 can_gather = true
 gather_duration = 3.0

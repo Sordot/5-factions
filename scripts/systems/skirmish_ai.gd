@@ -448,7 +448,21 @@ func _dispatch_base_defense(threat_pos: Vector2, core: Building) -> void:
 		_wave_launch_strength = 0.0
 
 	_breach_target = null
+	var armed_centroid_def: Vector2 = Vector2.ZERO
+	var armed_cnt_def: int = 0
+	for u_a: Unit in responders:
+		if u_a.data != null and u_a.data.attack_damage > 0.0:
+			armed_centroid_def += u_a.global_position
+			armed_cnt_def += 1
+	if armed_cnt_def > 0:
+		armed_centroid_def /= float(armed_cnt_def)
+
 	for u: Unit in responders:
+		if u.data != null and u.data.attack_damage <= 0.0 and armed_cnt_def > 0:
+			var escort_def: Vector2 = armed_centroid_def.lerp(core.global_position, 0.22)
+			if u.global_position.distance_to(escort_def) > 105.0 or u.command_state == Unit.CommandState.IDLE:
+				u.command_move(escort_def, false)
+			continue
 		var needs_order: bool = (
 			u.command_state == Unit.CommandState.IDLE
 			or u.command_state == Unit.CommandState.MOVING
@@ -533,9 +547,27 @@ func _tick_attacking_state(core: Building) -> void:
 	# Keep non-wave newly spawned reinforcements calmly staged at _staging_point
 	_rally_idle_combat_to_staging(true)
 
-	# Re-push any wave units that went idle after clearing an enemy pocket
+	# Keep 0-damage support units (Cantor, Symbiote, Aegis Relay) escorting cleanly behind the armed frontline
+	var armed_sum: Vector2 = Vector2.ZERO
+	var armed_count: int = 0
+	for u_f: Unit in _wave_units:
+		if u_f.data != null and u_f.data.attack_damage > 0.0:
+			armed_sum += u_f.global_position
+			armed_count += 1
+	if armed_count > 0:
+		var armed_center: Vector2 = armed_sum / float(armed_count)
+		var back_dir: Vector2 = (_staging_point - armed_center).normalized() if armed_center.distance_squared_to(_staging_point) > 100.0 else Vector2.LEFT
+		var escort_pt: Vector2 = armed_center + back_dir * 68.0
+		for u_s: Unit in _wave_units:
+			if u_s.data != null and u_s.data.attack_damage <= 0.0:
+				if u_s.global_position.distance_to(escort_pt) > 95.0 or u_s.command_state == Unit.CommandState.IDLE:
+					u_s.command_move(escort_pt, false)
+
+	# Re-push any armed wave units that went idle after clearing an enemy pocket
 	var idle_wave: Array[Unit] = []
 	for u: Unit in _wave_units:
+		if u.data != null and u.data.attack_damage <= 0.0:
+			continue
 		if u.command_state == Unit.CommandState.IDLE:
 			idle_wave.append(u)
 	if not idle_wave.is_empty():
@@ -1357,6 +1389,31 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 			core.queue_unit_data(_worker_data)
 		return
 
+	# Priority 1.5 (Proactive Power Lattice Recovery — faction-agnostic for any power-grid faction):
+	# If any constructed structure requiring power is dormant, immediately place a replacement power provider nearby.
+	if _supply_data != null and _supply_data.provides_power_grid and _supply_data.power_radius > 0.0:
+		var unpowered_bldg: Building = null
+		for b_chk: Building in buildings:
+			if b_chk.is_constructed and not b_chk.is_destroyed and b_chk.requires_power_grid and not b_chk.is_powered:
+				unpowered_bldg = b_chk
+				break
+		if unpowered_bldg != null:
+			var recovery_r: float = _supply_data.power_radius * 0.95
+			var recovery_in_progress: bool = false
+			for b_p: Building in buildings:
+				if not b_p.is_destroyed and not b_p.is_constructed and b_p.provides_power_grid:
+					if b_p.global_position.distance_to(unpowered_bldg.global_position) <= recovery_r:
+						recovery_in_progress = true
+						break
+			if not recovery_in_progress and econ.can_afford(ai_team, _supply_data.get_cost_dict()):
+				var to_core_dir: Vector2 = (core.global_position - unpowered_bldg.global_position).normalized()
+				if to_core_dir.length_squared() < 0.01:
+					to_core_dir = Vector2.RIGHT
+				var recovery_offset: float = minf(115.0, _supply_data.power_radius * 0.58)
+				var recovery_anchor: Vector2 = unpowered_bldg.global_position + to_core_dir * recovery_offset
+				_try_place_and_build(_supply_data, recovery_anchor, unpowered_bldg.global_position)
+				return
+
 	# Swarm Rush builds its first Tier-1 Barracks before the Refinery for rapid early pressure.
 	if is_swarm_rush and barracks_list.is_empty() and _barracks_t1_data != null:
 		if econ.can_afford(ai_team, _barracks_t1_data.get_cost_dict()):
@@ -1548,17 +1605,70 @@ func _manage_economy_and_production(econ: EconomyManager, core: Building) -> voi
 
 func _trigger_combat_abilities() -> void:
 	for u: Unit in _get_team_units(ai_team):
-		if u.data == null or u.data.abilities.is_empty() or u.current_target == null or not is_instance_valid(u.current_target):
+		if u.data == null or u.data.abilities.is_empty():
 			continue
-		var dist: float = u.global_position.distance_to(u.current_target.global_position)
+		var has_target: bool = u.current_target != null and is_instance_valid(u.current_target)
+		var dist: float = u.global_position.distance_to(u.current_target.global_position) if has_target else INF
 		for ab: AbilityData in u.data.abilities:
 			if ab == null or ab.target_type == AbilityData.TargetType.BUILD_PLACEMENT:
 				continue
-			# Allied-target AOE abilities (e.g., Shield Overcharge) are handled by AbilityComponent autocast.
-			if ab.ability_id == &"monolith_shield_overcharge":
+			# Allied-target AOE abilities (Shield Overcharge, Luminous Mend) are handled by AbilityComponent autocast.
+			if ab.ability_id == &"monolith_shield_overcharge" or ab.ability_id == &"luminous_mend":
 				continue
 			if not u.is_ability_ready(ab):
 				continue
+
+			if ab.ability_id == &"solar_step":
+				var closing_in: bool = has_target and dist > u.get_effective_attack_range() * 0.85 and dist <= u.get_effective_attack_range() + 260.0
+				var wounded_in_fight: bool = has_target and u.current_hp < u.get_max_hp() * 0.70
+				if closing_in or wounded_in_fight:
+					u.command_cast_ability(ab, u.global_position, u)
+					break
+				continue
+
+			if ab.ability_id == &"radiant_mark":
+				var best_rm: Unit = _find_highest_hp_visible_hostile_unit(u.global_position, ab.cast_range)
+				if best_rm != null:
+					u.command_cast_ability(ab, best_rm.global_position, best_rm)
+					break
+				continue
+
+			if ab.ability_id == &"focus_alignment":
+				if has_target and dist <= u.get_effective_attack_range() + 45.0:
+					var is_armored_or_bldg: bool = (
+						(u.current_target is Building)
+						or (u.current_target.is_in_group("destructible_barricades"))
+						or (u.current_target is Unit and (u.current_target as Unit).data != null and (u.current_target as Unit).data.is_armored)
+					)
+					if is_armored_or_bldg:
+						u.command_cast_ability(ab, u.global_position, u)
+						break
+				continue
+
+			if ab.ability_id == &"blinding_glare":
+				if has_target and dist <= ab.cast_range:
+					var glare_cnt: int = _count_hostile_combat_near(u.current_target.global_position, maxf(70.0, ab.aoe_radius))
+					if glare_cnt >= 2:
+						u.command_cast_ability(ab, u.current_target.global_position)
+						break
+				continue
+
+			if ab.ability_id == &"aureole_surge":
+				if has_target and dist <= u.get_effective_attack_range() + 45.0 and u.current_hp >= u.get_max_hp() * 0.50:
+					u.command_cast_ability(ab, u.global_position, u)
+					break
+				continue
+
+			if ab.ability_id == &"solar_convergence":
+				var conv_pt: Variant = _find_solar_convergence_target(u, ab.cast_range, maxf(75.0, ab.aoe_radius))
+				if conv_pt is Vector2:
+					u.command_cast_ability(ab, conv_pt as Vector2)
+					break
+				continue
+
+			if not has_target:
+				continue
+
 			if ab.ability_id == &"kinetic_barrier":
 				var low_shd: bool = u.max_shield > 0.0 and u.current_shield <= u.max_shield * 0.25
 				var low_hp: bool = u.current_hp < u.get_max_hp() * 0.80
@@ -1589,6 +1699,77 @@ func _trigger_combat_abilities() -> void:
 				if dist <= ab.cast_range and u.current_target is Unit:
 					u.command_cast_ability(ab, u.current_target.global_position, u.current_target as Unit)
 					break
+
+
+func _find_highest_hp_visible_hostile_unit(origin: Vector2, cast_range: float) -> Unit:
+	var best: Unit = null
+	var best_hp: float = -1.0
+	var list: Array = SpatialGrid.query_units_in_radius(origin, cast_range + 24.0) if SpatialGrid != null else get_tree().get_nodes_in_group("units")
+	var r_sq: float = cast_range * cast_range
+	for node: Variant in list:
+		if not is_instance_valid(node) or not (node is Unit):
+			continue
+		var e: Unit = node as Unit
+		if e.is_dead or e.is_staffed or not _is_enemy_team(int(e.team)):
+			continue
+		if e.global_position.distance_squared_to(origin) > r_sq:
+			continue
+		if not _is_entity_visible_to_ai(e):
+			continue
+		if e.has_status_effect(&"radiant_mark"):
+			continue
+		if e.current_hp > best_hp:
+			best_hp = e.current_hp
+			best = e
+	return best
+
+
+func _find_solar_convergence_target(caster: Unit, cast_range: float, aoe_radius: float) -> Variant:
+	var origin: Vector2 = caster.global_position
+	var r_sq: float = cast_range * cast_range
+	# 1. Active breach barricade or hostile building in cast_range (strictly visible)
+	if caster.current_target != null and is_instance_valid(caster.current_target):
+		if caster.current_target.is_in_group("destructible_barricades") and not bool(caster.current_target.get("is_destroyed")):
+			if caster.current_target.global_position.distance_squared_to(origin) <= r_sq:
+				return caster.current_target.global_position
+		elif caster.current_target is Building:
+			var tb: Building = caster.current_target as Building
+			if not tb.is_destroyed and _is_enemy_team(int(tb.team)) and tb.global_position.distance_squared_to(origin) <= r_sq and _is_entity_visible_to_ai(tb):
+				return tb.global_position
+
+	# 2. Visible deployed siege units or clustered (>= 2) hostile units in cast_range
+	var unit_list: Array = SpatialGrid.query_units_in_radius(origin, cast_range + 24.0) if SpatialGrid != null else get_tree().get_nodes_in_group("units")
+	var best_cluster_pos: Variant = null
+	var best_cluster_cnt: int = 1
+	for node: Variant in unit_list:
+		if not is_instance_valid(node) or not (node is Unit):
+			continue
+		var e: Unit = node as Unit
+		if e.is_dead or e.is_staffed or not _is_enemy_team(int(e.team)):
+			continue
+		if e.global_position.distance_squared_to(origin) > r_sq or not _is_entity_visible_to_ai(e):
+			continue
+		if e.is_deployed():
+			return e.global_position
+		var cnt: int = _count_hostile_combat_near(e.global_position, aoe_radius)
+		if cnt > best_cluster_cnt:
+			best_cluster_cnt = cnt
+			best_cluster_pos = e.global_position
+	if best_cluster_pos is Vector2:
+		return best_cluster_pos
+
+	# 3. Any visible hostile building in cast_range (prioritize turrets/production)
+	var bldg_list: Array = SpatialGrid.query_buildings_in_radius(origin, cast_range + 48.0) if SpatialGrid != null else get_tree().get_nodes_in_group("buildings")
+	for node: Variant in bldg_list:
+		if not is_instance_valid(node) or not (node is Building):
+			continue
+		var b: Building = node as Building
+		if b.is_destroyed or not _is_enemy_team(int(b.team)):
+			continue
+		if b.global_position.distance_squared_to(origin) <= r_sq and _is_entity_visible_to_ai(b):
+			return b.global_position
+
+	return null
 
 
 func _count_hostile_combat_near(center: Vector2, radius: float) -> int:

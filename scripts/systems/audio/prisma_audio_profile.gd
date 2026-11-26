@@ -20,11 +20,15 @@ func register_cooldowns(cooldowns_ms: Dictionary) -> void:
 	cooldowns_ms[&"weapon_prism_bolt"] = 65
 	cooldowns_ms[&"weapon_prism_beam"] = 80
 	cooldowns_ms[&"weapon_prism_refract"] = 75
+	cooldowns_ms[&"weapon_prisma_lance"] = 110
 	cooldowns_ms[&"ability_solar_step"] = 100
 	cooldowns_ms[&"ability_radiant_mark"] = 110
 	cooldowns_ms[&"ability_luminous_mend"] = 120
 	cooldowns_ms[&"ability_focus_alignment"] = 120
 	cooldowns_ms[&"ability_blinding_glare"] = 120
+	cooldowns_ms[&"ability_aureole_surge"] = 140
+	cooldowns_ms[&"ability_solar_convergence_charge"] = 180
+	cooldowns_ms[&"ability_solar_convergence_impact"] = 180
 
 
 func build_weapon_and_ability_sfx(sfx_bank: Dictionary) -> void:
@@ -33,11 +37,15 @@ func build_weapon_and_ability_sfx(sfx_bank: Dictionary) -> void:
 		sfx_bank[&"weapon_prism_beam"] = SynthPrimitives.synth_prism_beam()
 	if not sfx_bank.has(&"weapon_prism_refract"):
 		sfx_bank[&"weapon_prism_refract"] = SynthPrimitives.synth_prism_refract()
+	sfx_bank[&"weapon_prisma_lance"] = _synth_prisma_lance()
 	sfx_bank[&"ability_solar_step"] = _synth_solar_step()
 	sfx_bank[&"ability_radiant_mark"] = _synth_radiant_mark()
 	sfx_bank[&"ability_luminous_mend"] = _synth_luminous_mend()
 	sfx_bank[&"ability_focus_alignment"] = _synth_focus_alignment()
 	sfx_bank[&"ability_blinding_glare"] = _synth_blinding_glare()
+	sfx_bank[&"ability_aureole_surge"] = _synth_aureole_surge()
+	sfx_bank[&"ability_solar_convergence_charge"] = _synth_solar_convergence_charge()
+	sfx_bank[&"ability_solar_convergence_impact"] = _synth_solar_convergence_impact()
 
 
 func build_bark_sfx(sfx_bank: Dictionary) -> void:
@@ -75,14 +83,18 @@ func resolve_weapon_sfx(sfx_id: StringName, unit_type_id: StringName) -> Diction
 			return {"sfx_id": &"weapon_prism_beam", "db": -6.0, "jitter": 0.03}
 		&"weapon_prism_refract":
 			return {"sfx_id": &"weapon_prism_refract", "db": -5.5, "jitter": 0.05}
+		&"weapon_prisma_lance":
+			return {"sfx_id": &"weapon_prisma_lance", "db": -3.2, "jitter": 0.03}
 
 	match unit_type_id:
 		&"acolyte", &"lumen_skiff":
 			return {"sfx_id": &"weapon_prism_bolt", "db": -6.2, "jitter": 0.05}
 		&"votary", &"prism_weaver":
 			return {"sfx_id": &"weapon_prism_refract", "db": -5.5, "jitter": 0.05}
-		&"lens_adjudicator":
+		&"lens_adjudicator", &"seraph_cruiser":
 			return {"sfx_id": &"weapon_prism_beam", "db": -6.0, "jitter": 0.03}
+		&"solstice_lance":
+			return {"sfx_id": &"weapon_prisma_lance", "db": -3.2, "jitter": 0.03}
 	return {}
 
 
@@ -98,6 +110,10 @@ func resolve_ability_sfx(ability_id: StringName) -> Dictionary:
 			return {"sfx_id": &"ability_focus_alignment", "db": -2.8, "jitter": 0.02}
 		&"blinding_glare":
 			return {"sfx_id": &"ability_blinding_glare", "db": -3.2, "jitter": 0.04}
+		&"aureole_surge":
+			return {"sfx_id": &"ability_aureole_surge", "db": -2.6, "jitter": 0.02}
+		&"solar_convergence":
+			return {"sfx_id": &"ability_solar_convergence_charge", "db": -2.4, "jitter": 0.02}
 	return {}
 
 
@@ -196,6 +212,79 @@ func _synth_blinding_glare() -> AudioStreamWAV:
 		var flash_env: float = minf(1.0, t / 0.002) * exp(-u * 4.6)
 		var air_env: float = minf(1.0, t / 0.008) * exp(-u * 5.8)
 		out[i] = clampf((sin(ph_a) * 0.48 + sin(ph_b) * 0.42) * flash_env * 0.26 + hp * air_env * 0.18, -0.92, 0.92)
+	return SynthPrimitives.make_wav(out)
+
+
+func _synth_prisma_lance() -> AudioStreamWAV:
+	# Deep resonant cathedral bell + focused prism crack (~0.38s)
+	var dur: float = 0.38
+	var count: int = int(SR * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var ph_crack: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SR)
+		var u: float = t / dur
+		var f_crack: float = lerpf(2400.0, 520.0, pow(u, 0.35))
+		ph_crack += TAU * f_crack / float(SR)
+		var crack_env: float = minf(1.0, t / 0.002) * exp(-u * 9.5)
+		var bell_env: float = minf(1.0, t / 0.006) * exp(-u * 3.8)
+		var sub_env: float = minf(1.0, t / 0.004) * exp(-u * 6.5)
+		var crack: float = sin(ph_crack) * crack_env * 0.30
+		var bell: float = (sin(TAU * 293.66 * t) * 0.48 + sin(TAU * 440.0 * t) * 0.30 + sin(TAU * 880.0 * t) * 0.22 * exp(-t * 10.0)) * bell_env * 0.28
+		var sub: float = sin(TAU * 110.0 * t) * sub_env * 0.22
+		out[i] = clampf(crack + bell + sub, -0.92, 0.92)
+	return SynthPrimitives.make_wav(out)
+
+
+func _synth_aureole_surge() -> AudioStreamWAV:
+	# Ascending crystalline choir chord (~0.46s)
+	return SynthPrimitives.synth_chord_swell(PackedFloat32Array([440.0, 554.37, 659.25, 880.0, 1318.51]), 0.46, 0.30)
+
+
+func _synth_solar_convergence_charge() -> AudioStreamWAV:
+	# Rising glass-harmonic focus hum (~1.15s)
+	var dur: float = 1.15
+	var count: int = int(SR * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var ph1: float = 0.0
+	var ph2: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SR)
+		var u: float = t / dur
+		var f1: float = lerpf(293.66, 880.0, pow(u, 1.35))
+		var f2: float = lerpf(440.0, 1318.51, pow(u, 1.45))
+		ph1 += TAU * f1 / float(SR)
+		ph2 += TAU * f2 / float(SR)
+		var env: float = minf(1.0, t / 0.06) * (0.35 + 0.65 * pow(u, 1.1)) * minf(1.0, (dur - t) / 0.04)
+		var pulse_mod: float = 0.85 + 0.15 * sin(TAU * lerpf(4.0, 14.0, u) * t)
+		out[i] = clampf((sin(ph1) * 0.56 + sin(ph2) * 0.44) * env * pulse_mod * 0.24, -0.92, 0.92)
+	return SynthPrimitives.make_wav(out)
+
+
+func _synth_solar_convergence_impact() -> AudioStreamWAV:
+	# Bright harmonic blast + tight sub-bass thump (~0.56s)
+	var dur: float = 0.56
+	var count: int = int(SR * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var ph_sub: float = 0.0
+	var seed_val: int = 94117
+	var lp: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SR)
+		var u: float = t / dur
+		var f_sub: float = lerpf(135.0, 44.0, pow(u, 0.45))
+		ph_sub += TAU * f_sub / float(SR)
+		var sub: float = sin(ph_sub) * minf(1.0, t / 0.004) * exp(-u * 4.8) * 0.44
+		var chime_env: float = minf(1.0, t / 0.003) * exp(-u * 3.2)
+		var chime: float = (sin(TAU * 587.33 * t) * 0.42 + sin(TAU * 880.0 * t) * 0.34 + sin(TAU * 1760.0 * t) * 0.24 * exp(-t * 9.0)) * chime_env * 0.30
+		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
+		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
+		lp = lerpf(lp, noise, 0.22)
+		var burst: float = (noise - lp * 0.5) * minf(1.0, t / 0.003) * exp(-u * 7.2) * 0.24
+		out[i] = clampf(sub + chime + burst, -0.94, 0.94)
 	return SynthPrimitives.make_wav(out)
 
 

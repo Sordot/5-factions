@@ -7,7 +7,7 @@
 script = ExtResource("1_ab")
 ability_id = &"build_prisma_alabaster_kiln"
 display_name = "Alabaster Kiln"
-hotkey_label = "W"
+hotkey_label = "E"
 cooldown_duration = 0.0
 cast_range = 0.0
 target_type = 3

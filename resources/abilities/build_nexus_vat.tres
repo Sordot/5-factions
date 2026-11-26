@@ -7,7 +7,7 @@
 script = ExtResource("1_ab")
 ability_id = &"build_nexus_vat"
 display_name = "Nexus Vat"
-hotkey_label = "F"
+hotkey_label = "Q"
 cooldown_duration = 0.0
 cast_range = 0.0
 target_type = 3

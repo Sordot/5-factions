@@ -7,7 +7,7 @@
 script = ExtResource("1_ab")
 ability_id = &"build_synthetics_fabricator"
 display_name = "Synthetics Fabricator"
-hotkey_label = "Y"
+hotkey_label = "G"
 cooldown_duration = 0.0
 cast_range = 0.0
 target_type = 3

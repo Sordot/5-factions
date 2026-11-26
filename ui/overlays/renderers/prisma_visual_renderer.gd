@@ -23,6 +23,8 @@ const UNIT_IDS: Dictionary = {
 	&"cantor": true,
 	&"lens_adjudicator": true,
 	&"prism_weaver": true,
+	&"seraph_cruiser": true,
+	&"solstice_lance": true,
 }
 
 const BUILDING_IDS: Dictionary = {
@@ -33,6 +35,7 @@ const BUILDING_IDS: Dictionary = {
 	&"choir_basilica": true,
 	&"refraction_cloister": true,
 	&"solar_obelisk": true,
+	&"cathedral_foundry": true,
 }
 
 const ANIMATED_UNITS: Dictionary = {
@@ -40,6 +43,8 @@ const ANIMATED_UNITS: Dictionary = {
 	&"cantor": true,
 	&"lens_adjudicator": true,
 	&"prism_weaver": true,
+	&"seraph_cruiser": true,
+	&"solstice_lance": true,
 }
 
 
@@ -297,6 +302,78 @@ func draw_unit(canvas: CanvasItem, type_id: StringName, unit: Unit, ctx: Diction
 			canvas.draw_circle(Vector2.ZERO, w_r + 2.0, Color(PRISMA_MAGENTA.r, PRISMA_MAGENTA.g, PRISMA_MAGENTA.b, 0.28))
 			_draw_diamond(canvas, Vector2.ZERO, w_r, w_r, PRISMA_OBSIDIAN, PRISMA_GOLD, 1.3)
 			canvas.draw_circle(Vector2.ZERO, 2.8 + pulse * 0.5, PRISMA_MAGENTA)
+
+		&"seraph_cruiser":
+			# Swept angelic-geometric delta frigate: twin split alabaster wing-vanes, obsidian prism spine, golden double-halo
+			var is_surging: bool = unit != null and is_instance_valid(unit) and unit.has_status_effect(&"aureole_surge")
+			var ramp_s: float = 0.0
+			if unit != null and is_instance_valid(unit) and unit.combat_component != null:
+				ramp_s = unit.combat_component.get_beam_ramp_ratio(unit)
+			if is_surging:
+				var corona_r: float = 23.0 + pulse * 3.0
+				canvas.draw_circle(Vector2.ZERO, corona_r, Color(PRISMA_GOLD.r, PRISMA_GOLD.g, PRISMA_GOLD.b, 0.16 + pulse * 0.08))
+				canvas.draw_arc(Vector2.ZERO, corona_r, 0.0, TAU, 32, Color(PRISMA_MAGENTA.r, PRISMA_MAGENTA.g, PRISMA_MAGENTA.b, 0.78), 2.0, true)
+				canvas.draw_arc(Vector2.ZERO, corona_r - 3.0, anim_time * 2.2, anim_time * 2.2 + PI * 1.4, 22, PRISMA_GOLD, 1.8, true)
+
+			# Outer split angelic wing-vanes
+			var wing_upper: PackedVector2Array = PackedVector2Array([
+				Vector2(18.0, -3.5), Vector2(4.0, -18.5), Vector2(-14.0, -21.0),
+				Vector2(-20.0, -11.0), Vector2(-8.0, -7.5), Vector2(6.0, -5.5),
+			])
+			var wing_lower: PackedVector2Array = PackedVector2Array([
+				Vector2(18.0, 3.5), Vector2(6.0, 5.5), Vector2(-8.0, 7.5),
+				Vector2(-20.0, 11.0), Vector2(-14.0, 21.0), Vector2(4.0, 18.5),
+			])
+			_draw_soft_shadow(canvas, wing_upper, Vector2(2.6, 3.0))
+			_draw_soft_shadow(canvas, wing_lower, Vector2(2.6, 3.0))
+			poly_outlined(canvas, wing_upper, ceramic, PRISMA_OBSIDIAN, 1.55)
+			poly_outlined(canvas, wing_lower, ceramic, PRISMA_OBSIDIAN, 1.55)
+			# Team pennant inlays on wings
+			canvas.draw_line(Vector2(-12.5, -16.5), Vector2(4.0, -13.5), ribbon, 2.8, true)
+			canvas.draw_line(Vector2(-12.5, 16.5), Vector2(4.0, 13.5), ribbon, 2.8, true)
+			# Obsidian dorsal prism spine
+			var spine: PackedVector2Array = PackedVector2Array([
+				Vector2(23.5, 0.0), Vector2(10.0, -6.5), Vector2(-16.5, -7.5),
+				Vector2(-21.5, 0.0), Vector2(-16.5, 7.5), Vector2(10.0, 6.5),
+			])
+			poly_outlined(canvas, spine, PRISMA_OBSIDIAN, PRISMA_GOLD, 1.6)
+			# Golden double-halo focus ring
+			var h_rot_s: float = anim_time * (1.85 if is_surging else 0.95)
+			canvas.draw_arc(Vector2(1.0, 0.0), 11.0, h_rot_s, h_rot_s + PI * 0.85, 16, PRISMA_GOLD, 1.6, true)
+			canvas.draw_arc(Vector2(1.0, 0.0), 11.0, h_rot_s + PI, h_rot_s + PI * 1.85, 16, PRISMA_GOLD, 1.6, true)
+			canvas.draw_arc(Vector2(1.0, 0.0), 7.2, 0.0, TAU, 22, PRISMA_MAGENTA if is_surging else PRISMA_GOLD, 1.3, true)
+			# Escalating forward focal crystal
+			var s_col: Color = PRISMA_GOLD.lerp(PRISMA_WHITE_HOT, clampf(ramp_s * 0.8 + (0.35 if is_surging else 0.0), 0.0, 1.0))
+			canvas.draw_circle(Vector2(13.5, 0.0), lerpf(4.8, 8.2, ramp_s) + pulse * 0.7, Color(s_col.r, s_col.g, s_col.b, 0.34))
+			_draw_diamond(canvas, Vector2(13.5, 0.0), 6.2, 3.6, s_col, PRISMA_WHITE_HOT, 1.1)
+
+		&"solstice_lance":
+			# Elongated diamond-cathedral siege skiff with split gilded focus-rails framing a floating magenta lens crystal
+			var hull_sl: PackedVector2Array = PackedVector2Array([
+				Vector2(11.0, -11.0), Vector2(-12.0, -15.0), Vector2(-21.0, -6.0),
+				Vector2(-21.0, 6.0), Vector2(-12.0, 15.0), Vector2(11.0, 11.0),
+				Vector2(6.0, 4.5), Vector2(-10.0, 4.5), Vector2(-10.0, -4.5), Vector2(6.0, -4.5),
+			])
+			_draw_soft_shadow(canvas, hull_sl, Vector2(2.6, 3.0))
+			poly_outlined(canvas, hull_sl, ceramic, PRISMA_OBSIDIAN, 1.6)
+			# Obsidian cathedral keel & team flank stripes
+			var keel: PackedVector2Array = PackedVector2Array([
+				Vector2(2.0, -8.5), Vector2(-13.5, -10.0), Vector2(-17.5, 0.0),
+				Vector2(-13.5, 10.0), Vector2(2.0, 8.5),
+			])
+			poly_outlined(canvas, keel, PRISMA_OBSIDIAN, PRISMA_GOLD, 1.4)
+			canvas.draw_line(Vector2(-12.0, -12.6), Vector2(5.5, -9.6), ribbon, 2.8, true)
+			canvas.draw_line(Vector2(-12.0, 12.6), Vector2(5.5, 9.6), ribbon, 2.8, true)
+			# Split gilded orbital focus-rails projecting forward
+			canvas.draw_line(Vector2(2.0, -6.4), Vector2(26.0, -3.2), PRISMA_OBSIDIAN, 4.4, true)
+			canvas.draw_line(Vector2(2.0, 6.4), Vector2(26.0, 3.2), PRISMA_OBSIDIAN, 4.4, true)
+			canvas.draw_line(Vector2(2.0, -6.4), Vector2(26.0, -3.2), PRISMA_GOLD, 2.2, true)
+			canvas.draw_line(Vector2(2.0, 6.4), Vector2(26.0, 3.2), PRISMA_GOLD, 2.2, true)
+			# Floating ultraviolet-magenta orbital lens crystal suspended between the rails
+			var float_x: float = 14.5 + sin(anim_time * 3.0) * 1.1
+			canvas.draw_circle(Vector2(float_x, 0.0), 6.5 + pulse * 1.1, Color(PRISMA_MAGENTA.r, PRISMA_MAGENTA.g, PRISMA_MAGENTA.b, 0.30))
+			_draw_diamond(canvas, Vector2(float_x, 0.0), 6.0, 3.4, PRISMA_MAGENTA, PRISMA_WHITE_HOT, 1.2)
+			canvas.draw_circle(Vector2(-6.0, 0.0), 3.6, PRISMA_GOLD)
 		_:
 			var fallback: PackedVector2Array = PackedVector2Array([
 				Vector2(14.0, 0.0), Vector2(0.0, -11.0), Vector2(-14.0, 0.0), Vector2(0.0, 11.0),
@@ -473,6 +550,102 @@ func draw_building(
 				var cd: Vector2 = Vector2.RIGHT.rotated(ca)
 				canvas.draw_line(cd * (r * 0.52), cd * (r * 0.88), ribbon, 2.4, true)
 			canvas.draw_arc(Vector2.ZERO, r * 0.44, 0.0, TAU, 24, PRISMA_GOLD, 1.5, true)
+
+		&"cathedral_foundry":
+			# Grand 88x88 octagonal rose-window cathedral bay: twin gilded apse wings, obsidian central altar glass,
+			# rotating golden astrolabe ring while actively producing, subtle crimson/magenta unpowered dim state
+			var unpowered_tint: Color = Color(0.72, 0.22, 0.46, 0.72)
+			var active_energy: Color = PRISMA_MAGENTA if is_powered else unpowered_tint
+			var gold_trim: Color = PRISMA_GOLD if is_powered else Color(0.62, 0.48, 0.22, 0.85)
+			# Twin gilded apse wings
+			var apse_l: PackedVector2Array = PackedVector2Array([
+				Vector2(-r * 0.88, -r * 0.46), Vector2(-r * 0.42, -r * 0.74),
+				Vector2(-r * 0.42, r * 0.74), Vector2(-r * 0.88, r * 0.46),
+			])
+			var apse_r: PackedVector2Array = PackedVector2Array([
+				Vector2(r * 0.42, -r * 0.74), Vector2(r * 0.88, -r * 0.46),
+				Vector2(r * 0.88, r * 0.46), Vector2(r * 0.42, r * 0.74),
+			])
+			poly_outlined(canvas, apse_l, PRISMA_OBSIDIAN, gold_trim, 1.6)
+			poly_outlined(canvas, apse_r, PRISMA_OBSIDIAN, gold_trim, 1.6)
+			canvas.draw_line(Vector2(-r * 0.66, -r * 0.48), Vector2(-r * 0.66, r * 0.48), ribbon, 3.2, true)
+			canvas.draw_line(Vector2(r * 0.66, -r * 0.48), Vector2(r * 0.66, r * 0.48), ribbon, 3.2, true)
+			# Central obsidian altar glass octagon
+			var altar: PackedVector2Array = scale_poly(hull_poly, 0.56)
+			poly_outlined(canvas, altar, PRISMA_OBSIDIAN, gold_trim, 1.6)
+			# Rose-window spokes & rotating golden astrolabe ring
+			var astro_r: float = r * 0.44
+			var astro_rot: float = anim_time * (1.25 if (is_producing and is_powered) else 0.18)
+			canvas.draw_arc(Vector2.ZERO, astro_r, 0.0, TAU, 32, gold_trim, 1.8, true)
+			canvas.draw_arc(Vector2.ZERO, astro_r * 0.78, astro_rot, astro_rot + PI * 0.78, 16, PRISMA_WHITE_HOT if is_powered else unpowered_tint, 1.4, true)
+			canvas.draw_arc(Vector2.ZERO, astro_r * 0.78, astro_rot + PI, astro_rot + PI * 1.78, 16, PRISMA_WHITE_HOT if is_powered else unpowered_tint, 1.4, true)
+			for ri: int in range(8):
+				var ra: float = astro_rot * 0.5 + float(ri) * (TAU / 8.0)
+				var rd: Vector2 = Vector2.RIGHT.rotated(ra)
+				canvas.draw_line(rd * (astro_r * 0.34), rd * astro_r, Color(gold_trim.r, gold_trim.g, gold_trim.b, 0.78), 1.2, true)
+			# Central consecrated prism heart
+			var heart_r: float = r * (0.20 + (active_pulse * 0.05 if (is_producing and is_powered) else pulse * 0.02))
+			canvas.draw_circle(Vector2.ZERO, heart_r + 5.0, Color(active_energy.r, active_energy.g, active_energy.b, 0.26 + (active_pulse * 0.18 if is_producing else 0.0)))
+			_draw_diamond(canvas, Vector2.ZERO, heart_r, heart_r, active_energy, gold_trim, 1.5)
+			canvas.draw_circle(Vector2.ZERO, heart_r * 0.44, PRISMA_WHITE_HOT if is_powered else unpowered_tint)
+			if is_producing and is_powered:
+				draw_active_conduit_sparks(canvas, PRISMA_GOLD, r * 0.62, anim_time)
+				draw_active_conduit_sparks(canvas, PRISMA_MAGENTA, r * 0.48, -anim_time * 1.2)
+
+
+# =============================================================================
+# SCOUTABLE UPGRADE VISUAL TELLTALES (MILESTONE 4.0b)
+# =============================================================================
+
+func draw_unit_upgrade_telltales(canvas: CanvasItem, type_id: StringName, unit: Unit, ctx: Dictionary) -> void:
+	# 1. Harmonic Communion: crisp concentric Liturgical Gold halo ring + 4 tiny cardinal diamond nodes
+	if (type_id == &"cantor" or type_id == &"prism_weaver") and ctx_has_upgrade(ctx, UpgradeManager.UPGRADE_HARMONIC_COMMUNION):
+		var halo_r: float = 17.5 if type_id == &"cantor" else 19.0
+		canvas.draw_arc(Vector2.ZERO, halo_r, 0.0, TAU, 28, Color(PRISMA_GOLD.r, PRISMA_GOLD.g, PRISMA_GOLD.b, 0.85), 1.3, true)
+		for ci: int in range(4):
+			var ca: float = float(ci) * (PI * 0.5)
+			var pt: Vector2 = Vector2.RIGHT.rotated(ca) * halo_r
+			_draw_diamond(canvas, pt, 2.4, 2.4, PRISMA_GOLD, PRISMA_WHITE_HOT, 0.9)
+
+	# 2. Specular Focusing: glowing Ultraviolet Magenta faceted wing/lens pips along forward emitters
+	if (type_id == &"votary" or type_id == &"lens_adjudicator" or type_id == &"prism_weaver" or type_id == &"seraph_cruiser") and ctx_has_upgrade(ctx, UpgradeManager.UPGRADE_SPECULAR_FOCUSING):
+		var x_fwd: float = 11.5
+		var y_off: float = 5.5
+		if type_id == &"lens_adjudicator":
+			x_fwd = 17.0
+			y_off = 6.2
+		elif type_id == &"prism_weaver":
+			x_fwd = 12.0
+			y_off = 6.0
+		elif type_id == &"seraph_cruiser":
+			x_fwd = 17.5
+			y_off = 8.2
+		_draw_diamond(canvas, Vector2(x_fwd, -y_off), 2.8, 1.9, PRISMA_MAGENTA, PRISMA_WHITE_HOT, 0.9)
+		_draw_diamond(canvas, Vector2(x_fwd, y_off), 2.8, 1.9, PRISMA_MAGENTA, PRISMA_WHITE_HOT, 0.9)
+
+	# 3. Solar Apotheosis: sharp Solar Gold dorsal chevron crown trim on all PRISMA_DEI combat units
+	if unit != null and is_instance_valid(unit) and unit.data != null and unit.data.is_combat_unit() and ctx_has_upgrade(ctx, UpgradeManager.UPGRADE_SOLAR_APOTHEOSIS):
+		var crown_x: float = -4.5 if unit.data.collision_radius >= 17.0 else -3.0
+		var crown_s: float = 6.2 if unit.data.collision_radius >= 17.0 else 4.6
+		var chev: PackedVector2Array = PackedVector2Array([
+			Vector2(crown_x - crown_s * 0.55, -crown_s),
+			Vector2(crown_x + crown_s * 0.75, 0.0),
+			Vector2(crown_x - crown_s * 0.55, crown_s),
+		])
+		canvas.draw_polyline(chev, PRISMA_GOLD, 2.0, true)
+		canvas.draw_circle(Vector2(crown_x + crown_s * 0.75, 0.0), 1.6, PRISMA_WHITE_HOT)
+
+
+func draw_building_upgrade_telltales(canvas: CanvasItem, type_id: StringName, building: Building, ctx: Dictionary) -> void:
+	# 1. Harmonic Communion: crisp concentric Liturgical Gold halo ring + 4 tiny cardinal diamond nodes around Halo Spire
+	if type_id == &"halo_spire" and ctx_has_upgrade(ctx, UpgradeManager.UPGRADE_HARMONIC_COMMUNION):
+		var r: float = building.footprint_radius if (building != null and is_instance_valid(building)) else 32.0
+		var halo_r: float = r * 1.08
+		canvas.draw_arc(Vector2.ZERO, halo_r, 0.0, TAU, 32, Color(PRISMA_GOLD.r, PRISMA_GOLD.g, PRISMA_GOLD.b, 0.88), 1.6, true)
+		for ci: int in range(4):
+			var ca: float = float(ci) * (PI * 0.5)
+			var pt: Vector2 = Vector2.RIGHT.rotated(ca) * halo_r
+			_draw_diamond(canvas, pt, 3.4, 3.4, PRISMA_GOLD, PRISMA_WHITE_HOT, 1.0)
 
 
 func draw_building_turret(canvas: CanvasItem, building: Building, ctx: Dictionary) -> bool:

@@ -407,13 +407,41 @@ func execute_ability(owner_unit: Unit, ability: AbilityData, target_pos: Vector2
 		AbilityData.TargetType.INSTANT:
 			_execute_instant(owner_unit, ability)
 
-	if AudioManager != null and (owner_unit.team == Unit.Team.PLAYER or owner_unit.visible):
-		AudioManager.play_ability_sfx(ability.ability_id, owner_unit.global_position)
+	if AudioManager != null:
+		var sfx_pos: Vector2 = target_pos if ability.ability_id == &"solar_convergence" else owner_unit.global_position
+		var is_local_caster: bool = TeamManager.is_team_controlled_by_local_human(int(owner_unit.team)) if TeamManager != null else (owner_unit.team == Unit.Team.PLAYER)
+		var sfx_visible: bool = is_local_caster or owner_unit.visible
+		if not sfx_visible and ability.ability_id == &"solar_convergence" and owner_unit.is_inside_tree():
+			var fog: FogOfWarSystem = owner_unit.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+			sfx_visible = fog == null or not fog.fog_enabled or fog.is_world_pos_visible_strict(target_pos)
+		if sfx_visible:
+			AudioManager.play_ability_sfx(ability.ability_id, sfx_pos)
 
 	ability_executed.emit(ability.ability_id, target_pos)
 
 
 func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vector2) -> void:
+	if ability.ability_id == &"solar_convergence":
+		var telegraph_time: float = ability.effect_duration if ability.effect_duration > 0.0 else 1.4
+		var base_dmg: float = ability.damage_or_value if ability.damage_or_value > 0.0 else 75.0
+		var bonus_armored: float = 45.0
+		var blast_radius: float = ability.aoe_radius if ability.aoe_radius > 0.0 else 95.0
+		var tree: SceneTree = owner_unit.get_tree()
+		var caster_team: Unit.Team = owner_unit.team
+		var caster_ref: WeakRef = weakref(owner_unit)
+		var on_impact: Callable = func() -> void:
+			_detonate_solar_convergence(tree, caster_team, caster_ref, target_pos, blast_radius, base_dmg, bonus_armored)
+		var fx: CombatVFX = VFXPool.acquire_combat_vfx(55) if VFXPool != null else null
+		if fx == null and owner_unit.get_parent() != null:
+			fx = load("res://ui/overlays/combat_vfx.gd").new() as CombatVFX
+			fx.z_index = 55
+			owner_unit.get_parent().add_child(fx)
+		if fx != null:
+			fx.setup_solar_convergence(target_pos, blast_radius, telegraph_time, on_impact)
+		else:
+			on_impact.call()
+		return
+
 	if ability.ability_id == &"grav_pulse":
 		_spawn_grav_pulse_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
 	elif ability.ability_id == &"luminous_mend" or ability.ability_id == &"blinding_glare":
@@ -535,6 +563,19 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 			"move_speed_mult": ss_mv,
 		})
 		_spawn_prism_burst_effect(owner_unit, owner_unit.global_position, maxf(34.0, ability.aoe_radius), ability.effect_color)
+		return
+
+	if ab_id == &"aureole_surge":
+		var as_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 4.0
+		var as_ramp: float = ability.damage_or_value if ability.damage_or_value > 1.0 else 1.35
+		owner_unit.apply_status_effect(&"aureole_surge", {
+			"duration": as_dur,
+			"label": "Aureole Surge",
+			"beam_ramp_speed_mult": as_ramp,
+			"bonus_refract_bounces": 1,
+			"damage_taken_mult": 1.15,
+		})
+		_spawn_prism_burst_effect(owner_unit, owner_unit.global_position, maxf(44.0, ability.aoe_radius), ability.effect_color)
 		return
 
 	if ab_id == &"focus_alignment":
@@ -686,3 +727,86 @@ func _spawn_prism_burst_effect(owner_unit: Unit, target_pos: Vector2, radius: fl
 		fx.z_index = 55
 		owner_unit.get_parent().add_child(fx)
 	fx.setup_prism_burst(owner_unit.global_position, target_pos, radius, effect_color)
+
+
+func _detonate_solar_convergence(
+	tree: SceneTree,
+	caster_team: Unit.Team,
+	caster_ref: WeakRef,
+	center: Vector2,
+	radius: float,
+	base_dmg: float,
+	bonus_armored: float
+) -> void:
+	if tree == null:
+		return
+	var caster_obj: Variant = caster_ref.get_ref() if caster_ref != null else null
+	var attacker: Unit = caster_obj as Unit if (caster_obj != null and is_instance_valid(caster_obj) and caster_obj is Unit) else null
+
+	var entities: Array = SpatialGrid.query_entities_in_radius(center, radius, true, true) if SpatialGrid != null else []
+	if SpatialGrid != null:
+		for node: Variant in entities:
+			if not is_instance_valid(node):
+				continue
+			if node is Unit:
+				var candidate: Unit = node as Unit
+				var is_hostile: bool = TeamManager.are_enemies(int(caster_team), int(candidate.team)) if TeamManager != null else (candidate.team != caster_team)
+				if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not is_hostile:
+					continue
+				var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
+				if candidate.global_position.distance_to(center) <= radius + enemy_r:
+					var dmg: float = base_dmg + (bonus_armored if (candidate.data != null and candidate.data.is_armored) else 0.0)
+					candidate.take_damage(dmg, attacker)
+			elif node is Building:
+				var b: Building = node as Building
+				var is_hostile_b: bool = TeamManager.are_enemies(int(caster_team), int(b.team)) if TeamManager != null else (b.team != caster_team)
+				if b.is_destroyed or b.is_queued_for_deletion() or not is_hostile_b:
+					continue
+				if b.global_position.distance_to(center) <= radius + b.footprint_radius:
+					b.take_damage(base_dmg + bonus_armored, attacker)
+			elif node is Node2D and (node as Node).is_in_group("destructible_barricades"):
+				var bar: Node2D = node as Node2D
+				if bool(bar.get("is_destroyed")) or bar.is_queued_for_deletion():
+					continue
+				var bar_r: float = float(bar.call("get_footprint_radius")) if bar.has_method("get_footprint_radius") else 40.0
+				if bar.global_position.distance_to(center) <= radius + bar_r:
+					bar.call("take_damage", base_dmg + bonus_armored, attacker)
+	else:
+		for node: Node in tree.get_nodes_in_group("units"):
+			if not is_instance_valid(node) or not (node is Unit):
+				continue
+			var candidate: Unit = node as Unit
+			var is_hostile: bool = TeamManager.are_enemies(int(caster_team), int(candidate.team)) if TeamManager != null else (candidate.team != caster_team)
+			if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not is_hostile:
+				continue
+			var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
+			if candidate.global_position.distance_to(center) <= radius + enemy_r:
+				var dmg: float = base_dmg + (bonus_armored if (candidate.data != null and candidate.data.is_armored) else 0.0)
+				candidate.take_damage(dmg, attacker)
+		for node: Node in tree.get_nodes_in_group("buildings"):
+			if not is_instance_valid(node) or not (node is Building):
+				continue
+			var b: Building = node as Building
+			var is_hostile_b: bool = TeamManager.are_enemies(int(caster_team), int(b.team)) if TeamManager != null else (b.team != caster_team)
+			if b.is_destroyed or b.is_queued_for_deletion() or not is_hostile_b:
+				continue
+			if b.global_position.distance_to(center) <= radius + b.footprint_radius:
+				b.take_damage(base_dmg + bonus_armored, attacker)
+		for node: Node in tree.get_nodes_in_group("destructible_barricades"):
+			if not is_instance_valid(node) or not (node is Node2D):
+				continue
+			if bool(node.get("is_destroyed")) or node.is_queued_for_deletion():
+				continue
+			var bar_r: float = float(node.call("get_footprint_radius")) if node.has_method("get_footprint_radius") else 40.0
+			if (node as Node2D).global_position.distance_to(center) <= radius + bar_r:
+				node.call("take_damage", base_dmg + bonus_armored, attacker)
+
+	var fog: FogOfWarSystem = tree.get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	var is_local: bool = TeamManager.is_team_controlled_by_local_human(int(caster_team)) if TeamManager != null else (caster_team == Unit.Team.PLAYER)
+	var visible_to_local: bool = is_local or fog == null or not fog.fog_enabled or fog.is_world_pos_visible_strict(center)
+	if visible_to_local:
+		if AudioManager != null:
+			AudioManager.play_sfx(&"ability_solar_convergence_impact", -2.0, 0.04, center, true)
+		var cam: Node = tree.get_first_node_in_group("rts_camera")
+		if cam != null and cam.has_method("add_camera_shake"):
+			cam.call("add_camera_shake", 2.6, 0.20, center)

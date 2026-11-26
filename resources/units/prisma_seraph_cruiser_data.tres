@@ -1,0 +1,52 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/prisma_aureole_surge.tres" id="2_ab_surge"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"seraph_cruiser"
+display_name = "Seraph Cruiser"
+short_display_name = "Seraph"
+max_hp = 290.0
+max_shield = 0.0
+move_speed = 190.0
+acceleration = 1500.0
+turn_speed = 10.5
+selection_radius = 26.0
+collision_radius = 20.0
+attack_damage = 16.0
+attack_range = 250.0
+aggro_range = 330.0
+vision_range = 400.0
+attack_cooldown = 0.35
+attack_windup = 0.08
+is_armored = true
+unit_tags = Array[StringName]([&"synthetic", &"armored", &"heavy", &"beam"])
+bonus_vs_armored = 5.0
+damage_reduction = 0.12
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_ab_surge")])
+bandwidth_cost = 4
+biomass_cost = 125
+silica_cost = 180
+compute_cost = 60
+salvage_silica = 50
+salvage_compute = 25
+build_time = 12.0
+train_time = 12.0
+unit_scene_path = "res://scenes/units/prisma_seraph_cruiser.tscn"
+weapon_tracer_style = &"prism_beam"
+weapon_tracer_color = Color(0.98, 0.8, 0.14, 1)
+weapon_tracer_width = 3.2
+weapon_sfx_id = &"weapon_prism_beam"
+audio_bark_class = &"heavy"
+minimap_icon_shape = &"triangle_heavy"
+role_tags_display = "Elite Beam Frigate • Escalating + Refract"
+is_continuous_beam = true
+beam_ramp_max_multiplier = 2.4
+beam_ramp_duration = 3.2
+beam_ramp_decay_delay = 0.55
+beam_ramp_decay_rate = 1.4
+refract_max_bounces = 1
+refract_radius = 125.0
+refract_damage_ratio = 0.5

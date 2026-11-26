@@ -59,6 +59,7 @@ func apply_effect(effect_id: StringName, config: Dictionary) -> void:
 	var source_attacker: Variant = config.get("source_attacker", null)
 	var bonus_attack_range: float = maxf(0.0, float(config.get("bonus_attack_range", 0.0)))
 	var beam_ramp_speed_mult: float = clampf(float(config.get("beam_ramp_speed_mult", 1.0)), 0.25, 4.0)
+	var bonus_refract_bounces: int = maxi(0, int(config.get("bonus_refract_bounces", 0)))
 	var tether_stacks: int = maxi(0, int(config.get("tether_stacks", 0)))
 	var label_str: String = String(config.get("label", String(effect_id).replace("_", " ").capitalize()))
 
@@ -76,6 +77,7 @@ func apply_effect(effect_id: StringName, config: Dictionary) -> void:
 		"source_attacker": source_attacker,
 		"bonus_attack_range": bonus_attack_range,
 		"beam_ramp_speed_mult": beam_ramp_speed_mult,
+		"bonus_refract_bounces": bonus_refract_bounces,
 		"tether_stacks": tether_stacks,
 	}
 
@@ -295,6 +297,13 @@ func get_beam_ramp_speed_multiplier() -> float:
 	for eff: Variant in _effects.values():
 		mult *= float((eff as Dictionary).get("beam_ramp_speed_mult", 1.0))
 	return clampf(mult, 0.25, 4.0)
+
+
+func get_bonus_refract_bounces() -> int:
+	var total: int = 0
+	for eff: Variant in _effects.values():
+		total += maxi(0, int((eff as Dictionary).get("bonus_refract_bounces", 0)))
+	return total
 
 
 func get_optical_tether_stacks() -> int:

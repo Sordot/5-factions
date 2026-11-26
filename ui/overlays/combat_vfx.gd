@@ -15,6 +15,7 @@ enum VFXMode {
 	SHIELD_SHATTER,
 	MUZZLE_SHOCK,
 	ANCHOR_THUD,
+	SOLAR_CONVERGENCE,
 }
 
 var _mode: VFXMode = VFXMode.DEATH_BURST
@@ -46,7 +47,7 @@ var is_pooled: bool = false
 
 
 func is_critical_flight() -> bool:
-	return _mode == VFXMode.MORTAR_SHELL and not _impacted
+	return (_mode == VFXMode.MORTAR_SHELL or _mode == VFXMode.SOLAR_CONVERGENCE) and not _impacted
 
 
 func reset_for_pool() -> void:
@@ -251,21 +252,42 @@ func setup_anchor_thud(origin: Vector2, radius: float, accent_col: Color = Color
 	queue_redraw()
 
 
+func setup_solar_convergence(
+	target_world: Vector2,
+	radius: float,
+	telegraph_time: float = 1.4,
+	on_impact_callback: Callable = Callable()
+) -> void:
+	_mode = VFXMode.SOLAR_CONVERGENCE
+	_from_world = target_world
+	_target_world = target_world
+	_radius = maxf(32.0, radius)
+	_flight_time = maxf(0.25, telegraph_time)
+	_blast_duration = 0.42
+	_duration = _flight_time + _blast_duration
+	_color = Color(0.98, 0.80, 0.14, 1.0)
+	_on_impact = on_impact_callback
+	_impacted = false
+	_elapsed = 0.0
+	_refresh_fog_visibility()
+	queue_redraw()
+
+
 func _process(delta: float) -> void:
 	_elapsed += delta
-	if _mode == VFXMode.MORTAR_SHELL:
+	if _mode == VFXMode.MORTAR_SHELL or _mode == VFXMode.SOLAR_CONVERGENCE:
 		if not _impacted and _elapsed >= _flight_time:
 			_impacted = true
 			if is_inside_tree():
 				var scars: Node = get_tree().get_first_node_in_group("battle_scars")
 				if scars != null and scars.has_method("add_scar"):
-					var scar_kind: StringName = &"scorch_large" if _radius >= 50.0 else &"scorch_small"
-					scars.call("add_scar", scar_kind, _target_world, clampf(_radius * 0.62, 16.0, 56.0), _color)
+					var scar_kind: StringName = &"scorch_large" if (_radius >= 50.0 or _mode == VFXMode.SOLAR_CONVERGENCE) else &"scorch_small"
+					scars.call("add_scar", scar_kind, _target_world, clampf(_radius * 0.62, 16.0, 58.0), _color)
 			if _on_impact.is_valid():
 				_on_impact.call()
 		_refresh_fog_visibility()
 	if _elapsed >= _duration:
-		if _mode == VFXMode.MORTAR_SHELL and not _impacted:
+		if (_mode == VFXMode.MORTAR_SHELL or _mode == VFXMode.SOLAR_CONVERGENCE) and not _impacted:
 			_impacted = true
 			if _on_impact.is_valid():
 				_on_impact.call()
@@ -320,6 +342,8 @@ func _draw() -> void:
 			_draw_muzzle_shock()
 		VFXMode.ANCHOR_THUD:
 			_draw_anchor_thud()
+		VFXMode.SOLAR_CONVERGENCE:
+			_draw_solar_convergence()
 
 
 func _draw_mortar_shell() -> void:
@@ -665,6 +689,63 @@ func _draw_anchor_thud() -> void:
 		var outer_pt: Vector2 = p + d * lerpf(_radius * 0.78, _radius * 1.48, ease_out)
 		draw_line(inner_pt, outer_pt, Color(_color.r, _color.g, _color.b, 0.92 * fade), 2.4 * fade + 0.8, true)
 		draw_circle(outer_pt, maxf(1.4, 3.2 * fade), Color(0.95, 0.94, 0.91, 0.78 * fade))
+
+
+func _draw_solar_convergence() -> void:
+	var p: Vector2 = to_local(_target_world)
+	var gold: Color = Color(0.98, 0.80, 0.14, 1.0)
+	var magenta: Color = Color(0.851, 0.275, 0.937, 1.0)
+	var bone: Color = Color(0.99, 0.98, 0.95, 1.0)
+
+	if not _impacted:
+		var u: float = clampf(_elapsed / maxf(0.01, _flight_time), 0.0, 1.0)
+		var ease_in: float = u * u
+		var alpha: float = lerpf(0.55, 0.98, u)
+
+		# Outer hazard boundary (dashed gold) + subtle tinted interior
+		draw_circle(p, _radius, Color(magenta.r, magenta.g, magenta.b, 0.06 + 0.10 * ease_in))
+		_draw_dashed_circle(p, _radius, Color(gold.r, gold.g, gold.b, alpha), 2.4, 24)
+
+		# Converging inner Bauhaus sacred lens ring + rotating inscribed diamond
+		var conv_r: float = lerpf(_radius * 0.96, _radius * 0.12, u)
+		draw_arc(p, conv_r, 0.0, TAU, 36, Color(magenta.r, magenta.g, magenta.b, 0.55 + 0.42 * u), 2.2, true)
+		var rot: float = u * PI * 0.75
+		var d_pts: PackedVector2Array = PackedVector2Array()
+		for i: int in range(4):
+			var a: float = rot + float(i) * (PI * 0.5)
+			d_pts.append(p + Vector2(cos(a), sin(a)) * conv_r)
+		d_pts.append(d_pts[0])
+		draw_polyline(d_pts, Color(gold.r, gold.g, gold.b, 0.75 + 0.22 * u), 1.6, true)
+
+		# Cardinal precision crosshairs converging inward
+		for i: int in range(4):
+			var a: float = float(i) * (PI * 0.5)
+			var dir_v: Vector2 = Vector2(cos(a), sin(a))
+			draw_line(p + dir_v * _radius, p + dir_v * maxf(10.0, conv_r * 0.65), Color(gold.r, gold.g, gold.b, alpha), 1.8, true)
+
+		# Rising orbital guide filament in final 35% of telegraph
+		if u > 0.65:
+			var beam_u: float = (u - 0.65) / 0.35
+			var sky_pt: Vector2 = p + Vector2(0.0, -420.0)
+			draw_line(sky_pt, p, Color(magenta.r, magenta.g, magenta.b, 0.22 + 0.45 * beam_u), 2.0 + 3.0 * beam_u, true)
+			draw_circle(p, 5.0 + 9.0 * beam_u, Color(bone.r, bone.g, bone.b, 0.55 + 0.40 * beam_u))
+	else:
+		var bt: float = clampf((_elapsed - _flight_time) / maxf(0.01, _blast_duration), 0.0, 1.0)
+		var ease_out: float = 1.0 - pow(1.0 - bt, 2.6)
+		var fade: float = 1.0 - bt
+		var sky_top: Vector2 = p + Vector2(0.0, -560.0)
+
+		# Blinding vertical orbital light column (magenta aura -> liturgical gold -> white core)
+		var col_w: float = maxf(2.0, _radius * 0.62 * (1.0 - bt * 0.72))
+		draw_line(sky_top, p, Color(magenta.r, magenta.g, magenta.b, 0.42 * fade), col_w * 1.45, true)
+		draw_line(sky_top, p, Color(gold.r, gold.g, gold.b, 0.78 * fade), col_w * 0.92, true)
+		draw_line(sky_top, p, Color(bone.r, bone.g, bone.b, 0.96 * fade), col_w * 0.42, true)
+
+		# Ground detonation disc + expanding sacred octagonal shockwave
+		draw_circle(p, _radius * lerpf(0.82, 1.04, ease_out), Color(gold.r, gold.g, gold.b, 0.24 * fade))
+		draw_circle(p, _radius * lerpf(0.45, 0.14, ease_out), Color(bone.r, bone.g, bone.b, 0.88 * fade))
+		draw_arc(p, _radius * lerpf(0.70, 1.12, ease_out), 0.0, TAU, 36, Color(gold.r, gold.g, gold.b, 0.92 * fade), 3.2 * fade + 1.0, true)
+		draw_arc(p, _radius * lerpf(0.48, 0.94, ease_out), 0.0, TAU, 28, Color(magenta.r, magenta.g, magenta.b, 0.72 * fade), 2.0 * fade + 0.6, true)
 
 
 func _draw_dashed_circle(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:

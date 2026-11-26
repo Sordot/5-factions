@@ -1,6 +1,7 @@
-[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="BuildingData" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+[ext_resource type="Resource" path="res://resources/upgrades/prisma_specular_focusing.tres" id="2_upg_focusing"]
 
 [resource]
 script = ExtResource("1_bdata")
@@ -27,6 +28,7 @@ accepted_dropoff_resources = Array[StringName]([])
 requires_vent = false
 max_staff_slots = 0
 trainable_unit_paths = PackedStringArray("res://resources/units/prisma_lens_adjudicator_data.tres", "res://resources/units/prisma_prism_weaver_data.tres")
+researchable_upgrades = Array[Resource("res://scripts/data/upgrade_data.gd")]([ExtResource("2_upg_focusing")])
 can_set_rally = true
 batch_production_count = 1
 base_batch_cost_multiplier = 1.0

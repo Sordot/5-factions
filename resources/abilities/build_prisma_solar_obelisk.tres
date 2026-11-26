@@ -7,7 +7,7 @@
 script = ExtResource("1_ab")
 ability_id = &"build_prisma_solar_obelisk"
 display_name = "Solar Obelisk"
-hotkey_label = "Y"
+hotkey_label = "F"
 cooldown_duration = 0.0
 cast_range = 0.0
 target_type = 3

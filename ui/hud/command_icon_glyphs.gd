@@ -271,8 +271,62 @@ static func draw_icon(
 				c + Vector2(0, -5), c + Vector2(5, 0), c + Vector2(0, 5), c + Vector2(-5, 0),
 			])
 			poly_icon(canvas, wcore, dark, hi, 1.5)
+		&"seraph_cruiser":
+			# Swept angelic delta wings + double halo core
+			var s_l: PackedVector2Array = PackedVector2Array([c + Vector2(10, -2), c + Vector2(-9, -11), c + Vector2(-4, -3)])
+			var s_r: PackedVector2Array = PackedVector2Array([c + Vector2(10, 2), c + Vector2(-9, 11), c + Vector2(-4, 3)])
+			poly_icon(canvas, s_l, dark, fg, 1.5)
+			poly_icon(canvas, s_r, dark, fg, 1.5)
+			canvas.draw_arc(c + Vector2(-1, 0), 5.8, 0.0, TAU, 16, hi, 1.6, true)
+			canvas.draw_circle(c + Vector2(4, 0), 2.5, hi)
+		&"solstice_lance":
+			# Twin gilded siege rails + floating central lens diamond
+			var sl_b: PackedVector2Array = PackedVector2Array([c + Vector2(1, -7), c + Vector2(-10, -8), c + Vector2(-10, 8), c + Vector2(1, 7)])
+			poly_icon(canvas, sl_b, dark, fg, 1.5)
+			canvas.draw_line(c + Vector2(-2, -4), c + Vector2(11, -2.5), hi, 2.0, true)
+			canvas.draw_line(c + Vector2(-2, 4), c + Vector2(11, 2.5), hi, 2.0, true)
+			var sl_d: PackedVector2Array = PackedVector2Array([c + Vector2(9, 0), c + Vector2(5, -3), c + Vector2(1, 0), c + Vector2(5, 3)])
+			poly_icon(canvas, sl_d, hi, fg, 1.1)
 
 		# --- PRISMA_DEI ABILITIES ---
+		&"aureole_surge":
+			# Radiant double-halo corona with 4 cardinal flare spikes
+			canvas.draw_arc(c, 9.5, 0.0, TAU, 22, fg, 1.8, true)
+			canvas.draw_arc(c, 5.2, 0.0, TAU, 16, hi, 1.6, true)
+			for ai: int in range(4):
+				var aa: float = float(ai) * (PI * 0.5)
+				var ad: Vector2 = Vector2.RIGHT.rotated(aa)
+				canvas.draw_line(c + ad * 5.5, c + ad * 12.0, hi, 1.8, true)
+			canvas.draw_circle(c, 2.4, hi)
+		&"solar_convergence":
+			# Vertical orbital beam column piercing a sacred target ring
+			canvas.draw_arc(c + Vector2(0, 4), 8.5, 0.0, TAU, 20, fg, 1.6, true)
+			canvas.draw_line(c + Vector2(0, -11), c + Vector2(0, 5), hi, 3.2, true)
+			canvas.draw_line(c + Vector2(-9, 4), c + Vector2(9, 4), fg, 1.4, true)
+			canvas.draw_circle(c + Vector2(0, 4), 3.0, hi)
+
+		# --- PRISMA_DEI UPGRADES ---
+		&"prisma_harmonic_communion":
+			# Concentric gold tether ring + 4 cardinal diamond nodes
+			canvas.draw_arc(c, 8.2, 0.0, TAU, 20, fg, 1.7, true)
+			for ci: int in range(4):
+				var ca: float = float(ci) * (PI * 0.5)
+				var cp: Vector2 = c + Vector2.RIGHT.rotated(ca) * 8.2
+				canvas.draw_circle(cp, 2.4, hi)
+			canvas.draw_circle(c, 3.0, hi)
+		&"prisma_specular_focusing":
+			# Split refracting prism beam (1 incoming -> 3 fanned rays)
+			var sf_t: PackedVector2Array = PackedVector2Array([c + Vector2(-1, -7), c + Vector2(5, 6), c + Vector2(-7, 6)])
+			poly_icon(canvas, sf_t, dark, fg, 1.6)
+			canvas.draw_line(c + Vector2(-11, 0), c + Vector2(-3, 0), hi, 2.0, true)
+			canvas.draw_line(c + Vector2(2, 0), c + Vector2(11, -7), hi, 1.7, true)
+			canvas.draw_line(c + Vector2(2, 0), c + Vector2(11, 0), fg, 1.7, true)
+			canvas.draw_line(c + Vector2(2, 0), c + Vector2(11, 7), hi, 1.7, true)
+		&"prisma_solar_apotheosis":
+			# Solar gold double crown chevrons + apex sunburst diamond
+			canvas.draw_polyline(PackedVector2Array([c + Vector2(-9, 6), c + Vector2(0, -2), c + Vector2(9, 6)]), fg, 2.0, true)
+			canvas.draw_polyline(PackedVector2Array([c + Vector2(-7, 0), c + Vector2(0, -7), c + Vector2(7, 0)]), hi, 2.2, true)
+			canvas.draw_circle(c + Vector2(0, -9), 2.4, hi)
 		&"solar_step":
 			canvas.draw_polyline(PackedVector2Array([c + Vector2(-8, -6), c + Vector2(0, 0), c + Vector2(-8, 6)]), fg, 2.0, true)
 			canvas.draw_polyline(PackedVector2Array([c + Vector2(0, -7), c + Vector2(9, 0), c + Vector2(0, 7)]), hi, 2.2, true)
@@ -395,6 +449,13 @@ static func draw_building_icon(canvas: CanvasItem, icon_id: StringName, c: Vecto
 		canvas.draw_circle(c, 4.0, fg)
 		canvas.draw_line(c + Vector2(0, -2), c + Vector2(9, -6), hi, 1.8, true)
 		canvas.draw_line(c + Vector2(0, 2), c + Vector2(9, 6), hi, 1.8, true)
+	elif id_s.contains("cathedral_foundry"):
+		# Grand rose-window astrolabe flanked by twin gilded apse bars
+		canvas.draw_line(c + Vector2(-7.5, -5.5), c + Vector2(-7.5, 5.5), fg, 2.2, true)
+		canvas.draw_line(c + Vector2(7.5, -5.5), c + Vector2(7.5, 5.5), fg, 2.2, true)
+		canvas.draw_arc(c, 5.2, 0.0, TAU, 16, hi, 1.6, true)
+		var cf_d: PackedVector2Array = PackedVector2Array([c + Vector2(0, -4), c + Vector2(4, 0), c + Vector2(0, 4), c + Vector2(-4, 0)])
+		poly_icon(canvas, cf_d, fg, hi, 1.1)
 	elif id_s.contains("pylon"):
 		canvas.draw_line(c + Vector2(0, -6), c + Vector2(0, 6), hi, 2.2, true)
 		canvas.draw_circle(c, 3.5, fg)

@@ -485,6 +485,30 @@ func get_rail_range_bonus(team: int) -> float:
 	return upgrade_manager.get_rail_range_bonus(team)
 
 
+func get_bonus_tether_links(team: int) -> int:
+	return upgrade_manager.get_bonus_tether_links(team)
+
+
+func get_bonus_tether_radius(team: int) -> float:
+	return upgrade_manager.get_bonus_tether_radius(team)
+
+
+func get_beam_ramp_upgrade_multiplier(team: int) -> float:
+	return upgrade_manager.get_beam_ramp_upgrade_multiplier(team)
+
+
+func get_bonus_refract_bounces(team: int, unit_type_id: StringName) -> int:
+	return upgrade_manager.get_bonus_refract_bounces(team, unit_type_id)
+
+
+func get_prisma_move_speed_multiplier(team: int) -> float:
+	return upgrade_manager.get_prisma_move_speed_multiplier(team)
+
+
+func get_prisma_beam_range_bonus(team: int, unit_type_id: StringName) -> float:
+	return upgrade_manager.get_prisma_beam_range_bonus(team, unit_type_id)
+
+
 func get_upgrade_modifier_sum(team: int, modifier_key: StringName) -> float:
 	return upgrade_manager.get_modifier_sum(team, modifier_key)
 

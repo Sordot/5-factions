@@ -20,12 +20,12 @@ vision_range = 460.0
 footprint_radius = 46.0
 selection_radius = 54.0
 is_resource_dropoff = true
-accepted_resources = Array[StringName]([&"biomass"])
+accepted_resources = Array[StringName]([&"biomass", &"silica"])
 bandwidth_provided = 10
 build_time = 20.0
 is_constructed = true
 is_core_hub = true
-trainable_unit_data = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("2_worker_data"), ExtResource("3_engineer_data"), ExtResource("4_harvester_data")])
+trainable_unit_data = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("2_worker_data"), ExtResource("4_harvester_data"), ExtResource("3_engineer_data")])
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 shape = SubResource("CircleShape2D_nexus")

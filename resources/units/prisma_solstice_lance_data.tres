@@ -1,0 +1,46 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/prisma_solar_convergence.tres" id="2_ab_conv"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"solstice_lance"
+display_name = "Solstice Lance"
+short_display_name = "Solstice"
+max_hp = 235.0
+max_shield = 0.0
+move_speed = 155.0
+acceleration = 1250.0
+turn_speed = 9.0
+selection_radius = 25.0
+collision_radius = 19.0
+attack_damage = 54.0
+attack_range = 390.0
+min_attack_range = 115.0
+aggro_range = 420.0
+vision_range = 410.0
+attack_cooldown = 2.6
+attack_windup = 0.18
+is_armored = true
+unit_tags = Array[StringName]([&"synthetic", &"armored", &"heavy", &"siege", &"artillery"])
+bonus_vs_armored = 36.0
+damage_reduction = 0.08
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_ab_conv")])
+bandwidth_cost = 4
+biomass_cost = 110
+silica_cost = 165
+compute_cost = 55
+salvage_silica = 45
+salvage_compute = 25
+build_time = 11.5
+train_time = 11.5
+unit_scene_path = "res://scenes/units/prisma_solstice_lance.tscn"
+weapon_tracer_style = &"prism_beam"
+weapon_tracer_color = Color(0.98, 0.8, 0.14, 1)
+weapon_tracer_width = 3.6
+weapon_sfx_id = &"weapon_prisma_lance"
+audio_bark_class = &"siege"
+minimap_icon_shape = &"triangle_heavy"
+role_tags_display = "Siege Prism • Anti-Armor • Solar Convergence"
+is_continuous_beam = false
