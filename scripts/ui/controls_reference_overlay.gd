@@ -127,7 +127,8 @@ func _rebuild_cards() -> void:
 			{"key": "LMB / Drag", "desc": "Select unit/building or drag-box squad"},
 			{"key": "Dbl-Click / Ctrl+LMB", "desc": "Select all on-screen units of same type"},
 			{"key": "Ctrl / Shift / Alt + 1–9", "desc": "Assign / Add to / Steal Control Group (2× tap centers)"},
-			{"key": _key_short(&"ui_cycle_subgroup", "TAB"), "desc": "Cycle active subgroup in mixed selection"},
+			{"key": _key_short(&"ui_cycle_subgroup", "TAB"), "desc": "Cycle active subgroup (units or mixed buildings)"},
+			{"key": _key_short(&"cmd_select_next_hub", "BKSP"), "desc": "Cycle & Select Command Hub (Shift: Select All Hubs)"},
 			{"key": _key_short(&"cmd_select_all_army", "F9"), "desc": "Select all combat army units"},
 			{"key": _key_short(&"cmd_select_idle_worker", "`"), "desc": "Cycle idle workers (2× centers camera)"},
 			{"key": _key_short(&"cmd_select_idle_production", ";"), "desc": "Cycle idle production (+Shift selects all)"},
@@ -175,7 +176,7 @@ func _rebuild_cards() -> void:
 			{"key": "MMB Drag / Edge", "desc": "Middle-mouse drag pan / Screen-edge pan"},
 			{"key": "Mouse Wheel", "desc": "Zoom camera in / out"},
 			{"key": "Ctrl + %s / %s" % [bm_keys, bm_keys], "desc": "Save / Jump to Camera Bookmarks 1–4"},
-			{"key": _key_short(&"jump_base_hub", "BKSP"), "desc": "Jump camera to primary Command Hub"},
+			{"key": _key_short(&"jump_base_hub", "HOME"), "desc": "Jump camera to Command Hub (no selection change)"},
 			{"key": _key_short(&"jump_last_alert", "SPC"), "desc": "Jump camera to latest tactical alert"},
 			{"key": _key_short(&"camera_toggle_edge_pan", "F12"), "desc": "Toggle screen edge-panning"},
 		]

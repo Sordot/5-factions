@@ -30,6 +30,7 @@ const KEYBIND_DEFS: Array = [
 	{"action": &"cmd_patrol", "label": "Patrol", "default_key": KEY_P, "category": "Unit Commands"},
 	{"action": &"cmd_select_idle_worker", "label": "Select Idle Worker", "default_key": KEY_QUOTELEFT, "category": "Abilities & Selection"},
 	{"action": &"cmd_select_idle_production", "label": "Select Idle Production", "default_key": KEY_SEMICOLON, "category": "Abilities & Selection"},
+	{"action": &"cmd_select_next_hub", "label": "Cycle Command Hub", "default_key": KEY_BACKSPACE, "category": "Abilities & Selection"},
 	{"action": &"cmd_select_all_army", "label": "Select All Army", "default_key": KEY_F9, "category": "Abilities & Selection"},
 	{"action": &"cmd_toggle_smart_box_select", "label": "Toggle Combat-Only Box Select", "default_key": KEY_B, "category": "Abilities & Selection"},
 	{"action": &"ui_cycle_subgroup", "label": "Cycle Subgroup", "default_key": KEY_TAB, "category": "Abilities & Selection"},
@@ -40,7 +41,7 @@ const KEYBIND_DEFS: Array = [
 	{"action": &"cmd_ability_t", "label": "Ability / Build Slot T", "default_key": KEY_T, "category": "Abilities & Selection"},
 	{"action": &"cmd_ability_y", "label": "Ability / Build Slot Y", "default_key": KEY_Y, "category": "Abilities & Selection"},
 	{"action": &"cmd_ability_f", "label": "Ability / Build Slot F", "default_key": KEY_F, "category": "Abilities & Selection"},
-	{"action": &"jump_base_hub", "label": "Jump to Nexus Vat", "default_key": KEY_BACKSPACE, "category": "Camera & Navigation"},
+	{"action": &"jump_base_hub", "label": "Jump Camera to Command Hub", "default_key": KEY_HOME, "category": "Camera & Navigation"},
 	{"action": &"jump_last_alert", "label": "Jump to Last Alert", "default_key": KEY_SPACE, "category": "Camera & Navigation"},
 	{"action": &"cam_bookmark_1", "label": "Camera Bookmark 1 (Ctrl=Save)", "default_key": KEY_F1, "category": "Camera & Navigation"},
 	{"action": &"cam_bookmark_2", "label": "Camera Bookmark 2 (Ctrl=Save)", "default_key": KEY_F2, "category": "Camera & Navigation"},
@@ -212,6 +213,11 @@ func load_settings() -> void:
 		var default_bind: String = encode_key_binding(int(entry["default_key"]))
 		var raw_val: Variant = cfg.get_value("keybinds", String(act), default_bind)
 		keybinds[act] = _normalize_loaded_binding(raw_val, default_bind)
+
+	# Milestone 3.3 migration: avoid default Backspace collision with cmd_select_next_hub on existing profiles.
+	if not cfg.has_section_key("keybinds", "cmd_select_next_hub"):
+		if String(keybinds.get(&"jump_base_hub", "")) == encode_key_binding(KEY_BACKSPACE):
+			keybinds[&"jump_base_hub"] = encode_key_binding(KEY_HOME)
 
 
 func _normalize_loaded_binding(raw_val: Variant, fallback_bind: String) -> String:

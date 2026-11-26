@@ -269,7 +269,7 @@ func jump_to_next_base_hub() -> bool:
 		var b: Building = node
 		if b.is_destroyed or b.is_queued_for_deletion() or int(b.team) != local_team:
 			continue
-		if b.is_core_hub or b.building_type_id == &"nexus_vat":
+		if b.is_command_hub():
 			hubs.append(b)
 	if hubs.is_empty():
 		return false

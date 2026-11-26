@@ -605,7 +605,7 @@ func classify_unit_bark_class(unit_type_id: StringName) -> StringName:
 	match unit_type_id:
 		&"worker", &"silica_harvester", &"engineer", &"servo_drone", &"ore_crawler", &"grid_tech":
 			return &"worker"
-		&"clone_trooper", &"stinger", &"scout_unit", &"picket_drone":
+		&"clone_trooper", &"stinger", &"picket_drone":
 			return &"swarm"
 		&"lance_rig", &"signal_jammer", &"rail_sentinel", &"null_grid_projector":
 			return &"counter"
@@ -718,7 +718,7 @@ func play_build_sfx(sfx_id: StringName = &"build_complete", world_pos: Vector2 =
 
 func play_ability_sfx(ability_id: StringName, world_pos: Vector2 = Vector2.INF) -> void:
 	match ability_id:
-		&"adrenal_surge", &"nanite_surge":
+		&"adrenal_surge":
 			play_sfx(&"ability_adrenal", -3.5, 0.04, world_pos, true)
 		&"static_pulse":
 			play_sfx(&"ability_static", -3.0, 0.03, world_pos, true)
@@ -732,7 +732,7 @@ func play_ability_sfx(ability_id: StringName, world_pos: Vector2 = Vector2.INF) 
 			play_sfx(&"ability_grav_pulse", -2.2, 0.04, world_pos, true)
 		&"seismic_slam":
 			play_sfx(&"ability_slam", -2.0, 0.04, world_pos, true)
-		&"spore_barrage", &"overcharge_pulse":
+		&"spore_barrage":
 			play_sfx(&"ability_barrage", -2.5, 0.04, world_pos, true)
 		_:
 			play_sfx(&"ability_adrenal", -4.0, 0.04, world_pos, true)

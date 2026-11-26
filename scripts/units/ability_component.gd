@@ -195,8 +195,6 @@ func _should_trigger_autocast(owner_unit: Unit, ability: AbilityData) -> bool:
 			if owner_unit.combat_component.is_within_attack_envelope(owner_unit, owner_unit.current_target):
 				return true
 		return false
-	if ability.ability_id == &"nanite_surge":
-		return owner_unit.current_hp < owner_unit.get_max_hp() * 0.72
 	if ability.ability_id == &"kinetic_barrier":
 		var in_combat: bool = owner_unit.current_target != null and is_instance_valid(owner_unit.current_target)
 		if not in_combat:

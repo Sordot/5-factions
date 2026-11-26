@@ -10,6 +10,7 @@ signal selection_updated(selected_count: int)
 signal selection_changed(selected_units: Array[Unit], subgroups: Array[Dictionary], active_subgroup_index: int)
 signal building_selection_changed(building: Building)
 signal buildings_selection_changed(buildings: Array[Building])
+signal building_subgroups_changed(building_subgroups: Array[Dictionary], active_index: int)
 signal inspection_changed(entity: Node)
 signal control_groups_changed(summary: Dictionary)
 signal ability_targeting_changed(active_ability: AbilityData)
@@ -39,6 +40,8 @@ var selected_buildings: Array[Building] = []
 var inspected_entity: Node = null
 var subgroups: Array[Dictionary] = []
 var active_subgroup_index: int = 0
+var building_subgroups: Array[Dictionary] = []
+var active_building_subgroup_index: int = 0
 var inspected_enemy: Unit = null
 var control_groups: Dictionary = {}
 var active_targeting_ability: AbilityData = null
@@ -67,6 +70,7 @@ var _click_ctrl_pressed: bool = false
 var _tracked_death_units: Array[Unit] = []
 var _idle_cycle_index: int = -1
 var _idle_prod_cycle_index: int = -1
+var _hub_cycle_index: int = -1
 var _last_idle_prod_click_ms: int = 0
 var _last_idle_prod_building: Building = null
 var _idle_refresh_timer: float = 0.0
@@ -291,12 +295,32 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event.is_action_pressed("ui_cycle_subgroup") and not event.is_echo():
+		var shift_tab: bool = Input.is_key_pressed(KEY_SHIFT)
+		if event is InputEventKey:
+			shift_tab = shift_tab or (event as InputEventKey).shift_pressed
+		var tab_step: int = -1 if shift_tab else 1
 		if subgroups.size() > 1:
-			cycle_subgroup()
+			cycle_subgroup(tab_step)
+			get_viewport().set_input_as_handled()
+		elif selected_units.is_empty() and building_subgroups.size() > 1:
+			cycle_building_subgroup(tab_step)
 			get_viewport().set_input_as_handled()
 		elif event is InputEventMouseButton:
 			get_viewport().set_input_as_handled()
 		return
+
+	if event.is_action_pressed("cmd_select_next_hub") and not event.is_echo():
+		var allow_hub_hotkey: bool = true
+		var shift_hub: bool = Input.is_key_pressed(KEY_SHIFT)
+		if event is InputEventKey:
+			var hub_k: InputEventKey = event as InputEventKey
+			if hub_k.ctrl_pressed or hub_k.alt_pressed:
+				allow_hub_hotkey = false
+			shift_hub = shift_hub or hub_k.shift_pressed
+		if allow_hub_hotkey:
+			if select_next_command_hub(true, shift_hub) != null or event is InputEventMouseButton:
+				get_viewport().set_input_as_handled()
+			return
 
 	if event.is_action_pressed("cmd_select_idle_worker") and not event.is_echo():
 		var allow_idle_hotkey: bool = true
@@ -604,11 +628,11 @@ func select_single_entity(entity: Node, focus_camera: bool = false) -> void:
 				cam_u.center_on(u.global_position)
 
 
-func cycle_subgroup() -> void:
+func cycle_subgroup(step: int = 1) -> void:
 	if subgroups.size() <= 1:
 		return
 	cancel_ability_targeting()
-	active_subgroup_index = (active_subgroup_index + 1) % subgroups.size()
+	active_subgroup_index = posmod(active_subgroup_index + step, subgroups.size())
 	_play_active_subgroup_bark()
 	selection_changed.emit(selected_units, subgroups, active_subgroup_index)
 
@@ -620,6 +644,113 @@ func set_active_subgroup(index: int) -> void:
 	active_subgroup_index = index
 	_play_active_subgroup_bark()
 	selection_changed.emit(selected_units, subgroups, active_subgroup_index)
+
+
+func _get_building_subgroup_sort_rank(b: Building) -> int:
+	if b.is_command_hub():
+		return 0
+	if b.is_military_production_building():
+		return 1
+	if not b.researchable_upgrades.is_empty() or b.max_staff_slots > 0:
+		return 2
+	return 3
+
+
+func _rebuild_building_subgroups(preserve_type_id: StringName = &"") -> void:
+	building_subgroups.clear()
+	if selected_buildings.is_empty():
+		active_building_subgroup_index = 0
+		return
+
+	var grouped: Dictionary = {}
+	for b: Building in selected_buildings:
+		if not is_instance_valid(b) or b.is_destroyed or b.is_queued_for_deletion():
+			continue
+		var tid: StringName = b.building_type_id
+		if not grouped.has(tid):
+			var b_arr: Array[Building] = []
+			grouped[tid] = {
+				"type_id": tid,
+				"display_name": b.display_name,
+				"tech_tier": b.get_tech_tier(),
+				"is_hub": b.is_command_hub(),
+				"sort_rank": _get_building_subgroup_sort_rank(b),
+				"buildings": b_arr,
+			}
+		var list_ref: Array[Building] = grouped[tid]["buildings"] as Array[Building]
+		list_ref.append(b)
+
+	for entry: Variant in grouped.values():
+		building_subgroups.append(entry as Dictionary)
+
+	building_subgroups.sort_custom(func(a: Dictionary, b_dict: Dictionary) -> bool:
+		var ra: int = int(a["sort_rank"])
+		var rb: int = int(b_dict["sort_rank"])
+		if ra != rb:
+			return ra < rb
+		var ta: int = int(a["tech_tier"])
+		var tb: int = int(b_dict["tech_tier"])
+		if ta != tb:
+			return ta < tb
+		return String(a["type_id"]) < String(b_dict["type_id"])
+	)
+
+	var next_idx: int = 0
+	if preserve_type_id != &"":
+		for i: int in range(building_subgroups.size()):
+			if (building_subgroups[i]["type_id"] as StringName) == preserve_type_id:
+				next_idx = i
+				break
+	active_building_subgroup_index = clampi(next_idx, 0, maxi(0, building_subgroups.size() - 1))
+
+
+func get_active_building_subgroup() -> Dictionary:
+	if active_building_subgroup_index < 0 or active_building_subgroup_index >= building_subgroups.size():
+		return {}
+	return building_subgroups[active_building_subgroup_index]
+
+
+func get_active_building_subgroup_buildings() -> Array[Building]:
+	var active: Dictionary = get_active_building_subgroup()
+	if active.is_empty():
+		return []
+	var out: Array[Building] = []
+	for item: Variant in active.get("buildings", []):
+		if is_instance_valid(item) and item is Building:
+			var b: Building = item as Building
+			if not b.is_destroyed and not b.is_queued_for_deletion():
+				out.append(b)
+	return out
+
+
+func cycle_building_subgroup(step: int = 1) -> void:
+	if building_subgroups.size() <= 1:
+		return
+	active_building_subgroup_index = posmod(active_building_subgroup_index + step, building_subgroups.size())
+	_sync_active_building_subgroup(true)
+
+
+func set_active_building_subgroup(index: int) -> void:
+	if index < 0 or index >= building_subgroups.size() or active_building_subgroup_index == index:
+		return
+	active_building_subgroup_index = index
+	_sync_active_building_subgroup(true)
+
+
+func _sync_active_building_subgroup(play_audio: bool) -> void:
+	var active_bldgs: Array[Building] = get_active_building_subgroup_buildings()
+	if is_overclock_targeting and not has_selected_overclock_hub():
+		cancel_overclock_targeting()
+	var lead: Building = active_bldgs[0] if not active_bldgs.is_empty() else null
+	if lead != null:
+		_set_inspected_entity(lead, false)
+	for b: Building in selected_buildings:
+		if is_instance_valid(b) and not b.is_destroyed:
+			b.set_selected(true)
+	if play_audio and AudioManager != null and not active_bldgs.is_empty():
+		AudioManager.play_selection_audio(active_bldgs)
+	building_subgroups_changed.emit(building_subgroups, active_building_subgroup_index)
+	buildings_selection_changed.emit(selected_buildings)
 
 
 func _play_active_subgroup_bark() -> void:
@@ -826,9 +957,18 @@ func reset_command_cursors() -> void:
 	_clear_custom_cursor()
 
 
+func _get_scoped_selected_buildings() -> Array[Building]:
+	if building_subgroups.size() > 1:
+		var active_b: Array[Building] = get_active_building_subgroup_buildings()
+		if not active_b.is_empty():
+			return active_b
+	return selected_buildings
+
+
 func has_selected_overclock_hub() -> bool:
 	var local_t: Unit.Team = _get_local_human_team_enum()
-	for b: Building in selected_buildings:
+	var scoped: Array[Building] = _get_scoped_selected_buildings()
+	for b: Building in scoped:
 		if is_instance_valid(b) and not b.is_destroyed and b.is_constructed and b.team == local_t and b.has_overclock_ability():
 			return true
 	if selected_building != null and is_instance_valid(selected_building):
@@ -839,7 +979,8 @@ func has_selected_overclock_hub() -> bool:
 
 func find_ready_overclock_hub() -> Building:
 	var local_t: Unit.Team = _get_local_human_team_enum()
-	for b: Building in selected_buildings:
+	var scoped: Array[Building] = _get_scoped_selected_buildings()
+	for b: Building in scoped:
 		if is_instance_valid(b) and b.team == local_t and b.can_cast_overclock():
 			return b
 	if selected_building != null and is_instance_valid(selected_building):
@@ -1147,6 +1288,63 @@ func select_next_idle_production(allow_center_on_repeat: bool = true, select_all
 			if not inner_rect.has_point(chosen.global_position):
 				cam_one.smooth_center_on(chosen.global_position)
 	return 1
+
+
+func get_friendly_command_hubs() -> Array[Building]:
+	var hubs: Array[Building] = []
+	if not is_inside_tree():
+		return hubs
+	if TeamManager != null and TeamManager.is_spectator_mode():
+		return hubs
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node) or not (node is Building):
+			continue
+		var b: Building = node as Building
+		if b.is_destroyed or b.is_queued_for_deletion() or not b.is_constructed or b.is_salvaging:
+			continue
+		if int(b.team) != local_team:
+			continue
+		if b.is_command_hub():
+			hubs.append(b)
+	hubs.sort_custom(func(a: Building, b: Building) -> bool:
+		return a.get_instance_id() < b.get_instance_id()
+	)
+	return hubs
+
+
+func select_next_command_hub(focus_camera: bool = true, select_all: bool = false) -> Building:
+	var hubs: Array[Building] = get_friendly_command_hubs()
+	if hubs.is_empty():
+		_hub_cycle_index = -1
+		return null
+
+	cancel_ability_targeting()
+	cancel_overclock_targeting()
+	cancel_attack_move_targeting()
+	cancel_patrol_targeting()
+	_set_selected_units([])
+
+	if select_all:
+		_set_selected_buildings(hubs)
+		return hubs[0]
+
+	var next_idx: int = (_hub_cycle_index + 1) % hubs.size()
+	if selected_buildings.size() == 1 and is_instance_valid(selected_buildings[0]):
+		var cur_idx: int = hubs.find(selected_buildings[0])
+		if cur_idx >= 0:
+			next_idx = (cur_idx + 1) % hubs.size()
+
+	_hub_cycle_index = next_idx
+	var chosen: Building = hubs[next_idx]
+	_set_selected_buildings([chosen])
+
+	if focus_camera:
+		var cam: RTSCamera = _get_rts_camera()
+		if cam != null:
+			cam.smooth_center_on(chosen.global_position)
+
+	return chosen
 
 
 func _refresh_idle_workers(force_emit: bool = false) -> void:
@@ -1916,7 +2114,13 @@ func _find_visible_buildings_of_type(type_id: StringName, target_team: Unit.Team
 	return matches
 
 
-func _set_selected_buildings(buildings: Array[Building]) -> void:
+func _set_selected_buildings(buildings: Array[Building], preserve_subgroup: bool = false) -> void:
+	var prev_type_id: StringName = &""
+	if preserve_subgroup:
+		var prev_grp: Dictionary = get_active_building_subgroup()
+		if not prev_grp.is_empty():
+			prev_type_id = prev_grp.get("type_id", &"") as StringName
+
 	for prev: Building in selected_buildings:
 		if is_instance_valid(prev):
 			if prev.destroyed.is_connected(_on_selected_building_destroyed):
@@ -1932,23 +2136,31 @@ func _set_selected_buildings(buildings: Array[Building]) -> void:
 				selected_buildings.append(b)
 
 	if selected_buildings.is_empty():
+		building_subgroups.clear()
+		active_building_subgroup_index = 0
 		cancel_overclock_targeting()
 		_set_inspected_entity(null)
+		building_subgroups_changed.emit(building_subgroups, active_building_subgroup_index)
 		buildings_selection_changed.emit(selected_buildings)
 		return
+
+	_rebuild_building_subgroups(prev_type_id)
+	var active_bldgs: Array[Building] = get_active_building_subgroup_buildings()
+	var lead_b: Building = active_bldgs[0] if not active_bldgs.is_empty() else selected_buildings[0]
 
 	for b: Building in selected_buildings:
 		b.set_selected(true)
 		if not b.destroyed.is_connected(_on_selected_building_destroyed):
 			b.destroyed.connect(_on_selected_building_destroyed)
 
-	_set_inspected_entity(selected_buildings[0], false)
+	_set_inspected_entity(lead_b, false)
 	# Re-ensure every multi-selected building stays visibly selected after _set_inspected_entity.
 	for b: Building in selected_buildings:
 		if is_instance_valid(b):
 			b.set_selected(true)
 	if AudioManager != null:
-		AudioManager.play_selection_audio(selected_buildings)
+		AudioManager.play_selection_audio(active_bldgs if not active_bldgs.is_empty() else selected_buildings)
+	building_subgroups_changed.emit(building_subgroups, active_building_subgroup_index)
 	buildings_selection_changed.emit(selected_buildings)
 
 
@@ -1958,7 +2170,7 @@ func _on_selected_building_destroyed(dead_b: Building) -> void:
 		for b: Building in selected_buildings:
 			if is_instance_valid(b) and b != dead_b and not b.is_destroyed:
 				rem.append(b)
-		_set_selected_buildings(rem)
+		_set_selected_buildings(rem, true)
 
 
 func queue_unit_distributed(unit_data: UnitData, play_audio: bool = true) -> bool:
@@ -1997,7 +2209,8 @@ func queue_unit_distributed_batch(unit_data: UnitData, count: int, fallback_buil
 func _collect_compatible_production_buildings(unit_data: UnitData, fallback_building: Building) -> Array[Building]:
 	var candidates: Array[Building] = []
 	var local_t: Unit.Team = _get_local_human_team_enum()
-	for b: Building in selected_buildings:
+	var scoped: Array[Building] = _get_scoped_selected_buildings()
+	for b: Building in scoped:
 		if is_instance_valid(b) and not b.is_destroyed and b.is_constructed and not b.is_salvaging and b.team == local_t:
 			if b.trainable_unit_data.has(unit_data):
 				candidates.append(b)
@@ -2031,8 +2244,9 @@ func _pick_shortest_queue_building(candidates: Array[Building]) -> Building:
 
 
 func eject_engineers_from_selected_buildings() -> void:
-	if not selected_buildings.is_empty():
-		for b: Building in selected_buildings:
+	var scoped: Array[Building] = _get_scoped_selected_buildings()
+	if not scoped.is_empty():
+		for b: Building in scoped:
 			if is_instance_valid(b) and b.max_staff_slots > 0:
 				b.eject_engineers()
 	elif selected_building != null and is_instance_valid(selected_building):
@@ -2237,7 +2451,8 @@ func _try_handle_ability_hotkey_event(event: InputEvent, action_name: StringName
 func _get_selected_friendly_constructed_buildings() -> Array[Building]:
 	var out: Array[Building] = []
 	var local_t: Unit.Team = _get_local_human_team_enum()
-	for b: Building in selected_buildings:
+	var scoped: Array[Building] = _get_scoped_selected_buildings()
+	for b: Building in scoped:
 		if is_instance_valid(b) and not b.is_destroyed and b.is_constructed and not b.is_salvaging and b.team == local_t:
 			out.append(b)
 	if out.is_empty() and selected_building != null and is_instance_valid(selected_building):
@@ -2346,7 +2561,7 @@ func _prune_invalid_units() -> void:
 				if not b.is_destroyed and not b.is_queued_for_deletion() and b.team == local_t:
 					valid_b.append(b)
 		if valid_b.size() != selected_buildings.size():
-			_set_selected_buildings(valid_b)
+			_set_selected_buildings(valid_b, true)
 	if inspected_entity != null:
 		if not is_instance_valid(inspected_entity):
 			_set_inspected_entity(null)

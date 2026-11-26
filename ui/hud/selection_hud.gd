@@ -33,6 +33,8 @@ var _connected_units: Array[Unit] = []
 var _inspected_entity: Node = null
 var _selected_buildings: Array[Building] = []
 var _connected_buildings: Array[Building] = []
+var _building_subgroups: Array[Dictionary] = []
+var _active_building_subgroup_index: int = 0
 var _active_subgroup_units: Array[Unit] = []
 var _active_abilities: Array[AbilityData] = []
 var _unit_cmd_tiles: Dictionary = {}
@@ -62,6 +64,8 @@ func _ready() -> void:
 		_selection_controller.selection_changed.connect(_on_selection_changed)
 		_selection_controller.inspection_changed.connect(_on_inspection_changed)
 		_selection_controller.buildings_selection_changed.connect(_on_buildings_selection_changed)
+		if _selection_controller.has_signal("building_subgroups_changed"):
+			_selection_controller.building_subgroups_changed.connect(_on_building_subgroups_changed)
 		_selection_controller.control_groups_changed.connect(_on_control_groups_changed)
 		_selection_controller.ability_targeting_changed.connect(_on_ability_targeting_changed)
 		_selection_controller.patrol_targeting_changed.connect(_on_patrol_targeting_changed)
@@ -240,6 +244,8 @@ func _on_keybind_changed(_action_name: StringName) -> void:
 		_refresh_all_ability_states()
 	if _inspected_entity is Building and is_instance_valid(_inspected_entity):
 		_refresh_building_action_buttons(_inspected_entity as Building)
+		if _building_subgroups.size() > 1:
+			_rebuild_building_subgroup_tabs(_building_subgroups, _active_building_subgroup_index)
 	if _selection_controller != null and _selection_controller.subgroups.size() > 1:
 		_rebuild_subgroup_tabs(_selection_controller.subgroups, _selection_controller.active_subgroup_index)
 
@@ -285,16 +291,45 @@ func _on_overclock_targeting_changed(active: bool) -> void:
 		_refresh_building_action_buttons(_inspected_entity as Building)
 
 
+func _on_building_subgroups_changed(b_subgroups: Array[Dictionary], active_index: int) -> void:
+	_building_subgroups = b_subgroups
+	_active_building_subgroup_index = active_index
+	if _selection_controller != null and not _selected_buildings.is_empty():
+		var active_b: Array[Building] = _selection_controller.get_active_building_subgroup_buildings()
+		if not active_b.is_empty() and is_instance_valid(active_b[0]):
+			if _inspected_entity != active_b[0]:
+				_disconnect_inspected_signals()
+				_inspected_entity = active_b[0]
+				_connect_inspected_signals(_inspected_entity)
+			_render_inspected_entity(_inspected_entity, true)
+
+
 func _on_buildings_selection_changed(buildings: Array[Building]) -> void:
 	_disconnect_multi_building_signals()
 	_selected_buildings = buildings.duplicate()
+	if _selection_controller != null:
+		_building_subgroups = _selection_controller.building_subgroups
+		_active_building_subgroup_index = _selection_controller.active_building_subgroup_index
+	else:
+		_building_subgroups = []
+		_active_building_subgroup_index = 0
 	for b: Building in _selected_buildings:
 		if is_instance_valid(b) and not b.is_destroyed:
 			if not b.status_changed.is_connected(_on_inspected_entity_updated):
 				b.status_changed.connect(_on_inspected_entity_updated)
 			_connected_buildings.append(b)
-	if not _selected_buildings.is_empty() and is_instance_valid(_selected_buildings[0]):
-		_inspected_entity = _selected_buildings[0]
+	var lead_b: Building = null
+	if _selection_controller != null:
+		var active_b: Array[Building] = _selection_controller.get_active_building_subgroup_buildings()
+		if not active_b.is_empty() and is_instance_valid(active_b[0]):
+			lead_b = active_b[0]
+	if lead_b == null and not _selected_buildings.is_empty() and is_instance_valid(_selected_buildings[0]):
+		lead_b = _selected_buildings[0]
+	if lead_b != null:
+		if _inspected_entity != lead_b:
+			_disconnect_inspected_signals()
+			_inspected_entity = lead_b
+			_connect_inspected_signals(_inspected_entity)
 		_render_inspected_entity(_inspected_entity, true)
 	if _selection_controller != null:
 		_on_control_groups_changed(_selection_controller.get_control_groups_summary())
@@ -503,22 +538,37 @@ func _render_inspected_entity(entity: Node, rebuild_actions: bool) -> void:
 	_apply_faction_hud_theme(false)
 
 	var info: Dictionary = InspectionHelper.get_inspection_data(entity)
+	var show_building_tabs: bool = false
 	if entity is Building and _selected_buildings.size() > 1:
 		var lead_b: Building = entity as Building
-		var same_type_count: int = 0
-		var total_queued: int = 0
-		for sb: Building in _selected_buildings:
-			if is_instance_valid(sb) and not sb.is_destroyed:
-				if sb.building_type_id == lead_b.building_type_id:
-					same_type_count += 1
-				total_queued += sb.get_training_queue_size()
-		if same_type_count == _selected_buildings.size():
-			info["title"] = "%s  x%d" % [lead_b.display_name, _selected_buildings.size()]
+		if _selection_controller != null:
+			_building_subgroups = _selection_controller.building_subgroups
+			_active_building_subgroup_index = _selection_controller.active_building_subgroup_index
+		if _building_subgroups.size() > 1:
+			show_building_tabs = true
+			var safe_b_idx: int = clampi(_active_building_subgroup_index, 0, _building_subgroups.size() - 1)
+			var active_grp: Dictionary = _building_subgroups[safe_b_idx]
+			var grp_bldgs: Array = active_grp.get("buildings", [])
+			var active_cnt: int = maxi(1, grp_bldgs.size())
+			info["title"] = "%s  x%d" % [lead_b.display_name, active_cnt]
+			info["subtitle"] = "SUBGROUP %d/%d • %d BUILDINGS SELECTED" % [safe_b_idx + 1, _building_subgroups.size(), _selected_buildings.size()]
 		else:
-			info["title"] = "%s (+%d)" % [lead_b.display_name, _selected_buildings.size() - 1]
-		info["subtitle"] = "MULTI-PRODUCTION (%d QUEUED)" % total_queued
+			var same_type_count: int = 0
+			var total_queued: int = 0
+			for sb: Building in _selected_buildings:
+				if is_instance_valid(sb) and not sb.is_destroyed:
+					if sb.building_type_id == lead_b.building_type_id:
+						same_type_count += 1
+					total_queued += sb.get_training_queue_size()
+			if same_type_count == _selected_buildings.size():
+				info["title"] = "%s  x%d" % [lead_b.display_name, _selected_buildings.size()]
+			else:
+				info["title"] = "%s (+%d)" % [lead_b.display_name, _selected_buildings.size() - 1]
+			info["subtitle"] = "MULTI-PRODUCTION (%d QUEUED)" % total_queued
 	bottom_panel.visible = true
-	subgroup_tabs_row.visible = false
+	subgroup_tabs_row.visible = show_building_tabs
+	if show_building_tabs:
+		_rebuild_building_subgroup_tabs(_building_subgroups, _active_building_subgroup_index)
 	unit_badges_grid.visible = false
 	telemetry_grid.visible = true
 
@@ -948,7 +998,17 @@ func _rebuild_building_action_buttons(building: Building) -> void:
 		var captured_upg_idx: int = j
 		var captured_upg: UpgradeData = upg
 		upg_tile.pressed.connect(func() -> void:
-			if is_instance_valid(captured_b_u):
+			var started: bool = false
+			if _selection_controller != null:
+				var scoped_u: Array[Building] = _selection_controller.get_active_building_subgroup_buildings()
+				for cand_u: Building in scoped_u:
+					if is_instance_valid(cand_u) and not cand_u.is_destroyed and cand_u.is_constructed:
+						var u_idx: int = cand_u.researchable_upgrades.find(captured_upg)
+						if u_idx >= 0 and cand_u.can_research_upgrade(u_idx):
+							if cand_u.queue_upgrade_research(u_idx):
+								started = true
+								break
+			if not started and is_instance_valid(captured_b_u):
 				captured_b_u.queue_upgrade_research(captured_upg_idx)
 		)
 		upg_tile.tooltip_text = ""
@@ -1107,7 +1167,9 @@ func _refresh_building_action_buttons(building: Building) -> void:
 			var min_cd: float = INF
 			var max_cd: float = maxf(1.0, building.get_overclock_config_cooldown())
 			var hub_list: Array[Building] = []
-			if _selected_buildings.size() > 1:
+			if _selection_controller != null and _building_subgroups.size() > 1:
+				hub_list = _selection_controller.get_active_building_subgroup_buildings()
+			elif _selected_buildings.size() > 1:
 				hub_list = _selected_buildings
 			else:
 				hub_list.append(building)
@@ -1676,6 +1738,49 @@ func _rebuild_subgroup_tabs(subgroups: Array[Dictionary], active_index: int) -> 
 		subgroup_tabs_row.add_child(more_tabs)
 
 	if subgroups.size() > 1:
+		var k_tab: String = _get_compact_action_badge(&"ui_cycle_subgroup", "Tab")
+		if not k_tab.is_empty():
+			var hint: Label = Label.new()
+			hint.text = "[%s]" % k_tab
+			hint.add_theme_font_size_override("font_size", 10)
+			hint.modulate = _active_hud_accent
+			subgroup_tabs_row.add_child(hint)
+
+
+func _shorten_building_name(full_name: String) -> String:
+	return full_name.replace("Assembly Bay", "Assembly").replace("Ballistics Lab", "Ballistics").replace("Siege Gantry", "Gantry").replace("Foundry Core", "Foundry").replace("Cloning Vat", "Cloning").replace("Calibration Foundry", "Calibration").replace("Synthetics Fabricator", "Synthetics").replace("Nexus Vat", "Nexus").replace("Logic Monolith", "Logic").replace("Wetware Mainframe", "Mainframe").replace("Silica Smelter", "Smelter").replace("Silica Condenser", "Condenser").replace("Capacitor Pylon", "Capacitor").replace("Synapse Pylon", "Synapse").replace("Bastion Emplacement", "Bastion").replace("Defense Turret", "Turret")
+
+
+func _rebuild_building_subgroup_tabs(b_subgroups: Array[Dictionary], active_index: int) -> void:
+	for child: Node in subgroup_tabs_row.get_children():
+		child.queue_free()
+
+	var safe_active: int = clampi(active_index, 0, maxi(0, b_subgroups.size() - 1))
+	var max_tabs: int = mini(b_subgroups.size(), 4)
+	for i: int in range(max_tabs):
+		var group: Dictionary = b_subgroups[i]
+		var grp_bldgs: Array = group.get("buildings", [])
+		var btn: Button = Button.new()
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.add_theme_font_size_override("font_size", 10)
+		var prefix: String = ">" if i == safe_active else ""
+		btn.text = "%s%s (%d)" % [prefix, _shorten_building_name(String(group.get("display_name", "Structure"))), grp_bldgs.size()]
+		btn.modulate = _active_hud_accent if i == safe_active else Color(0.72, 0.78, 0.84, 0.85)
+		var captured_idx: int = i
+		btn.pressed.connect(func() -> void:
+			if _selection_controller != null:
+				_selection_controller.set_active_building_subgroup(captured_idx)
+		)
+		subgroup_tabs_row.add_child(btn)
+
+	if b_subgroups.size() > max_tabs:
+		var more_tabs: Label = Label.new()
+		more_tabs.text = "+%d" % (b_subgroups.size() - max_tabs)
+		more_tabs.add_theme_font_size_override("font_size", 10)
+		more_tabs.modulate = Color(0.75, 0.85, 0.90, 0.85)
+		subgroup_tabs_row.add_child(more_tabs)
+
+	if b_subgroups.size() > 1:
 		var k_tab: String = _get_compact_action_badge(&"ui_cycle_subgroup", "Tab")
 		if not k_tab.is_empty():
 			var hint: Label = Label.new()

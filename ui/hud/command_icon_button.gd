@@ -487,7 +487,7 @@ func _draw_vector_icon(c: Vector2, fg: Color, hi: Color, dark: Color) -> void:
 		&"adrenal_surge":
 			draw_polyline(PackedVector2Array([c + Vector2(-8, 2), c + Vector2(0, -7), c + Vector2(8, 2)]), hi, 2.2, true)
 			draw_polyline(PackedVector2Array([c + Vector2(-7, 8), c + Vector2(0, 0), c + Vector2(7, 8)]), fg, 2.2, true)
-		&"nanite_surge", &"monolith_shield_overcharge":
+		&"monolith_shield_overcharge":
 			draw_arc(c, 9.5, 0.0, TAU, 20, fg, 1.8, true)
 			draw_circle(c, 4.2, Color(fg.r, fg.g, fg.b, 0.40))
 			draw_line(c + Vector2(-5, 0), c + Vector2(5, 0), hi, 2.2, true)
@@ -506,7 +506,7 @@ func _draw_vector_icon(c: Vector2, fg: Color, hi: Color, dark: Color) -> void:
 				var ga: float = float(gi) * (PI * 0.5) + PI * 0.25
 				var gd: Vector2 = Vector2.RIGHT.rotated(ga)
 				draw_line(c + gd * 12.0, c + gd * 6.5, hi, 1.8, true)
-		&"seismic_slam", &"spore_barrage", &"overcharge_pulse":
+		&"seismic_slam", &"spore_barrage":
 			draw_circle(c, 4.0, hi)
 			draw_arc(c, 8.5, 0.0, TAU, 18, fg, 2.0, true)
 			for si: int in range(6):
