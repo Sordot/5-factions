@@ -64,6 +64,23 @@ static func _ensure_builtin_providers() -> void:
 		"shadow_offset": Vector2(0.0, 2.0),
 		"shadow_color": Color(0.0, 0.03, 0.06, 0.55),
 	})
+	register_theme_provider(&"prisma_dei", {
+		"faction_id": &"prisma_dei",
+		"style": &"bauhaus_sacred",
+		"bg": Color(0.075, 0.065, 0.115, 0.94), # Deep obsidian-violet matte glass
+		"bg_hover": Color(0.118, 0.098, 0.175, 0.98),
+		"bg_row": Color(0.060, 0.052, 0.096, 0.94),
+		"border": Color(0.980, 0.800, 0.082, 0.94), # #FACC15 Liturgical Gold
+		"inner_trim": Color(0.965, 0.957, 0.933, 0.80), # #F6F4EE Alabaster hairline
+		"accent": Color(0.980, 0.800, 0.082, 1.0), # Liturgical Gold
+		"secondary": Color(0.851, 0.275, 0.937, 1.0), # #D946EF Ultraviolet Magenta
+		"primary": Color(0.965, 0.957, 0.933, 1.0), # Alabaster
+		"corner_radius": 2,
+		"border_width": 2,
+		"shadow_size": 4,
+		"shadow_offset": Vector2(0.0, 2.0),
+		"shadow_color": Color(0.04, 0.02, 0.08, 0.62),
+	})
 
 
 static func register_theme_provider(faction_id: StringName, provider: Dictionary) -> void:
@@ -158,7 +175,9 @@ static func make_panel_style(faction_id: StringName, compact: bool = false) -> S
 static func make_utility_button_style(faction_id: StringName, hovered: bool = false) -> StyleBoxFlat:
 	var pal: Dictionary = get_palette(faction_id)
 	var is_brutal: bool = (pal["style"] == &"brutalist")
+	var is_bauhaus: bool = (pal["style"] == &"bauhaus_sacred")
 	var accent: Color = pal["accent"] as Color
+	var sec: Color = pal.get("secondary", accent) as Color
 	var sb: StyleBoxFlat = StyleBoxFlat.new()
 	sb.content_margin_left = 6.0
 	sb.content_margin_right = 6.0
@@ -169,6 +188,11 @@ static func make_utility_button_style(faction_id: StringName, hovered: bool = fa
 		sb.set_corner_radius_all(0)
 		sb.set_border_width_all(2)
 		sb.border_color = accent if hovered else (pal["inner_trim"] as Color)
+	elif is_bauhaus:
+		sb.bg_color = Color(0.135, 0.105, 0.200, 0.96) if hovered else Color(0.086, 0.071, 0.141, 0.94)
+		sb.set_corner_radius_all(2)
+		sb.set_border_width_all(1)
+		sb.border_color = sec if hovered else Color(accent.r, accent.g, accent.b, 0.72)
 	else:
 		sb.bg_color = Color(0.08, 0.16, 0.22, 0.94) if hovered else Color(0.04, 0.09, 0.14, 0.90)
 		sb.set_corner_radius_all(4)
@@ -276,6 +300,51 @@ class _HudFrameOverlay extends Control:
 				_draw_halftone_corner(Rect2(maxf(12.0, w - 74.0), maxf(12.0, h - 20.0), 66.0, 14.0), amber, 0.24)
 			elif _variant == &"top_bar" or _variant == &"ticker":
 				_draw_halftone_corner(Rect2(w - 34.0, h - 11.0, 28.0, 6.0), amber, 0.22)
+		elif _style == &"bauhaus_sacred":
+			# PRISMA_DEI Bauhaus Sacred Geometry: alabaster inner inset rule, rotated 45-deg gold corner diamonds, magenta accent pips
+			var gold: Color = _accent
+			var alabaster: Color = _inner_trim
+			var magenta: Color = _palette.get("secondary", Color(0.851, 0.275, 0.937, 1.0)) as Color
+			var inset_b: float = 3.5
+			draw_rect(Rect2(inset_b, inset_b, w - inset_b * 2.0, h - inset_b * 2.0), Color(alabaster.r, alabaster.g, alabaster.b, 0.34), false, 1.0)
+
+			# Twin hairline gold horizontal rule accents along top & bottom margins
+			var margin_x: float = minf(22.0, w * 0.14)
+			draw_line(Vector2(margin_x, 2.0), Vector2(w - margin_x, 2.0), Color(gold.r, gold.g, gold.b, 0.72), 1.2, true)
+			draw_line(Vector2(margin_x + 8.0, h - 2.0), Vector2(w - margin_x - 8.0, h - 2.0), Color(gold.r, gold.g, gold.b, 0.46), 1.0, true)
+
+			# Crisp rotated 45-deg geometric corner diamonds
+			var d_off: float = 5.5 if (_variant == &"selection" or _variant == &"minimap") else 4.5
+			var d_r: float = 3.6 if (_variant == &"selection" or _variant == &"minimap") else 2.8
+			var c_pts: PackedVector2Array = PackedVector2Array([
+				Vector2(d_off, d_off),
+				Vector2(w - d_off, d_off),
+				Vector2(w - d_off, h - d_off),
+				Vector2(d_off, h - d_off),
+			])
+			for ci: int in range(c_pts.size()):
+				var pt: Vector2 = c_pts[ci]
+				var dia: PackedVector2Array = PackedVector2Array([
+					pt + Vector2(0.0, -d_r),
+					pt + Vector2(d_r, 0.0),
+					pt + Vector2(0.0, d_r),
+					pt + Vector2(-d_r, 0.0),
+				])
+				draw_colored_polygon(dia, Color(0.075, 0.065, 0.115, 0.96))
+				draw_polyline(dia + PackedVector2Array([dia[0]]), gold, 1.2, true)
+				draw_circle(pt, 1.35, magenta if (ci % 2 == 0) else alabaster)
+
+			# Subtle Bauhaus center-top geometric divider pip on larger panels
+			if _variant == &"selection" or _variant == &"minimap":
+				var mid_x: float = w * 0.5
+				var top_dia: PackedVector2Array = PackedVector2Array([
+					Vector2(mid_x, 0.5),
+					Vector2(mid_x + 4.0, 4.5),
+					Vector2(mid_x, 8.5),
+					Vector2(mid_x - 4.0, 4.5),
+				])
+				draw_colored_polygon(top_dia, magenta)
+				draw_polyline(top_dia + PackedVector2Array([top_dia[0]]), gold, 1.1, true)
 		else:
 			# Technozen / Bio-Synth (and Spectator / Future Factions)
 			var glow: Color = Color(_accent.r, _accent.g, _accent.b, 0.58)

@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"alabaster_kiln"
+display_name = "Alabaster Kiln"
+short_display_name = "Kiln"
+hud_accent_color = Color(0.98, 0.8, 0.082, 1)
+scene_path = "res://scenes/buildings/prisma_alabaster_kiln.tscn"
+biomass_cost = 100
+silica_cost = 20
+compute_cost = 0
+build_time = 6.0
+footprint_size = Vector2(72, 72)
+max_hp = 640.0
+max_shield = 0.0
+shield_regen_rate = 0.0
+shield_regen_delay = 7.0
+damage_reduction = 0.05
+vision_range = 360.0
+bandwidth_provided = 0
+is_dropoff = true
+accepted_resources = Array[StringName]([&"silica"])
+accepted_dropoff_resources = Array[StringName]([&"silica"])
+requires_vent = false
+max_staff_slots = 0
+trainable_unit_paths = PackedStringArray("res://resources/units/prisma_prism_dredge_data.tres")
+can_set_rally = true
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &""
+prerequisite_building_ids = Array[StringName]([])
+is_core_hub = false
+is_command_hub = false
+is_military_production = false
+is_supply_provider = false
+tech_tier = 0
+audio_select_class = &"utility"
+tech_tree_summary = "Silica Drop-Off • Trains Prism Dredge • Independent"
+provides_power_grid = false
+power_radius = 0.0
+requires_power_grid = false

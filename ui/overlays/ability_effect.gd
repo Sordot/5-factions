@@ -7,6 +7,7 @@ enum EffectStyle {
 	SEISMIC_SLAM,
 	HEX_BARRIER,
 	GRAV_PULSE,
+	PRISM_BURST,
 }
 
 @export var duration: float = 0.35
@@ -93,6 +94,17 @@ func setup_grav_pulse(from_world: Vector2, target_world: Vector2, radius: float,
 	queue_redraw()
 
 
+func setup_prism_burst(from_world: Vector2, target_world: Vector2, radius: float, effect_color: Color = Color(0.98, 0.80, 0.14, 0.96)) -> void:
+	_style = EffectStyle.PRISM_BURST
+	_from_world = from_world
+	_to_world = target_world
+	_radius = maxf(24.0, radius)
+	_color = effect_color
+	duration = 0.44
+	_elapsed = 0.0
+	queue_redraw()
+
+
 func _process(delta: float) -> void:
 	_elapsed += delta
 	if _elapsed >= duration:
@@ -171,6 +183,33 @@ func _draw() -> void:
 			draw_circle(target_local + g_dir * (wave_r * 0.82), 2.2, tick_col)
 			if gi % 2 == 0:
 				draw_line(target_local + g_dir * _radius, target_local + g_dir * maxf(12.0, collapse_r), tick_col, 1.5, true)
+	elif _style == EffectStyle.PRISM_BURST:
+		# Bauhaus Sacred Geometry gold/magenta diamond prism burst
+		var from_loc: Vector2 = to_local(_from_world)
+		if t < 0.36 and from_loc.distance_squared_to(target_local) > 64.0:
+			var ba: float = (1.0 - (t / 0.36)) * 0.92
+			draw_line(from_loc, target_local, Color(0.851, 0.275, 0.937, ba * 0.55), 4.0, true)
+			draw_line(from_loc, target_local, Color(_color.r, _color.g, _color.b, ba), 1.8, true)
+		var outer_pr: float = lerpf(_radius * 0.24, _radius, sqrt(t))
+		var inner_pr: float = lerpf(_radius * 0.14, _radius * 0.68, t)
+		draw_circle(target_local, outer_pr, Color(_color.r, _color.g, _color.b, fade * 0.16))
+		draw_arc(target_local, outer_pr, 0.0, TAU, 36, Color(_color.r, _color.g, _color.b, fade * 0.96), 2.2, true)
+		# Rotating 4-point diamond frame + counter-rotating inner diamond
+		var rot_a: float = t * 0.85
+		var rot_b: float = -t * 1.15 + PI * 0.25
+		var dia_a: PackedVector2Array = PackedVector2Array()
+		var dia_b: PackedVector2Array = PackedVector2Array()
+		for di: int in range(4):
+			var aa: float = rot_a + float(di) * (PI * 0.5)
+			var ab: float = rot_b + float(di) * (PI * 0.5)
+			dia_a.append(target_local + Vector2.RIGHT.rotated(aa) * outer_pr)
+			dia_b.append(target_local + Vector2.RIGHT.rotated(ab) * inner_pr)
+		draw_polyline(dia_a + PackedVector2Array([dia_a[0]]), Color(0.98, 0.80, 0.14, fade * 0.94), 1.8, true)
+		draw_polyline(dia_b + PackedVector2Array([dia_b[0]]), Color(0.851, 0.275, 0.937, fade * 0.86), 1.5, true)
+		for ri: int in range(8):
+			var ra: float = float(ri) * (TAU / 8.0) + rot_a * 0.5
+			var rd: Vector2 = Vector2.RIGHT.rotated(ra)
+			draw_line(target_local + rd * inner_pr, target_local + rd * outer_pr, Color(1.0, 0.96, 0.86, fade * 0.70), 1.2, true)
 	else:
 		var pulse_r: float = lerpf(8.0, _radius, t)
 		var ring_col: Color = _color

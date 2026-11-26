@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="AbilityData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ability_data.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+ability_id = &"focus_alignment"
+display_name = "Focus Alignment"
+hotkey_label = "Q"
+cooldown_duration = 14.0
+cast_range = 0.0
+target_type = 2
+damage_or_value = 40.0
+aoe_radius = 38.0
+effect_duration = 4.0
+move_speed_modifier = -0.2
+attack_speed_modifier = 0.0
+effect_color = Color(0.851, 0.275, 0.937, 0.96)
+cast_on_all_ready = true
+allow_autocast = false
+default_autocast = false
+description = "Instantly jumps continuous beam ramp by +50% and grants +40px attack range while slowing movement by -20% for 4.0s (14s CD)."

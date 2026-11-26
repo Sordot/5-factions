@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="AbilityData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ability_data.gd" id="1_ab"]
+
+[resource]
+script = ExtResource("1_ab")
+ability_id = &"luminous_mend"
+display_name = "Luminous Mend"
+hotkey_label = "Q"
+cooldown_duration = 9.0
+cast_range = 220.0
+target_type = 0
+damage_or_value = 45.0
+aoe_radius = 115.0
+effect_duration = 0.0
+move_speed_modifier = 0.0
+attack_speed_modifier = 0.0
+effect_color = Color(0.98, 0.84, 0.24, 0.96)
+cast_on_all_ready = false
+allow_autocast = true
+default_autocast = true
+description = "Radiates a 115px golden sunburst (range 220), restoring +45 HP to all wounded allied units in radius (9s CD). Auto-Cast enabled by default."

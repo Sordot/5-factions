@@ -111,7 +111,7 @@ func _draw() -> void:
 
 		# 1a. All friendly production rally lines (even if off-viewport start/end crosses view)
 		if b.has_rally():
-			var rally_world: Vector2 = b.get_rally_point()
+			var rally_world: Vector2 = b.get_rally_world_position()
 			if view_rect.has_point(b.global_position) or view_rect.has_point(rally_world):
 				var r_pos: Vector2 = to_local(rally_world)
 				var r_col: Color = Color(team_col.r, team_col.g, team_col.b, 0.58 * a)

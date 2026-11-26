@@ -1,0 +1,39 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"luminant"
+display_name = "Luminant"
+short_display_name = "Luminant"
+max_hp = 70.0
+max_shield = 0.0
+move_speed = 240.0
+acceleration = 1800.0
+turn_speed = 14.5
+selection_radius = 18.5
+collision_radius = 13.5
+attack_damage = 0.0
+attack_range = 0.0
+aggro_range = 0.0
+vision_range = 350.0
+attack_cooldown = 1.0
+is_armored = false
+unit_tags = Array[StringName]([&"engineer", &"biological"])
+damage_reduction = 0.0
+bandwidth_cost = 1
+can_gather = false
+can_staff_compute = true
+biomass_cost = 60
+silica_cost = 20
+compute_cost = 0
+build_time = 4.5
+train_time = 4.5
+unit_scene_path = "res://scenes/units/prisma_luminant.tscn"
+weapon_tracer_style = &"prism_bolt"
+weapon_tracer_color = Color(0.98, 0.8, 0.14, 1)
+weapon_sfx_id = &"weapon_prism_bolt"
+audio_bark_class = &"worker"
+minimap_icon_shape = &"worker"
+role_tags_display = "Compute Specialist • Repair"

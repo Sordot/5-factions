@@ -41,6 +41,16 @@ func get_beam_ramp_ratio(owner_unit: Unit) -> float:
 	return clampf(_beam_ramp_elapsed / maxf(0.1, owner_unit.data.beam_ramp_duration), 0.0, 1.0)
 
 
+func boost_beam_ramp_fraction(owner_unit: Unit, fraction: float) -> void:
+	if owner_unit == null or owner_unit.data == null or not owner_unit.data.is_continuous_beam:
+		return
+	var ramp_dur: float = maxf(0.1, owner_unit.data.beam_ramp_duration)
+	_beam_ramp_elapsed = clampf(_beam_ramp_elapsed + ramp_dur * maxf(0.0, fraction), 0.0, ramp_dur)
+	_beam_grace_timer = maxf(_beam_grace_timer, maxf(0.65, owner_unit.data.beam_ramp_decay_delay))
+	if _beam_lock_target == null and owner_unit.current_target != null and is_instance_valid(owner_unit.current_target):
+		_beam_lock_target = owner_unit.current_target as Node2D
+
+
 func tick_beam_decay(owner_unit: Unit, delta: float) -> void:
 	if owner_unit == null or owner_unit.data == null or not owner_unit.data.is_continuous_beam:
 		return
@@ -544,6 +554,16 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 
 	if tracer_style == &"arc_tether":
 		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(2.1, tracer_width), 0.13, 0.0, AttackTracer.TracerStyle.ARC_TETHER)
+		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
+		return true
+
+	if tracer_style == &"prism_refract":
+		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(2.2, tracer_width), 0.16, 0.0, AttackTracer.TracerStyle.PRISM_REFRACT)
+		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
+		return true
+
+	if tracer_style == &"prism_bolt":
+		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(2.0, tracer_width), 0.12, 0.0, AttackTracer.TracerStyle.PRISM_REFRACT)
 		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
 		return true
 

@@ -90,7 +90,7 @@ func _ready() -> void:
 		get_viewport().size_changed.connect(_adjust_layout_for_minimap)
 
 
-func _on_teams_reconfigured() -> void:
+func _on_teams_reconfigured(_mode: StringName = &"") -> void:
 	_apply_faction_hud_theme(true)
 
 

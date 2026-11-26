@@ -39,7 +39,7 @@ func _ready() -> void:
 	call_deferred("_resolve_references")
 
 
-func _apply_faction_theme() -> void:
+func _apply_faction_theme(_mode: StringName = &"") -> void:
 	var fid: StringName = FactionHudTheme.resolve_local_faction_id()
 	var pal: Dictionary = FactionHudTheme.get_palette(fid)
 	var accent: Color = pal["accent"] as Color

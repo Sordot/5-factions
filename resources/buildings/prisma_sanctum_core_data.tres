@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"sanctum_core"
+display_name = "Sanctum Core"
+short_display_name = "Sanctum"
+hud_accent_color = Color(0.98, 0.8, 0.082, 1)
+scene_path = "res://scenes/buildings/prisma_sanctum_core.tscn"
+biomass_cost = 300
+silica_cost = 80
+compute_cost = 0
+build_time = 14.0
+footprint_size = Vector2(96, 96)
+max_hp = 1350.0
+max_shield = 0.0
+shield_regen_rate = 0.0
+shield_regen_delay = 7.0
+damage_reduction = 0.05
+vision_range = 460.0
+bandwidth_provided = 10
+is_dropoff = true
+accepted_resources = Array[StringName]([&"biomass"])
+accepted_dropoff_resources = Array[StringName]([&"biomass"])
+requires_vent = false
+max_staff_slots = 0
+trainable_unit_paths = PackedStringArray("res://resources/units/prisma_acolyte_data.tres", "res://resources/units/prisma_prism_dredge_data.tres", "res://resources/units/prisma_luminant_data.tres")
+can_set_rally = true
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &""
+prerequisite_building_ids = Array[StringName]([])
+is_core_hub = true
+is_command_hub = true
+is_military_production = false
+is_supply_provider = true
+tech_tier = 0
+audio_select_class = &"hub"
+tech_tree_summary = "Core Hub • +10 BW • Biomass Drop-Off • Power Lattice (290px)"
+provides_power_grid = true
+power_radius = 290.0
+requires_power_grid = false

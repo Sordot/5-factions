@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"refraction_cloister"
+display_name = "Refraction Cloister"
+short_display_name = "Cloister"
+hud_accent_color = Color(0.851, 0.275, 0.937, 1)
+scene_path = "res://scenes/buildings/prisma_refraction_cloister.tscn"
+biomass_cost = 120
+silica_cost = 125
+compute_cost = 25
+build_time = 9.5
+footprint_size = Vector2(84, 84)
+max_hp = 840.0
+max_shield = 0.0
+shield_regen_rate = 0.0
+shield_regen_delay = 7.0
+damage_reduction = 0.08
+vision_range = 410.0
+bandwidth_provided = 0
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+accepted_dropoff_resources = Array[StringName]([])
+requires_vent = false
+max_staff_slots = 0
+trainable_unit_paths = PackedStringArray("res://resources/units/prisma_lens_adjudicator_data.tres", "res://resources/units/prisma_prism_weaver_data.tres")
+can_set_rally = true
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &"choir_basilica"
+prerequisite_building_ids = Array[StringName]([&"choir_basilica"])
+is_core_hub = false
+is_command_hub = false
+is_military_production = true
+is_supply_provider = false
+tech_tier = 1
+audio_select_class = &"production"
+tech_tree_summary = "Tier-1.5 Optical Tech • Requires Power Lattice • Trains Adjudicator / Weaver"
+provides_power_grid = false
+power_radius = 0.0
+requires_power_grid = true

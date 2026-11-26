@@ -1175,7 +1175,8 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 		var base_delay: float = data.shield_regen_delay if data != null else 6.0
 		_shield_regen_timer = maxf(0.0, base_delay * delay_mult)
 
-	var remaining: float = amount
+	var dmg_taken_mult: float = float(status_effect_component.call("get_damage_taken_multiplier")) if status_effect_component != null else 1.0
+	var remaining: float = amount * maxf(0.0, dmg_taken_mult)
 	var absorbed_temp: float = 0.0
 	# Layer 1 — Temporary Bonus Barrier (Unmitigated)
 	if status_effect_component != null and remaining > 0.0:
@@ -1585,6 +1586,19 @@ func _draw() -> void:
 		var sr: float = (data.collision_radius if data != null else 16.0) + 3.5 + (1.0 - sf) * 4.5
 		draw_circle(Vector2.ZERO, sr * 0.92, Color(0.220, 0.741, 0.973, sf * 0.18))
 		draw_arc(Vector2.ZERO, sr, 0.0, TAU, 24, Color(0.220, 0.741, 0.973, sf * 0.92), 2.2, true)
+
+	# PRISMA_DEI Radiant Mark golden amplification halo (+15% dmg taken) & Blinding Glare ring
+	if has_status_effect(&"radiant_mark"):
+		var rm_r: float = (data.collision_radius if data != null else 16.0) + 6.5
+		var gold_mark: Color = Color(0.98, 0.80, 0.14, 0.92)
+		draw_arc(Vector2.ZERO, rm_r, 0.0, TAU, 24, gold_mark, 1.8, true)
+		for ri: int in range(4):
+			var ra: float = float(ri) * (PI * 0.5)
+			var rd: Vector2 = Vector2.RIGHT.rotated(ra)
+			draw_line(rd * (rm_r - 3.5), rd * (rm_r + 4.5), Color(1.0, 0.96, 0.72, 0.96), 1.8, true)
+	if has_status_effect(&"blinding_glare"):
+		var bg_r: float = (data.collision_radius if data != null else 16.0) + 4.0
+		draw_arc(Vector2.ZERO, bg_r, 0.0, TAU, 20, Color(0.94, 0.36, 0.96, 0.72), 1.6, true)
 
 	# Rail-Lance targeting lock-line telegraph during attack windup
 	if combat_component != null and combat_component.is_in_windup() and get_effective_weapon_tracer_style() == &"rail_lance":
@@ -2697,6 +2711,12 @@ func get_inspection_data() -> Dictionary:
 				"label": "Lattice Link",
 				"value": "x%d Active" % tether_stacks,
 				"color": Color(0.98, 0.80, 0.14, 1.0),
+			})
+		if data.tether_emit_radius > 0.0 and data.tether_max_links > 0:
+			stats.append({
+				"label": "Tether Anchor",
+				"value": "x%d Links (%dpx)" % [data.tether_max_links, int(round(data.tether_emit_radius))],
+				"color": Color(0.851, 0.275, 0.937, 1.0),
 			})
 		if data.is_continuous_beam and combat_component != null:
 			var ramp_pct: int = int(round(combat_component.get_beam_ramp_ratio(self) * 100.0))

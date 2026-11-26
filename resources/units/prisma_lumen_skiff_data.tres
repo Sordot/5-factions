@@ -1,0 +1,41 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/prisma_radiant_mark.tres" id="2_ab_mark"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"lumen_skiff"
+display_name = "Lumen Skiff"
+short_display_name = "Skiff"
+max_hp = 85.0
+max_shield = 0.0
+move_speed = 325.0
+acceleration = 2250.0
+turn_speed = 18.0
+selection_radius = 19.0
+collision_radius = 13.5
+attack_damage = 12.0
+attack_range = 165.0
+aggro_range = 300.0
+vision_range = 435.0
+attack_cooldown = 0.62
+attack_windup = 0.06
+is_armored = false
+unit_tags = Array[StringName]([&"scout", &"flanker", &"synthetic"])
+damage_reduction = 0.0
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_ab_mark")])
+bandwidth_cost = 1
+biomass_cost = 40
+silica_cost = 35
+compute_cost = 0
+build_time = 4.0
+train_time = 4.0
+unit_scene_path = "res://scenes/units/prisma_lumen_skiff.tscn"
+weapon_tracer_style = &"prism_bolt"
+weapon_tracer_color = Color(0.85, 0.27, 0.94, 1)
+weapon_tracer_width = 2.0
+weapon_sfx_id = &"weapon_prism_bolt"
+audio_bark_class = &"swarm"
+minimap_icon_shape = &"dot"
+role_tags_display = "Fast Scout • Radiant Mark"

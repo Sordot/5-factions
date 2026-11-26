@@ -1,0 +1,115 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/buildings/building.gd" id="1_building_script"]
+[ext_resource type="Resource" path="res://resources/buildings/prisma_alabaster_kiln_data.tres" id="2_bdata"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_alabaster_kiln"]
+radius = 36.0
+
+[node name="PrismaAlabasterKiln" type="StaticBody2D"]
+collision_layer = 1
+collision_mask = 0
+script = ExtResource("1_building_script")
+building_data = ExtResource("2_bdata")
+team = 0
+building_type_id = &"alabaster_kiln"
+display_name = "Alabaster Kiln"
+max_hp = 640.0
+max_shield = 0.0
+damage_reduction = 0.05
+vision_range = 360.0
+footprint_radius = 36.0
+selection_radius = 44.0
+is_resource_dropoff = true
+accepted_resources = Array[StringName]([&"silica"])
+bandwidth_provided = 0
+build_time = 6.0
+is_constructed = true
+can_set_rally = true
+requires_power_grid = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_alabaster_kiln")
+
+[node name="NavigationObstacle2D" type="NavigationObstacle2D" parent="."]
+radius = 36.0
+avoidance_enabled = true
+
+[node name="SelectionRing" type="Node2D" parent="."]
+visible = false
+
+[node name="Fill" type="Polygon2D" parent="SelectionRing"]
+color = Color(0.98, 0.8, 0.082, 0.16)
+polygon = PackedVector2Array(44, 0, 40.6, 16.8, 31.1, 31.1, 16.8, 40.6, 0, 44, -16.8, 40.6, -31.1, 31.1, -40.6, 16.8, -44, 0, -40.6, -16.8, -31.1, -31.1, -16.8, -40.6, 0, -44, 16.8, -40.6, 31.1, -31.1, 40.6, -16.8)
+
+[node name="Outline" type="Line2D" parent="SelectionRing"]
+points = PackedVector2Array(44, 0, 40.6, 16.8, 31.1, 31.1, 16.8, 40.6, 0, 44, -16.8, 40.6, -31.1, 31.1, -40.6, 16.8, -44, 0, -40.6, -16.8, -31.1, -31.1, -16.8, -40.6, 0, -44, 16.8, -40.6, 31.1, -31.1, 40.6, -16.8)
+closed = true
+width = 2.4
+default_color = Color(0.98, 0.8, 0.082, 0.95)
+antialiased = true
+
+[node name="BodyVisual" type="Node2D" parent="."]
+
+[node name="OuterHull" type="Polygon2D" parent="BodyVisual"]
+color = Color(0.965, 0.957, 0.933, 1)
+polygon = PackedVector2Array(34, -14, 34, 14, 14, 34, -14, 34, -34, 14, -34, -14, -14, -34, 14, -34)
+
+[node name="CoreGlow" type="Polygon2D" parent="BodyVisual"]
+color = Color(0.98, 0.8, 0.082, 1)
+polygon = PackedVector2Array(10, -10, 10, 10, -10, 10, -10, -10)
+
+[node name="HullBorder" type="Line2D" parent="BodyVisual"]
+points = PackedVector2Array(34, -14, 34, 14, 14, 34, -14, 34, -34, 14, -34, -14, -14, -34, 14, -34)
+closed = true
+width = 2.0
+default_color = Color(0.98, 0.8, 0.082, 0.92)
+antialiased = true
+
+[node name="NameTag" type="Label" parent="."]
+offset_left = -60.0
+offset_top = 38.0
+offset_right = 60.0
+offset_bottom = 54.0
+theme_override_colors/font_color = Color(0.965, 0.957, 0.933, 0.92)
+theme_override_font_sizes/font_size = 10
+text = "ALABASTER KILN"
+horizontal_alignment = 1
+
+[node name="HealthBar" type="Node2D" parent="."]
+visible = false
+position = Vector2(-38, -48)
+z_index = 20
+
+[node name="Bg" type="ColorRect" parent="HealthBar"]
+offset_left = -1.0
+offset_top = -1.0
+offset_right = 77.0
+offset_bottom = 7.0
+mouse_filter = 2
+color = Color(0.05, 0.04, 0.09, 0.9)
+
+[node name="Fill" type="ColorRect" parent="HealthBar"]
+offset_right = 76.0
+offset_bottom = 6.0
+mouse_filter = 2
+color = Color(0.98, 0.8, 0.082, 1)
+
+[node name="ConstructBar" type="Node2D" parent="."]
+visible = false
+position = Vector2(-34, -39)
+z_index = 21
+
+[node name="Bg" type="ColorRect" parent="ConstructBar"]
+offset_left = -1.0
+offset_top = -1.0
+offset_right = 69.0
+offset_bottom = 5.0
+mouse_filter = 2
+color = Color(0.05, 0.04, 0.09, 0.9)
+
+[node name="Fill" type="ColorRect" parent="ConstructBar"]
+offset_right = 0.0
+offset_bottom = 4.0
+mouse_filter = 2
+color = Color(0.851, 0.275, 0.937, 1)

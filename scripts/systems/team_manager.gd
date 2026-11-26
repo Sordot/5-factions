@@ -138,6 +138,9 @@ func get_playable_factions() -> Array[FactionData]:
 		var res: Resource = _factions[fid] as Resource
 		if res is FactionData and (res as FactionData).is_playable:
 			out.append(res as FactionData)
+	out.sort_custom(func(a: FactionData, b: FactionData) -> bool:
+		return a.dossier_slot_number < b.dossier_slot_number
+	)
 	return out
 
 

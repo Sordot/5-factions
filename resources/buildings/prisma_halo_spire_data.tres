@@ -1,0 +1,48 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"halo_spire"
+display_name = "Halo Spire"
+short_display_name = "Halo Spire"
+hud_accent_color = Color(0.98, 0.8, 0.082, 1)
+scene_path = "res://scenes/buildings/prisma_halo_spire.tscn"
+biomass_cost = 95
+silica_cost = 30
+compute_cost = 0
+build_time = 5.5
+footprint_size = Vector2(58, 58)
+max_hp = 420.0
+max_shield = 0.0
+shield_regen_rate = 0.0
+shield_regen_delay = 7.0
+damage_reduction = 0.05
+vision_range = 380.0
+bandwidth_provided = 10
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+accepted_dropoff_resources = Array[StringName]([])
+requires_vent = false
+max_staff_slots = 0
+can_set_rally = false
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &""
+prerequisite_building_ids = Array[StringName]([])
+is_core_hub = false
+is_command_hub = false
+is_military_production = false
+is_supply_provider = true
+tech_tier = 0
+audio_select_class = &"utility"
+tech_tree_summary = "+10 BW • Power Lattice (265px) • Defensive Tether (x2, +10% RoF)"
+provides_power_grid = true
+power_radius = 265.0
+requires_power_grid = false
+tether_emit_radius = 200.0
+tether_max_links = 2
+tether_fire_rate_bonus = 0.1
+tether_range_bonus = 0.0
+tether_beam_ramp_bonus = 0.0

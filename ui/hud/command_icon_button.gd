@@ -115,7 +115,8 @@ func apply_faction_theme(faction_id: StringName, f_accent: Color, f_primary: Col
 	theme_style = pal.get("style", &"technozen") as StringName
 
 	var is_brutal: bool = (theme_style == &"brutalist")
-	var radius: int = 0 if is_brutal else 4
+	var is_bauhaus: bool = (theme_style == &"bauhaus_sacred")
+	var radius: int = 0 if is_brutal else (2 if is_bauhaus else 4)
 	var bw: int = 2 if is_brutal else 1
 
 	var normal_sb: StyleBoxFlat = StyleBoxFlat.new()
@@ -124,6 +125,9 @@ func apply_faction_theme(faction_id: StringName, f_accent: Color, f_primary: Col
 	if is_brutal:
 		normal_sb.bg_color = Color(0.137, 0.149, 0.169, 0.98) # #23262B
 		normal_sb.border_color = Color(0.039, 0.051, 0.071, 1.0) # #0A0D12
+	elif is_bauhaus:
+		normal_sb.bg_color = Color(0.086, 0.071, 0.141, 0.96) # #161224 dark obsidian socket
+		normal_sb.border_color = Color(0.980, 0.800, 0.082, 0.65) # Liturgical Gold rim
 	else:
 		normal_sb.bg_color = Color(0.045, 0.095, 0.140, 0.94)
 		normal_sb.border_color = Color(f_accent.r, f_accent.g, f_accent.b, 0.42)
@@ -132,6 +136,9 @@ func apply_faction_theme(faction_id: StringName, f_accent: Color, f_primary: Col
 	if is_brutal:
 		hover_sb.bg_color = Color(0.195, 0.212, 0.238, 0.98)
 		hover_sb.border_color = Color(f_accent.r, f_accent.g, f_accent.b, 0.98)
+	elif is_bauhaus:
+		hover_sb.bg_color = Color(0.145, 0.102, 0.218, 0.98)
+		hover_sb.border_color = Color(0.851, 0.275, 0.937, 0.98) # Ultraviolet Magenta hover glow
 	else:
 		hover_sb.bg_color = Color(0.075, 0.165, 0.220, 0.96)
 		hover_sb.border_color = Color(f_accent.r, f_accent.g, f_accent.b, 0.96)
@@ -140,6 +147,9 @@ func apply_faction_theme(faction_id: StringName, f_accent: Color, f_primary: Col
 	if is_brutal:
 		press_sb.bg_color = Color(0.250, 0.220, 0.165, 0.98)
 		press_sb.border_color = Color(0.949, 0.937, 0.914, 1.0)
+	elif is_bauhaus:
+		press_sb.bg_color = Color(0.200, 0.155, 0.265, 0.98)
+		press_sb.border_color = Color(0.965, 0.957, 0.933, 1.0)
 	else:
 		press_sb.bg_color = Color(0.11, 0.24, 0.29, 0.98)
 		press_sb.border_color = Color(0.86, 1.0, 0.98, 1.0)
@@ -148,6 +158,9 @@ func apply_faction_theme(faction_id: StringName, f_accent: Color, f_primary: Col
 	if is_brutal:
 		disabled_sb.bg_color = Color(0.095, 0.105, 0.120, 0.72)
 		disabled_sb.border_color = Color(0.039, 0.051, 0.071, 0.75)
+	elif is_bauhaus:
+		disabled_sb.bg_color = Color(0.055, 0.048, 0.090, 0.72)
+		disabled_sb.border_color = Color(0.980, 0.800, 0.082, 0.22)
 	else:
 		disabled_sb.bg_color = Color(0.030, 0.058, 0.088, 0.65)
 		disabled_sb.border_color = Color(f_accent.r, f_accent.g, f_accent.b, 0.18)
@@ -173,6 +186,7 @@ func _draw() -> void:
 	if w < 8.0 or h < 8.0:
 		return
 	var is_brutal: bool = (theme_style == &"brutalist")
+	var is_bauhaus: bool = (theme_style == &"bauhaus_sacred")
 	var center: Vector2 = Vector2(w * 0.5, h * 0.5)
 
 	if is_empty_socket:
@@ -183,6 +197,17 @@ func _draw() -> void:
 					var px: float = 12.0 + float(gx) * 10.0
 					var py: float = 12.0 + float(gy) * 10.0
 					draw_circle(Vector2(px, py), 1.0, Color(0.95, 0.94, 0.91, 0.10))
+		elif is_bauhaus:
+			# Subtle Bauhaus recessed gold diamond socket
+			var d_col: Color = Color(0.980, 0.800, 0.082, 0.16)
+			var dia_e: PackedVector2Array = PackedVector2Array([
+				center + Vector2(0.0, -5.0),
+				center + Vector2(5.0, 0.0),
+				center + Vector2(0.0, 5.0),
+				center + Vector2(-5.0, 0.0),
+				center + Vector2(0.0, -5.0),
+			])
+			draw_polyline(dia_e, d_col, 1.0, true)
 		else:
 			# Subtle Technozen recessed cross-socket
 			var c_col: Color = Color(theme_accent.r, theme_accent.g, theme_accent.b, 0.12)
@@ -190,10 +215,12 @@ func _draw() -> void:
 			draw_line(center - Vector2(0.0, 5.0), center + Vector2(0.0, 5.0), c_col, 1.0)
 		return
 
-	# Subtle brutalist inner bevel shadow / off-white top-left lip
+	# Subtle brutalist inner bevel shadow / Bauhaus hairline alabaster inset
 	if is_brutal:
 		draw_rect(Rect2(2.0, 2.0, w - 4.0, h - 4.0), Color(0.04, 0.05, 0.07, 0.36), false, 1.0)
 		draw_line(Vector2(3.0, 3.0), Vector2(w - 3.0, 3.0), Color(0.95, 0.94, 0.91, 0.16), 1.0)
+	elif is_bauhaus:
+		draw_rect(Rect2(2.0, 2.0, w - 4.0, h - 4.0), Color(0.965, 0.957, 0.933, 0.22), false, 1.0)
 
 	# Active-state highlight fill & inner rim
 	if is_active_state:
@@ -240,8 +267,8 @@ func _draw() -> void:
 		var hk_dim: Vector2 = hk_font.get_string_size(hotkey_text, HORIZONTAL_ALIGNMENT_LEFT, -1, hk_sz)
 		var box_w: float = maxf(13.0, hk_dim.x + 5.0)
 		var box_h: float = 12.0
-		var hk_bg: Color = Color(0.04, 0.05, 0.07, 0.88) if is_brutal else Color(0.02, 0.06, 0.10, 0.84)
-		var hk_col: Color = theme_accent if is_brutal else Color(0.68, 0.98, 1.0, 0.98)
+		var hk_bg: Color = Color(0.04, 0.05, 0.07, 0.88) if is_brutal else (Color(0.06, 0.05, 0.10, 0.90) if is_bauhaus else Color(0.02, 0.06, 0.10, 0.84))
+		var hk_col: Color = theme_accent if (is_brutal or is_bauhaus) else Color(0.68, 0.98, 1.0, 0.98)
 		if is_locked_state:
 			hk_col = Color(0.82, 0.44, 0.44, 0.80)
 		draw_rect(Rect2(2.0, 2.0, box_w, box_h), hk_bg, true)

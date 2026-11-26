@@ -184,6 +184,84 @@ func _find_autocast_point_target(owner_unit: Unit, ability: AbilityData) -> Vect
 				best_gp_pos = centroid
 		return best_gp_pos
 
+	if ab_id == &"luminous_mend":
+		var lm_r: float = maxf(60.0, ability.aoe_radius)
+		var allies_lm: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, cast_r + lm_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		var wounded_allies: Array[Unit] = []
+		for node: Variant in allies_lm:
+			if not is_instance_valid(node) or not (node is Unit):
+				continue
+			var u: Unit = node as Unit
+			if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
+				continue
+			var is_ally: bool = (int(u.team) == int(owner_unit.team)) or (TeamManager != null and TeamManager.are_allies(int(owner_unit.team), int(u.team)))
+			if not is_ally:
+				continue
+			if u.current_hp < u.get_max_hp() * 0.85:
+				wounded_allies.append(u)
+		if wounded_allies.is_empty():
+			return Vector2.INF
+		var best_lm_pos: Vector2 = Vector2.INF
+		var best_lm_score: float = 0.0
+		for cand: Unit in wounded_allies:
+			if cand.global_position.distance_to(owner_unit.global_position) > cast_r:
+				continue
+			var sum_pos: Vector2 = Vector2.ZERO
+			var cnt: int = 0
+			var missing_hp_sum: float = 0.0
+			for other: Unit in wounded_allies:
+				if other.global_position.distance_to(cand.global_position) <= lm_r:
+					sum_pos += other.global_position
+					cnt += 1
+					missing_hp_sum += maxf(0.0, other.get_max_hp() - other.current_hp)
+			var sc: float = float(cnt) * 20.0 + missing_hp_sum * 0.45
+			if sc > best_lm_score:
+				best_lm_score = sc
+				var c_pt: Vector2 = sum_pos / float(maxi(1, cnt))
+				best_lm_pos = c_pt if c_pt.distance_to(owner_unit.global_position) <= cast_r else cand.global_position
+		return best_lm_pos
+
+	if ab_id == &"blinding_glare":
+		var bg_r: float = maxf(60.0, ability.aoe_radius)
+		var raw_bg: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, cast_r + bg_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		var hostiles_bg: Array[Unit] = []
+		for node: Variant in raw_bg:
+			if not is_instance_valid(node) or not (node is Unit):
+				continue
+			var e: Unit = node as Unit
+			if e.is_dead or e.is_staffed or e.is_queued_for_deletion():
+				continue
+			var is_hostile: bool = TeamManager.are_enemies(int(owner_unit.team), int(e.team)) if TeamManager != null else (e.team != owner_unit.team)
+			if not is_hostile:
+				continue
+			if e.data != null and (e.data.can_gather or e.data.can_staff_compute):
+				continue
+			hostiles_bg.append(e)
+		if hostiles_bg.is_empty():
+			return Vector2.INF
+		var best_bg_pos: Vector2 = Vector2.INF
+		var best_bg_score: float = 0.0
+		for cand: Unit in hostiles_bg:
+			if cand.global_position.distance_to(owner_unit.global_position) > cast_r:
+				continue
+			var cnt: int = 0
+			var fresh: int = 0
+			var sum_p: Vector2 = Vector2.ZERO
+			for other: Unit in hostiles_bg:
+				if other.global_position.distance_to(cand.global_position) <= bg_r:
+					cnt += 1
+					sum_p += other.global_position
+					if not other.has_status_effect(&"blinding_glare"):
+						fresh += 1
+			if fresh <= 0:
+				continue
+			var sc_bg: float = float(cnt) * 16.0 + float(fresh) * 14.0
+			if sc_bg > best_bg_score:
+				best_bg_score = sc_bg
+				var c_pt2: Vector2 = sum_p / float(maxi(1, cnt))
+				best_bg_pos = c_pt2 if c_pt2.distance_to(owner_unit.global_position) <= cast_r else cand.global_position
+		return best_bg_pos
+
 	return Vector2.INF
 
 
@@ -338,9 +416,28 @@ func execute_ability(owner_unit: Unit, ability: AbilityData, target_pos: Vector2
 func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vector2) -> void:
 	if ability.ability_id == &"grav_pulse":
 		_spawn_grav_pulse_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
+	elif ability.ability_id == &"luminous_mend" or ability.ability_id == &"blinding_glare":
+		_spawn_prism_burst_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
 	else:
 		_spawn_aoe_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
 	var unit_list: Array = SpatialGrid.query_units_in_radius(target_pos, ability.aoe_radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+
+	# Allied Luminous Mend (PRISMA_DEI Cantor)
+	if ability.ability_id == &"luminous_mend":
+		var heal_amt: float = ability.damage_or_value if ability.damage_or_value > 0.0 else 45.0
+		for node: Variant in unit_list:
+			if not is_instance_valid(node) or not (node is Unit):
+				continue
+			var ally: Unit = node as Unit
+			if ally.is_dead or ally.is_staffed or ally.is_queued_for_deletion():
+				continue
+			var is_ally: bool = (int(ally.team) == int(owner_unit.team)) or (TeamManager != null and TeamManager.are_allies(int(owner_unit.team), int(ally.team)))
+			if not is_ally:
+				continue
+			var ally_r: float = ally.data.collision_radius if ally.data != null else 16.0
+			if ally.global_position.distance_to(target_pos) <= ability.aoe_radius + ally_r:
+				ally.heal(heal_amt)
+		return
 
 	# Allied Shield Overcharge (Aegis Relay)
 	if ability.ability_id == &"monolith_shield_overcharge":
@@ -383,6 +480,16 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 					"move_speed_mult": mv_mult,
 					"attack_speed_mult": atk_mult,
 				})
+			elif ability.ability_id == &"blinding_glare":
+				var bg_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 3.5
+				var bg_mv: float = clampf(1.0 + ability.move_speed_modifier, 0.25, 1.0) if ability.move_speed_modifier < 0.0 else 0.80
+				var bg_atk: float = clampf(1.0 + ability.attack_speed_modifier, 0.25, 1.0) if ability.attack_speed_modifier < 0.0 else 0.75
+				candidate.apply_status_effect(&"blinding_glare", {
+					"duration": bg_dur,
+					"label": "Blinding Glare",
+					"move_speed_mult": bg_mv,
+					"attack_speed_mult": bg_atk,
+				})
 			elif ability.effect_duration > 0.0 and (ability.move_speed_modifier < 0.0 or ability.attack_speed_modifier < 0.0):
 				candidate.apply_slow_debuff(ability.effect_duration, absf(ability.move_speed_modifier), absf(ability.attack_speed_modifier))
 
@@ -402,12 +509,48 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 func _execute_unit_target(owner_unit: Unit, ability: AbilityData, target_unit: Unit) -> void:
 	if target_unit == null or not is_instance_valid(target_unit) or target_unit.is_dead:
 		return
+	if ability.ability_id == &"radiant_mark":
+		var rm_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 4.0
+		var amp_mult: float = ability.damage_or_value if ability.damage_or_value > 1.0 else 1.15
+		target_unit.apply_status_effect(&"radiant_mark", {
+			"duration": rm_dur,
+			"label": "Radiant Mark (+15% Dmg)",
+			"damage_taken_mult": amp_mult,
+		})
+		_spawn_prism_burst_effect(owner_unit, target_unit.global_position, maxf(30.0, ability.aoe_radius), ability.effect_color)
+		return
 	_spawn_aoe_effect(owner_unit, target_unit.global_position, maxf(24.0, ability.aoe_radius), ability.effect_color)
 	target_unit.take_damage(ability.damage_or_value, owner_unit)
 
 
 func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 	var ab_id: StringName = ability.ability_id
+
+	if ab_id == &"solar_step":
+		var ss_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 2.5
+		var ss_mv: float = 1.0 + (ability.move_speed_modifier if ability.move_speed_modifier > 0.0 else 0.35)
+		owner_unit.apply_status_effect(&"solar_step", {
+			"duration": ss_dur,
+			"label": "Solar Step",
+			"move_speed_mult": ss_mv,
+		})
+		_spawn_prism_burst_effect(owner_unit, owner_unit.global_position, maxf(34.0, ability.aoe_radius), ability.effect_color)
+		return
+
+	if ab_id == &"focus_alignment":
+		var fa_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 4.0
+		var fa_rng: float = ability.damage_or_value if ability.damage_or_value > 0.0 else 40.0
+		var fa_mv: float = clampf(1.0 + ability.move_speed_modifier, 0.25, 1.0) if ability.move_speed_modifier < 0.0 else 0.80
+		if owner_unit.combat_component != null:
+			owner_unit.combat_component.boost_beam_ramp_fraction(owner_unit, 0.50)
+		owner_unit.apply_status_effect(&"focus_alignment", {
+			"duration": fa_dur,
+			"label": "Focus Alignment",
+			"bonus_attack_range": fa_rng,
+			"move_speed_mult": fa_mv,
+		})
+		_spawn_prism_burst_effect(owner_unit, owner_unit.global_position, maxf(38.0, ability.aoe_radius), ability.effect_color)
+		return
 
 	if ab_id == &"adrenal_surge":
 		var econ: EconomyManager = owner_unit.get_tree().get_first_node_in_group("economy_manager") as EconomyManager
@@ -532,3 +675,14 @@ func _spawn_grav_pulse_effect(owner_unit: Unit, target_pos: Vector2, radius: flo
 		fx.z_index = 55
 		owner_unit.get_parent().add_child(fx)
 	fx.setup_grav_pulse(owner_unit.global_position, target_pos, radius, effect_color)
+
+
+func _spawn_prism_burst_effect(owner_unit: Unit, target_pos: Vector2, radius: float, effect_color: Color) -> void:
+	if owner_unit.get_parent() == null:
+		return
+	var fx: AbilityEffect = VFXPool.acquire_ability_effect(55) if VFXPool != null else null
+	if fx == null:
+		fx = ABILITY_EFFECT_SCRIPT.new()
+		fx.z_index = 55
+		owner_unit.get_parent().add_child(fx)
+	fx.setup_prism_burst(owner_unit.global_position, target_pos, radius, effect_color)

@@ -1734,7 +1734,7 @@ func get_inspection_data() -> Dictionary:
 			stats.append({"label": "Role", "value": "Siege & Heavy Chassis"})
 		else:
 			stats.append({"label": "Role", "value": "Precision & Support"})
-	elif building_type_id == &"silica_condenser" or building_type_id == &"silica_smelter":
+	elif building_type_id == &"silica_condenser" or building_type_id == &"silica_smelter" or (is_resource_dropoff and accepts_resource(&"silica") and not is_command_hub()):
 		subtitle = "SILICA REFINING FACILITY"
 		stats.append({"label": "Drop-Off", "value": "Silica"})
 		stats.append({"label": "Harvesters", "value": "%d Active" % _count_friendly_harvesters()})
@@ -1763,6 +1763,12 @@ func get_inspection_data() -> Dictionary:
 			"label": "Power Lattice",
 			"value": "%dpx Radius" % int(round(power_radius)),
 			"color": Color(0.98, 0.80, 0.14, 1.0),
+		})
+	if tether_emit_radius > 0.0 and tether_max_links > 0:
+		stats.append({
+			"label": "Optical Tether",
+			"value": "x%d Links (+%d%% RoF, %dpx)" % [tether_max_links, int(round(tether_fire_rate_bonus * 100.0)), int(round(tether_emit_radius))],
+			"color": Color(0.851, 0.275, 0.937, 1.0),
 		})
 
 	if requires_power_grid and not is_powered:

@@ -308,6 +308,8 @@ func _fire_at(target: Node2D) -> void:
 				AudioManager.play_weapon_for_unit(&"goliath_frame", sfx_pos)
 			&"heavy_slug":
 				AudioManager.play_sfx(&"weapon_mono_bastion", -4.0, 0.05, sfx_pos, true)
+			&"prism_beam":
+				AudioManager.play_sfx(&"weapon_prism_refract", -4.5, 0.05, sfx_pos, true)
 			_:
 				AudioManager.play_weapon_for_unit(&"clone_trooper", sfx_pos)
 		if AudioManager.has_method("notify_combat_activity"):
@@ -346,6 +348,14 @@ func _fire_at(target: Node2D) -> void:
 				_spawn_armor_spark(end_pos, shot_dir_hs, Color(1.0, 0.72, 0.20, 1.0))
 		&"heavy":
 			_spawn_tracer(origin, end_pos, team_col, 3.0, 0.14, AttackTracer.TracerStyle.TWIN_SLUG)
+		&"prism_beam":
+			var is_local_ob: bool = TeamManager.is_team_controlled_by_local_human(int(owner_building.team)) if TeamManager != null else (owner_building.team == Unit.Team.PLAYER)
+			var base_gold: Color = Color(0.98, 0.80, 0.14, 0.96)
+			var ob_col: Color = base_gold if is_local_ob else base_gold.lerp(team_col, 0.55)
+			_spawn_tracer(origin, end_pos, ob_col, 3.1, 0.20, AttackTracer.TracerStyle.PRISM_BEAM)
+			if _is_armored_target(target) and owner_building.turret_bonus_vs_armored > 1.0:
+				var shot_dir_pb: Vector2 = (end_pos - origin).normalized() if end_pos.distance_squared_to(origin) > 1.0 else Vector2.RIGHT
+				_spawn_armor_spark(end_pos, shot_dir_pb, Color(0.98, 0.84, 0.24, 1.0))
 		_:
 			_spawn_tracer(origin, end_pos, team_col, 2.4, 0.12, AttackTracer.TracerStyle.PULSE_BOLT)
 

@@ -283,7 +283,7 @@ func _on_keybind_changed(_action_name: StringName) -> void:
 	_refresh_aggro_badge()
 
 
-func _apply_faction_hud_theme() -> void:
+func _apply_faction_hud_theme(_mode: StringName = &"") -> void:
 	if TeamManager != null and TeamManager.get_local_human_team() >= 0:
 		tracked_team = TeamManager.get_local_human_team() as Unit.Team
 	var fid: StringName = FactionHudTheme.resolve_local_faction_id()

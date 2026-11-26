@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/prisma_luminous_mend.tres" id="2_ab_mend"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"cantor"
+display_name = "Cantor"
+short_display_name = "Cantor"
+max_hp = 105.0
+max_shield = 0.0
+move_speed = 230.0
+acceleration = 1750.0
+turn_speed = 14.0
+selection_radius = 21.0
+collision_radius = 15.0
+attack_damage = 0.0
+attack_range = 0.0
+aggro_range = 0.0
+vision_range = 390.0
+attack_cooldown = 1.0
+is_armored = false
+unit_tags = Array[StringName]([&"support", &"biological"])
+damage_reduction = 0.0
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_ab_mend")])
+bandwidth_cost = 2
+biomass_cost = 55
+silica_cost = 50
+compute_cost = 15
+build_time = 6.5
+train_time = 6.5
+unit_scene_path = "res://scenes/units/prisma_cantor.tscn"
+weapon_tracer_style = &"prism_bolt"
+weapon_tracer_color = Color(0.98, 0.8, 0.14, 1)
+weapon_sfx_id = &"weapon_prism_bolt"
+audio_bark_class = &"support"
+minimap_icon_shape = &"dot"
+role_tags_display = "Tether Anchor (x4) • Luminous Mend"
+tether_emit_radius = 215.0
+tether_max_links = 4
+tether_fire_rate_bonus = 0.18
+tether_range_bonus = 28.0
+tether_beam_ramp_bonus = 0.25

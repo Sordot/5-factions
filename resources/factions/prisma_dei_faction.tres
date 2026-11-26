@@ -1,0 +1,100 @@
+[gd_resource type="Resource" script_class="FactionData" load_steps=23 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/faction_data.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/prisma_sanctum_core.tscn" id="2_hub"]
+[ext_resource type="PackedScene" path="res://scenes/units/prisma_acolyte.tscn" id="3_worker"]
+[ext_resource type="PackedScene" path="res://scenes/units/prisma_prism_dredge.tscn" id="4_harvester"]
+[ext_resource type="PackedScene" path="res://scenes/units/prisma_luminant.tscn" id="5_engineer"]
+[ext_resource type="PackedScene" path="res://scenes/units/prisma_votary.tscn" id="6_votary_scn"]
+[ext_resource type="PackedScene" path="res://scenes/units/prisma_lumen_skiff.tscn" id="7_skiff_scn"]
+[ext_resource type="Resource" path="res://resources/buildings/prisma_sanctum_core_data.tres" id="8_b_sanctum"]
+[ext_resource type="Resource" path="res://resources/buildings/prisma_halo_spire_data.tres" id="9_b_spire"]
+[ext_resource type="Resource" path="res://resources/buildings/prisma_alabaster_kiln_data.tres" id="10_b_kiln"]
+[ext_resource type="Resource" path="res://resources/buildings/prisma_oracle_reliquary_data.tres" id="11_b_reliquary"]
+[ext_resource type="Resource" path="res://resources/buildings/prisma_choir_basilica_data.tres" id="12_b_basilica"]
+[ext_resource type="Resource" path="res://resources/buildings/prisma_refraction_cloister_data.tres" id="13_b_cloister"]
+[ext_resource type="Resource" path="res://resources/buildings/prisma_solar_obelisk_data.tres" id="14_b_obelisk"]
+[ext_resource type="Resource" path="res://resources/units/prisma_acolyte_data.tres" id="15_u_acolyte"]
+[ext_resource type="Resource" path="res://resources/units/prisma_prism_dredge_data.tres" id="16_u_dredge"]
+[ext_resource type="Resource" path="res://resources/units/prisma_luminant_data.tres" id="17_u_luminant"]
+[ext_resource type="Resource" path="res://resources/units/prisma_votary_data.tres" id="18_u_votary"]
+[ext_resource type="Resource" path="res://resources/units/prisma_lumen_skiff_data.tres" id="19_u_skiff"]
+[ext_resource type="Resource" path="res://resources/units/prisma_cantor_data.tres" id="20_u_cantor"]
+[ext_resource type="Resource" path="res://resources/units/prisma_lens_adjudicator_data.tres" id="21_u_adjudicator"]
+[ext_resource type="Resource" path="res://resources/units/prisma_prism_weaver_data.tres" id="22_u_weaver"]
+
+[resource]
+script = ExtResource("1_script")
+faction_id = &"prisma_dei"
+display_name = "PRISMA_DEI — The Divine Lattice"
+short_code = "PRIS-DEI"
+tagline = "Solar theocracy channeling Consecrated Power Lattices, visible Optical Tethers, and escalating or refracting prism beams."
+is_playable = true
+primary_color = Color(0.965, 0.957, 0.933, 1)
+accent_color = Color(0.851, 0.275, 0.937, 1)
+hud_accent_color = Color(0.98, 0.8, 0.082, 1)
+boot_banner_text = "// DIVINE LATTICE CONSECRATED — PRISMA_DEI"
+audio_bark_pitch_bias = 1.12
+audio_timbre_profile = &"prisma_cathedral"
+dossier_slot_number = 3
+dossier_subtitle = "Solar Theocracy  •  Consecrated Power Lattice  •  Optical Tethers & Prism Beams"
+dossier_description = "Devoted human acolytes worshiping a radiant orbital AI. Channels visible Optical Tethers between agile glass-ceramic beam craft whose weapons escalate or refract across enemy lines."
+signature_badges = PackedStringArray("Consecrated Power Lattice", "Optical Tethers", "Votary / Lumen Skiff", "Cantor (x4 Tether)", "Lens Adjudicator (Beam)", "Prism Weaver (Refract)", "Solar Obelisk")
+ai_transmissions = {
+&"barricade_breach": "// PRISMA_DEI: Mundane barrier refracted to ash. Proceeding along the radiant path.",
+&"tier2_online": "// PRISMA_DEI: High sanctum illumination achieved. Preparing apex vessels.",
+&"under_attack": "// PRISMA_DEI: Heretical incursion upon the Lattice. Redirecting the Choir.",
+&"uplink_contest": "// PRISMA_DEI: Consecrating the Data Hyper-Uplink in the Light's name.",
+&"wave_launch": "// PRISMA_DEI: The Choir advances in harmonic convergence. Behold the Lattice."
+}
+starting_biomass = 200
+starting_silica = 50
+starting_compute = 0
+starting_worker_count = 3
+starting_hub_scene = ExtResource("2_hub")
+worker_scene = ExtResource("3_worker")
+harvester_scene = ExtResource("4_harvester")
+engineer_scene = ExtResource("5_engineer")
+extra_starting_units = Array[PackedScene]([ExtResource("6_votary_scn"), ExtResource("7_skiff_scn")])
+building_roster = Array[Resource("res://scripts/data/building_data.gd")]([ExtResource("8_b_sanctum"), ExtResource("9_b_spire"), ExtResource("10_b_kiln"), ExtResource("11_b_reliquary"), ExtResource("12_b_basilica"), ExtResource("13_b_cloister"), ExtResource("14_b_obelisk")])
+unit_roster = Array[Resource("res://scripts/data/unit_data.gd")]([ExtResource("15_u_acolyte"), ExtResource("16_u_dredge"), ExtResource("17_u_luminant"), ExtResource("18_u_votary"), ExtResource("19_u_skiff"), ExtResource("20_u_cantor"), ExtResource("21_u_adjudicator"), ExtResource("22_u_weaver")])
+upgrade_roster = Array[Resource("res://scripts/data/upgrade_data.gd")]([])
+ai_build_profile = {
+&"barracks_t1": &"choir_basilica",
+&"compute_hub": &"oracle_reliquary",
+&"counter_foundry": &"refraction_cloister",
+&"hub": &"sanctum_core",
+&"refinery": &"alabaster_kiln",
+&"supply": &"halo_spire"
+}
+ai_scout_unit_id = &"lumen_skiff"
+ai_salvage_unit_ids = Array[StringName]([&"luminant", &"acolyte"])
+ai_counter_units = {
+&"ANTI_ARMOR": [&"lens_adjudicator", &"votary", &"prism_weaver"],
+&"ANTI_SIEGE": [&"lumen_skiff", &"votary", &"lens_adjudicator"],
+&"ANTI_SWARM": [&"prism_weaver", &"votary", &"cantor"],
+&"BREACH": [&"lens_adjudicator", &"prism_weaver", &"votary"]
+}
+ai_playstyle_weights = {
+&"balanced": {
+&"cantor": 1.1,
+&"lens_adjudicator": 2.1,
+&"lumen_skiff": 1.5,
+&"prism_weaver": 1.7,
+&"votary": 2.8
+},
+&"swarm_rush": {
+&"cantor": 0.9,
+&"lens_adjudicator": 1.3,
+&"lumen_skiff": 2.6,
+&"prism_weaver": 1.4,
+&"votary": 3.2
+},
+&"synthetics_tech": {
+&"cantor": 1.4,
+&"lens_adjudicator": 2.8,
+&"lumen_skiff": 1.1,
+&"prism_weaver": 2.4,
+&"votary": 1.8
+}
+}

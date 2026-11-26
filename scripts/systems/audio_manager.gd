@@ -160,6 +160,7 @@ func _ready() -> void:
 func _register_builtin_profiles() -> void:
 	register_audio_profile(GenesisAudioProfile.new(), false)
 	register_audio_profile(MonolithAudioProfile.new(), false)
+	register_audio_profile(PrismaAudioProfile.new(), false)
 
 
 func register_audio_profile(profile: FactionAudioProfile, populate_immediately: bool = true) -> void:
@@ -278,7 +279,7 @@ func _get_or_build_ambience_profile(profile_id: StringName) -> Dictionary:
 	return pack
 
 
-func refresh_faction_ambience_profile() -> void:
+func refresh_faction_ambience_profile(_mode: StringName = &"") -> void:
 	if _amb_base_player == null:
 		return
 	var desired: StringName = _resolve_desired_ambience_profile()

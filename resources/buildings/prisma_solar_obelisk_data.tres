@@ -1,0 +1,52 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"solar_obelisk"
+display_name = "Solar Obelisk"
+short_display_name = "Obelisk"
+hud_accent_color = Color(0.98, 0.8, 0.082, 1)
+scene_path = "res://scenes/buildings/prisma_solar_obelisk.tscn"
+biomass_cost = 85
+silica_cost = 95
+compute_cost = 0
+build_time = 6.5
+footprint_size = Vector2(64, 64)
+max_hp = 660.0
+max_shield = 0.0
+shield_regen_rate = 0.0
+shield_regen_delay = 7.0
+damage_reduction = 0.15
+vision_range = 410.0
+bandwidth_provided = 0
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+accepted_dropoff_resources = Array[StringName]([])
+requires_vent = false
+max_staff_slots = 0
+can_set_rally = false
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &"choir_basilica"
+prerequisite_building_ids = Array[StringName]([&"choir_basilica"])
+is_core_hub = false
+is_command_hub = false
+is_military_production = false
+is_supply_provider = false
+tech_tier = 1
+audio_select_class = &"defense"
+tech_tree_summary = "Static Beam Defense • Requires Power Lattice • 30 Dmg (1.25x Arm, 295px)"
+has_turret = true
+turret_damage = 30.0
+turret_attack_interval = 0.95
+turret_attack_range = 295.0
+turret_min_range = 0.0
+turret_splash_radius = 0.0
+turret_bonus_vs_armored = 1.25
+turret_tracer_style = &"prism_beam"
+turret_turn_speed = 9.0
+provides_power_grid = false
+power_radius = 0.0
+requires_power_grid = true

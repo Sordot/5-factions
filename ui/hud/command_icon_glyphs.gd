@@ -210,6 +210,102 @@ static func draw_icon(
 			canvas.draw_rect(Rect2(c + Vector2(-10, -7), Vector2(9, 14)), fg, false, 1.6)
 			canvas.draw_circle(c + Vector2(4, 0), 3.6, fg)
 
+		# --- PRISMA_DEI UNITS (BAUHAUS SACRED GEOMETRY) ---
+		&"acolyte":
+			var aco: PackedVector2Array = PackedVector2Array([
+				c + Vector2(9, 0), c + Vector2(-7, -8), c + Vector2(-4, 0), c + Vector2(-7, 8),
+			])
+			poly_icon(canvas, aco, dark, fg, 1.6)
+			canvas.draw_line(c + Vector2(5, -4), c + Vector2(11, -3), hi, 1.6, true)
+			canvas.draw_line(c + Vector2(5, 4), c + Vector2(11, 3), hi, 1.6, true)
+			canvas.draw_circle(c, 2.4, hi)
+		&"prism_dredge":
+			var drg: PackedVector2Array = PackedVector2Array([
+				c + Vector2(11, 0), c + Vector2(0, -9), c + Vector2(-10, 0), c + Vector2(0, 9),
+			])
+			poly_icon(canvas, drg, dark, fg, 1.7)
+			canvas.draw_rect(Rect2(c - Vector2(3.5, 3.5), Vector2(7, 7)), hi, true)
+		&"luminant":
+			canvas.draw_arc(c, 8.5, -2.3, 2.3, 18, fg, 1.8, true)
+			var lum: PackedVector2Array = PackedVector2Array([
+				c + Vector2(6, 0), c + Vector2(-2, -6), c + Vector2(-6, 0), c + Vector2(-2, 6),
+			])
+			poly_icon(canvas, lum, dark, hi, 1.5)
+			canvas.draw_circle(c, 2.2, hi)
+		&"votary":
+			var vot: PackedVector2Array = PackedVector2Array([
+				c + Vector2(11, 0), c + Vector2(-8, -9), c + Vector2(-3, 0), c + Vector2(-8, 9),
+			])
+			poly_icon(canvas, vot, dark, fg, 1.7)
+			canvas.draw_line(c + Vector2(-2, 0), c + Vector2(10, 0), hi, 1.8, true)
+		&"lumen_skiff":
+			var skf: PackedVector2Array = PackedVector2Array([
+				c + Vector2(12, 0), c + Vector2(0, -6), c + Vector2(-11, 0), c + Vector2(0, 6),
+			])
+			poly_icon(canvas, skf, dark, fg, 1.6)
+			canvas.draw_arc(c + Vector2(-2, 0), 9.5, -1.1, 1.1, 12, hi, 1.5, true)
+			canvas.draw_circle(c + Vector2(-8, 0), 2.0, hi)
+		&"cantor":
+			canvas.draw_arc(c, 9.5, 0.0, TAU, 22, fg, 1.8, true)
+			var tri_c: PackedVector2Array = PackedVector2Array([
+				c + Vector2(0, -7), c + Vector2(6.5, 5), c + Vector2(-6.5, 5),
+			])
+			poly_icon(canvas, tri_c, dark, hi, 1.5)
+			canvas.draw_circle(c, 2.6, fg)
+		&"lens_adjudicator":
+			var adj: PackedVector2Array = PackedVector2Array([
+				c + Vector2(11, -4), c + Vector2(11, 4), c + Vector2(1, 9),
+				c + Vector2(-10, 6), c + Vector2(-10, -6), c + Vector2(1, -9),
+			])
+			poly_icon(canvas, adj, dark, fg, 1.7)
+			canvas.draw_line(c + Vector2(2, -5), c + Vector2(12, -3), hi, 1.8, true)
+			canvas.draw_line(c + Vector2(2, 5), c + Vector2(12, 3), hi, 1.8, true)
+			canvas.draw_circle(c + Vector2(3, 0), 3.0, hi)
+		&"prism_weaver":
+			for wi: int in range(3):
+				var wa: float = float(wi) * (TAU / 3.0)
+				var wd: Vector2 = Vector2.RIGHT.rotated(wa)
+				canvas.draw_line(c, c + wd * 10.5, fg, 2.0, true)
+				canvas.draw_circle(c + wd * 10.5, 2.2, hi)
+			var wcore: PackedVector2Array = PackedVector2Array([
+				c + Vector2(0, -5), c + Vector2(5, 0), c + Vector2(0, 5), c + Vector2(-5, 0),
+			])
+			poly_icon(canvas, wcore, dark, hi, 1.5)
+
+		# --- PRISMA_DEI ABILITIES ---
+		&"solar_step":
+			canvas.draw_polyline(PackedVector2Array([c + Vector2(-8, -6), c + Vector2(0, 0), c + Vector2(-8, 6)]), fg, 2.0, true)
+			canvas.draw_polyline(PackedVector2Array([c + Vector2(0, -7), c + Vector2(9, 0), c + Vector2(0, 7)]), hi, 2.2, true)
+			canvas.draw_circle(c + Vector2(-3, 0), 2.0, hi)
+		&"radiant_mark":
+			canvas.draw_arc(c, 8.5, 0.0, TAU, 20, fg, 1.7, true)
+			var rm_d: PackedVector2Array = PackedVector2Array([
+				c + Vector2(0, -11), c + Vector2(4, 0), c + Vector2(0, 11), c + Vector2(-4, 0),
+			])
+			poly_icon(canvas, rm_d, Color(fg.r, fg.g, fg.b, 0.25), hi, 1.5)
+			canvas.draw_circle(c, 2.4, hi)
+		&"luminous_mend":
+			canvas.draw_arc(c, 9.5, 0.0, TAU, 20, fg, 1.7, true)
+			for mi: int in range(8):
+				var ma: float = float(mi) * (TAU / 8.0)
+				var md: Vector2 = Vector2.RIGHT.rotated(ma)
+				canvas.draw_line(c + md * 4.5, c + md * 10.5, hi if (mi % 2 == 0) else fg, 1.5, true)
+			canvas.draw_circle(c, 3.2, hi)
+		&"focus_alignment":
+			canvas.draw_line(c + Vector2(-10, 0), c + Vector2(10, 0), hi, 2.2, true)
+			var fa_d: PackedVector2Array = PackedVector2Array([
+				c + Vector2(0, -9), c + Vector2(7, 0), c + Vector2(0, 9), c + Vector2(-7, 0),
+			])
+			poly_icon(canvas, fa_d, Color(fg.r, fg.g, fg.b, 0.26), fg, 1.7)
+			canvas.draw_circle(c, 2.8, hi)
+		&"blinding_glare":
+			for bi: int in range(8):
+				var ba: float = float(bi) * (TAU / 8.0)
+				var bd: Vector2 = Vector2.RIGHT.rotated(ba)
+				var r_out: float = 11.0 if (bi % 2 == 0) else 7.5
+				canvas.draw_line(c + bd * 2.5, c + bd * r_out, hi if (bi % 2 == 0) else fg, 1.8, true)
+			canvas.draw_circle(c, 3.5, hi)
+
 		# --- ABILITIES ---
 		&"adrenal_surge":
 			canvas.draw_polyline(PackedVector2Array([c + Vector2(-8, 2), c + Vector2(0, -7), c + Vector2(8, 2)]), hi, 2.2, true)
@@ -268,7 +364,38 @@ static func draw_building_icon(canvas: CanvasItem, icon_id: StringName, c: Vecto
 	])
 	poly_icon(canvas, poly, dark, fg, 1.7)
 	var id_s: String = String(icon_id)
-	if id_s.contains("pylon"):
+	if id_s.contains("sanctum_core"):
+		canvas.draw_arc(c, 6.5, 0.0, TAU, 16, fg, 1.5, true)
+		var sc_d: PackedVector2Array = PackedVector2Array([c + Vector2(0, -5), c + Vector2(5, 0), c + Vector2(0, 5), c + Vector2(-5, 0)])
+		poly_icon(canvas, sc_d, hi, fg, 1.2)
+	elif id_s.contains("halo_spire"):
+		canvas.draw_arc(c, 7.2, -1.2, 1.2, 10, hi, 1.6, true)
+		canvas.draw_arc(c, 7.2, PI - 1.2, PI + 1.2, 10, hi, 1.6, true)
+		var hs_d: PackedVector2Array = PackedVector2Array([c + Vector2(0, -5.5), c + Vector2(4, 0), c + Vector2(0, 5.5), c + Vector2(-4, 0)])
+		poly_icon(canvas, hs_d, fg, hi, 1.2)
+	elif id_s.contains("alabaster_kiln"):
+		canvas.draw_rect(Rect2(c + Vector2(-6.5, -5), Vector2(4.5, 10)), fg, true)
+		canvas.draw_rect(Rect2(c + Vector2(2.0, -5), Vector2(4.5, 10)), fg, true)
+		canvas.draw_line(c + Vector2(-2, 0), c + Vector2(2, 0), hi, 2.4, true)
+	elif id_s.contains("oracle_reliquary"):
+		var rel: PackedVector2Array = PackedVector2Array([c + Vector2(0, -7), c + Vector2(6.5, 5), c + Vector2(-6.5, 5)])
+		poly_icon(canvas, rel, Color(fg.r, fg.g, fg.b, 0.28), hi, 1.5)
+		canvas.draw_circle(c + Vector2(0, 1), 2.2, hi)
+	elif id_s.contains("choir_basilica"):
+		canvas.draw_arc(c, 5.5, 0.0, TAU, 14, hi, 1.5, true)
+		canvas.draw_line(c + Vector2(-7, -5), c + Vector2(-7, 5), fg, 2.2, true)
+		canvas.draw_line(c + Vector2(7, -5), c + Vector2(7, 5), fg, 2.2, true)
+		canvas.draw_circle(c, 2.2, fg)
+	elif id_s.contains("refraction_cloister"):
+		var cl_t: PackedVector2Array = PackedVector2Array([c + Vector2(0, -7), c + Vector2(7, 5), c + Vector2(-7, 5)])
+		poly_icon(canvas, cl_t, dark, fg, 1.6)
+		canvas.draw_line(c + Vector2(-5, 0), c + Vector2(5, 0), hi, 1.6, true)
+		canvas.draw_circle(c, 2.4, hi)
+	elif id_s.contains("solar_obelisk"):
+		canvas.draw_circle(c, 4.0, fg)
+		canvas.draw_line(c + Vector2(0, -2), c + Vector2(9, -6), hi, 1.8, true)
+		canvas.draw_line(c + Vector2(0, 2), c + Vector2(9, 6), hi, 1.8, true)
+	elif id_s.contains("pylon"):
 		canvas.draw_line(c + Vector2(0, -6), c + Vector2(0, 6), hi, 2.2, true)
 		canvas.draw_circle(c, 3.5, fg)
 	elif id_s.contains("silica") or id_s.contains("condenser") or id_s.contains("smelter"):

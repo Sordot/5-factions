@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/prisma_solar_step.tres" id="2_ab_step"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"votary"
+display_name = "Votary"
+short_display_name = "Votary"
+max_hp = 92.0
+max_shield = 0.0
+move_speed = 250.0
+acceleration = 1900.0
+turn_speed = 15.0
+selection_radius = 19.0
+collision_radius = 14.0
+attack_damage = 17.0
+attack_range = 195.0
+aggro_range = 290.0
+vision_range = 365.0
+attack_cooldown = 0.92
+attack_windup = 0.08
+is_armored = false
+unit_tags = Array[StringName]([&"infantry", &"biological", &"skirmisher"])
+damage_reduction = 0.0
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_ab_step")])
+bandwidth_cost = 1
+biomass_cost = 55
+silica_cost = 20
+compute_cost = 0
+build_time = 4.5
+train_time = 4.5
+unit_scene_path = "res://scenes/units/prisma_votary.tscn"
+weapon_tracer_style = &"prism_refract"
+weapon_tracer_color = Color(0.98, 0.8, 0.18, 1)
+weapon_tracer_width = 2.2
+weapon_sfx_id = &"weapon_prism_refract"
+audio_bark_class = &"swarm"
+minimap_icon_shape = &"dot"
+role_tags_display = "Light • Refracting Beam • Solar Step"
+refract_max_bounces = 1
+refract_radius = 95.0
+refract_damage_ratio = 0.45

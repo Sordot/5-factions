@@ -38,7 +38,7 @@ func _ready() -> void:
 	call_deferred("_refresh_ticker")
 
 
-func _apply_faction_theme() -> void:
+func _apply_faction_theme(_mode: StringName = &"") -> void:
 	_active_faction_id = FactionHudTheme.resolve_local_faction_id()
 	var pal: Dictionary = FactionHudTheme.get_palette(_active_faction_id)
 	_faction_accent = pal["accent"] as Color

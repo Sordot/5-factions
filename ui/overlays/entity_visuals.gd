@@ -38,6 +38,7 @@ static func _ensure_renderers() -> void:
 	_renderers = [
 		GenesisVisualRenderer.new(),
 		MonolithVisualRenderer.new(),
+		PrismaVisualRenderer.new(),
 	]
 
 

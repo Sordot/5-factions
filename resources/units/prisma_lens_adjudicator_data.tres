@@ -1,0 +1,49 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+[ext_resource type="Resource" path="res://resources/abilities/prisma_focus_alignment.tres" id="2_ab_focus"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"lens_adjudicator"
+display_name = "Lens Adjudicator"
+short_display_name = "Adjudicator"
+max_hp = 175.0
+max_shield = 0.0
+move_speed = 210.0
+acceleration = 1600.0
+turn_speed = 12.5
+selection_radius = 22.0
+collision_radius = 16.5
+attack_damage = 11.0
+attack_range = 245.0
+aggro_range = 320.0
+vision_range = 390.0
+attack_cooldown = 0.35
+attack_windup = 0.06
+is_armored = false
+unit_tags = Array[StringName]([&"anti_armor", &"synthetic", &"beam"])
+bonus_vs_armored = 5.0
+damage_reduction = 0.05
+abilities = Array[Resource("res://scripts/data/ability_data.gd")]([ExtResource("2_ab_focus")])
+bandwidth_cost = 2
+biomass_cost = 65
+silica_cost = 95
+compute_cost = 30
+salvage_silica = 25
+salvage_compute = 10
+build_time = 7.5
+train_time = 7.5
+unit_scene_path = "res://scenes/units/prisma_lens_adjudicator.tscn"
+weapon_tracer_style = &"prism_beam"
+weapon_tracer_color = Color(0.85, 0.27, 0.94, 1)
+weapon_tracer_width = 2.6
+weapon_sfx_id = &"weapon_prism_beam"
+audio_bark_class = &"counter"
+minimap_icon_shape = &"dot"
+role_tags_display = "Escalating Beam • +vs Armored"
+is_continuous_beam = true
+beam_ramp_max_multiplier = 2.6
+beam_ramp_duration = 3.2
+beam_ramp_decay_delay = 0.55
+beam_ramp_decay_rate = 1.4

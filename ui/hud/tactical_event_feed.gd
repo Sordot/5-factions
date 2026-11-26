@@ -26,7 +26,7 @@ func _ready() -> void:
 	call_deferred("_resolve_references")
 
 
-func _on_teams_reconfigured() -> void:
+func _on_teams_reconfigured(_mode: StringName = &"") -> void:
 	_active_faction_id = FactionHudTheme.resolve_local_faction_id()
 	for entry: Dictionary in _entries:
 		var panel: PanelContainer = entry.get("node", null) as PanelContainer

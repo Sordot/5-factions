@@ -1,0 +1,43 @@
+[gd_resource type="Resource" script_class="BuildingData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/building_data.gd" id="1_bdata"]
+
+[resource]
+script = ExtResource("1_bdata")
+building_id = &"oracle_reliquary"
+display_name = "Oracle Reliquary"
+short_display_name = "Reliquary"
+hud_accent_color = Color(0.851, 0.275, 0.937, 1)
+scene_path = "res://scenes/buildings/prisma_oracle_reliquary.tscn"
+biomass_cost = 80
+silica_cost = 100
+compute_cost = 0
+build_time = 7.5
+footprint_size = Vector2(76, 76)
+max_hp = 680.0
+max_shield = 0.0
+shield_regen_rate = 0.0
+shield_regen_delay = 7.0
+damage_reduction = 0.05
+vision_range = 390.0
+bandwidth_provided = 0
+is_dropoff = false
+accepted_resources = Array[StringName]([])
+accepted_dropoff_resources = Array[StringName]([])
+requires_vent = true
+max_staff_slots = 3
+can_set_rally = false
+batch_production_count = 1
+base_batch_cost_multiplier = 1.0
+required_building_id = &""
+prerequisite_building_ids = Array[StringName]([])
+is_core_hub = false
+is_command_hub = false
+is_military_production = false
+is_supply_provider = false
+tech_tier = 0
+audio_select_class = &"tech"
+tech_tree_summary = "Thermal Vent • Staffs up to 3 Luminants (+5 Compute / 3.0s each)"
+provides_power_grid = false
+power_radius = 0.0
+requires_power_grid = false

@@ -1,0 +1,45 @@
+[gd_resource type="Resource" script_class="UnitData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/unit_data.gd" id="1_unit_data"]
+
+[resource]
+script = ExtResource("1_unit_data")
+unit_type_id = &"prism_dredge"
+display_name = "Prism Dredge"
+short_display_name = "Dredge"
+max_hp = 95.0
+max_shield = 0.0
+move_speed = 205.0
+acceleration = 1550.0
+turn_speed = 12.0
+selection_radius = 20.0
+collision_radius = 15.0
+attack_damage = 0.0
+attack_range = 0.0
+aggro_range = 0.0
+vision_range = 320.0
+attack_cooldown = 1.0
+is_armored = false
+unit_tags = Array[StringName]([&"harvester", &"synthetic"])
+damage_reduction = 0.05
+bandwidth_cost = 1
+can_gather = true
+gather_duration = 3.2
+carry_capacity = 25
+gather_range = 50.0
+dropoff_range = 68.0
+allowed_resource = &"silica"
+auto_gather_on_spawn = true
+can_staff_compute = false
+biomass_cost = 55
+silica_cost = 25
+compute_cost = 0
+build_time = 4.5
+train_time = 4.5
+unit_scene_path = "res://scenes/units/prisma_prism_dredge.tscn"
+weapon_tracer_style = &"prism_bolt"
+weapon_tracer_color = Color(0.98, 0.8, 0.14, 1)
+weapon_sfx_id = &"weapon_prism_bolt"
+audio_bark_class = &"worker"
+minimap_icon_shape = &"worker"
+role_tags_display = "Automated Silica Harvester"
