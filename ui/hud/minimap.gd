@@ -83,6 +83,15 @@ func _resolve_references() -> void:
 		map_viewport.queue_redraw()
 
 
+func refresh_arena_bounds(new_bounds: Rect2 = Rect2()) -> void:
+	if new_bounds.has_area():
+		arena_bounds = new_bounds
+	elif _fog_system != null and _fog_system.arena_bounds.has_area():
+		arena_bounds = _fog_system.arena_bounds
+	if map_viewport != null:
+		map_viewport.queue_redraw()
+
+
 func _on_tactical_alert_triggered(world_pos: Vector2, alert_type: StringName, _message: String) -> void:
 	var col: Color = Color(0.24, 0.98, 0.86, 1.0)
 	match alert_type:

@@ -139,6 +139,8 @@ var _trail_points: Array[Vector2] = []
 var _trail_sample_timer: float = 0.0
 var _auto_retarget_timer: float = 0.0
 var _vfx_anim_time: float = 0.0
+var _recoil_offset: float = 0.0
+var _recoil_decay_rate: float = 28.0
 
 
 func _ready() -> void:
@@ -1195,7 +1197,12 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 			_last_emitted_shield_int = int(round(current_shield))
 			shield_changed.emit(self, current_shield, max_shield)
 			if had_native_shield and current_shield <= 0.001:
-				_trigger_shield_shatter_feedback()
+				var shatter_dir: Vector2 = Vector2.ZERO
+				if attacker is Node2D and is_instance_valid(attacker):
+					var d_vec: Vector2 = global_position - (attacker as Node2D).global_position
+					if d_vec.length_squared() > 1.0:
+						shatter_dir = d_vec.normalized()
+				_trigger_shield_shatter_feedback(shatter_dir)
 		_emit_hit_feedback_pip(HitFeedbackOverlay.KIND_SHIELD_ABSORB, int(round(absorbed_temp + absorbed_native)))
 
 	# Layer 3 — Hull HP (Mitigated)
@@ -1267,7 +1274,11 @@ func _emit_hit_feedback_pip(kind: StringName, val: int = 0) -> void:
 		ov.call("push_hit_pip", global_position, kind, val, get_instance_id())
 
 
-func _trigger_shield_shatter_feedback() -> void:
+func trigger_weapon_recoil(kick_px: float) -> void:
+	_recoil_offset = maxf(_recoil_offset, clampf(kick_px, 0.0, 7.5))
+
+
+func _trigger_shield_shatter_feedback(impact_dir: Vector2 = Vector2.ZERO) -> void:
 	if not is_inside_tree():
 		return
 	var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Team.PLAYER)
@@ -1283,7 +1294,7 @@ func _trigger_shield_shatter_feedback() -> void:
 			fx.z_index = 56
 			host.add_child(fx)
 		var rad: float = (data.collision_radius if data != null else 16.0) * 1.25
-		fx.setup_shield_shatter(global_position, rad, is_mono)
+		fx.setup_shield_shatter(global_position, rad, is_mono, impact_dir)
 	if AudioManager != null:
 		AudioManager.play_sfx(&"shield_shatter", -4.5, 0.06, global_position, true)
 
@@ -1700,8 +1711,12 @@ func _die() -> void:
 			fx.z_index = 53
 			get_parent().add_child(fx)
 		fx.setup_death_burst(global_position, burst_r, burst_col, is_heavy)
+		if is_heavy and is_inside_tree():
+			var cam_die: Node = get_tree().get_first_node_in_group("rts_camera")
+			if cam_die != null and cam_die.has_method("add_camera_shake"):
+				cam_die.call("add_camera_shake", 2.4, 0.13, global_position)
 	if AudioManager != null and (is_friendly_view or visible):
-		AudioManager.play_explosion_sfx(global_position, -6.0, false)
+		AudioManager.play_explosion_sfx(global_position, -4.5 if is_heavy else -6.0, is_heavy)
 	died.emit(self)
 	queue_free()
 
@@ -1724,6 +1739,14 @@ func _physics_process(delta: float) -> void:
 	_tick_status_effects(delta)
 	_tick_shield_regen(delta)
 	_tick_deploy_transition(delta)
+
+	if _recoil_offset > 0.0 or (body_visual != null and body_visual.position != Vector2.ZERO):
+		_recoil_offset = move_toward(_recoil_offset, 0.0, _recoil_decay_rate * delta)
+		if body_visual != null:
+			if _recoil_offset > 0.01:
+				body_visual.position = Vector2(-cos(body_visual.rotation), -sin(body_visual.rotation)) * _recoil_offset
+			else:
+				body_visual.position = Vector2.ZERO
 
 	if _hit_flash_timer > 0.0:
 		_hit_flash_timer = maxf(0.0, _hit_flash_timer - delta)
@@ -1847,6 +1870,7 @@ func _tick_deploy_transition(delta: float) -> void:
 	if _deploy_timer <= 0.0:
 		if deploy_state == DeployState.DEPLOYING:
 			deploy_state = DeployState.DEPLOYED
+			_trigger_deploy_anchor_impact()
 		elif deploy_state == DeployState.UNDEPLOYING:
 			deploy_state = DeployState.MOBILE
 		if _entity_visuals != null and is_instance_valid(_entity_visuals):
@@ -1854,6 +1878,29 @@ func _tick_deploy_transition(delta: float) -> void:
 		queue_redraw()
 		deploy_state_changed.emit(self, deploy_state)
 		status_changed.emit(self)
+
+
+func _trigger_deploy_anchor_impact() -> void:
+	if not is_inside_tree():
+		return
+	var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	var is_friendly_view: bool = viewer < 0 or (TeamManager.are_allies(viewer, int(team)) if TeamManager != null else (team == Team.PLAYER))
+	if not is_friendly_view and not visible:
+		return
+	var host: Node = get_parent()
+	if host != null:
+		var fx: CombatVFX = VFXPool.acquire_combat_vfx(52) if VFXPool != null else null
+		if fx == null:
+			fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+			fx.z_index = 52
+			host.add_child(fx)
+		var rad: float = (data.collision_radius if data != null else 22.0) * 1.45
+		fx.setup_anchor_thud(global_position, rad, Color(1.0, 0.624, 0.110, 1.0))
+	if AudioManager != null:
+		AudioManager.play_sfx(&"deploy_anchor_lock", -3.0, 0.04, global_position, true)
+	var cam: Node = get_tree().get_first_node_in_group("rts_camera")
+	if cam != null and cam.has_method("add_camera_shake"):
+		cam.call("add_camera_shake", 1.6, 0.10, global_position)
 
 
 func _maybe_retarget_higher_threat(delta: float, scan_range: float) -> void:

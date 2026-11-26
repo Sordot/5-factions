@@ -421,6 +421,83 @@ theme_override_font_sizes/font_size = 11
 clip_text = true
 fit_to_longest_item = false
 
+[node name="ProcMapOptionsBox" type="VBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="ProcRow1" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ProcMapOptionsBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ProcSeedLabel" type="Label" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ProcMapOptionsBox/ProcRow1"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.62, 0.84, 0.92, 0.95)
+theme_override_font_sizes/font_size = 10
+text = "SEED"
+
+[node name="ProcSeedInput" type="LineEdit" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ProcMapOptionsBox/ProcRow1"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(78, 22)
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+placeholder_text = "Random"
+max_length = 8
+
+[node name="BtnRollSeed" type="Button" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ProcMapOptionsBox/ProcRow1"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 22)
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Roll a new deterministic 6-digit seed"
+theme_override_font_sizes/font_size = 10
+text = "RND"
+
+[node name="OptProcBiome" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ProcMapOptionsBox/ProcRow1"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 22)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 10
+clip_text = true
+fit_to_longest_item = false
+
+[node name="ProcRow2" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ProcMapOptionsBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="OptProcChokes" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ProcMapOptionsBox/ProcRow2"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 22)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 10
+clip_text = true
+fit_to_longest_item = false
+
+[node name="OptProcHighGround" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ProcMapOptionsBox/ProcRow2"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 22)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 10
+clip_text = true
+fit_to_longest_item = false
+
+[node name="OptProcRichness" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ProcMapOptionsBox/ProcRow2"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 22)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+theme_override_font_sizes/font_size = 10
+clip_text = true
+fit_to_longest_item = false
+
 [node name="MatchFormatHeaderRow" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox"]
 layout_mode = 2
 theme_override_constants/separation = 8

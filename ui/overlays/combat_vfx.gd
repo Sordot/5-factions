@@ -13,6 +13,8 @@ enum VFXMode {
 	BUILDING_COMPLETE,
 	RALLY_RIPPLE,
 	SHIELD_SHATTER,
+	MUZZLE_SHOCK,
+	ANCHOR_THUD,
 }
 
 var _mode: VFXMode = VFXMode.DEATH_BURST
@@ -32,6 +34,7 @@ var _on_impact: Callable = Callable()
 
 # Cleave / spark / burst state
 var _dir: Vector2 = Vector2.RIGHT
+var _impact_dir: Vector2 = Vector2.ZERO
 var _is_heavy: bool = false
 var _is_monolith_style: bool = false
 var _rank_level: int = 1
@@ -59,6 +62,7 @@ func reset_for_pool() -> void:
 	_impacted = false
 	_on_impact = Callable()
 	_dir = Vector2.RIGHT
+	_impact_dir = Vector2.ZERO
 	_is_heavy = false
 	_is_monolith_style = false
 	_rank_level = 1
@@ -196,15 +200,51 @@ func setup_rally_ripple(world_pos: Vector2, vfx_color: Color = Color(0.22, 0.92,
 	queue_redraw()
 
 
-func setup_shield_shatter(world_pos: Vector2, radius: float, is_monolith_style: bool = false) -> void:
+func setup_shield_shatter(
+	world_pos: Vector2,
+	radius: float,
+	is_monolith_style: bool = false,
+	impact_dir: Vector2 = Vector2.ZERO
+) -> void:
 	_mode = VFXMode.SHIELD_SHATTER
 	_target_world = world_pos
 	_radius = maxf(16.0, radius)
 	_is_monolith_style = is_monolith_style
+	_impact_dir = impact_dir.normalized() if impact_dir.length_squared() > 0.01 else Vector2.ZERO
 	_color = Color(0.220, 0.741, 0.973, 1.0) # #38BDF8
 	_duration = 0.34
 	_elapsed = 0.0
 	_seed = int(Time.get_ticks_usec() & 0x7FFFFFFF)
+	_draw_visuals = true
+	queue_redraw()
+
+
+func setup_muzzle_shock(
+	origin: Vector2,
+	aim_dir: Vector2,
+	radius: float,
+	accent_col: Color,
+	is_brutalist: bool = false
+) -> void:
+	_mode = VFXMode.MUZZLE_SHOCK
+	_target_world = origin
+	_dir = aim_dir.normalized() if aim_dir.length_squared() > 0.01 else Vector2.RIGHT
+	_radius = maxf(14.0, radius)
+	_color = accent_col
+	_is_monolith_style = is_brutalist
+	_duration = 0.18
+	_elapsed = 0.0
+	_draw_visuals = true
+	queue_redraw()
+
+
+func setup_anchor_thud(origin: Vector2, radius: float, accent_col: Color = Color(1.0, 0.624, 0.110, 1.0)) -> void:
+	_mode = VFXMode.ANCHOR_THUD
+	_target_world = origin
+	_radius = maxf(22.0, radius)
+	_color = accent_col
+	_duration = 0.26
+	_elapsed = 0.0
 	_draw_visuals = true
 	queue_redraw()
 
@@ -269,6 +309,10 @@ func _draw() -> void:
 			_draw_rally_ripple()
 		VFXMode.SHIELD_SHATTER:
 			_draw_shield_shatter()
+		VFXMode.MUZZLE_SHOCK:
+			_draw_muzzle_shock()
+		VFXMode.ANCHOR_THUD:
+			_draw_anchor_thud()
 
 
 func _draw_mortar_shell() -> void:
@@ -531,13 +575,20 @@ func _draw_shield_shatter() -> void:
 		var ff: float = 1.0 - (t / 0.24)
 		draw_circle(p, _radius * 0.95, Color(offwhite.r, offwhite.g, offwhite.b, ff * 0.28))
 
-	# 7 angular polygonal shard fragments flying outward
-	var shard_count: int = 7
+	# 8 angular polygonal shard fragments flying outward (50% biased into directional knock-cone when impact_dir is set)
+	var shard_count: int = 8
+	var has_dir: bool = _impact_dir.length_squared() > 0.01
+	var impact_ang: float = _impact_dir.angle() if has_dir else 0.0
 	for i: int in range(shard_count):
 		var ang: float = base_rot + (TAU * float(i) / float(shard_count)) + float((i * 23) % 7) * 0.05
+		var dist_scale: float = 0.86 + float((i * 19) % 7) * 0.05
+		if has_dir and i < 4:
+			# Crisp forward-spraying directional shatter cone aligned away from attacker
+			var cone_spread: float = ((float(i) / 3.0) - 0.5) * 1.12
+			ang = impact_ang + cone_spread + float((i * 13) % 5 - 2) * 0.04
+			dist_scale *= 1.24
 		var rad: Vector2 = Vector2.RIGHT.rotated(ang)
 		var perp: Vector2 = Vector2(-rad.y, rad.x)
-		var dist_scale: float = 0.86 + float((i * 19) % 7) * 0.05
 		var pos: Vector2 = p + rad * lerpf(_radius * 0.65, _radius * 1.95 * dist_scale, ease_out)
 		var sz: float = clampf(_radius * 0.22, 4.0, 8.5) * fade
 		if sz > 1.2:
@@ -552,11 +603,59 @@ func _draw_shield_shatter() -> void:
 	# MONOLITH_OS neo-brutalist Hazard Amber / off-white halftone burst dots
 	if _is_monolith_style:
 		for m: int in range(4):
-			var ma: float = base_rot + float(m) * (PI * 0.5) + 0.38
+			var ma: float = (impact_ang + (float(m) - 1.5) * 0.42) if has_dir else (base_rot + float(m) * (PI * 0.5) + 0.38)
 			var mdir: Vector2 = Vector2.RIGHT.rotated(ma)
-			var mpos: Vector2 = p + mdir * lerpf(_radius * 0.72, _radius * 1.72, ease_out)
+			var mpos: Vector2 = p + mdir * lerpf(_radius * 0.72, _radius * 1.85, ease_out)
 			var dot_col: Color = amber if (m % 2 == 0) else offwhite
 			draw_circle(mpos, maxf(1.5, 3.2 * fade), Color(dot_col.r, dot_col.g, dot_col.b, fade * 0.94))
+
+
+func _draw_muzzle_shock() -> void:
+	var t: float = clampf(_elapsed / maxf(0.01, _duration), 0.0, 1.0)
+	var ease_out: float = 1.0 - pow(1.0 - t, 2.4)
+	var fade: float = 1.0 - t
+	var p: Vector2 = to_local(_target_world)
+	var fwd: Vector2 = _dir
+	var perp: Vector2 = Vector2(-fwd.y, fwd.x)
+
+	# Faint expanding ground pressure / dust displacement ring
+	var dust_r: float = lerpf(_radius * 0.55, _radius * 1.15, ease_out)
+	var dust_col: Color = Color(0.86, 0.84, 0.78, 0.36 * fade) if _is_monolith_style else Color(_color.r, _color.g, _color.b, 0.34 * fade)
+	draw_arc(p - fwd * 4.0, dust_r, 0.0, TAU, 24, dust_col, 2.2 * fade + 0.6, true)
+
+	# Crisp directional muzzle flare wedge aligned with aim_dir
+	if t < 0.72:
+		var ft: float = 1.0 - (t / 0.72)
+		var flare_len: float = _radius * lerpf(0.75, 1.12, ease_out)
+		var flare_w: float = _radius * 0.34 * ft
+		var wedge: PackedVector2Array = PackedVector2Array([
+			p + fwd * flare_len,
+			p - fwd * 3.0 + perp * flare_w,
+			p - fwd * 3.0 - perp * flare_w,
+		])
+		draw_colored_polygon(wedge, Color(_color.r, _color.g, _color.b, 0.62 * ft))
+		draw_circle(p + fwd * 3.0, maxf(2.0, _radius * 0.22 * ft), Color(0.98, 0.99, 1.0, 0.80 * ft))
+
+
+func _draw_anchor_thud() -> void:
+	var t: float = clampf(_elapsed / maxf(0.01, _duration), 0.0, 1.0)
+	var ease_out: float = 1.0 - pow(1.0 - t, 2.6)
+	var fade: float = 1.0 - t
+	var p: Vector2 = to_local(_target_world)
+
+	# Expanding ground-impact shock ring
+	var ring_r: float = lerpf(_radius * 0.60, _radius * 1.42, ease_out)
+	draw_arc(p, ring_r, 0.0, TAU, 32, Color(_color.r, _color.g, _color.b, 0.72 * fade), 2.6 * fade + 0.8, true)
+	draw_arc(p, ring_r * 0.78, 0.0, TAU, 24, Color(0.95, 0.94, 0.91, 0.42 * fade), 1.4, true)
+
+	# 4 radial dust / halftone clamp kick ticks at the 4 diagonal stabilizer legs
+	for i: int in range(4):
+		var ang: float = (PI * 0.25) + float(i) * (PI * 0.5)
+		var d: Vector2 = Vector2(cos(ang), sin(ang))
+		var inner_pt: Vector2 = p + d * lerpf(_radius * 0.52, _radius * 0.92, ease_out)
+		var outer_pt: Vector2 = p + d * lerpf(_radius * 0.78, _radius * 1.48, ease_out)
+		draw_line(inner_pt, outer_pt, Color(_color.r, _color.g, _color.b, 0.92 * fade), 2.4 * fade + 0.8, true)
+		draw_circle(outer_pt, maxf(1.4, 3.2 * fade), Color(0.95, 0.94, 0.91, 0.78 * fade))
 
 
 func _draw_dashed_circle(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:

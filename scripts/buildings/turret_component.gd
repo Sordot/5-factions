@@ -339,6 +339,7 @@ func _fire_at(target: Node2D) -> void:
 		&"heavy_slug":
 			var slug_col: Color = Color(1.0, 0.68, 0.18, 0.98) if int(owner_building.team) == 0 else team_col
 			_spawn_tracer(origin, end_pos, slug_col, 3.2, 0.15, AttackTracer.TracerStyle.HEAVY_SLUG)
+			_spawn_heavy_muzzle_shock(origin, end_pos, slug_col, true)
 			if _is_armored_target(target) and owner_building.turret_bonus_vs_armored > 1.0:
 				var shot_dir_hs: Vector2 = (end_pos - origin).normalized() if end_pos.distance_squared_to(origin) > 1.0 else Vector2.RIGHT
 				_spawn_armor_spark(end_pos, shot_dir_hs, Color(1.0, 0.72, 0.20, 1.0))
@@ -428,6 +429,22 @@ func _spawn_tracer(origin: Vector2, end_pos: Vector2, col: Color, width: float, 
 		tracer.z_index = 45
 		host.add_child(tracer)
 	tracer.setup(origin, end_pos, col, width, duration, 0.0, style)
+
+
+func _spawn_heavy_muzzle_shock(origin: Vector2, end_pos: Vector2, col: Color, is_brutalist: bool) -> void:
+	if owner_building == null or not owner_building.is_inside_tree() or owner_building.get_parent() == null:
+		return
+	var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	var is_vis: bool = viewer < 0 or (TeamManager.are_allies(viewer, int(owner_building.team)) if TeamManager != null else (owner_building.team == Unit.Team.PLAYER)) or owner_building.visible
+	if not is_vis:
+		return
+	var aim_d: Vector2 = (end_pos - origin).normalized() if end_pos.distance_squared_to(origin) > 1.0 else Vector2.RIGHT.rotated(turret_angle)
+	var fx: CombatVFX = VFXPool.acquire_combat_vfx(54) if VFXPool != null else null
+	if fx == null:
+		fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+		fx.z_index = 54
+		owner_building.get_parent().add_child(fx)
+	fx.setup_muzzle_shock(origin, aim_d, 28.0, col, is_brutalist)
 
 
 func _spawn_armor_spark(world_pos: Vector2, shot_dir: Vector2, col: Color) -> void:

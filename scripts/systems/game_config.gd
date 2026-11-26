@@ -26,6 +26,7 @@ enum GameMode {
 const MAP_SKIRMISH_01: String = "res://scenes/maps/skirmish_arena_01.tscn"
 const MAP_SKIRMISH_02: String = "res://scenes/maps/skirmish_arena_02.tscn"
 const MAP_SKIRMISH_03: String = "res://scenes/maps/skirmish_arena_03.tscn"
+const MAP_SKIRMISH_PROCEDURAL: String = "res://scenes/maps/skirmish_arena_procedural.tscn"
 const MAP_SANDBOX_TESTBED: String = "res://scenes/test/milestone_0_test.tscn"
 const MAIN_MENU_SCENE: String = "res://scenes/ui/main_menu.tscn"
 
@@ -33,6 +34,7 @@ const MAP_CATALOG: Array = [
 	{"path": MAP_SKIRMISH_01, "label": "Skirmish Arena 01 (1v1 Symmetric)", "max_players": 2},
 	{"path": MAP_SKIRMISH_02, "label": "Twin Causeway (Skirmish Arena 02)", "max_players": 2},
 	{"path": MAP_SKIRMISH_03, "label": "Quad Nexus (2–4P FFA / 2v2)", "max_players": 4},
+	{"path": MAP_SKIRMISH_PROCEDURAL, "label": "Procedural Arena (Seeded 2–4P)", "max_players": 4},
 	{"path": MAP_SANDBOX_TESTBED, "label": "Sandbox Testbed (Milestone 0)", "max_players": 2},
 ]
 
@@ -98,6 +100,14 @@ var active_game_mode: GameMode = GameMode.SKIRMISH
 var holdout_enemy_faction_id: StringName = &"monolith_os"
 var holdout_difficulty: AIDifficulty = AIDifficulty.STANDARD
 var selected_gauntlet_drill_id: StringName = DRILL_STUTTER_STEP
+
+# Milestone 3.6: Seeded Procedural Skirmish Map state
+var proc_map_seed: int = 0 # 0 = auto-roll 6-digit seed on launch
+var proc_map_active_seed: int = 482915
+var proc_map_chokes: int = 1 # 0 = Open, 1 = Balanced, 2 = Tight
+var proc_map_high_ground: int = 1 # 0 = Flat, 1 = Moderate, 2 = Elevated
+var proc_map_richness: int = 1 # 0 = Standard, 1 = Rich, 2 = Abundant
+var proc_map_biome: StringName = &"auto" # &"auto", &"vat_basin", &"twin_causeway", &"quad_nexus"
 
 var selected_faction_id: StringName = &"genesis_v2"
 var selected_map_path: String = MAP_SKIRMISH_01
@@ -436,6 +446,28 @@ func is_gauntlet_mode() -> bool:
 
 func is_special_mode() -> bool:
 	return active_game_mode != GameMode.SKIRMISH
+
+
+func is_procedural_map_selected(path: String = "") -> bool:
+	var target: String = selected_map_path if path.is_empty() else path
+	return target == MAP_SKIRMISH_PROCEDURAL
+
+
+func resolve_procedural_seed() -> int:
+	if proc_map_seed > 0:
+		proc_map_active_seed = clampi(proc_map_seed, 1, 99999999)
+	else:
+		var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+		rng.randomize()
+		proc_map_active_seed = rng.randi_range(100000, 999999)
+	return proc_map_active_seed
+
+
+func get_procedural_summary_tag() -> String:
+	var choke_lbl: String = "Open" if proc_map_chokes == 0 else ("Tight" if proc_map_chokes >= 2 else "Balanced")
+	var hg_lbl: String = "Flat" if proc_map_high_ground == 0 else ("High+" if proc_map_high_ground >= 2 else "Mid HG")
+	var rich_lbl: String = "Std" if proc_map_richness == 0 else ("Abundant" if proc_map_richness >= 2 else "Rich")
+	return "SEED %d • %s • %s • %s" % [proc_map_active_seed, choke_lbl, hg_lbl, rich_lbl]
 
 
 func get_gauntlet_drill_info(drill_id: StringName = &"") -> Dictionary:

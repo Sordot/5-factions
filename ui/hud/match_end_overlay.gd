@@ -285,7 +285,9 @@ func show_summary(stats: Dictionary) -> void:
 			Color(0.22, 0.98, 0.90, 1.0) if is_victory else Color(1.0, 0.36, 0.30, 1.0)
 		)
 	if subtitle_label != null:
-		subtitle_label.text = str(stats.get("reason", ""))
+		var reason_txt: String = str(stats.get("reason", ""))
+		var seed_tag: String = str(stats.get("procedural_seed_tag", ""))
+		subtitle_label.text = ("%s  •  %s" % [reason_txt, seed_tag]) if not seed_tag.is_empty() else reason_txt
 	if duration_value != null:
 		duration_value.text = "DURATION: %s" % str(stats.get("duration_formatted", "00:00"))
 	if winner_value != null:

@@ -127,6 +127,9 @@ func _initialize_match_runtime() -> void:
 	if not is_inside_tree():
 		return
 	_ensure_pause_menu()
+	var proc_gen: Node = get_tree().get_first_node_in_group("procedural_arena_generator")
+	if proc_gen != null and is_instance_valid(proc_gen) and proc_gen.has_method("generate_arena"):
+		proc_gen.call("generate_arena")
 	var is_holdout: bool = GameConfig != null and GameConfig.is_holdout_mode()
 	var is_gauntlet: bool = GameConfig != null and GameConfig.is_gauntlet_mode()
 	var is_boom_drill: bool = is_gauntlet and GameConfig.selected_gauntlet_drill_id == GameConfig.DRILL_OPTIMAL_BOOM
@@ -338,6 +341,13 @@ func _bootstrap_skirmish_teams() -> void:
 		elif b.is_command_hub():
 			_team_last_core_pos[b_tid] = b.global_position
 			preplaced_hubs[b_tid] = b
+
+	# 1b. Also scan procedural Marker2D spawn anchors when no pre-placed hubs exist.
+	for anchor_node: Node in get_tree().get_nodes_in_group("spawn_anchors"):
+		if anchor_node is Node2D and is_instance_valid(anchor_node) and anchor_node.has_meta("team_id"):
+			var a_tid: int = int(anchor_node.get_meta("team_id"))
+			if not _spawn_anchors.has(a_tid):
+				_spawn_anchors[a_tid] = (anchor_node as Node2D).global_position
 
 	# 2. Prune inactive teams' units.
 	for node: Node in get_tree().get_nodes_in_group("units"):
@@ -1294,6 +1304,7 @@ func _finish_match(winner_team: Unit.Team, reason: String) -> void:
 		"structures_destroyed": enemy_structures_destroyed,
 		"timeline_samples": timeline_samples.duplicate(true),
 		"combat_heatmap_events": combat_heatmap_events.duplicate(true),
+		"procedural_seed_tag": GameConfig.get_procedural_summary_tag() if (GameConfig != null and GameConfig.is_procedural_map_selected()) else "",
 		"active_mutators": GameConfig.get_active_mutator_labels() if (GameConfig != null and GameConfig.has_method("get_active_mutator_labels")) else PackedStringArray(),
 		"active_teams": active_teams,
 		"teams": teams_stats_out,

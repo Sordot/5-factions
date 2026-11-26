@@ -396,6 +396,40 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 		shot_col = base_weapon_col.lerp(team_col, blend)
 		shot_col.a = maxf(base_weapon_col.a, 0.94)
 
+	# Milestone 3.6: Calibrated visual chassis recoil & heavy muzzle shock rings
+	var is_heavy_shot: bool = (
+		aoe_radius > 0.0
+		or pierce_width > 0.0
+		or (owner_unit.data != null and owner_unit.data.is_heavy_unit())
+		or tracer_style == &"rail_lance"
+		or tracer_style == &"rail"
+		or tracer_style == &"rail_beam"
+	)
+	var kick_px: float = 1.2
+	if aoe_radius > 0.0 and owner_unit.is_deployed():
+		kick_px = 6.2
+	elif is_heavy_shot:
+		kick_px = 5.0 if (owner_unit.data != null and owner_unit.data.is_heavy_unit()) else 4.5
+	elif (owner_unit.data != null and owner_unit.data.is_armored) or tracer_style == &"heavy_slug" or tracer_style == &"heavy":
+		kick_px = 2.8
+	elif owner_unit.get_effective_attack_cooldown() >= 0.9:
+		kick_px = 2.0
+	owner_unit.trigger_weapon_recoil(kick_px)
+
+	if is_heavy_shot and owner_unit.is_inside_tree():
+		var viewer_ms: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+		var vis_ms: bool = viewer_ms < 0 or (TeamManager.are_allies(viewer_ms, int(owner_unit.team)) if TeamManager != null else (owner_unit.team == Unit.Team.PLAYER)) or owner_unit.visible
+		if vis_ms and owner_unit.get_parent() != null:
+			var aim_d: Vector2 = (tracer_end - tracer_origin).normalized() if tracer_end.distance_squared_to(tracer_origin) > 1.0 else Vector2.RIGHT.rotated(owner_unit.body_visual.rotation)
+			var is_brutal_ms: bool = TeamManager != null and TeamManager.has_method("get_team_faction") and TeamManager.get_team_faction(int(owner_unit.team)) == &"monolith_os"
+			var shock_r: float = 34.0 if (aoe_radius > 0.0 and owner_unit.is_deployed()) else (28.0 if (owner_unit.data != null and owner_unit.data.is_heavy_unit()) else 22.0)
+			var mfx: CombatVFX = VFXPool.acquire_combat_vfx(54) if VFXPool != null else null
+			if mfx == null:
+				mfx = COMBAT_VFX_SCRIPT.new() as CombatVFX
+				mfx.z_index = 54
+				owner_unit.get_parent().add_child(mfx)
+			mfx.setup_muzzle_shock(tracer_origin, aim_d, shock_r, shot_col, is_brutal_ms)
+
 	if AudioManager != null and _is_pos_audible(owner_unit, tracer_origin, tracer_end):
 		if owner_unit.is_deployed() and tracer_style == &"mortar" and owner_unit.data != null and owner_unit.data.has_tag(&"mechanical"):
 			AudioManager.play_sfx(&"weapon_mono_siege", -3.0, 0.04, owner_unit.global_position, true)

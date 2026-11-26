@@ -6,6 +6,7 @@ const TECH_TREE_SCENE_PATH: String = "res://scenes/ui/tech_tree_overlay.tscn"
 const CONTROLS_REF_SCENE_PATH: String = "res://scenes/ui/controls_reference_overlay.tscn"
 
 @onready var root_control: Control = %RootControl
+@onready var subtitle_label: Label = %SubtitleLabel
 @onready var btn_resume: Button = %BtnResume
 @onready var btn_settings: Button = %BtnSettings
 @onready var btn_tech_tree: Button = %BtnTechTree
@@ -107,6 +108,11 @@ func open_pause() -> void:
 	if AudioManager != null:
 		AudioManager.play_ui_click()
 	Engine.time_scale = 1.0
+	if subtitle_label != null:
+		if GameConfig != null and GameConfig.is_procedural_map_selected():
+			subtitle_label.text = "PROCEDURAL ARENA // %s" % GameConfig.get_procedural_summary_tag()
+		else:
+			subtitle_label.text = "SOVEREIGN KERNEL // TACTICAL SUSPENSION"
 	if root_control != null:
 		root_control.visible = true
 	_refresh_dynamic_hotkey_labels()

@@ -84,6 +84,14 @@ func invalidate_building_vision_cache() -> void:
 	_static_building_vision_cells.clear()
 
 
+func rebuild_static_grids(new_bounds: Rect2 = Rect2()) -> void:
+	if new_bounds.has_area():
+		arena_bounds = new_bounds
+	_initialize_grid()
+	rebuild_blocker_grid()
+	refresh_visibility()
+
+
 func rebuild_blocker_grid() -> void:
 	_blocker_dirty = false
 	_static_building_vision_cells.clear()

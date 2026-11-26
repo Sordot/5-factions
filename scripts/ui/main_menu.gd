@@ -23,6 +23,13 @@ const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.
 @onready var btn_drill_2: Button = %BtnDrill2
 @onready var gauntlet_detail_label: Label = %GauntletDetailLabel
 @onready var map_option: OptionButton = %MapOption
+@onready var proc_map_options_box: VBoxContainer = %ProcMapOptionsBox
+@onready var proc_seed_input: LineEdit = %ProcSeedInput
+@onready var btn_roll_seed: Button = %BtnRollSeed
+@onready var opt_proc_biome: OptionButton = %OptProcBiome
+@onready var opt_proc_chokes: OptionButton = %OptProcChokes
+@onready var opt_proc_high_ground: OptionButton = %OptProcHighGround
+@onready var opt_proc_richness: OptionButton = %OptProcRichness
 @onready var btn_players_2: Button = %BtnPlayers2
 @onready var btn_players_3: Button = %BtnPlayers3
 @onready var btn_players_4: Button = %BtnPlayers4
@@ -106,6 +113,12 @@ var _selected_mode: int = GameConfig.GameMode.SKIRMISH
 var _holdout_enemy_faction_id: StringName = &"monolith_os"
 var _holdout_difficulty: int = int(GameConfig.AIDifficulty.STANDARD)
 var _selected_drill_id: StringName = GameConfig.DRILL_STUTTER_STEP
+var _proc_seed: int = 0
+var _proc_chokes: int = 1
+var _proc_high_ground: int = 1
+var _proc_richness: int = 1
+var _proc_biome: StringName = &"auto"
+const PROC_BIOME_IDS: Array = [&"auto", &"vat_basin", &"twin_causeway", &"quad_nexus"]
 
 var _selected_map_path: String = GameConfig.MAP_SKIRMISH_01
 var _player_count: int = 2
@@ -144,6 +157,11 @@ func _ready() -> void:
 	_holdout_enemy_faction_id = GameConfig.holdout_enemy_faction_id
 	_holdout_difficulty = int(GameConfig.holdout_difficulty)
 	_selected_drill_id = GameConfig.selected_gauntlet_drill_id
+	_proc_seed = GameConfig.proc_map_seed
+	_proc_chokes = GameConfig.proc_map_chokes
+	_proc_high_ground = GameConfig.proc_map_high_ground
+	_proc_richness = GameConfig.proc_map_richness
+	_proc_biome = GameConfig.proc_map_biome
 
 	_slot_configs.clear()
 	for i: int in range(4):
@@ -339,11 +357,15 @@ func _ready() -> void:
 			_refresh_ui()
 		)
 
+	# Milestone 3.6: Procedural Skirmish Map controls
+	_init_procedural_map_controls()
+
 	_wire_hover_audio([
 		btn_audio_mute, btn_mode_skirmish, btn_mode_holdout, btn_mode_gauntlet,
 		btn_holdout_fac_gen, btn_holdout_fac_mono, btn_holdout_fac_mixed,
 		btn_holdout_diff_relaxed, btn_holdout_diff_standard, btn_holdout_diff_brutal,
-		btn_drill_0, btn_drill_1, btn_drill_2,
+		btn_drill_0, btn_drill_1, btn_drill_2, btn_roll_seed,
+		opt_proc_biome, opt_proc_chokes, opt_proc_high_ground, opt_proc_richness,
 		map_option, btn_players_2, btn_players_3, btn_players_4,
 		opt_team_preset, btn_ai_standard, btn_ai_passive, btn_res_standard, btn_res_fast,
 		chk_mutator_yield, chk_mutator_no_fog, chk_mutator_fast_build, chk_uplink_victory,
@@ -876,6 +898,97 @@ func _refresh_audio_button() -> void:
 		btn_audio_mute.modulate = Color(0.45, 0.98, 0.90, 1.0)
 
 
+func _init_procedural_map_controls() -> void:
+	if proc_seed_input != null:
+		proc_seed_input.text = str(_proc_seed) if _proc_seed > 0 else ""
+		proc_seed_input.text_changed.connect(_on_proc_seed_text_changed)
+	if btn_roll_seed != null:
+		btn_roll_seed.pressed.connect(_on_roll_proc_seed_pressed)
+	if opt_proc_biome != null:
+		opt_proc_biome.clear()
+		opt_proc_biome.add_item("Auto Biome", 0)
+		opt_proc_biome.add_item("Vat Basin", 1)
+		opt_proc_biome.add_item("Causeway", 2)
+		opt_proc_biome.add_item("Quad Nexus", 3)
+		var b_idx: int = maxi(0, PROC_BIOME_IDS.find(_proc_biome))
+		opt_proc_biome.select(b_idx)
+		opt_proc_biome.item_selected.connect(func(idx: int) -> void:
+			if _suppress_callbacks or idx < 0 or idx >= PROC_BIOME_IDS.size():
+				return
+			AudioManager.play_ui_click()
+			_proc_biome = PROC_BIOME_IDS[idx] as StringName
+			_refresh_ui()
+		)
+	if opt_proc_chokes != null:
+		opt_proc_chokes.clear()
+		opt_proc_chokes.add_item("Open Lanes", 0)
+		opt_proc_chokes.add_item("Balanced", 1)
+		opt_proc_chokes.add_item("Tight Chokes", 2)
+		opt_proc_chokes.select(clampi(_proc_chokes, 0, 2))
+		opt_proc_chokes.item_selected.connect(func(idx: int) -> void:
+			if _suppress_callbacks:
+				return
+			AudioManager.play_ui_click()
+			_proc_chokes = clampi(idx, 0, 2)
+			_refresh_ui()
+		)
+	if opt_proc_high_ground != null:
+		opt_proc_high_ground.clear()
+		opt_proc_high_ground.add_item("Flat Ground", 0)
+		opt_proc_high_ground.add_item("Mid Plateaus", 1)
+		opt_proc_high_ground.add_item("High Ground+", 2)
+		opt_proc_high_ground.select(clampi(_proc_high_ground, 0, 2))
+		opt_proc_high_ground.item_selected.connect(func(idx: int) -> void:
+			if _suppress_callbacks:
+				return
+			AudioManager.play_ui_click()
+			_proc_high_ground = clampi(idx, 0, 2)
+			_refresh_ui()
+		)
+	if opt_proc_richness != null:
+		opt_proc_richness.clear()
+		opt_proc_richness.add_item("Std Yield", 0)
+		opt_proc_richness.add_item("Rich Yield", 1)
+		opt_proc_richness.add_item("Abundant", 2)
+		opt_proc_richness.select(clampi(_proc_richness, 0, 2))
+		opt_proc_richness.item_selected.connect(func(idx: int) -> void:
+			if _suppress_callbacks:
+				return
+			AudioManager.play_ui_click()
+			_proc_richness = clampi(idx, 0, 2)
+			_refresh_ui()
+		)
+
+
+func _on_proc_seed_text_changed(new_text: String) -> void:
+	if _suppress_callbacks:
+		return
+	var cleaned: String = ""
+	for i: int in range(new_text.length()):
+		var ch: String = new_text.substr(i, 1)
+		if ch >= "0" and ch <= "9":
+			cleaned += ch
+	if cleaned != new_text and proc_seed_input != null:
+		_suppress_callbacks = true
+		proc_seed_input.text = cleaned
+		proc_seed_input.caret_column = cleaned.length()
+		_suppress_callbacks = false
+	_proc_seed = int(cleaned) if not cleaned.is_empty() else 0
+	_refresh_ui()
+
+
+func _on_roll_proc_seed_pressed() -> void:
+	AudioManager.play_ui_click()
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.randomize()
+	_proc_seed = rng.randi_range(100000, 999999)
+	if proc_seed_input != null:
+		_suppress_callbacks = true
+		proc_seed_input.text = str(_proc_seed)
+		_suppress_callbacks = false
+	_refresh_ui()
+
+
 func _set_selected_mode(mode_val: int) -> void:
 	if _selected_mode == mode_val:
 		return
@@ -1006,6 +1119,9 @@ func _refresh_gauntlet_panel() -> void:
 func _refresh_ui() -> void:
 	_suppress_callbacks = true
 	_refresh_mode_tabs_and_panels()
+	var is_proc_map: bool = GameConfig.is_procedural_map_selected(_selected_map_path)
+	if proc_map_options_box != null:
+		proc_map_options_box.visible = is_proc_map
 	var max_p: int = GameConfig.get_map_max_players(_selected_map_path)
 	var is_spec: bool = not _has_active_human()
 	var valid_teams: bool = GameConfig.has_opposing_alliances(_slot_configs, _player_count)
@@ -1111,7 +1227,11 @@ func _refresh_ui() -> void:
 			if lf_data != null and not lf_data.short_code.is_empty():
 				local_fac_label = lf_data.short_code
 		var mode_tag: String = "AI SPECTATOR" if is_spec else ("PASSIVE SANDBOX (%s)" % local_fac_label if not _aggro_ai_enabled else local_fac_label)
-		summary_label.text = "%s  •  %s\nTEAMS: %s\nWIN: %s  •  RES: %s%s" % [mode_tag, map_name, matchup_str, win_tag, res_str, mut_suffix]
+		var proc_tag: String = ""
+		if GameConfig.is_procedural_map_selected(_selected_map_path):
+			var seed_str: String = ("SEED %d" % _proc_seed) if _proc_seed > 0 else "SEED RANDOM"
+			proc_tag = " [%s]" % seed_str
+		summary_label.text = "%s  •  %s%s\nTEAMS: %s\nWIN: %s  •  RES: %s%s" % [mode_tag, map_name, proc_tag, matchup_str, win_tag, res_str, mut_suffix]
 	_suppress_callbacks = false
 
 
@@ -1155,6 +1275,13 @@ func _on_launch_pressed() -> void:
 		return
 	AudioManager.play_sfx(&"build_complete", -3.0, 0.0)
 	var primary_faction_id: StringName = _get_local_human_faction_id()
+	GameConfig.proc_map_seed = _proc_seed
+	GameConfig.proc_map_chokes = _proc_chokes
+	GameConfig.proc_map_high_ground = _proc_high_ground
+	GameConfig.proc_map_richness = _proc_richness
+	GameConfig.proc_map_biome = _proc_biome
+	if GameConfig.is_procedural_map_selected(_selected_map_path):
+		GameConfig.resolve_procedural_seed()
 	GameConfig.set_lobby_config(
 		_selected_map_path,
 		_player_count,

@@ -1370,7 +1370,12 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 		_last_emitted_shield_int = int(round(current_shield))
 		shield_changed.emit(self, current_shield, max_shield)
 		if had_native_shield and current_shield <= 0.001:
-			_trigger_shield_shatter_feedback()
+			var shatter_dir: Vector2 = Vector2.ZERO
+			if attacker is Node2D and is_instance_valid(attacker):
+				var d_vec: Vector2 = global_position - (attacker as Node2D).global_position
+				if d_vec.length_squared() > 1.0:
+					shatter_dir = d_vec.normalized()
+			_trigger_shield_shatter_feedback(shatter_dir)
 		_emit_hit_feedback_pip(HitFeedbackOverlay.KIND_SHIELD_ABSORB, int(round(absorbed_native)))
 
 	# Layer 3 — Hull HP (Mitigated)
@@ -1427,7 +1432,7 @@ func _emit_hit_feedback_pip(kind: StringName, val: int = 0) -> void:
 		ov.call("push_hit_pip", global_position, kind, val, get_instance_id())
 
 
-func _trigger_shield_shatter_feedback() -> void:
+func _trigger_shield_shatter_feedback(impact_dir: Vector2 = Vector2.ZERO) -> void:
 	if not is_inside_tree():
 		return
 	var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
@@ -1442,7 +1447,7 @@ func _trigger_shield_shatter_feedback() -> void:
 			fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
 			fx.z_index = 56
 			host.add_child(fx)
-		fx.setup_shield_shatter(global_position, footprint_radius * 1.05, is_mono)
+		fx.setup_shield_shatter(global_position, footprint_radius * 1.05, is_mono, impact_dir)
 	if AudioManager != null:
 		AudioManager.play_sfx(&"shield_shatter", -4.5, 0.06, global_position, true)
 

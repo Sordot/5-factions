@@ -347,17 +347,24 @@ func center_on(world_pos: Vector2) -> void:
 func add_camera_shake(intensity: float, duration: float = 0.15, world_pos: Variant = null) -> void:
 	if SettingsManager != null and not SettingsManager.camera_shake_enabled:
 		return
-	var clamped_intensity: float = clampf(intensity, 0.0, 5.0)
+	var clamped_intensity: float = clampf(intensity, 0.0, 6.0)
 	if clamped_intensity <= 0.05:
 		return
 	if world_pos is Vector2:
 		var vp: Viewport = get_viewport()
 		if vp != null:
-			var half_view: Vector2 = (vp.get_visible_rect().size / maxf(0.25, zoom.x)) * 0.55 + Vector2(96.0, 96.0)
-			var delta_p: Vector2 = (world_pos as Vector2) - global_position
-			if absf(delta_p.x) > half_view.x or absf(delta_p.y) > half_view.y:
+			var half_view: Vector2 = (vp.get_visible_rect().size / maxf(0.25, zoom.x)) * 0.5
+			var max_r: float = maxf(240.0, half_view.length() * 1.25)
+			var dist: float = (world_pos as Vector2).distance_to(global_position)
+			if dist > max_r:
 				return
-	_shake_intensity = maxf(_shake_intensity, clamped_intensity)
+			var inner_r: float = max_r * 0.55
+			if dist > inner_r:
+				var atten: float = 1.0 - clampf((dist - inner_r) / maxf(1.0, max_r - inner_r), 0.0, 1.0)
+				clamped_intensity *= atten
+			if clamped_intensity <= 0.05:
+				return
+	_shake_intensity = minf(6.0, maxf(_shake_intensity, clamped_intensity))
 	_shake_duration = maxf(0.08, duration)
 	_shake_timer = maxf(_shake_timer, _shake_duration)
 

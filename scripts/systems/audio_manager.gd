@@ -765,7 +765,7 @@ func play_weapon_for_unit(unit_type_id: StringName, world_pos: Vector2 = Vector2
 
 func play_explosion_sfx(world_pos: Vector2 = Vector2.INF, volume_db_offset: float = -5.0, is_major_global: bool = false) -> void:
 	if is_major_global:
-		play_sfx(&"entity_destroyed", volume_db_offset, 0.05, world_pos, false)
+		play_sfx(&"explosion_heavy", volume_db_offset, 0.05, world_pos, false)
 	else:
 		play_sfx(&"entity_destroyed", volume_db_offset, 0.08, world_pos, true)
 
@@ -887,6 +887,7 @@ func _generate_procedural_library() -> void:
 	_streams[&"ability_kinetic_barrier"] = _synth_mono_kinetic_barrier()
 	_streams[&"ability_grav_pulse"] = _synth_mono_grav_pulse()
 	_streams[&"entity_destroyed"] = _synth_destruction_boom()
+	_streams[&"explosion_heavy"] = _synth_explosion_heavy()
 	_streams[&"shield_shatter"] = _synth_shield_shatter()
 
 	# Tactical Alerts, Veterancy, Salvage & Auto-Cast
@@ -899,6 +900,7 @@ func _generate_procedural_library() -> void:
 	_streams[&"relay_captured"] = _synth_chime(PackedFloat32Array([659.25, 987.77, 1318.51]), 0.06, 0.22)
 	_streams[&"overclock_activate"] = _synth_mono_overclock()
 	_streams[&"deploy_lock"] = _synth_double_chirp(320.0, 145.0, 0.14, 0.28)
+	_streams[&"deploy_anchor_lock"] = _synth_deploy_anchor_lock()
 	_streams[&"deploy_release"] = _synth_double_chirp(185.0, 380.0, 0.13, 0.24)
 	_streams[&"ai_transmission"] = _synth_chime(PackedFloat32Array([740.0, 1110.0]), 0.042, 0.16)
 
@@ -1096,28 +1098,33 @@ func _synth_acid_snap() -> AudioStreamWAV:
 
 
 func _synth_rail_zap() -> AudioStreamWAV:
-	var duration: float = 0.17
+	var duration: float = 0.18
 	var count: int = int(SAMPLE_RATE * duration)
 	var out: PackedFloat32Array = PackedFloat32Array()
 	out.resize(count)
 	var phase: float = 0.0
+	var phase_sub: float = 0.0
 	for i: int in range(count):
 		var t: float = float(i) / float(SAMPLE_RATE)
 		var u: float = t / duration
 		var freq: float = lerpf(1680.0, 190.0, pow(u, 0.65))
 		var mod: float = sin(TAU * 95.0 * t) * 180.0
 		phase += TAU * (freq + mod) / float(SAMPLE_RATE)
+		var sub_f: float = lerpf(84.0, 48.0, minf(1.0, t / 0.085))
+		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
+		var sub_env: float = minf(1.0, t / 0.0025) * exp(-t * 28.0)
 		var env: float = minf(1.0, t / 0.003) * exp(-u * 4.8)
-		out[i] = clampf(sin(phase) * 1.4, -1.0, 1.0) * env * 0.30
+		out[i] = clampf(clampf(sin(phase) * 1.4, -1.0, 1.0) * env * 0.28 + sin(phase_sub) * sub_env * 0.22, -0.92, 0.92)
 	return _make_wav(out)
 
 
 func _synth_mortar_thud() -> AudioStreamWAV:
-	var duration: float = 0.28
+	var duration: float = 0.29
 	var count: int = int(SAMPLE_RATE * duration)
 	var out: PackedFloat32Array = PackedFloat32Array()
 	out.resize(count)
 	var phase: float = 0.0
+	var phase_sub: float = 0.0
 	var seed_val: int = 9001
 	var lp: float = 0.0
 	for i: int in range(count):
@@ -1125,11 +1132,14 @@ func _synth_mortar_thud() -> AudioStreamWAV:
 		var u: float = t / duration
 		var freq: float = lerpf(155.0, 38.0, pow(u, 0.55))
 		phase += TAU * freq / float(SAMPLE_RATE)
+		var sub_f: float = lerpf(82.0, 46.0, minf(1.0, t / 0.105))
+		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
+		var sub_env: float = minf(1.0, t / 0.003) * exp(-t * 22.0)
 		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
 		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
 		lp = lerpf(lp, noise, 0.16)
 		var env: float = minf(1.0, t / 0.004) * exp(-u * 4.6)
-		out[i] = (sin(phase) * 0.68 + lp * 0.52) * env * 0.36
+		out[i] = clampf((sin(phase) * 0.62 + lp * 0.46) * env * 0.34 + sin(phase_sub) * sub_env * 0.24, -0.92, 0.92)
 	return _make_wav(out)
 
 
@@ -1479,12 +1489,13 @@ func _synth_mono_slug() -> AudioStreamWAV:
 
 func _synth_mono_rail() -> AudioStreamWAV:
 	# Rising high-voltage capacitor whine -> crisp sub-bass crack + metallic ring
-	var dur: float = 0.24
+	var dur: float = 0.25
 	var count: int = int(SAMPLE_RATE * dur)
 	var out: PackedFloat32Array = PackedFloat32Array()
 	out.resize(count)
 	var phase_whine: float = 0.0
 	var phase_crack: float = 0.0
+	var phase_sub: float = 0.0
 	var seed_val: int = 8088
 	for i: int in range(count):
 		var t: float = float(i) / float(SAMPLE_RATE)
@@ -1499,13 +1510,16 @@ func _synth_mono_rail() -> AudioStreamWAV:
 			var uc: float = lt / (dur - 0.045)
 			var fc: float = lerpf(260.0, 46.0, pow(uc, 0.45))
 			phase_crack += TAU * fc / float(SAMPLE_RATE)
+			var f_sub: float = lerpf(85.0, 48.0, minf(1.0, lt / 0.09))
+			phase_sub += TAU * f_sub / float(SAMPLE_RATE)
+			var sub_env: float = minf(1.0, lt / 0.002) * exp(-lt * 26.0)
 			seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
 			var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
 			var crack_env: float = minf(1.0, lt / 0.0015) * exp(-uc * 5.2)
 			var ring_env: float = exp(-lt * 16.0)
 			var ring: float = (sin(TAU * 1180.0 * lt) * 0.55 + sin(TAU * 1770.0 * lt) * 0.45) * ring_env * 0.16
-			sample += (clampf(sin(phase_crack) * 1.35, -1.0, 1.0) * 0.65 + noise * 0.35 * exp(-lt * 40.0)) * crack_env * 0.36 + ring
-		out[i] = clampf(sample, -0.95, 0.95)
+			sample += (clampf(sin(phase_crack) * 1.35, -1.0, 1.0) * 0.62 + noise * 0.34 * exp(-lt * 40.0)) * crack_env * 0.34 + sin(phase_sub) * sub_env * 0.24 + ring
+		out[i] = clampf(sample, -0.92, 0.92)
 	return _make_wav(out)
 
 
@@ -1529,12 +1543,13 @@ func _synth_mono_tether() -> AudioStreamWAV:
 
 
 func _synth_mono_bastion() -> AudioStreamWAV:
-	# Deep pneumatic autocannon boom (Bastion Emplacement)
-	var dur: float = 0.26
+	# Deep pneumatic autocannon boom + sub-bass transient punch (Bastion Emplacement)
+	var dur: float = 0.27
 	var count: int = int(SAMPLE_RATE * dur)
 	var out: PackedFloat32Array = PackedFloat32Array()
 	out.resize(count)
 	var phase: float = 0.0
+	var phase_sub: float = 0.0
 	var seed_val: int = 55101
 	var lp: float = 0.0
 	for i: int in range(count):
@@ -1542,6 +1557,9 @@ func _synth_mono_bastion() -> AudioStreamWAV:
 		var u: float = t / dur
 		var freq: float = lerpf(165.0, 42.0, pow(u, 0.48))
 		phase += TAU * freq / float(SAMPLE_RATE)
+		var sub_f: float = lerpf(82.0, 48.0, minf(1.0, t / 0.095))
+		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
+		var sub_env: float = minf(1.0, t / 0.0025) * exp(-t * 25.0)
 		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
 		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
 		lp = lerpf(lp, noise, 0.20)
@@ -1549,7 +1567,7 @@ func _synth_mono_bastion() -> AudioStreamWAV:
 		var hiss_t: float = maxf(0.0, t - 0.07)
 		var hiss_env: float = (minf(1.0, hiss_t / 0.01) * exp(-hiss_t * 22.0)) if t >= 0.07 else 0.0
 		var hiss: float = (noise - lp) * hiss_env * 0.14
-		out[i] = clampf((sin(phase) * 0.78 + lp * 0.48) * boom_env * 0.38 + hiss, -0.95, 0.95)
+		out[i] = clampf((sin(phase) * 0.72 + lp * 0.44) * boom_env * 0.36 + sin(phase_sub) * sub_env * 0.24 + hiss, -0.92, 0.92)
 	return _make_wav(out)
 
 
@@ -1650,12 +1668,13 @@ func _synth_mono_bark(notes: PackedFloat32Array, is_order: bool) -> AudioStreamW
 
 
 func _synth_mono_siege() -> AudioStreamWAV:
-	# Deep heavy deployed artillery boom + metallic breech clang (Anvil Siege-Walker)
-	var dur: float = 0.38
+	# Deep heavy deployed artillery boom + sub-bass transient punch + metallic breech clang (Anvil Siege-Walker)
+	var dur: float = 0.40
 	var count: int = int(SAMPLE_RATE * dur)
 	var out: PackedFloat32Array = PackedFloat32Array()
 	out.resize(count)
 	var phase: float = 0.0
+	var phase_sub: float = 0.0
 	var seed_val: int = 88321
 	var lp: float = 0.0
 	for i: int in range(count):
@@ -1663,6 +1682,9 @@ func _synth_mono_siege() -> AudioStreamWAV:
 		var u: float = t / dur
 		var freq: float = lerpf(135.0, 32.0, pow(u, 0.42))
 		phase += TAU * freq / float(SAMPLE_RATE)
+		var sub_f: float = lerpf(80.0, 45.0, minf(1.0, t / 0.11))
+		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
+		var sub_env: float = minf(1.0, t / 0.0025) * exp(-t * 20.0)
 		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
 		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
 		lp = lerpf(lp, noise, 0.15)
@@ -1671,8 +1693,58 @@ func _synth_mono_siege() -> AudioStreamWAV:
 		if t >= 0.06:
 			var ct: float = t - 0.06
 			var c_env: float = minf(1.0, ct / 0.004) * exp(-ct * 16.0)
-			clang = (sin(TAU * 480.0 * ct) * 0.5 + sin(TAU * 725.0 * ct) * 0.35 + (noise - lp) * 0.25) * c_env * 0.16
-		out[i] = clampf((sin(phase) * 0.82 + lp * 0.52) * boom_env * 0.44 + clang, -0.95, 0.95)
+			clang = (sin(TAU * 480.0 * ct) * 0.5 + sin(TAU * 725.0 * ct) * 0.35 + (noise - lp) * 0.25) * c_env * 0.15
+		out[i] = clampf((sin(phase) * 0.74 + lp * 0.46) * boom_env * 0.40 + sin(phase_sub) * sub_env * 0.26 + clang, -0.92, 0.92)
+	return _make_wav(out)
+
+
+func _synth_explosion_heavy() -> AudioStreamWAV:
+	# Deep Tier 2 heavy unit / structure detonation with layered 48-84Hz sub-bass drop
+	var dur: float = 0.44
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	var phase_sub: float = 0.0
+	var seed_val: int = 60214
+	var lp: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var freq: float = lerpf(118.0, 28.0, pow(u, 0.52))
+		phase += TAU * freq / float(SAMPLE_RATE)
+		var sub_f: float = lerpf(84.0, 44.0, minf(1.0, t / 0.12))
+		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
+		var sub_env: float = minf(1.0, t / 0.003) * exp(-t * 17.5)
+		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
+		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
+		lp = lerpf(lp, noise, 0.14)
+		var env: float = minf(1.0, t / 0.004) * exp(-u * 3.8)
+		out[i] = clampf((sin(phase) * 0.54 + lp * 0.62) * env * 0.36 + sin(phase_sub) * sub_env * 0.28, -0.92, 0.92)
+	return _make_wav(out)
+
+
+func _synth_deploy_anchor_lock() -> AudioStreamWAV:
+	# Crisp pneumatic anchor lock-in thud + metallic clamp click (Anvil Siege-Walker DEPLOYED frame)
+	var dur: float = 0.24
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var phase_sub: float = 0.0
+	var seed_val: int = 33719
+	var lp: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var sub_f: float = lerpf(86.0, 46.0, minf(1.0, t / 0.095))
+		phase_sub += TAU * sub_f / float(SAMPLE_RATE)
+		var sub_env: float = minf(1.0, t / 0.002) * exp(-t * 24.0)
+		seed_val = (seed_val * 1103515245 + 12345) & 0x7FFFFFFF
+		var noise: float = (float(seed_val) / float(0x7FFFFFFF)) * 2.0 - 1.0
+		lp = lerpf(lp, noise, 0.22)
+		var clamp_click: float = (sin(TAU * 680.0 * t) * 0.55 + sin(TAU * 1340.0 * t) * 0.30 + (noise - lp) * 0.25) * exp(-t * 48.0) * 0.24
+		var air_hiss: float = (noise - lp) * (minf(1.0, maxf(0.0, t - 0.03) / 0.01) * exp(-maxf(0.0, t - 0.03) * 24.0) if t >= 0.03 else 0.0) * 0.12
+		out[i] = clampf(sin(phase_sub) * sub_env * 0.34 + lp * exp(-u * 6.0) * 0.14 + clamp_click + air_hiss, -0.92, 0.92)
 	return _make_wav(out)
 
 
