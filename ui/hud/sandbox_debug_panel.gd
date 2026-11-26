@@ -48,6 +48,9 @@ var _catalog_units: Array[UnitData] = []
 var _catalog_buildings: Array[BuildingData] = []
 var _faction_option: OptionButton = null
 var _combat_lab_open: bool = false
+var _engine_lab_39_open: bool = false
+var _btn_toggle_39_lab: Button = null
+var _row_39_lab: HBoxContainer = null
 var _is_collapsed: bool = false
 var _ai_telemetry_label: Label = null
 
@@ -157,6 +160,8 @@ func _ready() -> void:
 		)
 
 	_setup_genesis_catalog_controls()
+	if is_testbed:
+		_setup_39_engine_lab_controls()
 	_setup_ai_telemetry_label()
 
 	_refresh_edge_pan_button()
@@ -320,6 +325,87 @@ func _refresh_combat_lab_visibility() -> void:
 	if btn_toggle_combat_lab != null:
 		btn_toggle_combat_lab.text = "Combat Lab ▾" if _combat_lab_open else "Combat Lab ▸"
 		btn_toggle_combat_lab.modulate = Color(0.36, 1.0, 0.88, 1.0) if _combat_lab_open else Color(0.84, 0.92, 0.96, 0.92)
+
+
+func _setup_39_engine_lab_controls() -> void:
+	if body_vbox == null or _btn_toggle_39_lab != null:
+		return
+	var header_host: Node = btn_toggle_combat_lab.get_parent() if btn_toggle_combat_lab != null else body_vbox
+	_btn_toggle_39_lab = Button.new()
+	_btn_toggle_39_lab.name = "BtnToggle39EngineLab"
+	_btn_toggle_39_lab.focus_mode = Control.FOCUS_NONE
+	_btn_toggle_39_lab.add_theme_font_size_override("font_size", 10)
+	_btn_toggle_39_lab.tooltip_text = "Milestone 3.9 PRISMA_DEI Engine Foundations Lab (Testbed Only)"
+	_btn_toggle_39_lab.pressed.connect(func() -> void:
+		if AudioManager != null:
+			AudioManager.play_ui_click()
+		_engine_lab_39_open = not _engine_lab_39_open
+		_refresh_39_engine_lab_visibility()
+	)
+	header_host.add_child(_btn_toggle_39_lab)
+
+	_row_39_lab = HBoxContainer.new()
+	_row_39_lab.name = "EngineLab39Row"
+	_row_39_lab.add_theme_constant_override("separation", 6)
+
+	var btn_lattice: Button = Button.new()
+	btn_lattice.text = "Spawn Lattice Pair"
+	btn_lattice.focus_mode = Control.FOCUS_NONE
+	btn_lattice.add_theme_font_size_override("font_size", 10)
+	btn_lattice.modulate = Color(0.98, 0.82, 0.24, 1.0)
+	btn_lattice.tooltip_text = "Spawn Power Spire + Dependent Turret & Vat (salvage/destroy Spire to test Unpowered Dormancy)"
+	btn_lattice.pressed.connect(func() -> void:
+		if AudioManager != null:
+			AudioManager.play_ui_click()
+		if _spawner != null and _spawner.has_method("spawn_39_lattice_pair"):
+			_spawner.call("spawn_39_lattice_pair")
+	)
+	_row_39_lab.add_child(btn_lattice)
+
+	var btn_tether: Button = Button.new()
+	btn_tether.text = "Spawn Tether Squad"
+	btn_tether.focus_mode = Control.FOCUS_NONE
+	btn_tether.add_theme_font_size_override("font_size", 10)
+	btn_tether.modulate = Color(0.96, 0.42, 0.78, 1.0)
+	btn_tether.tooltip_text = "Spawn Optical Tether Relay + 4 Troopers (click twice to test 2x stack cap)"
+	btn_tether.pressed.connect(func() -> void:
+		if AudioManager != null:
+			AudioManager.play_ui_click()
+		if _spawner != null and _spawner.has_method("spawn_39_tether_squad"):
+			_spawner.call("spawn_39_tether_squad")
+	)
+	_row_39_lab.add_child(btn_tether)
+
+	var btn_beam: Button = Button.new()
+	btn_beam.text = "Spawn Prism Beam Tester"
+	btn_beam.focus_mode = Control.FOCUS_NONE
+	btn_beam.add_theme_font_size_override("font_size", 10)
+	btn_beam.modulate = Color(1.0, 0.72, 0.88, 1.0)
+	btn_beam.tooltip_text = "Spawn Escalating Continuous + Refracting Beam unit facing 3 high-HP enemy dummies"
+	btn_beam.pressed.connect(func() -> void:
+		if AudioManager != null:
+			AudioManager.play_ui_click()
+		if _spawner != null and _spawner.has_method("spawn_39_prism_beam_tester"):
+			_spawner.call("spawn_39_prism_beam_tester")
+	)
+	_row_39_lab.add_child(btn_beam)
+
+	body_vbox.add_child(_row_39_lab)
+	if combat_lab_row != null and combat_lab_row.get_parent() == body_vbox:
+		body_vbox.move_child(_row_39_lab, combat_lab_row.get_index() + 1)
+	_refresh_39_engine_lab_visibility()
+
+
+func _refresh_39_engine_lab_visibility() -> void:
+	if _row_39_lab != null:
+		_row_39_lab.visible = _engine_lab_39_open
+	if _btn_toggle_39_lab != null:
+		_btn_toggle_39_lab.text = "3.9 Engine Lab ▾" if _engine_lab_39_open else "3.9 Engine Lab ▸"
+		_btn_toggle_39_lab.modulate = Color(0.98, 0.82, 0.24, 1.0) if _engine_lab_39_open else Color(0.94, 0.62, 0.82, 0.92)
+	if margin_container != null:
+		margin_container.reset_size()
+	if panel_container != null:
+		panel_container.reset_size()
 
 
 func _refresh_catalog_team_button() -> void:

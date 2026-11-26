@@ -248,3 +248,46 @@ static func synth_alert_complete() -> AudioStreamWAV:
 
 static func synth_rank_up_chime() -> AudioStreamWAV:
 	return synth_chime(PackedFloat32Array([659.25, 880.0, 1318.5]), 0.055, 0.22)
+
+
+static func synth_prism_beam() -> AudioStreamWAV:
+	# Clean resonant crystalline beam pulse (harmonic fifth + octave shimmer, ~0.16s)
+	var dur: float = 0.16
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var ph1: float = 0.0
+	var ph2: float = 0.0
+	var ph3: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var f1: float = lerpf(440.0, 493.88, u)
+		ph1 += TAU * f1 / float(SAMPLE_RATE)
+		ph2 += TAU * (f1 * 1.5) / float(SAMPLE_RATE)
+		ph3 += TAU * (f1 * 3.0) / float(SAMPLE_RATE)
+		var env: float = minf(1.0, t / 0.008) * exp(-u * 2.6) * (1.0 - 0.35 * u)
+		var sig: float = sin(ph1) * 0.52 + sin(ph2) * 0.30 + sin(ph3) * 0.18
+		out[i] = clampf(sig * env * 0.24, -0.92, 0.92)
+	return make_wav(out)
+
+
+static func synth_prism_refract() -> AudioStreamWAV:
+	# Crisp glass-prism harmonic snap & split shimmer (~0.13s)
+	var dur: float = 0.13
+	var count: int = int(SAMPLE_RATE * dur)
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(count)
+	var ph_a: float = 0.0
+	var ph_b: float = 0.0
+	for i: int in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / dur
+		var f_a: float = lerpf(1568.0, 2349.32, pow(u, 0.4))
+		var f_b: float = lerpf(1174.66, 1760.0, u)
+		ph_a += TAU * f_a / float(SAMPLE_RATE)
+		ph_b += TAU * f_b / float(SAMPLE_RATE)
+		var env: float = minf(1.0, t / 0.002) * exp(-u * 6.0)
+		var sig: float = sin(ph_a) * 0.58 + sin(ph_b) * 0.42
+		out[i] = clampf(sig * env * 0.22, -0.92, 0.92)
+	return make_wav(out)

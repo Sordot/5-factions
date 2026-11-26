@@ -576,3 +576,180 @@ func clear_combat_lab_entities() -> void:
 			b.queue_free()
 
 	entities_changed.emit()
+
+
+# =============================================================================
+# MILESTONE 3.9 ENGINE LAB SPAWNERS (RUNTIME-CLONED TESTBED ONLY)
+# =============================================================================
+
+func spawn_39_lattice_pair() -> void:
+	var b_cont: Node = _get_buildings_container()
+	if b_cont == null:
+		return
+	var center: Vector2 = _clamp_to_walkable_arena(_get_camera_center_or_zero())
+
+	var pylon_scene: PackedScene = load("res://scenes/buildings/synapse_pylon.tscn") as PackedScene
+	var turret_scene: PackedScene = load(DEFENSE_TURRET_SCENE_PATH) as PackedScene
+	var vat_scene: PackedScene = load("res://scenes/buildings/cloning_vat.tscn") as PackedScene
+	if pylon_scene == null or turret_scene == null:
+		return
+
+	# 1. Runtime-cloned Power Spire (provides Consecrated Power Lattice + optical tether emitter)
+	var spire_node: Node = pylon_scene.instantiate()
+	if spire_node is Building:
+		var spire: Building = spire_node as Building
+		var base_spire_data: BuildingData = load("res://resources/buildings/synapse_pylon_data.tres") as BuildingData
+		var spire_data: BuildingData = (base_spire_data.duplicate() as BuildingData) if base_spire_data != null else BuildingData.new()
+		spire_data.display_name = "Power Spire [3.9 Lab]"
+		spire_data.provides_power_grid = true
+		spire_data.power_radius = 270.0
+		spire_data.requires_power_grid = false
+		spire_data.tether_emit_radius = 220.0
+		spire_data.tether_max_links = 2
+		spire_data.tether_fire_rate_bonus = 0.15
+		spire_data.tether_range_bonus = 25.0
+		spire_data.tether_beam_ramp_bonus = 0.30
+		spire.building_data = spire_data
+		spire.display_name = spire_data.display_name
+		spire.team = Unit.Team.PLAYER
+		spire.is_constructed = true
+		spire.global_position = _find_open_building_spot(center, spire.footprint_radius)
+		b_cont.add_child(spire)
+		spire.add_to_group("combat_lab_entities")
+
+		# 2. Dependent Turret inside the Spire's radius
+		var tur_node: Node = turret_scene.instantiate()
+		if tur_node is Building:
+			var tur: Building = tur_node as Building
+			var base_tur_data: BuildingData = load("res://resources/buildings/defense_turret_data.tres") as BuildingData
+			var tur_data: BuildingData = (base_tur_data.duplicate() as BuildingData) if base_tur_data != null else BuildingData.new()
+			tur_data.display_name = "Lattice Turret [3.9 Lab]"
+			tur_data.requires_power_grid = true
+			tur_data.provides_power_grid = false
+			tur_data.has_turret = true
+			if tur_data.turret_damage <= 0.0:
+				tur_data.turret_damage = 18.0
+				tur_data.turret_attack_range = 280.0
+			tur.building_data = tur_data
+			tur.display_name = tur_data.display_name
+			tur.team = Unit.Team.PLAYER
+			tur.is_constructed = true
+			tur.global_position = _find_open_building_spot(spire.global_position + Vector2(145.0, -35.0), tur.footprint_radius)
+			b_cont.add_child(tur)
+			tur.add_to_group("combat_lab_entities")
+
+		# 3. Dependent Production Vat inside the Spire's radius
+		if vat_scene != null:
+			var vat_node: Node = vat_scene.instantiate()
+			if vat_node is Building:
+				var vat: Building = vat_node as Building
+				var base_vat_data: BuildingData = load("res://resources/buildings/cloning_vat_data.tres") as BuildingData
+				var vat_data: BuildingData = (base_vat_data.duplicate() as BuildingData) if base_vat_data != null else BuildingData.new()
+				vat_data.display_name = "Lattice Vat [3.9 Lab]"
+				vat_data.requires_power_grid = true
+				vat_data.provides_power_grid = false
+				vat.building_data = vat_data
+				vat.display_name = vat_data.display_name
+				vat.team = Unit.Team.PLAYER
+				vat.is_constructed = true
+				vat.global_position = _find_open_building_spot(spire.global_position + Vector2(-145.0, -35.0), vat.footprint_radius)
+				b_cont.add_child(vat)
+				vat.add_to_group("combat_lab_entities")
+
+	entities_changed.emit()
+
+
+func spawn_39_tether_squad() -> void:
+	var container: Node = _get_units_container()
+	if container == null:
+		return
+	var center: Vector2 = _clamp_to_walkable_arena(_get_camera_center_or_zero())
+	var relay_scene: PackedScene = load("res://scenes/units/symbiote.tscn") as PackedScene
+	if relay_scene != null:
+		var r_node: Node = relay_scene.instantiate()
+		if r_node is Unit:
+			var relay: Unit = r_node as Unit
+			var base_u: UnitData = relay.data if relay.data != null else (load("res://resources/units/symbiote_data.tres") as UnitData)
+			var udata: UnitData = (base_u.duplicate() as UnitData) if base_u != null else UnitData.new()
+			udata.display_name = "Tether Relay [3.9 Lab]"
+			udata.tether_emit_radius = 220.0
+			udata.tether_max_links = 3
+			udata.tether_fire_rate_bonus = 0.20
+			udata.tether_range_bonus = 35.0
+			udata.tether_beam_ramp_bonus = 0.40
+			udata.weapon_tracer_color = Color(0.94, 0.22, 0.68, 0.96)
+			relay.data = udata
+			relay.team = Unit.Team.PLAYER
+			relay.position = _clamp_to_walkable_arena(center + Vector2(-45.0, 0.0))
+			container.add_child(relay)
+			relay.add_to_group("combat_lab_entities")
+
+	var squad: Array[Unit] = _spawn_batch(player_unit_scene, 4, center + Vector2(65.0, 0.0), 46.0, int(Unit.Team.PLAYER))
+	for u: Unit in squad:
+		u.add_to_group("combat_lab_entities")
+	entities_changed.emit()
+
+
+func spawn_39_prism_beam_tester() -> void:
+	var container: Node = _get_units_container()
+	if container == null:
+		return
+	var center: Vector2 = _clamp_to_walkable_arena(_get_camera_center_or_zero())
+	var beam_scene: PackedScene = load("res://scenes/units/arc_lancer.tscn") as PackedScene
+	var beam_unit: Unit = null
+	if beam_scene != null:
+		var b_node: Node = beam_scene.instantiate()
+		if b_node is Unit:
+			beam_unit = b_node as Unit
+			var base_b: UnitData = beam_unit.data if beam_unit.data != null else (load("res://resources/units/arc_lancer_data.tres") as UnitData)
+			var bdata: UnitData = (base_b.duplicate() as UnitData) if base_b != null else UnitData.new()
+			bdata.display_name = "Prism Beam [3.9 Lab]"
+			bdata.attack_damage = 8.0
+			bdata.attack_cooldown = 0.20
+			bdata.attack_range = 240.0
+			bdata.attack_windup = 0.04
+			bdata.line_pierce_width = 0.0
+			bdata.aoe_attack_radius = 0.0
+			bdata.bonus_vs_armored = 4.0
+			bdata.is_continuous_beam = true
+			bdata.beam_ramp_max_multiplier = 2.6
+			bdata.beam_ramp_duration = 2.8
+			bdata.beam_ramp_decay_delay = 0.45
+			bdata.beam_ramp_decay_rate = 1.6
+			bdata.refract_max_bounces = 2
+			bdata.refract_radius = 125.0
+			bdata.refract_damage_ratio = 0.50
+			bdata.weapon_tracer_style = &"prism_beam"
+			bdata.weapon_tracer_color = Color(0.94, 0.22, 0.68, 0.96)
+			bdata.weapon_tracer_width = 3.0
+			bdata.weapon_sfx_id = &"weapon_prism_beam"
+			beam_unit.data = bdata
+			beam_unit.team = Unit.Team.PLAYER
+			beam_unit.position = _clamp_to_walkable_arena(center + Vector2(-130.0, 0.0))
+			container.add_child(beam_unit)
+			beam_unit.add_to_group("combat_lab_entities")
+
+	# Spawn 3 clustered high-HP enemy Target Dummies so beam ramp & 2-bounce refraction are clearly visible
+	var offsets: Array[Vector2] = [Vector2(70.0, 0.0), Vector2(118.0, -48.0), Vector2(118.0, 48.0)]
+	var first_dummy: Unit = null
+	for off: Vector2 in offsets:
+		var d_node: Node = target_dummy_scene.instantiate()
+		if not (d_node is Unit):
+			d_node.queue_free()
+			continue
+		var dummy: Unit = d_node as Unit
+		var base_d: UnitData = dummy.data if dummy.data != null else UnitData.new()
+		var ddata: UnitData = base_d.duplicate() as UnitData
+		ddata.max_hp = 850.0
+		ddata.is_armored = true
+		dummy.data = ddata
+		dummy.team = Unit.Team.ENEMY
+		dummy.position = _clamp_to_walkable_arena(center + off)
+		container.add_child(dummy)
+		dummy.add_to_group("combat_lab_entities")
+		if first_dummy == null:
+			first_dummy = dummy
+
+	if beam_unit != null and first_dummy != null:
+		beam_unit.call_deferred("command_attack_target", first_dummy)
+	entities_changed.emit()

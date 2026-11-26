@@ -69,6 +69,23 @@ extends Resource
 @export var deployed_damage_reduction_bonus: float = 0.0
 @export var deployed_weapon_tracer_style: StringName = &""
 
+# Optional Optical Tether Emitter (Milestone 3.9 — Harmonic Communion)
+@export var tether_emit_radius: float = 0.0
+@export var tether_max_links: int = 0
+@export var tether_fire_rate_bonus: float = 0.0
+@export var tether_range_bonus: float = 0.0
+@export var tether_beam_ramp_bonus: float = 0.0
+
+# Optional Escalating Continuous Beam & Refracting Split-Beam (Milestone 3.9)
+@export var is_continuous_beam: bool = false
+@export var beam_ramp_max_multiplier: float = 1.0
+@export var beam_ramp_duration: float = 3.0
+@export var beam_ramp_decay_delay: float = 0.45
+@export var beam_ramp_decay_rate: float = 1.6
+@export var refract_max_bounces: int = 0
+@export var refract_radius: float = 0.0
+@export var refract_damage_ratio: float = 0.50
+
 
 func get_short_name() -> String:
 	return short_display_name if not short_display_name.is_empty() else display_name

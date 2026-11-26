@@ -67,6 +67,14 @@ signal rally_changed(building: Building)
 @export var overclock_cooldown: float = 50.0
 @export var shield_regen_aura_radius: float = 0.0
 @export var shield_regen_delay_speedup: float = 0.0
+@export var provides_power_grid: bool = false
+@export var power_radius: float = 0.0
+@export var requires_power_grid: bool = false
+@export var tether_emit_radius: float = 0.0
+@export var tether_max_links: int = 0
+@export var tether_fire_rate_bonus: float = 0.0
+@export var tether_range_bonus: float = 0.0
+@export var tether_beam_ramp_bonus: float = 0.0
 
 @onready var selection_ring: Node2D = get_node_or_null("SelectionRing") as Node2D
 @onready var body_visual: Node2D = get_node_or_null("BodyVisual") as Node2D
@@ -119,6 +127,9 @@ var _overclock_ui_tick: float = 0.0
 var _base_core_color: Color = Color(0.22, 0.94, 0.88, 1.0)
 var _compute_tick_timer: float = 0.0
 var _entity_visuals: EntityVisuals = null
+var is_powered: bool = true
+var _unpowered_pulse_time: float = 0.0
+var _last_unpowered_alert_ms: int = -99999
 
 
 func _ready() -> void:
@@ -141,6 +152,7 @@ func _ready() -> void:
 	if building_data != null:
 		_sync_turret_from_data(building_data)
 		_sync_defense_and_overclock_from_data(building_data)
+		_sync_lattice_and_tether_from_data(building_data)
 		if building_data.is_hub():
 			is_core_hub = true
 		if trainable_unit_data.is_empty():
@@ -190,6 +202,11 @@ func _ready() -> void:
 	_update_staff_slot_visuals()
 	if is_constructed:
 		_register_with_economy()
+		if requires_power_grid:
+			is_powered = Building.is_position_powered_for_team(get_tree(), global_position, int(team))
+			_update_construction_visuals()
+		if provides_power_grid:
+			Building.refresh_team_power_grid(get_tree(), int(team))
 		var econ_ready: EconomyManager = _get_economy_manager()
 		if econ_ready != null:
 			econ_ready.notify_building_tech_changed(team)
@@ -212,6 +229,8 @@ func _exit_tree() -> void:
 	if claimed_vent != null and is_instance_valid(claimed_vent):
 		claimed_vent.release_building(self)
 	_unregister_from_economy()
+	if provides_power_grid and not is_destroyed and is_inside_tree():
+		Building.refresh_team_power_grid(get_tree(), int(team), self)
 	_request_navmesh_rebake()
 
 
@@ -261,13 +280,17 @@ func _process(delta: float) -> void:
 			_complete_salvage()
 			return
 
-	if max_staff_slots > 0 and not assigned_engineers.is_empty():
+	if not is_powered and requires_power_grid:
+		_unpowered_pulse_time += delta
+		queue_redraw()
+
+	if max_staff_slots > 0 and not assigned_engineers.is_empty() and is_powered:
 		_tick_compute_generation(delta)
 
-	if production_component != null and not is_salvaging:
+	if production_component != null and not is_salvaging and is_powered:
 		production_component.tick(self, delta)
 
-	if turret_component != null and has_turret:
+	if turret_component != null and has_turret and is_powered:
 		turret_component.tick(delta)
 		if is_selected and turret_component.explicit_target != null:
 			queue_redraw()
@@ -302,6 +325,50 @@ func _draw_dashed_ring(center: Vector2, radius: float, col: Color, width: float,
 
 
 func _draw() -> void:
+	if is_selected and is_constructed and not is_destroyed and provides_power_grid and power_radius > 0.0:
+		var lat_r: float = power_radius
+		var gold_col: Color = Color(0.98, 0.80, 0.14, 0.56)
+		var mag_col: Color = Color(0.94, 0.22, 0.68, 0.62)
+		draw_circle(Vector2.ZERO, lat_r, Color(0.98, 0.80, 0.14, 0.04))
+		_draw_dashed_ring(Vector2.ZERO, lat_r, gold_col, 1.8, 44)
+		for li: int in range(12):
+			var la: float = float(li) * (TAU / 12.0)
+			var ldir: Vector2 = Vector2.RIGHT.rotated(la)
+			var lp: Vector2 = ldir * lat_r
+			if li % 3 == 0:
+				var dia_p: PackedVector2Array = PackedVector2Array([
+					lp + ldir * 4.5,
+					lp + ldir.orthogonal() * 3.5,
+					lp - ldir * 4.5,
+					lp - ldir.orthogonal() * 3.5,
+				])
+				draw_colored_polygon(dia_p, mag_col)
+			else:
+				draw_line(ldir * (lat_r - 5.0), ldir * (lat_r + 2.0), gold_col, 1.4, true)
+
+	if is_constructed and not is_destroyed and requires_power_grid and not is_powered:
+		var up_pulse: float = 0.55 + 0.45 * sin(_unpowered_pulse_time * 5.2)
+		var warn_amber: Color = Color(0.98, 0.72, 0.18, 0.75 + up_pulse * 0.23)
+		var warn_mag: Color = Color(0.94, 0.22, 0.58, 0.72 + up_pulse * 0.25)
+		var badge_y: float = (health_bar_root.position.y if health_bar_root != null else -(footprint_radius + 14.0)) - (18.0 if max_shield > 0.0 else 12.0)
+		var dia_c: Vector2 = Vector2(0.0, badge_y - 10.0)
+		var dia_pts: PackedVector2Array = PackedVector2Array([
+			dia_c + Vector2(0.0, -7.5),
+			dia_c + Vector2(7.5, 0.0),
+			dia_c + Vector2(0.0, 7.5),
+			dia_c + Vector2(-7.5, 0.0),
+		])
+		draw_colored_polygon(dia_pts, Color(0.05, 0.06, 0.10, 0.88))
+		draw_polyline(dia_pts + PackedVector2Array([dia_pts[0]]), warn_amber, 1.7, true)
+		draw_line(dia_c + Vector2(-5.5, 5.5), dia_c + Vector2(5.5, -5.5), warn_mag, 2.0, true)
+		var font_up: Font = ThemeDB.fallback_font
+		if font_up != null:
+			var up_lbl: String = "UNPOWERED"
+			var up_sz: Vector2 = font_up.get_string_size(up_lbl, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
+			var up_pos: Vector2 = Vector2(-up_sz.x * 0.5, badge_y + 2.0)
+			draw_rect(Rect2(up_pos + Vector2(-4.0, -up_sz.y), up_sz + Vector2(8.0, 4.0)), Color(0.05, 0.06, 0.10, 0.84), true)
+			draw_string(font_up, up_pos, up_lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, warn_amber)
+
 	if is_selected and is_constructed and not is_destroyed and shield_regen_aura_radius > 0.0:
 		var aura_r: float = shield_regen_aura_radius
 		var aura_col: Color = Color(0.220, 0.741, 0.973, 0.42)
@@ -415,6 +482,7 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 		base_batch_cost_multiplier = maxf(1.0, data.base_batch_cost_multiplier)
 		_sync_turret_from_data(data)
 		_sync_defense_and_overclock_from_data(data, true)
+		_sync_lattice_and_tether_from_data(data, true)
 		var resolved_units: Array[UnitData] = data.resolve_trainable_units()
 		if not resolved_units.is_empty():
 			trainable_unit_data = resolved_units
@@ -487,6 +555,84 @@ func _sync_defense_and_overclock_from_data(data: BuildingData, force_overwrite: 
 	if force_overwrite or data.shield_regen_aura_radius > 0.0:
 		shield_regen_aura_radius = maxf(0.0, data.shield_regen_aura_radius)
 		shield_regen_delay_speedup = maxf(0.0, data.shield_regen_delay_speedup)
+
+
+func _sync_lattice_and_tether_from_data(data: BuildingData, force_overwrite: bool = false) -> void:
+	if data == null:
+		return
+	if force_overwrite or data.provides_power_grid or data.power_radius > 0.0:
+		provides_power_grid = data.provides_power_grid
+		power_radius = maxf(0.0, data.power_radius)
+	if force_overwrite or data.requires_power_grid:
+		requires_power_grid = data.requires_power_grid
+	if force_overwrite or data.tether_emit_radius > 0.0 or data.tether_max_links > 0:
+		tether_emit_radius = maxf(0.0, data.tether_emit_radius)
+		tether_max_links = maxi(0, data.tether_max_links)
+		tether_fire_rate_bonus = maxf(0.0, data.tether_fire_rate_bonus)
+		tether_range_bonus = maxf(0.0, data.tether_range_bonus)
+		tether_beam_ramp_bonus = maxf(0.0, data.tether_beam_ramp_bonus)
+
+
+static func is_position_powered_for_team(tree: SceneTree, world_pos: Vector2, target_team: int, exclude_building: Building = null) -> bool:
+	if tree == null:
+		return false
+	var candidates: Array = SpatialGrid.query_buildings_in_radius(world_pos, 480.0) if SpatialGrid != null else tree.get_nodes_in_group("buildings")
+	for node: Variant in candidates:
+		if not is_instance_valid(node) or not (node is Building):
+			continue
+		var b: Building = node as Building
+		if b == exclude_building or b.is_destroyed or b.is_queued_for_deletion():
+			continue
+		if not b.is_constructed or b.is_salvaging:
+			continue
+		if int(b.team) != target_team:
+			continue
+		if not b.provides_power_grid or b.power_radius <= 0.0:
+			continue
+		if world_pos.distance_squared_to(b.global_position) <= b.power_radius * b.power_radius:
+			return true
+	return false
+
+
+static func refresh_team_power_grid(tree: SceneTree, target_team: int, exclude_building: Building = null) -> void:
+	if tree == null:
+		return
+	for node: Node in tree.get_nodes_in_group("buildings"):
+		if not is_instance_valid(node) or not (node is Building):
+			continue
+		var b: Building = node as Building
+		if b == exclude_building or b.is_destroyed or b.is_queued_for_deletion():
+			continue
+		if int(b.team) != target_team:
+			continue
+		var next_powered: bool = true
+		if b.is_constructed and b.requires_power_grid:
+			next_powered = Building.is_position_powered_for_team(tree, b.global_position, target_team, exclude_building)
+		if next_powered != b.is_powered:
+			b.set_powered_state(next_powered)
+
+
+func set_powered_state(powered: bool) -> void:
+	if is_powered == powered:
+		return
+	is_powered = powered
+	if is_powered:
+		_unpowered_pulse_time = 0.0
+	else:
+		if turret_component != null:
+			turret_component.current_target = null
+			turret_component.explicit_target = null
+		var is_local_owned: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Unit.Team.PLAYER)
+		if is_local_owned and is_inside_tree():
+			var now_ms: int = Time.get_ticks_msec()
+			if now_ms - _last_unpowered_alert_ms >= 6000:
+				_last_unpowered_alert_ms = now_ms
+				var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
+				if mm != null:
+					mm.push_tactical_alert(global_position, &"under_attack", "%s Unpowered!" % display_name)
+	_update_construction_visuals()
+	queue_redraw()
+	status_changed.emit(self)
 
 
 func _ensure_turret_component() -> void:
@@ -587,6 +733,11 @@ func _complete_construction() -> void:
 			get_parent().add_child(cfx)
 		cfx.setup_building_complete(global_position, footprint_radius, vfx_col)
 	_register_with_economy()
+	if requires_power_grid:
+		is_powered = Building.is_position_powered_for_team(get_tree(), global_position, int(team))
+		_update_construction_visuals()
+	if provides_power_grid:
+		Building.refresh_team_power_grid(get_tree(), int(team))
 	var econ_done: EconomyManager = _get_economy_manager()
 	if econ_done != null:
 		econ_done.notify_building_tech_changed(team)
@@ -635,7 +786,7 @@ func set_hovered(hovered: bool) -> void:
 
 
 func is_actively_producing() -> bool:
-	if is_destroyed or not is_constructed or is_salvaging:
+	if is_destroyed or not is_constructed or is_salvaging or not is_powered:
 		return false
 	if production_component != null and production_component.get_queue_size() > 0:
 		return true
@@ -940,39 +1091,39 @@ func get_assigned_engineer_count() -> int:
 
 
 func can_train_unit(slot_index: int) -> bool:
-	if production_component == null or slot_index < 0 or slot_index >= trainable_unit_data.size():
+	if not is_powered or production_component == null or slot_index < 0 or slot_index >= trainable_unit_data.size():
 		return false
 	var scene_override: PackedScene = trainable_unit_scenes[slot_index] if slot_index < trainable_unit_scenes.size() else null
 	return production_component.can_queue_unit(self, trainable_unit_data[slot_index], scene_override)
 
 
 func queue_unit_training(slot_index: int, play_audio: bool = true) -> bool:
-	if production_component == null or slot_index < 0 or slot_index >= trainable_unit_data.size():
+	if not is_powered or production_component == null or slot_index < 0 or slot_index >= trainable_unit_data.size():
 		return false
 	var scene_override: PackedScene = trainable_unit_scenes[slot_index] if slot_index < trainable_unit_scenes.size() else null
 	return production_component.enqueue_unit(self, trainable_unit_data[slot_index], scene_override, play_audio)
 
 
 func can_train_unit_data(unit_data: UnitData, scene_override: PackedScene = null) -> bool:
-	if production_component == null or unit_data == null:
+	if not is_powered or production_component == null or unit_data == null:
 		return false
 	return production_component.can_queue_unit(self, unit_data, scene_override)
 
 
 func queue_unit_data(unit_data: UnitData, scene_override: PackedScene = null, play_audio: bool = true) -> bool:
-	if production_component == null or unit_data == null:
+	if not is_powered or production_component == null or unit_data == null:
 		return false
 	return production_component.enqueue_unit(self, unit_data, scene_override, play_audio)
 
 
 func can_research_upgrade(upgrade_index: int) -> bool:
-	if production_component == null or upgrade_index < 0 or upgrade_index >= researchable_upgrades.size():
+	if not is_powered or production_component == null or upgrade_index < 0 or upgrade_index >= researchable_upgrades.size():
 		return false
 	return production_component.can_queue_upgrade(self, researchable_upgrades[upgrade_index])
 
 
 func queue_upgrade_research(upgrade_index: int) -> bool:
-	if production_component == null or upgrade_index < 0 or upgrade_index >= researchable_upgrades.size():
+	if not is_powered or production_component == null or upgrade_index < 0 or upgrade_index >= researchable_upgrades.size():
 		return false
 	return production_component.enqueue_upgrade(self, researchable_upgrades[upgrade_index])
 
@@ -1051,7 +1202,7 @@ func get_overclock_config_cooldown() -> float:
 
 
 func can_cast_overclock() -> bool:
-	return is_constructed and not is_destroyed and not is_salvaging and has_overclock_ability() and overclock_ability_cooldown <= 0.0
+	return is_constructed and is_powered and not is_destroyed and not is_salvaging and has_overclock_ability() and overclock_ability_cooldown <= 0.0
 
 
 func is_valid_overclock_target(caster_team: int) -> bool:
@@ -1279,6 +1430,8 @@ func start_salvage() -> bool:
 		return false
 	is_salvaging = true
 	salvage_elapsed = 0.0
+	if provides_power_grid and is_inside_tree():
+		Building.refresh_team_power_grid(get_tree(), int(team), self)
 	if AudioManager != null:
 		AudioManager.play_ui_click()
 	queue_redraw()
@@ -1291,6 +1444,8 @@ func cancel_salvage() -> void:
 		return
 	is_salvaging = false
 	salvage_elapsed = 0.0
+	if provides_power_grid and is_inside_tree():
+		Building.refresh_team_power_grid(get_tree(), int(team))
 	if AudioManager != null:
 		AudioManager.play_ui_click()
 	queue_redraw()
@@ -1603,6 +1758,21 @@ func get_inspection_data() -> Dictionary:
 	else:
 		stats.append({"label": "Status", "value": "Operational"})
 
+	if provides_power_grid and power_radius > 0.0:
+		stats.append({
+			"label": "Power Lattice",
+			"value": "%dpx Radius" % int(round(power_radius)),
+			"color": Color(0.98, 0.80, 0.14, 1.0),
+		})
+
+	if requires_power_grid and not is_powered:
+		subtitle = "UNPOWERED STRUCTURE"
+		stats.append({
+			"label": "Lattice",
+			"value": "UNPOWERED — Build Power Spire",
+			"color": Color(1.0, 0.42, 0.36, 1.0),
+		})
+
 	if is_overclocked():
 		stats.append({
 			"label": "Status",
@@ -1668,6 +1838,8 @@ func _destroy() -> void:
 		claimed_vent.release_building(self)
 	set_selected(false)
 	_unregister_from_economy()
+	if provides_power_grid and is_inside_tree():
+		Building.refresh_team_power_grid(get_tree(), int(team), self)
 	var econ_dead: EconomyManager = _get_economy_manager()
 	if econ_dead != null:
 		econ_dead.notify_building_tech_changed(team)
@@ -1780,7 +1952,10 @@ func _setup_procedural_visuals() -> void:
 
 func _update_construction_visuals() -> void:
 	if body_visual != null:
-		body_visual.modulate = Color.WHITE
+		if is_constructed and requires_power_grid and not is_powered:
+			body_visual.modulate = Color(0.68, 0.62, 0.74, 1.0)
+		else:
+			body_visual.modulate = Color.WHITE
 	if _entity_visuals != null:
 		_entity_visuals.queue_redraw()
 	if construct_bar_root != null and construct_bar_fill != null:

@@ -70,6 +70,8 @@ const SPECTATOR_BAR_SCENE_PATH: String = "res://ui/hud/spectator_comparison_bar.
 const MATCH_END_OVERLAY_SCENE_PATH: String = "res://ui/hud/match_end_overlay.tscn"
 const HOLDOUT_CONTROLLER_SCRIPT: GDScript = preload("res://scripts/systems/holdout_mode_controller.gd")
 const GAUNTLET_CONTROLLER_SCRIPT: GDScript = preload("res://scripts/systems/gauntlet_mode_controller.gd")
+const OPTICAL_TETHER_SYSTEM_SCRIPT: GDScript = preload("res://scripts/systems/optical_tether_system.gd")
+const OPTICAL_TETHER_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/optical_tether_overlay.gd")
 const MAX_HEATMAP_EVENTS: int = 800
 
 
@@ -127,6 +129,7 @@ func _initialize_match_runtime() -> void:
 	if not is_inside_tree():
 		return
 	_ensure_pause_menu()
+	_ensure_optical_tether_system()
 	var proc_gen: Node = get_tree().get_first_node_in_group("procedural_arena_generator")
 	if proc_gen != null and is_instance_valid(proc_gen) and proc_gen.has_method("generate_arena"):
 		proc_gen.call("generate_arena")
@@ -154,6 +157,20 @@ func _initialize_match_runtime() -> void:
 		_schedule_starting_worker_dispatch()
 	if not is_gauntlet:
 		_play_match_start_boot_sequence()
+
+
+func _ensure_optical_tether_system() -> void:
+	if not is_inside_tree():
+		return
+	var host: Node = get_parent() if get_parent() != null else self
+	if get_tree().get_first_node_in_group("optical_tether_system") == null:
+		var sys: OpticalTetherSystem = OPTICAL_TETHER_SYSTEM_SCRIPT.new() as OpticalTetherSystem
+		sys.name = "OpticalTetherSystem"
+		host.add_child(sys)
+	if get_tree().get_first_node_in_group("optical_tether_overlay") == null:
+		var ov: OpticalTetherOverlay = OPTICAL_TETHER_OVERLAY_SCRIPT.new() as OpticalTetherOverlay
+		ov.name = "OpticalTetherOverlay"
+		host.add_child(ov)
 
 
 func _start_holdout_controller() -> void:

@@ -50,6 +50,15 @@ func get_building_for_role(role: StringName) -> BuildingData:
 	return null
 
 
+func get_power_provider_building() -> BuildingData:
+	if faction == null:
+		return null
+	for b: BuildingData in faction.building_roster:
+		if b != null and b.provides_power_grid and b.power_radius > 0.0:
+			return b
+	return null
+
+
 func get_unit_for_role(role_tag: StringName) -> UnitData:
 	if faction == null:
 		return null

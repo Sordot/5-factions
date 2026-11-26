@@ -618,6 +618,11 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 			result["reason"] = "Requires %s" % req_name
 			return result
 
+	if building_data.requires_power_grid:
+		if not Building.is_position_powered_for_team(get_tree(), place_pos, int(target_team)):
+			result["reason"] = "Requires Power Lattice"
+			return result
+
 	if econ != null and not econ.can_afford(target_team, building_data.get_cost_dict()):
 		result["reason"] = "Need %s" % building_data.get_cost_label()
 		return result

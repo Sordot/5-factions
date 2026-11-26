@@ -1436,7 +1436,21 @@ func get_effective_attack_range() -> float:
 		var econ: EconomyManager = _get_economy_manager()
 		if econ != null:
 			rng += econ.get_rail_range_bonus(int(team))
+	if rng > 0.0 and status_effect_component != null:
+		rng += float(status_effect_component.call("get_bonus_attack_range"))
 	return rng
+
+
+func get_effective_beam_ramp_speed_multiplier() -> float:
+	if status_effect_component != null:
+		return float(status_effect_component.call("get_beam_ramp_speed_multiplier"))
+	return 1.0
+
+
+func get_optical_tether_stacks() -> int:
+	if status_effect_component != null:
+		return int(status_effect_component.call("get_optical_tether_stacks"))
+	return 0
 
 
 func get_effective_min_attack_range() -> float:
@@ -1755,6 +1769,7 @@ func _physics_process(delta: float) -> void:
 
 	if combat_component != null:
 		combat_component.tick_cooldown(delta)
+		combat_component.tick_beam_decay(self, delta)
 	if ability_component != null:
 		ability_component.tick_cooldowns(delta)
 		ability_component.tick_autocast(self, delta)
@@ -2675,6 +2690,22 @@ func get_inspection_data() -> Dictionary:
 				})
 			else:
 				stats.append({"label": "Kills", "value": "%d" % kill_count})
+
+		var tether_stacks: int = get_optical_tether_stacks()
+		if tether_stacks > 0:
+			stats.append({
+				"label": "Lattice Link",
+				"value": "x%d Active" % tether_stacks,
+				"color": Color(0.98, 0.80, 0.14, 1.0),
+			})
+		if data.is_continuous_beam and combat_component != null:
+			var ramp_pct: int = int(round(combat_component.get_beam_ramp_ratio(self) * 100.0))
+			if ramp_pct > 0:
+				stats.append({
+					"label": "Beam Charge",
+					"value": "%d%% (%.1fx)" % [ramp_pct, lerpf(1.0, maxf(1.0, data.beam_ramp_max_multiplier), float(ramp_pct) * 0.01)],
+					"color": Color(0.94, 0.22, 0.68, 1.0),
+				})
 
 	var is_local_controlled: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (not is_enemy)
 	return {

@@ -10,6 +10,8 @@ enum TracerStyle {
 	HEAVY_SLUG = 5,
 	RAIL_LANCE = 6,
 	ARC_TETHER = 7,
+	PRISM_BEAM = 8,
+	PRISM_REFRACT = 9,
 }
 
 @export var color: Color = Color(0.35, 0.98, 0.92, 0.95)
@@ -22,6 +24,10 @@ var _arc_height: float = 0.0
 var _style: int = TracerStyle.PULSE_BOLT
 var _elapsed: float = 0.0
 var _hide_origin_muzzle: bool = false
+var _live_from_node: Node2D = null
+var _live_to_node: Node2D = null
+var _beam_intensity: float = 0.0
+var _muzzle_dist: float = 16.0
 var is_pooled: bool = false
 
 
@@ -35,6 +41,10 @@ func reset_for_pool() -> void:
 	_style = TracerStyle.PULSE_BOLT
 	_elapsed = 0.0
 	_hide_origin_muzzle = false
+	_live_from_node = null
+	_live_to_node = null
+	_beam_intensity = 0.0
+	_muzzle_dist = 16.0
 	global_position = Vector2.ZERO
 
 
@@ -63,7 +73,19 @@ func setup(
 	_arc_height = arc_height
 	_style = TracerStyle.ARC_SHELL if arc_height > 1.0 else style
 	_hide_origin_muzzle = hide_origin_muzzle
+	_live_from_node = null
+	_live_to_node = null
+	_beam_intensity = 0.0
+	_muzzle_dist = 16.0
 	_elapsed = 0.0
+	queue_redraw()
+
+
+func attach_live_endpoints(from_node: Node2D, to_node: Node2D, intensity: float = 0.0, muzzle_dist: float = 16.0) -> void:
+	_live_from_node = from_node
+	_live_to_node = to_node
+	_beam_intensity = clampf(intensity, 0.0, 1.0)
+	_muzzle_dist = maxf(0.0, muzzle_dist)
 	queue_redraw()
 
 
@@ -80,6 +102,13 @@ func _draw() -> void:
 	var fade: float = 1.0 - t
 	var alpha: float = fade * color.a
 	var draw_col: Color = Color(color.r, color.g, color.b, alpha)
+
+	if _live_to_node != null and is_instance_valid(_live_to_node):
+		end_world = _live_to_node.global_position
+	if _live_from_node != null and is_instance_valid(_live_from_node):
+		var aim_vec: Vector2 = end_world - _live_from_node.global_position
+		var aim_dir: Vector2 = aim_vec.normalized() if aim_vec.length_squared() > 1.0 else Vector2.RIGHT
+		start_world = _live_from_node.global_position + aim_dir * _muzzle_dist
 
 	var effective_start: Vector2 = start_world.lerp(end_world, 0.28) if _hide_origin_muzzle else start_world
 	var p0: Vector2 = to_local(effective_start)
@@ -214,6 +243,55 @@ func _draw() -> void:
 			draw_polyline(pts_arc, draw_col, line_width, true)
 			draw_polyline(pts_arc, Color(0.95, 0.99, 1.0, alpha * 0.90), maxf(1.0, line_width * 0.42), true)
 			draw_circle(p1, lerpf(6.5, 1.8, t), cyan_halo)
+
+		TracerStyle.PRISM_BEAM:
+			# Escalating continuous optical beam: shifts Electric Magenta -> Liturgical Gold -> White-Gold core
+			var hold_fade: float = 1.0 if t < 0.65 else clampf(1.0 - (t - 0.65) / 0.35, 0.0, 1.0)
+			var b_alpha: float = hold_fade * maxf(color.a, 0.92)
+			var magenta_c: Color = Color(0.94, 0.22, 0.68, 1.0)
+			var gold_c: Color = Color(0.98, 0.82, 0.18, 1.0)
+			var beam_tint: Color = magenta_c.lerp(gold_c, _beam_intensity)
+			var glow_w: float = line_width * lerpf(2.3, 3.1, _beam_intensity)
+			var core_w: float = maxf(1.3, line_width * lerpf(0.42, 0.64, _beam_intensity))
+			draw_line(p0, p1, Color(beam_tint.r, beam_tint.g, beam_tint.b, b_alpha * 0.34), glow_w, true)
+			draw_line(p0, p1, Color(beam_tint.r, beam_tint.g, beam_tint.b, b_alpha * 0.95), line_width, true)
+			draw_line(p0, p1, Color(1.0, 0.98, 0.92, b_alpha), core_w, true)
+			# Bauhaus diamond focal lens at emitter & crystalline impact star at target
+			if not _hide_origin_muzzle:
+				var lens_r: float = lerpf(4.2, 7.6, _beam_intensity) * hold_fade
+				var lens_pts: PackedVector2Array = PackedVector2Array([
+					p0 + dir * (lens_r * 1.25),
+					p0 + perp * lens_r,
+					p0 - dir * (lens_r * 0.55),
+					p0 - perp * lens_r,
+				])
+				draw_colored_polygon(lens_pts, Color(1.0, 0.96, 0.86, b_alpha * 0.92))
+			var hit_r: float = lerpf(5.0, 10.5, _beam_intensity) * hold_fade
+			var hit_pts: PackedVector2Array = PackedVector2Array([
+				p1 + dir * hit_r,
+				p1 + perp * hit_r,
+				p1 - dir * hit_r,
+				p1 - perp * hit_r,
+			])
+			draw_colored_polygon(hit_pts, Color(beam_tint.r, beam_tint.g, beam_tint.b, b_alpha * 0.82))
+			draw_circle(p1, hit_r * 0.45, Color(1.0, 0.99, 0.94, b_alpha))
+
+		TracerStyle.PRISM_REFRACT:
+			# Crisp crystalline split-beam bounce ray with diamond refraction glint
+			var r_col: Color = Color(color.r, color.g, color.b, alpha * 0.94)
+			draw_line(p0, p1, Color(0.94, 0.22, 0.68, alpha * 0.36), line_width * 2.1, true)
+			draw_line(p0, p1, r_col, line_width, true)
+			draw_line(p0, p1, Color(1.0, 0.98, 0.90, alpha * 0.96), maxf(1.0, line_width * 0.45), true)
+			var glint_r: float = lerpf(5.2, 1.5, t)
+			if not _hide_origin_muzzle:
+				var o_pts: PackedVector2Array = PackedVector2Array([
+					p0 + dir * glint_r,
+					p0 + perp * glint_r,
+					p0 - dir * glint_r,
+					p0 - perp * glint_r,
+				])
+				draw_colored_polygon(o_pts, Color(1.0, 0.95, 0.78, alpha * 0.90))
+			draw_circle(p1, lerpf(4.8, 1.4, t), r_col)
 
 		_:
 			# PULSE_BOLT (Clone Trooper / standard): brief muzzle flash + crisp tapering energy bolt

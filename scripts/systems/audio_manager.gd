@@ -114,6 +114,8 @@ var _cooldowns_ms: Dictionary = {
 	&"relay_captured": 450,
 	&"deploy_lock": 90,
 	&"deploy_release": 90,
+	&"weapon_prism_beam": 80,
+	&"weapon_prism_refract": 75,
 	&"match_victory": 500,
 	&"match_defeat": 500,
 }
@@ -437,7 +439,8 @@ func play_sfx(
 	volume_db_offset: float = 0.0,
 	pitch_jitter: float = 0.0,
 	world_pos: Vector2 = Vector2.INF,
-	allow_offscreen_cull: bool = true
+	allow_offscreen_cull: bool = true,
+	base_pitch: float = 1.0
 ) -> void:
 	if is_effectively_muted() or master_volume_linear <= 0.005:
 		return
@@ -471,9 +474,9 @@ func play_sfx(
 	player.stream = _streams[sfx_id] as AudioStreamWAV
 	player.volume_db = volume_db_offset + spatial_db + _slider_to_db(channel_linear)
 	if pitch_jitter > 0.0:
-		player.pitch_scale = 1.0 + randf_range(-pitch_jitter, pitch_jitter)
+		player.pitch_scale = maxf(0.25, base_pitch + randf_range(-pitch_jitter, pitch_jitter))
 	else:
-		player.pitch_scale = 1.0
+		player.pitch_scale = maxf(0.25, base_pitch)
 	player.play()
 
 
@@ -841,6 +844,8 @@ func _generate_procedural_library() -> void:
 	_streams[&"relay_captured"] = SynthPrimitives.synth_chime(PackedFloat32Array([659.25, 987.77, 1318.51]), 0.06, 0.22)
 	_streams[&"deploy_lock"] = SynthPrimitives.synth_double_chirp(320.0, 145.0, 0.14, 0.28)
 	_streams[&"deploy_release"] = SynthPrimitives.synth_double_chirp(185.0, 380.0, 0.13, 0.24)
+	_streams[&"weapon_prism_beam"] = SynthPrimitives.synth_prism_beam()
+	_streams[&"weapon_prism_refract"] = SynthPrimitives.synth_prism_refract()
 	_streams[&"ai_transmission"] = SynthPrimitives.synth_chime(PackedFloat32Array([740.0, 1110.0]), 0.042, 0.16)
 	_streams[&"match_victory"] = SynthPrimitives.synth_chime(PackedFloat32Array([523.25, 659.25, 783.99, 1046.5, 1318.5]), 0.11, 0.30)
 	_streams[&"match_defeat"] = SynthPrimitives.synth_chime(PackedFloat32Array([440.0, 392.0, 329.63, 246.94]), 0.14, 0.30)

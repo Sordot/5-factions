@@ -1889,6 +1889,12 @@ func _try_place_and_build(data: BuildingData, preferred_pos: Vector2, fallback_o
 
 	var spot: Vector2 = _find_valid_build_position(data, preferred_pos, fallback_origin)
 	if spot == Vector2.INF:
+		if data.requires_power_grid and _planner != null:
+			var power_data: BuildingData = _planner.get_power_provider_building()
+			if power_data != null and power_data != data and econ.can_afford(ai_team, power_data.get_cost_dict()):
+				var p_spot: Vector2 = _find_valid_build_position(power_data, preferred_pos, fallback_origin)
+				if p_spot != Vector2.INF and econ.spend_resources(ai_team, power_data.get_cost_dict()):
+					return _instantiate_ai_building(power_data, p_spot, worker, null)
 		return null
 
 	if not econ.spend_resources(ai_team, data.get_cost_dict()):
@@ -2005,6 +2011,42 @@ func _try_emit_ai_transmission(category: StringName, safe_world_pos: Vector2 = V
 
 
 func _find_valid_build_position(data: BuildingData, preferred_pos: Vector2, fallback_origin: Vector2) -> Vector2:
+	if data != null and data.requires_power_grid and is_inside_tree():
+		var footprint_r: float = data.get_footprint_radius()
+		var providers: Array[Building] = []
+		for node: Node in get_tree().get_nodes_in_group("buildings"):
+			if not (node is Building) or not is_instance_valid(node):
+				continue
+			var b: Building = node as Building
+			if b.is_destroyed or not b.is_constructed or b.is_salvaging or int(b.team) != int(ai_team):
+				continue
+			if b.provides_power_grid and b.power_radius > footprint_r + 24.0:
+				providers.append(b)
+		if providers.is_empty():
+			return Vector2.INF
+		providers.sort_custom(func(a: Building, b: Building) -> bool:
+			return a.global_position.distance_squared_to(preferred_pos) < b.global_position.distance_squared_to(preferred_pos)
+		)
+		var p_steps: int = 12
+		for prov: Building in providers:
+			var max_r: float = maxf(prov.footprint_radius + footprint_r + 18.0, prov.power_radius - footprint_r - 12.0)
+			var min_r: float = prov.footprint_radius + footprint_r + 16.0
+			var ring_radii: PackedFloat32Array = PackedFloat32Array([
+				min_r,
+				lerpf(min_r, max_r, 0.45),
+				lerpf(min_r, max_r, 0.80),
+				max_r,
+			])
+			for r: float in ring_radii:
+				if r > prov.power_radius - 6.0:
+					continue
+				for k: int in range(p_steps):
+					var angle: float = TAU * float(k) / float(p_steps)
+					var candidate: Vector2 = prov.global_position + Vector2.RIGHT.rotated(angle) * r
+					if _is_build_spot_valid(data, candidate):
+						return candidate
+		return Vector2.INF
+
 	var anchors: Array[Vector2] = [preferred_pos, fallback_origin]
 	var radii: PackedFloat32Array = PackedFloat32Array([0.0, 75.0, 125.0, 175.0, 230.0, 290.0])
 	var angle_steps: int = 12
@@ -2062,6 +2104,8 @@ func _is_build_spot_valid(data: BuildingData, world_pos: Vector2) -> bool:
 			var min_d: float = rn.collision_radius + new_radius + 8.0
 			if rn.global_position.distance_squared_to(world_pos) < min_d * min_d:
 				return false
+	if data.requires_power_grid and not Building.is_position_powered_for_team(get_tree(), world_pos, int(ai_team)):
+		return false
 	return true
 
 

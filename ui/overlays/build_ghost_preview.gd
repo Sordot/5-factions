@@ -82,6 +82,10 @@ func _draw() -> void:
 			var ha: float = float(hi) * (TAU / 18.0)
 			draw_circle(preview_pos + Vector2.RIGHT.rotated(ha) * (aura_r - 5.0), 1.8, amber_dot if (hi % 3 == 0) else aura_col)
 
+	# 2.6 Consecrated Power Lattice overlay (Milestone 3.9)
+	if building_data.provides_power_grid or building_data.requires_power_grid:
+		_draw_power_lattice_preview(preview_pos)
+
 	# 3. Drop-off tether lines & node rings for economy hubs (Nexus Vat / Biomass Silo / Silica Condenser)
 	if building_data.is_dropoff:
 		_draw_dropoff_tethers(preview_pos, building_data.get_dropoff_resources())
@@ -213,6 +217,67 @@ func _draw_friendly_alignment_guides(origin: Vector2, half: Vector2) -> void:
 			var perp: Vector2 = dir.orthogonal() * 4.5
 			draw_line(p_from - perp, p_from + perp, Color(0.46, 0.96, 1.0, 0.36), 1.2)
 			draw_line(p_to - perp, p_to + perp, Color(0.46, 0.96, 1.0, 0.36), 1.2)
+
+
+func _draw_power_lattice_preview(origin: Vector2) -> void:
+	if not is_inside_tree() or building_data == null:
+		return
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	var gold: Color = Color(0.98, 0.80, 0.14, 0.72)
+	var magenta: Color = Color(0.94, 0.22, 0.68, 0.68)
+	var warn_red: Color = Color(1.0, 0.34, 0.30, 0.78)
+
+	var nearest_provider: Building = null
+	var nearest_d_sq: float = INF
+	var is_covered_by_provider: bool = false
+
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(node) or not (node is Building):
+			continue
+		var b: Building = node as Building
+		if b.is_destroyed or b.is_queued_for_deletion():
+			continue
+		if local_team >= 0 and int(b.team) != local_team:
+			continue
+		if b.is_constructed and not b.is_salvaging and b.provides_power_grid and b.power_radius > 0.0:
+			var pr: float = b.power_radius
+			draw_circle(b.global_position, pr, Color(0.98, 0.80, 0.14, 0.04))
+			_draw_dashed_ring(b.global_position, pr, Color(0.98, 0.80, 0.14, 0.56), 1.6, 40)
+			var d_sq: float = origin.distance_squared_to(b.global_position)
+			if d_sq <= pr * pr:
+				is_covered_by_provider = true
+			if d_sq < nearest_d_sq:
+				nearest_d_sq = d_sq
+				nearest_provider = b
+		elif building_data.provides_power_grid and building_data.power_radius > 0.0 and b.is_constructed and b.requires_power_grid and not b.is_powered:
+			if origin.distance_squared_to(b.global_position) <= building_data.power_radius * building_data.power_radius:
+				_draw_dashed_line(origin, b.global_position, Color(0.98, 0.84, 0.22, 0.90), 1.8, 8.0, 5.0)
+				draw_arc(b.global_position, b.footprint_radius + 7.0, 0.0, TAU, 28, gold, 2.0, true)
+
+	if building_data.provides_power_grid and building_data.power_radius > 0.0:
+		var ghost_r: float = building_data.power_radius
+		var ring_col: Color = gold if is_valid else Color(1.0, 0.36, 0.32, 0.38)
+		var accent_col: Color = magenta if is_valid else Color(1.0, 0.36, 0.32, 0.42)
+		draw_circle(origin, ghost_r, Color(ring_col.r, ring_col.g, ring_col.b, 0.05))
+		_draw_dashed_ring(origin, ghost_r, ring_col, 1.8, 44)
+		for k: int in range(12):
+			var ang: float = float(k) * (TAU / 12.0)
+			var dir_k: Vector2 = Vector2.RIGHT.rotated(ang)
+			var p_in: Vector2 = origin + dir_k * (ghost_r - 7.0)
+			var p_out: Vector2 = origin + dir_k * (ghost_r + 3.0)
+			draw_line(p_in, p_out, accent_col if (k % 2 == 0) else ring_col, 1.5, true)
+
+	if building_data.requires_power_grid and nearest_provider != null:
+		var link_col: Color = gold if is_covered_by_provider else warn_red
+		_draw_dashed_line(origin, nearest_provider.global_position, link_col, 1.7, 9.0, 6.0)
+		var mid_pt: Vector2 = origin.lerp(nearest_provider.global_position, 0.5)
+		var dia: PackedVector2Array = PackedVector2Array([
+			mid_pt + Vector2(0.0, -4.5),
+			mid_pt + Vector2(4.5, 0.0),
+			mid_pt + Vector2(0.0, 4.5),
+			mid_pt + Vector2(-4.5, 0.0),
+		])
+		draw_colored_polygon(dia, link_col)
 
 
 func _draw_dashed_ring(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:

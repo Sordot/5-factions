@@ -61,6 +61,18 @@ extends Resource
 @export var shield_regen_aura_radius: float = 0.0
 @export var shield_regen_delay_speedup: float = 0.0
 
+# Optional Consecrated Power Lattice (Milestone 3.9)
+@export var provides_power_grid: bool = false
+@export var power_radius: float = 0.0
+@export var requires_power_grid: bool = false
+
+# Optional Optical Tether Emitter (Milestone 3.9 — Harmonic Communion)
+@export var tether_emit_radius: float = 0.0
+@export var tether_max_links: int = 0
+@export var tether_fire_rate_bonus: float = 0.0
+@export var tether_range_bonus: float = 0.0
+@export var tether_beam_ramp_bonus: float = 0.0
+
 
 func get_short_name() -> String:
 	return short_display_name if not short_display_name.is_empty() else display_name

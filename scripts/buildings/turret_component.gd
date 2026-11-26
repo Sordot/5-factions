@@ -27,7 +27,7 @@ func bind_building(building: Building) -> void:
 
 
 func set_explicit_target(target: Node2D) -> bool:
-	if owner_building == null or owner_building.is_destroyed or not owner_building.is_constructed or owner_building.is_salvaging:
+	if owner_building == null or owner_building.is_destroyed or not owner_building.is_constructed or not owner_building.is_powered or owner_building.is_salvaging:
 		return false
 	if not is_valid_target(target) or not is_in_attack_range(target):
 		return false
@@ -48,7 +48,7 @@ func tick(delta: float) -> void:
 	if cooldown > 0.0:
 		cooldown = maxf(0.0, cooldown - delta)
 
-	if not owner_building.is_constructed or owner_building.is_salvaging:
+	if not owner_building.is_constructed or not owner_building.is_powered or owner_building.is_salvaging:
 		current_target = null
 		explicit_target = null
 		return

@@ -21,6 +21,9 @@ var attack_phase: AttackPhase = AttackPhase.IDLE
 var _windup_timer: float = 0.0
 var _backswing_timer: float = 0.0
 var _windup_target: Node2D = null
+var _beam_lock_target: Node2D = null
+var _beam_ramp_elapsed: float = 0.0
+var _beam_grace_timer: float = 0.0
 
 
 func tick_cooldown(delta: float) -> void:
@@ -30,6 +33,28 @@ func tick_cooldown(delta: float) -> void:
 		_backswing_timer = maxf(0.0, _backswing_timer - delta)
 		if _backswing_timer <= 0.0:
 			attack_phase = AttackPhase.IDLE
+
+
+func get_beam_ramp_ratio(owner_unit: Unit) -> float:
+	if owner_unit == null or owner_unit.data == null or not owner_unit.data.is_continuous_beam:
+		return 0.0
+	return clampf(_beam_ramp_elapsed / maxf(0.1, owner_unit.data.beam_ramp_duration), 0.0, 1.0)
+
+
+func tick_beam_decay(owner_unit: Unit, delta: float) -> void:
+	if owner_unit == null or owner_unit.data == null or not owner_unit.data.is_continuous_beam:
+		return
+	if _beam_lock_target != null and not is_valid_target(owner_unit, _beam_lock_target):
+		_beam_lock_target = null
+	if _beam_grace_timer > 0.0:
+		_beam_grace_timer = maxf(0.0, _beam_grace_timer - delta)
+		return
+	if _beam_ramp_elapsed > 0.0:
+		var decay_rate: float = maxf(0.1, owner_unit.data.beam_ramp_decay_rate)
+		_beam_ramp_elapsed = maxf(0.0, _beam_ramp_elapsed - decay_rate * delta)
+		if _beam_ramp_elapsed <= 0.001:
+			_beam_ramp_elapsed = 0.0
+			_beam_lock_target = null
 
 
 func cancel_attack_animation() -> void:
@@ -397,22 +422,26 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 		shot_col.a = maxf(base_weapon_col.a, 0.94)
 
 	# Milestone 3.6: Calibrated visual chassis recoil & heavy muzzle shock rings
+	var is_continuous_beam: bool = owner_unit.data != null and owner_unit.data.is_continuous_beam
 	var is_heavy_shot: bool = (
-		aoe_radius > 0.0
-		or pierce_width > 0.0
-		or (owner_unit.data != null and owner_unit.data.is_heavy_unit())
-		or tracer_style == &"rail_lance"
-		or tracer_style == &"rail"
-		or tracer_style == &"rail_beam"
+		not is_continuous_beam
+		and (
+			aoe_radius > 0.0
+			or pierce_width > 0.0
+			or (owner_unit.data != null and owner_unit.data.is_heavy_unit())
+			or tracer_style == &"rail_lance"
+			or tracer_style == &"rail"
+			or tracer_style == &"rail_beam"
+		)
 	)
-	var kick_px: float = 1.2
+	var kick_px: float = 0.55 if is_continuous_beam else 1.2
 	if aoe_radius > 0.0 and owner_unit.is_deployed():
 		kick_px = 6.2
 	elif is_heavy_shot:
 		kick_px = 5.0 if (owner_unit.data != null and owner_unit.data.is_heavy_unit()) else 4.5
-	elif (owner_unit.data != null and owner_unit.data.is_armored) or tracer_style == &"heavy_slug" or tracer_style == &"heavy":
+	elif not is_continuous_beam and ((owner_unit.data != null and owner_unit.data.is_armored) or tracer_style == &"heavy_slug" or tracer_style == &"heavy"):
 		kick_px = 2.8
-	elif owner_unit.get_effective_attack_cooldown() >= 0.9:
+	elif not is_continuous_beam and owner_unit.get_effective_attack_cooldown() >= 0.9:
 		kick_px = 2.0
 	owner_unit.trigger_weapon_recoil(kick_px)
 
@@ -429,6 +458,32 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 				mfx.z_index = 54
 				owner_unit.get_parent().add_child(mfx)
 			mfx.setup_muzzle_shock(tracer_origin, aim_d, shock_r, shot_col, is_brutal_ms)
+
+	if is_continuous_beam:
+		if _beam_lock_target != target_node:
+			_beam_lock_target = target_node
+			_beam_ramp_elapsed = 0.0
+		var ramp_speed_mult: float = owner_unit.get_effective_beam_ramp_speed_multiplier()
+		var tick_dt: float = owner_unit.get_effective_attack_cooldown()
+		var ramp_dur: float = maxf(0.1, owner_unit.data.beam_ramp_duration)
+		_beam_ramp_elapsed = minf(ramp_dur, _beam_ramp_elapsed + tick_dt * ramp_speed_mult)
+		_beam_grace_timer = maxf(tick_dt + 0.06, owner_unit.data.beam_ramp_decay_delay)
+		var ramp_ratio: float = clampf(_beam_ramp_elapsed / ramp_dur, 0.0, 1.0)
+		var ramp_mult: float = lerpf(1.0, maxf(1.0, owner_unit.data.beam_ramp_max_multiplier), ramp_ratio)
+		var beam_dmg: float = base_dmg * ramp_mult
+		var beam_bonus_armored: float = bonus_armored * ramp_mult
+		if AudioManager != null and _is_pos_audible(owner_unit, tracer_origin, tracer_end):
+			var sfx_pos_b: Vector2 = owner_unit.global_position if _is_point_visible_local(owner_unit, tracer_origin) else tracer_end
+			var beam_sfx_id: StringName = owner_unit.data.weapon_sfx_id if (owner_unit.data.weapon_sfx_id != &"" and owner_unit.data.weapon_sfx_id != &"weapon_rifle") else &"weapon_prism_beam"
+			AudioManager.play_sfx(beam_sfx_id, -6.5, 0.02, sfx_pos_b, true, lerpf(0.95, 1.28, ramp_ratio))
+			if AudioManager.has_method("notify_combat_activity"):
+				AudioManager.call("notify_combat_activity", 0.30)
+		var beam_w: float = lerpf(tracer_width, tracer_width * 2.15, ramp_ratio)
+		var beam_tracer: AttackTracer = _spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, beam_w, maxf(0.14, tick_dt + 0.06), 0.0, AttackTracer.TracerStyle.PRISM_BEAM)
+		if beam_tracer != null:
+			beam_tracer.attach_live_endpoints(owner_unit, target_node, ramp_ratio, owner_unit.data.collision_radius)
+		_apply_primary_and_refract(owner_unit, target_node, beam_dmg, beam_bonus_armored, shot_col)
+		return true
 
 	if AudioManager != null and _is_pos_audible(owner_unit, tracer_origin, tracer_end):
 		var sfx_pos: Vector2 = owner_unit.global_position if _is_point_visible_local(owner_unit, tracer_origin) else tracer_end
@@ -464,14 +519,14 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 				_spawn_armor_pierce_spark_vfx(owner_unit, tracer_end, dir, Color(1.0, 0.72, 0.20, 1.0))
 		else:
 			_spawn_attack_tracer(owner_unit, tracer_origin, beam_end, shot_col, maxf(3.5, tracer_width), 0.21, 0.0, AttackTracer.TracerStyle.ARC_LANCE)
-		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
 		_apply_line_pierce_damage(owner_unit, tracer_origin, beam_end, pierce_width, base_dmg * 0.65, bonus_armored, target_node)
 		return true
 
 	if tracer_style == &"bio" or tracer_style == &"melee_cleave" or owner_unit.get_effective_attack_range() <= 64.0:
 		# Fast directional melee cleave arc
 		_spawn_melee_cleave_vfx(owner_unit, owner_unit.global_position, tracer_end, shot_col)
-		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
 		return true
 
 	if tracer_style == &"rail_lance":
@@ -479,17 +534,17 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 		if _is_armored_target(target_node):
 			var shot_dir_rl: Vector2 = (tracer_end - tracer_origin).normalized() if tracer_end.distance_squared_to(tracer_origin) > 1.0 else Vector2.RIGHT
 			_spawn_armor_pierce_spark_vfx(owner_unit, tracer_end, shot_dir_rl, Color(1.0, 0.72, 0.20, 1.0))
-		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
 		return true
 
 	if tracer_style == &"heavy_slug":
 		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(2.8, tracer_width), 0.14, 0.0, AttackTracer.TracerStyle.HEAVY_SLUG)
-		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
 		return true
 
 	if tracer_style == &"arc_tether":
 		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(2.1, tracer_width), 0.13, 0.0, AttackTracer.TracerStyle.ARC_TETHER)
-		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
 		return true
 
 	if tracer_style == &"rail" or tracer_style == &"rail_beam" or bonus_armored > 0.0:
@@ -498,19 +553,100 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 		if _is_armored_target(target_node):
 			var shot_dir: Vector2 = (tracer_end - tracer_origin).normalized() if tracer_end.distance_squared_to(tracer_origin) > 1.0 else Vector2.RIGHT
 			_spawn_armor_pierce_spark_vfx(owner_unit, tracer_end, shot_dir, Color(1.0, 0.88, 0.36, 1.0))
-		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
 		return true
 
 	if tracer_style == &"heavy" or tracer_style == &"twin_slug":
 		# Heavy twin-slug parallel autocannon tracers
 		_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, maxf(2.6, tracer_width), 0.14, 0.0, AttackTracer.TracerStyle.TWIN_SLUG)
-		_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+		_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
 		return true
 
 	# Standard pulse bolt
 	_spawn_attack_tracer(owner_unit, tracer_origin, tracer_end, shot_col, tracer_width, 0.11, 0.0, AttackTracer.TracerStyle.PULSE_BOLT)
-	_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+	_apply_primary_and_refract(owner_unit, target_node, base_dmg, bonus_armored, shot_col)
 	return true
+
+
+func _apply_primary_and_refract(owner_unit: Unit, target_node: Node2D, base_dmg: float, bonus_armored: float, beam_col: Color) -> void:
+	var refract_origin: Vector2 = target_node.global_position if is_instance_valid(target_node) else Vector2.ZERO
+	var want_refract: bool = owner_unit != null and owner_unit.data != null and owner_unit.data.refract_max_bounces > 0 and owner_unit.data.refract_radius > 0.0
+	_apply_damage_to_target(owner_unit, target_node, base_dmg, bonus_armored)
+	if want_refract:
+		_apply_refract_split_damage(owner_unit, target_node, refract_origin, base_dmg, bonus_armored, beam_col)
+
+
+func _apply_refract_split_damage(
+	owner_unit: Unit,
+	primary_target: Node2D,
+	origin_pos: Vector2,
+	primary_dmg: float,
+	primary_bonus_armored: float,
+	beam_col: Color
+) -> void:
+	if owner_unit == null or not is_instance_valid(owner_unit) or not owner_unit.is_inside_tree() or owner_unit.data == null:
+		return
+	var max_bounces: int = owner_unit.data.refract_max_bounces
+	var radius: float = owner_unit.data.refract_radius
+	if max_bounces <= 0 or radius <= 0.0:
+		return
+	var dmg_ratio: float = clampf(owner_unit.data.refract_damage_ratio, 0.05, 1.5)
+	var split_dmg: float = primary_dmg * dmg_ratio
+	var split_bonus: float = primary_bonus_armored * dmg_ratio
+
+	var query_r: float = radius + 48.0
+	var raw_entities: Array = SpatialGrid.query_entities_in_radius(origin_pos, query_r, true, true) if SpatialGrid != null else []
+	if SpatialGrid == null:
+		raw_entities = owner_unit.get_tree().get_nodes_in_group("units") + owner_unit.get_tree().get_nodes_in_group("buildings")
+
+	var candidates: Array[Dictionary] = []
+	for node: Variant in raw_entities:
+		if not is_instance_valid(node) or not (node is Node2D) or node == primary_target:
+			continue
+		var cand: Node2D = node as Node2D
+		if not can_target_entity(owner_unit, cand):
+			continue
+		var cand_r: float = 16.0
+		if cand is Unit:
+			var cu: Unit = cand as Unit
+			cand_r = cu.data.collision_radius if cu.data != null else 16.0
+		elif cand is Building:
+			cand_r = (cand as Building).footprint_radius
+		var dist: float = origin_pos.distance_to(cand.global_position)
+		if dist > radius + cand_r:
+			continue
+		candidates.append({
+			"node": cand,
+			"dist_sq": dist * dist,
+			"id": cand.get_instance_id(),
+		})
+
+	if candidates.is_empty():
+		return
+
+	candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var da: float = float(a["dist_sq"])
+		var db: float = float(b["dist_sq"])
+		if not is_equal_approx(da, db):
+			return da < db
+		return int(a["id"]) < int(b["id"])
+	)
+
+	var hits: int = 0
+	var refract_col: Color = beam_col.lerp(Color(0.98, 0.80, 0.14, 0.96), 0.45)
+	for entry: Dictionary in candidates:
+		if hits >= max_bounces:
+			break
+		var sec: Node2D = entry["node"] as Node2D
+		if not is_instance_valid(sec):
+			continue
+		var sec_pos: Vector2 = sec.global_position
+		_apply_damage_to_target(owner_unit, sec, split_dmg, split_bonus)
+		_spawn_attack_tracer(owner_unit, origin_pos, sec_pos, refract_col, 1.9, 0.16, 0.0, AttackTracer.TracerStyle.PRISM_REFRACT)
+		hits += 1
+
+	if hits > 0 and AudioManager != null and _is_pos_audible(owner_unit, origin_pos, origin_pos):
+		AudioManager.play_sfx(&"weapon_prism_refract", -6.0, 0.06, origin_pos, true)
 
 
 func _is_armored_target(target: Variant) -> bool:
@@ -687,19 +823,20 @@ func _spawn_attack_tracer(
 	tracer_duration: float = 0.12,
 	arc_height: float = 0.0,
 	style: int = 0
-) -> void:
+) -> AttackTracer:
 	if owner_unit.get_parent() == null:
-		return
+		return null
 	var from_vis: bool = _is_point_visible_local(owner_unit, from_pos)
 	var to_vis: bool = _is_point_visible_local(owner_unit, to_pos)
 	if not from_vis and not to_vis:
-		return
+		return null
 	var tracer: AttackTracer = VFXPool.acquire_attack_tracer(50) if VFXPool != null else null
 	if tracer == null:
 		tracer = ATTACK_TRACER_SCRIPT.new()
 		tracer.z_index = 50
 		owner_unit.get_parent().add_child(tracer)
 	tracer.setup(from_pos, to_pos, tracer_color, width, tracer_duration, arc_height, style, not from_vis)
+	return tracer
 
 
 func _spawn_mortar_shell_vfx(
