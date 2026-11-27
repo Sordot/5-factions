@@ -577,6 +577,11 @@ func _on_inspected_building_construction_changed(building: Building, _progress: 
 		_render_inspected_entity(building, constructed)
 
 
+func _on_inspected_building_progress_updated(building: Building) -> void:
+	if building == _inspected_entity and is_instance_valid(building):
+		_telemetry.update_production_progress_bar(self, building)
+
+
 func _on_inspected_entity_removed(_arg: Variant = null) -> void:
 	_disconnect_inspected_signals()
 	_inspected_entity = null
@@ -602,6 +607,8 @@ func _connect_inspected_signals(entity: Node) -> void:
 			b.status_changed.connect(_on_inspected_entity_updated)
 		if not b.construction_progress_changed.is_connected(_on_inspected_building_construction_changed):
 			b.construction_progress_changed.connect(_on_inspected_building_construction_changed)
+		if b.has_signal("training_progress_updated") and not b.training_progress_updated.is_connected(_on_inspected_building_progress_updated):
+			b.training_progress_updated.connect(_on_inspected_building_progress_updated)
 		if not b.destroyed.is_connected(_on_inspected_entity_removed):
 			b.destroyed.connect(_on_inspected_entity_removed)
 	elif entity is Unit:
@@ -656,6 +663,8 @@ func _disconnect_inspected_signals() -> void:
 			b.status_changed.disconnect(_on_inspected_entity_updated)
 		if b.construction_progress_changed.is_connected(_on_inspected_building_construction_changed):
 			b.construction_progress_changed.disconnect(_on_inspected_building_construction_changed)
+		if b.has_signal("training_progress_updated") and b.training_progress_updated.is_connected(_on_inspected_building_progress_updated):
+			b.training_progress_updated.disconnect(_on_inspected_building_progress_updated)
 		if b.destroyed.is_connected(_on_inspected_entity_removed):
 			b.destroyed.disconnect(_on_inspected_entity_removed)
 	elif _inspected_entity is Unit:

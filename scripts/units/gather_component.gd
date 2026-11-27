@@ -10,6 +10,9 @@ enum GatherState {
 
 const CLUSTER_REACQUIRE_RADIUS: float = 480.0
 const OVERFLOW_REACQUIRE_RADIUS: float = 1100.0
+const MISSING_DROPOFF_RECHECK_INTERVAL: float = 0.50
+const ACTIVE_DROPOFF_UPGRADE_INTERVAL: float = 0.60
+const DROPOFF_SWITCH_IMPROVEMENT_PX: float = 48.0
 
 signal gather_state_changed(new_state: GatherState)
 signal cargo_changed(resource_type: StringName, amount: int)
@@ -26,6 +29,8 @@ var carried_type: StringName = &""
 
 var _owner_unit_ref: Unit = null
 var _claimed_slot_pos: Vector2 = Vector2.INF
+var _dropoff_recheck_timer: float = 0.0
+var _checked_bounce_on_move: bool = false
 
 
 func is_active() -> bool:
@@ -58,7 +63,7 @@ func release_assigned_node(owner_unit: Unit = null) -> void:
 	_claimed_slot_pos = Vector2.INF
 
 
-func start_gather(owner_unit: Unit, resource_node: ResourceNode, is_auto_migration: bool = false) -> bool:
+func start_gather(owner_unit: Unit, resource_node: ResourceNode, _is_auto_migration: bool = false) -> bool:
 	if owner_unit == null or owner_unit.data == null or not owner_unit.data.can_gather:
 		return false
 	if not is_instance_valid(resource_node) or resource_node.is_depleted() or resource_node.is_vent:
@@ -67,10 +72,10 @@ func start_gather(owner_unit: Unit, resource_node: ResourceNode, is_auto_migrati
 		return false
 
 	_owner_unit_ref = owner_unit
-	var switched_target: bool = (target_node != null and target_node != resource_node) or (carried_type != &"" and carried_type != resource_node.resource_type)
+	var switched_resource_type: bool = (carried_type != &"" and carried_type != resource_node.resource_type)
 	if is_instance_valid(target_node) and target_node != resource_node:
 		target_node.release_worker(owner_unit)
-	if not is_auto_migration and switched_target and carried_amount > 0:
+	if switched_resource_type and carried_amount > 0:
 		clear_carried_cargo(owner_unit)
 
 	target_node = resource_node
@@ -79,6 +84,7 @@ func start_gather(owner_unit: Unit, resource_node: ResourceNode, is_auto_migrati
 	last_resource_type = resource_node.resource_type
 	gather_timer = 0.0
 	_claimed_slot_pos = Vector2.INF
+	_checked_bounce_on_move = false
 
 	var effective_cap: int = target_node.get_effective_carry_capacity(owner_unit.data.carry_capacity)
 	if carried_amount >= effective_cap and carried_type == resource_node.resource_type:
@@ -152,7 +158,7 @@ func tick(owner_unit: Unit, delta: float) -> void:
 		GatherState.GATHERING:
 			_tick_gathering(owner_unit, delta)
 		GatherState.GATHER_RETURNING_TO_BASE:
-			_tick_returning_to_base(owner_unit)
+			_tick_returning_to_base(owner_unit, delta)
 
 
 func _claim_slot_on_target(owner_unit: Unit) -> Vector2:
@@ -163,6 +169,31 @@ func _claim_slot_on_target(owner_unit: Unit) -> Vector2:
 	var hub_pos: Vector2 = nearest_hub.global_position if nearest_hub != null else Vector2.INF
 	_claimed_slot_pos = target_node.claim_harvest_slot(owner_unit, hub_pos)
 	return _claimed_slot_pos
+
+
+func _try_bounce_to_unsaturated_sibling(owner_unit: Unit) -> bool:
+	if owner_unit == null or not is_instance_valid(target_node) or target_node.is_depleted():
+		return false
+	var team_i: int = int(owner_unit.team)
+	if target_node.get_assigned_count(team_i) <= target_node.get_effective_max_harvesters(team_i):
+		return false
+	var candidate: ResourceNode = ResourceNode.pick_best_cluster_node(
+		target_node,
+		owner_unit,
+		team_i,
+		420.0,
+		420.0,
+		target_node
+	)
+	if candidate == null or candidate == target_node or not candidate.has_free_slot(team_i):
+		return false
+	target_node.release_worker(owner_unit)
+	target_node = candidate
+	target_node.assign_worker(owner_unit)
+	last_node_position = target_node.global_position
+	last_resource_type = target_node.resource_type
+	_claim_slot_on_target(owner_unit)
+	return true
 
 
 func _tick_moving_to_node(owner_unit: Unit) -> void:
@@ -184,6 +215,11 @@ func _tick_moving_to_node(owner_unit: Unit) -> void:
 
 	if _claimed_slot_pos == Vector2.INF:
 		_claim_slot_on_target(owner_unit)
+
+	if not _checked_bounce_on_move:
+		_checked_bounce_on_move = true
+		if target_node.has_method("is_worker_in_overflow_slot") and bool(target_node.call("is_worker_in_overflow_slot", owner_unit)):
+			_try_bounce_to_unsaturated_sibling(owner_unit)
 
 	var slot_dist: float = owner_unit.global_position.distance_to(_claimed_slot_pos)
 	var node_dist: float = owner_unit.global_position.distance_to(target_node.global_position)
@@ -280,7 +316,7 @@ func _tick_gathering(owner_unit: Unit, delta: float) -> void:
 				owner_unit.command_state = Unit.CommandState.IDLE
 
 
-func _tick_returning_to_base(owner_unit: Unit) -> void:
+func _tick_returning_to_base(owner_unit: Unit, delta: float) -> void:
 	if carried_amount <= 0 or carried_type == &"":
 		if owner_unit.has_queued_commands():
 			cancel(owner_unit, false)
@@ -295,14 +331,26 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 			owner_unit.command_state = Unit.CommandState.IDLE
 		return
 
-	if (
-		not is_instance_valid(dropoff_building)
-		or dropoff_building.is_destroyed
-		or not dropoff_building.is_constructed
-		or dropoff_building.is_salvaging
-		or not dropoff_building.accepts_resource(carried_type)
-	):
+	var dropoff_valid: bool = (
+		dropoff_building != null
+		and is_instance_valid(dropoff_building)
+		and not dropoff_building.is_destroyed
+		and dropoff_building.is_constructed
+		and not dropoff_building.is_salvaging
+		and dropoff_building.team == owner_unit.team
+		and dropoff_building.accepts_resource(carried_type)
+	)
+	if not dropoff_valid:
+		var was_already_null: bool = (dropoff_building == null)
+		dropoff_building = null
+		if was_already_null:
+			_dropoff_recheck_timer -= delta
+			if _dropoff_recheck_timer > 0.0:
+				if owner_unit.data.auto_gather_on_spawn:
+					owner_unit.stop_component_navigation()
+					return
 		dropoff_building = _find_nearest_dropoff(owner_unit, carried_type)
+		_dropoff_recheck_timer = MISSING_DROPOFF_RECHECK_INTERVAL
 		if dropoff_building == null:
 			# Automated harvesters wait patiently with their full load until a Refinery is constructed.
 			if owner_unit.data.auto_gather_on_spawn:
@@ -315,6 +363,17 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 			else:
 				owner_unit.command_state = Unit.CommandState.IDLE
 			return
+	else:
+		# Throttled mid-trip check: smoothly redirect if a newly completed Refinery/Hub is >48px closer.
+		_dropoff_recheck_timer += delta
+		if _dropoff_recheck_timer >= ACTIVE_DROPOFF_UPGRADE_INTERVAL:
+			_dropoff_recheck_timer = 0.0
+			var better_dropoff: Building = _find_nearest_dropoff(owner_unit, carried_type)
+			if better_dropoff != null and better_dropoff != dropoff_building:
+				var cur_dist: float = owner_unit.global_position.distance_to(dropoff_building.global_position)
+				var new_dist: float = owner_unit.global_position.distance_to(better_dropoff.global_position)
+				if new_dist + DROPOFF_SWITCH_IMPROVEMENT_PX < cur_dist:
+					dropoff_building = better_dropoff
 
 	var reach: float = _get_dropoff_reach(owner_unit, dropoff_building)
 	var dist: float = owner_unit.global_position.distance_to(dropoff_building.global_position)
@@ -338,28 +397,39 @@ func _tick_returning_to_base(owner_unit: Unit) -> void:
 			return
 
 		if _ensure_valid_target_node(owner_unit):
-			_claim_slot_on_target(owner_unit)
+			if not _try_bounce_to_unsaturated_sibling(owner_unit):
+				_claim_slot_on_target(owner_unit)
 			_set_state(GatherState.GATHER_MOVING_TO_NODE)
 		else:
 			cancel(owner_unit, false)
 			owner_unit.command_state = Unit.CommandState.IDLE
 		return
 
-	owner_unit.request_component_navigation(
-		_get_approach_point(owner_unit, dropoff_building, dropoff_building.footprint_radius, dropoff_building, null),
-		12.0,
-		4.0
-	)
+	# Direct nearest-rim drop-off pathing so mineral-walking workers fly straight to the closest hub/refinery edge.
+	var unit_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 13.0
+	var to_worker: Vector2 = owner_unit.global_position - dropoff_building.global_position
+	var dir: Vector2 = to_worker.normalized() if to_worker.length_squared() > 1.0 else Vector2.RIGHT
+	var rim_pt: Vector2 = dropoff_building.global_position + dir * (dropoff_building.footprint_radius + unit_r + 4.0)
+	rim_pt = _clamp_to_arena_bounds(owner_unit, rim_pt, unit_r + 6.0)
+	owner_unit.request_component_navigation(rim_pt, 12.0, 4.0)
 
 
-func _get_approach_point(
-	owner_unit: Unit,
-	target_entity: Node2D,
-	target_radius: float,
-	ignore_building: Building = null,
-	ignore_resource: ResourceNode = null
-) -> Vector2:
-	return owner_unit.get_or_compute_approach_point(target_entity, target_radius, 8.0, ignore_building, ignore_resource)
+func _clamp_to_arena_bounds(owner_unit: Unit, pt: Vector2, pad: float) -> Vector2:
+	if owner_unit == null or not owner_unit.is_inside_tree():
+		return pt
+	var nav_reg: Node = owner_unit.get_tree().get_first_node_in_group("arena_nav_region")
+	if nav_reg != null and is_instance_valid(nav_reg):
+		var bounds_var: Variant = nav_reg.get("arena_bounds")
+		if bounds_var is Rect2:
+			var b: Rect2 = bounds_var as Rect2
+			if b.has_area():
+				var min_x: float = b.position.x + pad
+				var max_x: float = b.end.x - pad
+				var min_y: float = b.position.y + pad
+				var max_y: float = b.end.y - pad
+				if min_x <= max_x and min_y <= max_y:
+					return Vector2(clampf(pt.x, min_x, max_x), clampf(pt.y, min_y, max_y))
+	return pt
 
 
 func _ensure_valid_target_node(owner_unit: Unit, exclude_node: ResourceNode = null) -> bool:
@@ -441,4 +511,7 @@ func _set_state(new_state: GatherState) -> void:
 	if state == new_state:
 		return
 	state = new_state
+	_dropoff_recheck_timer = 0.0
+	if new_state == GatherState.GATHER_MOVING_TO_NODE:
+		_checked_bounce_on_move = false
 	gather_state_changed.emit(state)

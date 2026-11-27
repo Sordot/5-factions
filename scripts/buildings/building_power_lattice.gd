@@ -1,11 +1,22 @@
 class_name BuildingPowerLattice
 extends RefCounted
 
+static var max_known_power_radius: float = 480.0
+static var max_known_shield_aura_radius: float = 320.0
+
+
+static func note_provider_radius(power_r: float, shield_aura_r: float) -> void:
+	if power_r > max_known_power_radius:
+		max_known_power_radius = power_r
+	if shield_aura_r > max_known_shield_aura_radius:
+		max_known_shield_aura_radius = shield_aura_r
+
 
 static func is_position_powered_for_team(tree: SceneTree, world_pos: Vector2, target_team: int, exclude_building: Building = null) -> bool:
 	if tree == null:
 		return false
-	var candidates: Array = SpatialGrid.query_buildings_in_radius(world_pos, 480.0) if SpatialGrid != null else tree.get_nodes_in_group("buildings")
+	var query_r: float = max_known_power_radius + 64.0
+	var candidates: Array = SpatialGrid.query_buildings_in_radius(world_pos, query_r) if SpatialGrid != null else tree.get_nodes_in_group("buildings")
 	for node: Variant in candidates:
 		if not is_instance_valid(node) or not (node is Building):
 			continue
@@ -26,19 +37,32 @@ static func is_position_powered_for_team(tree: SceneTree, world_pos: Vector2, ta
 static func refresh_team_power_grid(tree: SceneTree, target_team: int, exclude_building: Building = null) -> void:
 	if tree == null:
 		return
+	# Single-pass O(P + B) solver: collect team providers & consumers once, then resolve distances directly.
+	var providers: Array[Building] = []
+	var consumers: Array[Building] = []
 	for node: Node in tree.get_nodes_in_group("buildings"):
 		if not is_instance_valid(node) or not (node is Building):
 			continue
 		var b: Building = node as Building
-		if b == exclude_building or b.is_destroyed or b.is_queued_for_deletion():
+		if b == exclude_building or b.is_destroyed or b.is_queued_for_deletion() or not b.is_constructed:
 			continue
 		if int(b.team) != target_team:
 			continue
-		var next_powered: bool = true
-		if b.is_constructed and b.requires_power_grid:
-			next_powered = is_position_powered_for_team(tree, b.global_position, target_team, exclude_building)
-		if next_powered != b.is_powered:
-			b.set_powered_state(next_powered)
+		if not b.is_salvaging and b.provides_power_grid and b.power_radius > 0.0:
+			providers.append(b)
+		if b.requires_power_grid:
+			consumers.append(b)
+
+	for c: Building in consumers:
+		var powered: bool = false
+		var c_pos: Vector2 = c.global_position
+		for prov: Building in providers:
+			var pr: float = prov.power_radius
+			if c_pos.distance_squared_to(prov.global_position) <= pr * pr:
+				powered = true
+				break
+		if powered != c.is_powered:
+			c.set_powered_state(powered)
 
 
 static func apply_powered_state(building: Building, powered: bool) -> void:
@@ -68,7 +92,8 @@ static func get_shield_regen_delay_speedup_at(tree: SceneTree, world_pos: Vector
 	if tree == null:
 		return 0.0
 	var best_speedup: float = 0.0
-	var candidates: Array = SpatialGrid.query_buildings_in_radius(world_pos, 320.0) if SpatialGrid != null else tree.get_nodes_in_group("buildings")
+	var query_r: float = max_known_shield_aura_radius + 64.0
+	var candidates: Array = SpatialGrid.query_buildings_in_radius(world_pos, query_r) if SpatialGrid != null else tree.get_nodes_in_group("buildings")
 	for node: Variant in candidates:
 		if not is_instance_valid(node) or not (node is Building):
 			continue

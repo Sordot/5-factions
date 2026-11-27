@@ -43,6 +43,7 @@ var _badge_timer: float = 0.0
 var _show_saturation_badge: bool = false
 var _cached_badge_assigned: int = -1
 var _cached_badge_cap: int = -1
+var _cached_nav_agent_radius: float = -1.0
 
 
 func _ready() -> void:
@@ -157,6 +158,21 @@ func _refresh_saturation_badge_state() -> void:
 	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 	var should_show: bool = is_inspected or _is_highlighted or is_hovered
 	if not should_show and is_inside_tree():
+		var vp: Viewport = get_viewport()
+		var cam: Camera2D = vp.get_camera_2d() if vp != null else null
+		if cam != null:
+			var zoom_x: float = maxf(0.15, cam.zoom.x)
+			var zoom_y: float = maxf(0.15, cam.zoom.y)
+			var vis_sz: Vector2 = vp.get_visible_rect().size
+			var half_world: Vector2 = Vector2(vis_sz.x / zoom_x, vis_sz.y / zoom_y) * 0.5 + Vector2(80.0, 80.0)
+			var cam_rect: Rect2 = Rect2(cam.get_screen_center_position() - half_world, half_world * 2.0)
+			if not cam_rect.has_point(global_position):
+				if _show_saturation_badge:
+					_show_saturation_badge = false
+					_cached_badge_assigned = -1
+					_cached_badge_cap = -1
+					queue_redraw()
+				return
 		var mouse_world: Vector2 = get_global_mouse_position()
 		var hover_r: float = interaction_radius + 10.0
 		if global_position.distance_squared_to(mouse_world) <= hover_r * hover_r:
@@ -397,10 +413,68 @@ func release_harvest_slot(worker: Unit) -> void:
 		_harvest_slots.erase(k)
 
 
+func _get_nav_agent_radius() -> float:
+	if _cached_nav_agent_radius > 0.0:
+		return _cached_nav_agent_radius
+	_cached_nav_agent_radius = 24.0
+	if is_inside_tree():
+		var nav_reg: Node = get_tree().get_first_node_in_group("arena_nav_region")
+		if nav_reg != null and is_instance_valid(nav_reg):
+			var r_val: Variant = nav_reg.get("agent_radius")
+			if r_val != null and float(r_val) > 0.0:
+				_cached_nav_agent_radius = float(r_val)
+	return _cached_nav_agent_radius
+
+
+func _is_harvest_slot_clear(pt: Vector2, unit_r: float) -> bool:
+	if not is_inside_tree():
+		return true
+	var tree: SceneTree = get_tree()
+	var clearance: float = unit_r + 2.0
+	for p_node: Node in tree.get_nodes_in_group("high_ground_plateaus"):
+		if is_instance_valid(p_node) and p_node.has_method("overlaps_cliff_wall") and bool(p_node.call("overlaps_cliff_wall", pt, clearance)):
+			return false
+	for obs: Node in tree.get_nodes_in_group("terrain_obstacles"):
+		if is_instance_valid(obs) and obs.has_method("overlaps_circle") and bool(obs.call("overlaps_circle", pt, clearance)):
+			return false
+	var near_bldgs: Array = SpatialGrid.query_buildings_in_radius(pt, 96.0) if SpatialGrid != null else tree.get_nodes_in_group("buildings")
+	for nb: Variant in near_bldgs:
+		if not (nb is Building) or not is_instance_valid(nb):
+			continue
+		var b: Building = nb as Building
+		if b.is_destroyed:
+			continue
+		var min_b: float = b.footprint_radius + clearance
+		if b.global_position.distance_squared_to(pt) < min_b * min_b:
+			return false
+	var near_res: Array = SpatialGrid.query_resources_in_radius(pt, 64.0, false) if SpatialGrid != null else tree.get_nodes_in_group("resource_nodes")
+	for nr: Variant in near_res:
+		if not (nr is ResourceNode) or not is_instance_valid(nr):
+			continue
+		var rn: ResourceNode = nr as ResourceNode
+		if rn == self or rn.is_depleted() or rn.is_vent:
+			continue
+		var min_r: float = rn.collision_radius + clearance
+		if rn.global_position.distance_squared_to(pt) < min_r * min_r:
+			return false
+	return true
+
+
+func is_worker_in_overflow_slot(worker: Unit) -> bool:
+	if worker == null or not is_instance_valid(worker):
+		return false
+	var cap: int = get_effective_max_harvesters(int(worker.team))
+	for k: Variant in _harvest_slots.keys():
+		if _harvest_slots[k] == worker:
+			return int(k) >= cap
+	return get_assigned_count(int(worker.team)) > cap
+
+
 func claim_harvest_slot(worker: Unit, dropoff_pos: Vector2 = Vector2.INF) -> Vector2:
 	prune_assigned_workers()
 	var unit_r: float = worker.data.collision_radius if (worker != null and worker.data != null) else 13.0
-	var stand_r: float = collision_radius + unit_r + 6.0
+	var nav_agent_r: float = _get_nav_agent_radius()
+	var stand_r: float = maxf(collision_radius + unit_r + 8.0, collision_radius + nav_agent_r + 4.0)
 
 	var hub_dir: Vector2 = Vector2.ZERO
 	if dropoff_pos != Vector2.INF and dropoff_pos.distance_squared_to(global_position) > 16.0:
@@ -425,10 +499,12 @@ func claim_harvest_slot(worker: Unit, dropoff_pos: Vector2 = Vector2.INF) -> Vec
 			var idx_existing: int = clampi(int(k), 0, offsets.size() - 1)
 			return global_position + Vector2.RIGHT.rotated(hub_angle + offsets[idx_existing]) * stand_r
 
-	# Prefer unclaimed primary slots (0 .. cap - 1) closest to the worker
+	# Prefer clear, unclaimed primary slots (0 .. cap - 1) closest to the worker
 	var primary_count: int = mini(maxi(1, cap), offsets.size())
 	var best_idx: int = -1
 	var best_d_sq: float = INF
+	var fallback_blocked_idx: int = -1
+	var fallback_blocked_d_sq: float = INF
 	var worker_pos: Vector2 = worker.global_position if (worker != null and is_instance_valid(worker)) else global_position
 
 	for i: int in range(primary_count):
@@ -436,20 +512,31 @@ func claim_harvest_slot(worker: Unit, dropoff_pos: Vector2 = Vector2.INF) -> Vec
 			continue
 		var pt: Vector2 = global_position + Vector2.RIGHT.rotated(hub_angle + offsets[i]) * stand_r
 		var d_sq: float = worker_pos.distance_squared_to(pt)
-		if d_sq < best_d_sq:
-			best_d_sq = d_sq
-			best_idx = i
+		if _is_harvest_slot_clear(pt, unit_r):
+			if d_sq < best_d_sq:
+				best_d_sq = d_sq
+				best_idx = i
+		elif d_sq < fallback_blocked_d_sq:
+			fallback_blocked_d_sq = d_sq
+			fallback_blocked_idx = i
 
-	# Spill to overflow perimeter slots if all primary slots are currently occupied
+	# Spill to clear overflow perimeter slots if all clear primary slots are occupied/blocked
 	if best_idx < 0:
 		for i: int in range(primary_count, offsets.size()):
 			if _harvest_slots.has(i):
 				continue
 			var pt2: Vector2 = global_position + Vector2.RIGHT.rotated(hub_angle + offsets[i]) * stand_r
 			var d_sq2: float = worker_pos.distance_squared_to(pt2)
-			if d_sq2 < best_d_sq:
-				best_d_sq = d_sq2
-				best_idx = i
+			if _is_harvest_slot_clear(pt2, unit_r):
+				if d_sq2 < best_d_sq:
+					best_d_sq = d_sq2
+					best_idx = i
+			elif fallback_blocked_idx < 0 and d_sq2 < fallback_blocked_d_sq:
+				fallback_blocked_d_sq = d_sq2
+				fallback_blocked_idx = i
+
+	if best_idx < 0:
+		best_idx = fallback_blocked_idx
 
 	if best_idx >= 0:
 		_harvest_slots[best_idx] = worker
@@ -502,7 +589,9 @@ static func pick_best_cluster_node_from_pos(
 	var cluster_r_sq: float = cluster_radius * cluster_radius
 	var overflow_r_sq: float = overflow_radius * overflow_radius
 
-	for node: Node in tree.get_nodes_in_group("resource_nodes"):
+	var search_r: float = maxf(cluster_radius, overflow_radius)
+	var candidate_nodes: Array = SpatialGrid.query_resources_in_radius(origin, search_r, false) if SpatialGrid != null else tree.get_nodes_in_group("resource_nodes")
+	for node: Variant in candidate_nodes:
 		if not (node is ResourceNode) or not is_instance_valid(node):
 			continue
 		var rn: ResourceNode = node as ResourceNode
@@ -666,14 +755,29 @@ func extract(amount: int) -> int:
 
 func get_inspection_data() -> Dictionary:
 	if is_vent:
-		var status_text: String = "CAPPED — Compute Node" if is_occupied() else "UNOCCUPIED — Ready"
+		var compute_hub_name: String = "Compute Hub"
+		if TeamManager != null and TeamManager.has_method("get_team_faction_data"):
+			var viewer_v: int = TeamManager.get_local_human_team()
+			if viewer_v < 0:
+				viewer_v = int(Unit.Team.PLAYER)
+			var fdata_v: FactionData = TeamManager.get_team_faction_data(viewer_v)
+			if fdata_v != null and fdata_v.has_method("get_ai_building_for_role"):
+				var c_bdata: BuildingData = fdata_v.get_ai_building_for_role(&"compute_hub")
+				if c_bdata != null and not c_bdata.display_name.is_empty():
+					compute_hub_name = c_bdata.display_name
+		var hk_compute: String = SettingsManager.get_action_short_label(&"cmd_ability_e") if (SettingsManager != null and SettingsManager.has_method("get_action_short_label")) else "E"
+		if hk_compute.is_empty():
+			hk_compute = "E"
+		var status_text: String = ("CAPPED — %s" % occupied_by_building.display_name) if is_occupied() else "UNOCCUPIED — Ready"
 		var surging_now: bool = is_surging()
-		var yield_str: String = "+%d Compute / 3.0s / Eng (2x)" % int(round(5.0 * surge_multiplier)) if surging_now else "+5 Compute / 3.0s / Eng"
+		var yield_mult: float = GameConfig.get_yield_multiplier() if (GameConfig != null and GameConfig.has_method("get_yield_multiplier")) else 1.0
+		var per_eng_yield: int = maxi(1, int(round(5.0 * yield_mult * (surge_multiplier if surging_now else 1.0))))
+		var yield_str: String = "+%d Compute / 3.0s / Eng (%dx)" % [per_eng_yield, int(round(surge_multiplier))] if surging_now else "+%d Compute / 3.0s / Eng" % per_eng_yield
 		var vent_stats: Array[Dictionary] = [
 			{"label": "Status", "value": status_text},
 			{"label": "Yield Rate", "value": yield_str},
 			{"label": "Capacity", "value": "Infinite Geothermal"},
-			{"label": "Structure", "value": "Compute Node [E]"},
+			{"label": "Structure", "value": "%s [%s]" % [compute_hub_name, hk_compute]},
 		]
 		if surging_now:
 			vent_stats.append({
@@ -691,7 +795,7 @@ func get_inspection_data() -> Dictionary:
 			"show_primary_bar": false,
 			"stats": vent_stats,
 			"is_commandable": false,
-			"readonly_label": "READ-ONLY TELEMETRY  —  BUILD COMPUTE NODE [E]",
+			"readonly_label": "READ-ONLY TELEMETRY  —  BUILD %s [%s]" % [compute_hub_name.to_upper(), hk_compute],
 		}
 
 	var is_silica: bool = (resource_type == &"silica")

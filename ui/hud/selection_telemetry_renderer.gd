@@ -123,6 +123,40 @@ func rebuild_telemetry_grid(hud: SelectionHUD, stats: Variant) -> void:
 		hud.telemetry_grid.add_child(cell)
 
 
+func update_production_progress_bar(hud: SelectionHUD, building: Building) -> void:
+	if hud == null or hud.production_queue_box == null:
+		return
+	if building == null or not is_instance_valid(building) or not building.is_constructed or building.production_component == null or building.production_component.get_queue_size() == 0:
+		hud.production_queue_box.visible = false
+		return
+
+	hud.production_queue_box.visible = true
+	var status: Dictionary = building.get_active_training_status()
+	var pct: int = int(round(float(status.get("progress", 0.0)) * 100.0))
+	if building.requires_power_grid and not building.is_powered:
+		hud.production_label.text = "UNPOWERED — PAUSED (%d%%)" % pct
+		if hud._prod_fill_style != null:
+			hud._prod_fill_style.bg_color = Color(0.92, 0.42, 0.24, 0.95)
+	else:
+		var kind: StringName = status.get("kind", ProductionComponent.KIND_UNIT)
+		var active_name: String = String(status.get("display_name", "Unit"))
+		var batch_cnt: int = int(status.get("batch_count", 1))
+		if kind == ProductionComponent.KIND_UPGRADE:
+			hud.production_label.text = "Research %s (%d%%)" % [shorten_name(active_name), pct]
+		elif batch_cnt > 1:
+			hud.production_label.text = "Cloning %s x%d (%d%%)" % [shorten_name(active_name), batch_cnt, pct]
+		else:
+			hud.production_label.text = "Training %s (%d%%)" % [shorten_name(active_name), pct]
+		if building.is_overclocked():
+			hud.production_label.text += " [%.1fx]" % building.overclock_speed_mult
+			if hud._prod_fill_style != null:
+				hud._prod_fill_style.bg_color = Color(1.0, 0.624, 0.110, 1.0)
+		elif hud._prod_fill_style != null:
+			hud._prod_fill_style.bg_color = hud._active_hud_accent
+	hud.production_bar.max_value = 100.0
+	hud.production_bar.value = float(pct)
+
+
 func refresh_production_queue_ui(hud: SelectionHUD, entity: Node) -> void:
 	if hud.production_queue_box == null:
 		return
@@ -134,26 +168,7 @@ func refresh_production_queue_ui(hud: SelectionHUD, entity: Node) -> void:
 		hud.production_queue_box.visible = false
 		return
 
-	hud.production_queue_box.visible = true
-	var status: Dictionary = building.get_active_training_status()
-	var pct: int = int(round(float(status.get("progress", 0.0)) * 100.0))
-	var kind: StringName = status.get("kind", ProductionComponent.KIND_UNIT)
-	var active_name: String = String(status.get("display_name", "Unit"))
-	var batch_cnt: int = int(status.get("batch_count", 1))
-	if kind == ProductionComponent.KIND_UPGRADE:
-		hud.production_label.text = "Research %s (%d%%)" % [shorten_name(active_name), pct]
-	elif batch_cnt > 1:
-		hud.production_label.text = "Cloning %s x%d (%d%%)" % [shorten_name(active_name), batch_cnt, pct]
-	else:
-		hud.production_label.text = "Training %s (%d%%)" % [shorten_name(active_name), pct]
-	if building.is_overclocked():
-		hud.production_label.text += " [%.1fx]" % building.overclock_speed_mult
-		if hud._prod_fill_style != null:
-			hud._prod_fill_style.bg_color = Color(1.0, 0.624, 0.110, 1.0)
-	elif hud._prod_fill_style != null:
-		hud._prod_fill_style.bg_color = hud._active_hud_accent
-	hud.production_bar.max_value = 100.0
-	hud.production_bar.value = float(pct)
+	update_production_progress_bar(hud, building)
 
 	for child: Node in hud.queue_slots_row.get_children():
 		child.queue_free()

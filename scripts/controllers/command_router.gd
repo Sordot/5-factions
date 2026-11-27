@@ -1032,21 +1032,36 @@ static func nudge_units_out_of_building(building: Building, bounds: Rect2) -> vo
 	if building == null or not is_instance_valid(building) or not building.is_inside_tree():
 		return
 	var tree: SceneTree = building.get_tree()
-	for node: Node in tree.get_nodes_in_group("units"):
+	var active_bounds: Rect2 = bounds
+	var nav_reg: Node = tree.get_first_node_in_group("arena_nav_region")
+	if nav_reg != null and is_instance_valid(nav_reg):
+		var nav_b: Variant = nav_reg.get("arena_bounds")
+		if nav_b is Rect2 and (nav_b as Rect2).has_area():
+			active_bounds = nav_b as Rect2
+	var fog_sys: Node = tree.get_first_node_in_group("fog_of_war")
+	var b_elev: int = int(fog_sys.call("get_elevation_at", building.global_position)) if (fog_sys != null and is_instance_valid(fog_sys) and fog_sys.has_method("get_elevation_at")) else -1
+	var map_rid: RID = building.get_world_2d().navigation_map if building.get_world_2d() != null else RID()
+	var has_nav: bool = map_rid.is_valid() and NavigationServer2D.map_get_iteration_id(map_rid) > 0
+
+	var search_r: float = building.footprint_radius + 48.0
+	var candidates: Array = SpatialGrid.query_units_in_radius(building.global_position, search_r) if SpatialGrid != null else tree.get_nodes_in_group("units")
+	for node: Variant in candidates:
 		if not (node is Unit) or not is_instance_valid(node):
 			continue
-		var unit: Unit = node
-		if unit.is_dead or unit.is_staffed:
+		var unit: Unit = node as Unit
+		if unit.is_dead or unit.is_staffed or unit.is_movement_locked_by_deploy():
 			continue
 		var unit_r: float = unit.data.collision_radius if unit.data != null else 14.0
 		var min_dist: float = building.footprint_radius + unit_r + 6.0
 		var diff: Vector2 = unit.global_position - building.global_position
 		if diff.length_squared() >= min_dist * min_dist:
 			continue
-		var base_angle: float = diff.angle() if diff.length_squared() > 0.01 else 0.0
-		var ejected: Vector2 = _find_safe_ejection_spot(tree, building, unit_r, base_angle, bounds)
+		var base_angle: float = diff.angle() if diff.length_squared() > 0.01 else (float(unit.get_instance_id() % 12) * (TAU / 12.0))
+		var ejected: Vector2 = _find_safe_ejection_spot(tree, building, unit_r, base_angle, active_bounds, map_rid, has_nav, fog_sys, b_elev)
 		unit.global_position = ejected
 		unit.invalidate_nav_path()
+		if SpatialGrid != null:
+			SpatialGrid.update_unit(unit)
 
 
 static func _find_safe_ejection_spot(
@@ -1054,7 +1069,11 @@ static func _find_safe_ejection_spot(
 	building: Building,
 	unit_r: float,
 	base_angle: float,
-	bounds: Rect2
+	bounds: Rect2,
+	map_rid: RID = RID(),
+	has_nav: bool = false,
+	fog_sys: Node = null,
+	b_elev: int = -1
 ) -> Vector2:
 	var safe_bounds: Rect2 = Rect2(
 		bounds.position + Vector2(unit_r + 8.0, unit_r + 8.0),
@@ -1064,7 +1083,7 @@ static func _find_safe_ejection_spot(
 		building.footprint_radius + unit_r + 10.0,
 		building.footprint_radius + unit_r * 3.0 + 14.0,
 	])
-	var steps: int = 24
+	var steps: int = 12
 	var step_angle: float = TAU / float(steps)
 
 	for ring_dist: float in rings:
@@ -1073,8 +1092,14 @@ static func _find_safe_ejection_spot(
 			var sign_mult: float = 1.0 if (i % 2) == 1 else -1.0
 			var ang: float = base_angle + float(ring_offset) * step_angle * sign_mult
 			var cand: Vector2 = building.global_position + Vector2.RIGHT.rotated(ang) * ring_dist
-			if _is_ejection_spot_clear(tree, cand, unit_r + 4.0, safe_bounds, building):
-				return cand
+			if not _is_ejection_spot_clear(tree, cand, unit_r + 4.0, safe_bounds, building, fog_sys, b_elev):
+				continue
+			if has_nav:
+				var snapped: Vector2 = NavigationServer2D.map_get_closest_point(map_rid, cand)
+				if snapped.distance_squared_to(cand) <= 32.0 * 32.0:
+					if _is_ejection_spot_clear(tree, snapped, unit_r + 2.0, safe_bounds, building, fog_sys, b_elev):
+						return snapped
+			return cand
 
 	var fallback: Vector2 = building.global_position + Vector2.RIGHT.rotated(base_angle) * (building.footprint_radius + unit_r + 10.0)
 	if safe_bounds.has_area():
@@ -1088,17 +1113,30 @@ static func _is_ejection_spot_clear(
 	world_pos: Vector2,
 	clearance_r: float,
 	safe_bounds: Rect2,
-	ignore_building: Building
+	ignore_building: Building,
+	fog_sys: Node = null,
+	expected_elev: int = -1
 ) -> bool:
 	if safe_bounds.has_area() and not safe_bounds.has_point(world_pos):
 		return false
+	if expected_elev >= 0 and fog_sys != null and is_instance_valid(fog_sys) and fog_sys.has_method("get_elevation_at"):
+		if int(fog_sys.call("get_elevation_at", world_pos)) != expected_elev:
+			return false
 	for node: Node in tree.get_nodes_in_group("terrain_obstacles"):
 		if is_instance_valid(node) and node.has_method("overlaps_circle"):
-			if node.call("overlaps_circle", world_pos, clearance_r):
+			if bool(node.call("overlaps_circle", world_pos, clearance_r)):
+				return false
+	for node: Node in tree.get_nodes_in_group("high_ground_plateaus"):
+		if is_instance_valid(node) and node.has_method("overlaps_cliff_wall"):
+			if bool(node.call("overlaps_cliff_wall", world_pos, clearance_r)):
+				return false
+	for node: Node in tree.get_nodes_in_group("destructible_barricades"):
+		if is_instance_valid(node) and not bool(node.get("is_destroyed")) and not node.is_queued_for_deletion() and node.has_method("overlaps_circle"):
+			if bool(node.call("overlaps_circle", world_pos, clearance_r)):
 				return false
 	for node: Node in tree.get_nodes_in_group("map_landmarks"):
-		if is_instance_valid(node) and node.has_method("overlaps_circle"):
-			if node.call("overlaps_circle", world_pos, clearance_r):
+		if is_instance_valid(node) and bool(node.get("has_collision")) and node.has_method("overlaps_circle"):
+			if bool(node.call("overlaps_circle", world_pos, clearance_r)):
 				return false
 	for node: Node in tree.get_nodes_in_group("buildings"):
 		if not (node is Building) or not is_instance_valid(node):

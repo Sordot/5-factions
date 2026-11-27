@@ -5,6 +5,7 @@ const RESOURCE_BIOMASS: StringName = &"biomass"
 const RESOURCE_SILICA: StringName = &"silica"
 const RESOURCE_COMPUTE: StringName = &"compute"
 const INCOME_WINDOW_SEC: float = 30.0
+const INCOME_COMPACT_THRESHOLD: int = 64
 
 signal resources_changed(team: int, resources: Dictionary)
 signal bandwidth_changed(team: int, used: int, cap: int)
@@ -23,12 +24,19 @@ var upgrade_manager: UpgradeManager = UpgradeManager.new()
 var _resources: Dictionary = {}
 var _total_gathered: Dictionary = {}
 var _income_samples: Dictionary = {}
+var _income_heads: Dictionary = {}
 var _elapsed_time: float = 0.0
 var _bandwidth_used: Dictionary = {}
 var _bandwidth_reserved: Dictionary = {}
 var _bandwidth_cap: Dictionary = {}
 var _bandwidth_providers: Dictionary = {}
 var _bandwidth_units: Dictionary = {}
+var _team_unit_bw: Dictionary = {}
+var _team_provider_bw: Dictionary = {}
+var _reserved_by_source: Dictionary = {}
+var _reserved_unkeyed: Dictionary = {}
+var _constructed_building_counts: Dictionary = {}
+var _registered_tech_buildings: Dictionary = {}
 var _uplink_controller: int = -1
 var _uplink_bonus_pct: float = 0.05
 
@@ -52,6 +60,7 @@ func _ready() -> void:
 
 
 func _sync_initial_scene_state() -> void:
+	_rebuild_constructed_tech_cache()
 	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
 	for tid: int in active_teams:
 		recalculate_bandwidth(tid)
@@ -78,12 +87,25 @@ func _init_team_state(team: int, biomass: int, silica: int, compute: int) -> voi
 		RESOURCE_SILICA: [],
 		RESOURCE_COMPUTE: [],
 	}
+	_income_heads[team] = {
+		RESOURCE_BIOMASS: 0,
+		RESOURCE_SILICA: 0,
+		RESOURCE_COMPUTE: 0,
+	}
 	if not _bandwidth_used.has(team):
 		_bandwidth_used[team] = 0
 	if not _bandwidth_reserved.has(team):
 		_bandwidth_reserved[team] = 0
 	if not _bandwidth_cap.has(team):
 		_bandwidth_cap[team] = 0
+	if not _team_unit_bw.has(team):
+		_team_unit_bw[team] = 0
+	if not _team_provider_bw.has(team):
+		_team_provider_bw[team] = 0
+	if not _reserved_unkeyed.has(team):
+		_reserved_unkeyed[team] = 0
+	if not _constructed_building_counts.has(team):
+		_constructed_building_counts[team] = {}
 
 
 func _ensure_team(team: int) -> void:
@@ -93,6 +115,14 @@ func _ensure_team(team: int) -> void:
 
 func reset_economy() -> void:
 	_elapsed_time = 0.0
+	_bandwidth_providers.clear()
+	_bandwidth_units.clear()
+	_team_unit_bw.clear()
+	_team_provider_bw.clear()
+	_reserved_by_source.clear()
+	_reserved_unkeyed.clear()
+	_constructed_building_counts.clear()
+	_registered_tech_buildings.clear()
 	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
 	for tid: int in active_teams:
 		if tid == 0 or enemy_matches_starting_resources:
@@ -100,8 +130,11 @@ func reset_economy() -> void:
 		else:
 			_init_team_state(tid, 0, 0, 0)
 		_bandwidth_reserved[tid] = 0
+		_bandwidth_used[tid] = 0
+		_bandwidth_cap[tid] = 0
 	upgrade_manager.reset()
 	set_uplink_controller(-1, _uplink_bonus_pct)
+	_rebuild_constructed_tech_cache()
 	for tid: int in active_teams:
 		recalculate_bandwidth(tid)
 		resources_changed.emit(tid, get_resources(tid))
@@ -125,20 +158,35 @@ func add_resource(team: int, resource_type: StringName, amount: int, record_as_i
 		var sample_map: Dictionary = _income_samples[team]
 		if not sample_map.has(resource_type):
 			sample_map[resource_type] = []
+		var head_map: Dictionary = _income_heads[team]
+		if not head_map.has(resource_type):
+			head_map[resource_type] = 0
 		var arr: Array = sample_map[resource_type]
 		arr.append({"time": _elapsed_time, "amount": amount})
-		_prune_income_samples(arr)
+		_prune_income_samples(team, resource_type)
 	resources_changed.emit(team, get_resources(team))
 
 
-func _prune_income_samples(samples: Array) -> void:
+func _prune_income_samples(team: int, resource_type: StringName) -> void:
+	var sample_map: Dictionary = _income_samples[team]
+	var head_map: Dictionary = _income_heads[team]
+	var arr: Array = sample_map[resource_type]
+	var head: int = int(head_map.get(resource_type, 0))
+	var arr_size: int = arr.size()
 	var cutoff: float = _elapsed_time - INCOME_WINDOW_SEC
-	while not samples.is_empty():
-		var first: Dictionary = samples[0]
-		if float(first.get("time", 0.0)) < cutoff:
-			samples.pop_front()
+	while head < arr_size:
+		var entry: Dictionary = arr[head] as Dictionary
+		if float(entry.get("time", 0.0)) < cutoff:
+			head += 1
 		else:
 			break
+	if head >= arr_size:
+		arr.clear()
+		head = 0
+	elif head >= INCOME_COMPACT_THRESHOLD:
+		sample_map[resource_type] = arr.slice(head)
+		head = 0
+	head_map[resource_type] = head
 
 
 func get_income_rate_per_minute(team: int, resource_type: StringName) -> int:
@@ -147,12 +195,14 @@ func get_income_rate_per_minute(team: int, resource_type: StringName) -> int:
 	var sample_map: Dictionary = _income_samples[team]
 	if not sample_map.has(resource_type):
 		return 0
+	_prune_income_samples(team, resource_type)
 	var arr: Array = sample_map[resource_type]
-	_prune_income_samples(arr)
-	if arr.is_empty():
+	var head: int = int((_income_heads[team] as Dictionary).get(resource_type, 0))
+	if head >= arr.size():
 		return 0
 	var total_in_window: int = 0
-	for item: Variant in arr:
+	for i: int in range(head, arr.size()):
+		var item: Variant = arr[i]
 		if item is Dictionary:
 			total_in_window += int((item as Dictionary).get("amount", 0))
 	var effective_window: float = clampf(_elapsed_time, 12.0, INCOME_WINDOW_SEC)
@@ -230,21 +280,39 @@ func spend_resources(team: int, costs: Dictionary) -> bool:
 	return true
 
 
+func _emit_bandwidth_if_changed(team: int) -> void:
+	_ensure_team(team)
+	var next_used: int = maxi(0, int(_team_unit_bw.get(team, 0))) + maxi(0, int(_bandwidth_reserved.get(team, 0)))
+	var next_cap: int = maxi(0, int(_team_provider_bw.get(team, 0)))
+	var prev_used: int = int(_bandwidth_used.get(team, -1))
+	var prev_cap: int = int(_bandwidth_cap.get(team, -1))
+	_bandwidth_used[team] = next_used
+	_bandwidth_cap[team] = next_cap
+	if next_used != prev_used or next_cap != prev_cap:
+		bandwidth_changed.emit(team, next_used, next_cap)
+
+
 func register_bandwidth_provider(provider: Node, team: int, amount: int) -> void:
 	if provider == null or amount <= 0:
 		return
 	_ensure_team(team)
 	var provider_id: int = provider.get_instance_id()
 	if _bandwidth_providers.has(provider_id):
-		var prev: Dictionary = _bandwidth_providers[provider_id]
-		if int(prev["team"]) == team and int(prev["amount"]) == amount:
+		var prev: Dictionary = _bandwidth_providers[provider_id] as Dictionary
+		var prev_team: int = int(prev["team"])
+		var prev_amt: int = int(prev["amount"])
+		if prev_team == team and prev_amt == amount:
 			return
+		_team_provider_bw[prev_team] = maxi(0, int(_team_provider_bw.get(prev_team, 0)) - prev_amt)
+		if prev_team != team:
+			_emit_bandwidth_if_changed(prev_team)
 	_bandwidth_providers[provider_id] = {
 		"node": provider,
 		"team": team,
 		"amount": amount,
 	}
-	recalculate_bandwidth(team)
+	_team_provider_bw[team] = int(_team_provider_bw.get(team, 0)) + amount
+	_emit_bandwidth_if_changed(team)
 
 
 func unregister_bandwidth_provider(provider: Node) -> void:
@@ -253,10 +321,12 @@ func unregister_bandwidth_provider(provider: Node) -> void:
 	var provider_id: int = provider.get_instance_id()
 	if not _bandwidth_providers.has(provider_id):
 		return
-	var entry: Dictionary = _bandwidth_providers[provider_id]
+	var entry: Dictionary = _bandwidth_providers[provider_id] as Dictionary
 	var team: int = int(entry["team"])
+	var amt: int = int(entry["amount"])
 	_bandwidth_providers.erase(provider_id)
-	recalculate_bandwidth(team, provider)
+	_team_provider_bw[team] = maxi(0, int(_team_provider_bw.get(team, 0)) - amt)
+	_emit_bandwidth_if_changed(team)
 
 
 func register_unit_bandwidth(unit: Node, team: int, cost: int = 1) -> void:
@@ -264,12 +334,22 @@ func register_unit_bandwidth(unit: Node, team: int, cost: int = 1) -> void:
 		return
 	_ensure_team(team)
 	var unit_id: int = unit.get_instance_id()
+	if _bandwidth_units.has(unit_id):
+		var prev: Dictionary = _bandwidth_units[unit_id] as Dictionary
+		var prev_team: int = int(prev["team"])
+		var prev_cost: int = int(prev["cost"])
+		if prev_team == team and prev_cost == cost:
+			return
+		_team_unit_bw[prev_team] = maxi(0, int(_team_unit_bw.get(prev_team, 0)) - prev_cost)
+		if prev_team != team:
+			_emit_bandwidth_if_changed(prev_team)
 	_bandwidth_units[unit_id] = {
 		"node": unit,
 		"team": team,
 		"cost": cost,
 	}
-	recalculate_bandwidth(team)
+	_team_unit_bw[team] = int(_team_unit_bw.get(team, 0)) + cost
+	_emit_bandwidth_if_changed(team)
 
 
 func unregister_unit_bandwidth(unit: Node) -> void:
@@ -278,10 +358,12 @@ func unregister_unit_bandwidth(unit: Node) -> void:
 	var unit_id: int = unit.get_instance_id()
 	if not _bandwidth_units.has(unit_id):
 		return
-	var entry: Dictionary = _bandwidth_units[unit_id]
+	var entry: Dictionary = _bandwidth_units[unit_id] as Dictionary
 	var team: int = int(entry["team"])
+	var cost: int = int(entry["cost"])
 	_bandwidth_units.erase(unit_id)
-	recalculate_bandwidth(team, unit)
+	_team_unit_bw[team] = maxi(0, int(_team_unit_bw.get(team, 0)) - cost)
+	_emit_bandwidth_if_changed(team)
 
 
 func update_bandwidth_used(team: int, used: int) -> void:
@@ -293,20 +375,67 @@ func update_bandwidth_used(team: int, used: int) -> void:
 	bandwidth_changed.emit(team, clamped_used, get_bandwidth_cap(team))
 
 
-func reserve_bandwidth(team: int, amount: int) -> void:
+func reserve_bandwidth(team: int, amount: int, source_node: Node = null) -> void:
 	if amount <= 0:
 		return
 	_ensure_team(team)
+	if source_node != null:
+		var sid: int = source_node.get_instance_id()
+		if _reserved_by_source.has(sid):
+			var rec: Dictionary = _reserved_by_source[sid] as Dictionary
+			rec["amount"] = int(rec.get("amount", 0)) + amount
+		else:
+			_reserved_by_source[sid] = {
+				"team": team,
+				"amount": amount,
+			}
+	else:
+		_reserved_unkeyed[team] = int(_reserved_unkeyed.get(team, 0)) + amount
 	_bandwidth_reserved[team] = int(_bandwidth_reserved.get(team, 0)) + amount
-	recalculate_bandwidth(team)
+	_emit_bandwidth_if_changed(team)
 
 
-func release_bandwidth(team: int, amount: int) -> void:
+func release_bandwidth(team: int, amount: int, source_node: Node = null) -> void:
 	if amount <= 0:
 		return
 	_ensure_team(team)
-	_bandwidth_reserved[team] = maxi(0, int(_bandwidth_reserved.get(team, 0)) - amount)
-	recalculate_bandwidth(team)
+	var released: int = amount
+	if source_node != null:
+		var sid: int = source_node.get_instance_id()
+		if _reserved_by_source.has(sid):
+			var rec: Dictionary = _reserved_by_source[sid] as Dictionary
+			var cur_amt: int = int(rec.get("amount", 0))
+			released = mini(amount, cur_amt)
+			var rem: int = cur_amt - released
+			if rem <= 0:
+				_reserved_by_source.erase(sid)
+			else:
+				rec["amount"] = rem
+		else:
+			released = 0
+	else:
+		var unkeyed_cur: int = int(_reserved_unkeyed.get(team, 0))
+		released = mini(amount, unkeyed_cur)
+		_reserved_unkeyed[team] = maxi(0, unkeyed_cur - released)
+	if released > 0:
+		_bandwidth_reserved[team] = maxi(0, int(_bandwidth_reserved.get(team, 0)) - released)
+		_emit_bandwidth_if_changed(team)
+
+
+func clear_source_reservations(source_node: Node) -> void:
+	if source_node == null:
+		return
+	var sid: int = source_node.get_instance_id()
+	if not _reserved_by_source.has(sid):
+		return
+	var rec: Dictionary = _reserved_by_source[sid] as Dictionary
+	var team: int = int(rec.get("team", 0))
+	var rem: int = int(rec.get("amount", 0))
+	_reserved_by_source.erase(sid)
+	if rem > 0:
+		_ensure_team(team)
+		_bandwidth_reserved[team] = maxi(0, int(_bandwidth_reserved.get(team, 0)) - rem)
+		_emit_bandwidth_if_changed(team)
 
 
 func set_uplink_controller(team: int, bonus_pct: float = 0.05) -> void:
@@ -346,34 +475,55 @@ func recalculate_bandwidth(team: int, excluded_node: Node = null) -> void:
 	var cap: int = 0
 
 	if is_inside_tree():
+		# Purge existing cached entries for this team before rebuilding cleanly from the live scene.
+		for uid_key: Variant in _bandwidth_units.keys():
+			if int((_bandwidth_units[uid_key] as Dictionary).get("team", -1)) == team:
+				_bandwidth_units.erase(uid_key)
+		for pid_key: Variant in _bandwidth_providers.keys():
+			if int((_bandwidth_providers[pid_key] as Dictionary).get("team", -1)) == team:
+				_bandwidth_providers.erase(pid_key)
+
 		for node: Node in get_tree().get_nodes_in_group("units"):
 			if node == excluded_node or not is_instance_valid(node) or not (node is Unit):
 				continue
 			var unit: Unit = node
-			if unit.is_dead or unit.is_queued_for_deletion() or unit.team != team:
+			if unit.is_dead or unit.is_queued_for_deletion() or int(unit.team) != team:
 				continue
-			var cost: int = unit.data.bandwidth_cost if unit.data != null else 1
-			used += maxi(0, cost)
+			var cost: int = maxi(0, unit.data.bandwidth_cost if unit.data != null else 1)
+			if cost > 0:
+				_bandwidth_units[unit.get_instance_id()] = {"node": unit, "team": team, "cost": cost}
+				used += cost
 
 		for node: Node in get_tree().get_nodes_in_group("buildings"):
 			if node == excluded_node or not is_instance_valid(node) or not (node is Building):
 				continue
 			var building: Building = node
-			if building.is_destroyed or building.is_queued_for_deletion() or not building.is_constructed or building.team != team:
+			if building.is_destroyed or building.is_queued_for_deletion() or not building.is_constructed or int(building.team) != team:
 				continue
-			cap += maxi(0, building.bandwidth_provided)
+			var prov_amt: int = maxi(0, building.bandwidth_provided)
+			if prov_amt > 0:
+				_bandwidth_providers[building.get_instance_id()] = {"node": building, "team": team, "amount": prov_amt}
+				cap += prov_amt
 	else:
 		for provider_id: Variant in _bandwidth_providers.keys():
-			var p_entry: Dictionary = _bandwidth_providers[provider_id]
+			var p_entry: Dictionary = _bandwidth_providers[provider_id] as Dictionary
 			if p_entry["node"] != excluded_node and int(p_entry["team"]) == team and is_instance_valid(p_entry["node"]):
 				cap += int(p_entry["amount"])
 		for unit_id: Variant in _bandwidth_units.keys():
-			var u_entry: Dictionary = _bandwidth_units[unit_id]
+			var u_entry: Dictionary = _bandwidth_units[unit_id] as Dictionary
 			if u_entry["node"] != excluded_node and int(u_entry["team"]) == team and is_instance_valid(u_entry["node"]):
 				used += int(u_entry["cost"])
 
-	var reserved: int = maxi(0, int(_bandwidth_reserved.get(team, 0)))
-	_bandwidth_used[team] = used + reserved
+	# Reconcile reserved bandwidth from live keyed sources + unkeyed fallback
+	var reserved_sum: int = maxi(0, int(_reserved_unkeyed.get(team, 0)))
+	for sid_key: Variant in _reserved_by_source.keys():
+		var rec: Dictionary = _reserved_by_source[sid_key] as Dictionary
+		if int(rec.get("team", -1)) == team:
+			reserved_sum += maxi(0, int(rec.get("amount", 0)))
+	_bandwidth_reserved[team] = reserved_sum
+	_team_unit_bw[team] = used
+	_team_provider_bw[team] = cap
+	_bandwidth_used[team] = used + reserved_sum
 	_bandwidth_cap[team] = cap
 	bandwidth_changed.emit(team, _bandwidth_used[team], cap)
 
@@ -393,20 +543,66 @@ func notify_building_tech_changed(team: int) -> void:
 	tech_changed.emit(team)
 
 
+func register_constructed_building(building: Building) -> void:
+	if building == null or not is_instance_valid(building):
+		return
+	if building.is_destroyed or not building.is_constructed or building.is_salvaging or building.building_type_id == &"":
+		return
+	var bid: int = building.get_instance_id()
+	var team: int = int(building.team)
+	var type_id: StringName = building.building_type_id
+	_ensure_team(team)
+	if _registered_tech_buildings.has(bid):
+		var prev: Dictionary = _registered_tech_buildings[bid] as Dictionary
+		if int(prev["team"]) == team and (prev["type_id"] as StringName) == type_id:
+			return
+		unregister_constructed_building(building)
+	_registered_tech_buildings[bid] = {
+		"team": team,
+		"type_id": type_id,
+	}
+	var counts: Dictionary = _constructed_building_counts[team] as Dictionary
+	counts[type_id] = int(counts.get(type_id, 0)) + 1
+
+
+func unregister_constructed_building(building: Building) -> void:
+	if building == null:
+		return
+	var bid: int = building.get_instance_id()
+	if not _registered_tech_buildings.has(bid):
+		return
+	var entry: Dictionary = _registered_tech_buildings[bid] as Dictionary
+	_registered_tech_buildings.erase(bid)
+	var team: int = int(entry["team"])
+	var type_id: StringName = entry["type_id"] as StringName
+	if _constructed_building_counts.has(team):
+		var counts: Dictionary = _constructed_building_counts[team] as Dictionary
+		var next_cnt: int = int(counts.get(type_id, 0)) - 1
+		if next_cnt <= 0:
+			counts.erase(type_id)
+		else:
+			counts[type_id] = next_cnt
+
+
+func _rebuild_constructed_tech_cache() -> void:
+	_constructed_building_counts.clear()
+	_registered_tech_buildings.clear()
+	if not is_inside_tree():
+		return
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if node is Building and is_instance_valid(node):
+			var b: Building = node as Building
+			if not b.is_destroyed and not b.is_queued_for_deletion() and b.is_constructed and not b.is_salvaging:
+				register_constructed_building(b)
+
+
 func has_constructed_building(team: int, required_building_id: StringName) -> bool:
 	if required_building_id == &"":
 		return true
-	if not is_inside_tree():
+	if not _constructed_building_counts.has(team):
 		return false
-	for node: Node in get_tree().get_nodes_in_group("buildings"):
-		if not (node is Building) or not is_instance_valid(node):
-			continue
-		var b: Building = node
-		if b.is_destroyed or b.is_queued_for_deletion() or not b.is_constructed or b.team != team:
-			continue
-		if b.building_type_id == required_building_id:
-			return true
-	return false
+	var counts: Dictionary = _constructed_building_counts[team] as Dictionary
+	return int(counts.get(required_building_id, 0)) > 0
 
 
 func has_upgrade(team: int, upgrade_id: StringName) -> bool:

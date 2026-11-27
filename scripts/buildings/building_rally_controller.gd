@@ -127,6 +127,18 @@ func apply_rally_to_unit(building: Building, unit: Unit) -> void:
 	if not has_rally():
 		return
 
+	# Capability-aware universal Command Hub rallies: never walk automated Silica harvesters into Biomass patches.
+	if building.is_command_hub() and unit.data != null and unit.data.auto_gather_on_spawn and unit.data.allowed_resource == &"silica":
+		var rallied_to_biomass: bool = false
+		if _rally_target != null and is_instance_valid(_rally_target) and _rally_target is ResourceNode:
+			var r_rn: ResourceNode = _rally_target as ResourceNode
+			if not r_rn.is_vent and r_rn.resource_type == &"biomass":
+				rallied_to_biomass = true
+		elif _rally_resource_type == &"biomass":
+			rallied_to_biomass = true
+		if rallied_to_biomass:
+			return
+
 	if rally_target_unit != null and is_instance_valid(rally_target_unit) and not rally_target_unit.is_dead and not rally_target_unit.is_staffed:
 		_rally_position = rally_target_unit.global_position
 		if unit.data != null and unit.data.attack_damage > 0.0 and not unit.data.can_gather:

@@ -355,7 +355,7 @@ func rebuild_building_card(hud: SelectionHUD, building: Building) -> void:
 		if captured_b_salv.is_salvaging:
 			captured_b_salv.cancel_salvage()
 		else:
-			captured_b_salv.begin_salvage()
+			captured_b_salv.start_salvage()
 	)
 	salv_tile.tooltip_text = ""
 	salv_tile.mouse_entered.connect(func() -> void:
@@ -381,7 +381,7 @@ func rebuild_building_card(hud: SelectionHUD, building: Building) -> void:
 				"Salvage %s" % captured_b_salv.display_name,
 				"LMB",
 				"4.0s Timer  •  50%% Refund: %s" % captured_b_salv.get_refund_label(0.50),
-				"Deconstructs this structure over 4.0 seconds (click-only for safety), refunding 50% of its cost and clearing pathing."
+				"Immediately refunds queued production and ejects staffed Engineers; refunds 50% structure cost after 4.0s."
 			)
 	)
 	salv_tile.mouse_exited.connect(func() -> void:

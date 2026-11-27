@@ -26,6 +26,7 @@ signal construction_progress_changed(building: Building, progress: float, is_con
 signal construction_completed(building: Building)
 signal staffing_changed(building: Building, assigned_count: int, max_slots: int)
 signal training_changed(building: Building)
+signal training_progress_updated(building: Building)
 signal rally_changed(building: Building)
 
 @export var building_data: BuildingData = null
@@ -206,6 +207,11 @@ func _ready() -> void:
 			training_changed.emit(self)
 			status_changed.emit(self)
 		)
+		production_component.progress_updated.connect(func(_p: float, _d: float) -> void:
+			training_progress_updated.emit(self)
+		)
+
+	BUILDING_POWER_LATTICE_SCRIPT.note_provider_radius(power_radius if provides_power_grid else 0.0, shield_regen_aura_radius)
 
 	_ensure_turret_component()
 
@@ -372,6 +378,11 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 			training_changed.emit(self)
 			status_changed.emit(self)
 		)
+		production_component.progress_updated.connect(func(_p: float, _d: float) -> void:
+			training_progress_updated.emit(self)
+		)
+
+	BUILDING_POWER_LATTICE_SCRIPT.note_provider_radius(power_radius if provides_power_grid else 0.0, shield_regen_aura_radius)
 
 	_ensure_turret_component()
 
@@ -567,7 +578,8 @@ func _complete_construction() -> void:
 	var econ_done: EconomyManager = _get_economy_manager()
 	if econ_done != null:
 		econ_done.notify_building_tech_changed(team)
-	if team == Unit.Team.PLAYER:
+	var is_local_complete: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Unit.Team.PLAYER)
+	if is_local_complete:
 		var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
 		if mm != null:
 			mm.push_tactical_alert(global_position, &"tech_complete", "%s Complete" % display_name)
@@ -764,7 +776,7 @@ func can_train_unit(slot_index: int) -> bool:
 
 
 func queue_unit_training(slot_index: int, play_audio: bool = true) -> bool:
-	if not is_powered or production_component == null or slot_index < 0 or slot_index >= trainable_unit_data.size():
+	if production_component == null or slot_index < 0 or slot_index >= trainable_unit_data.size():
 		return false
 	var scene_override: PackedScene = trainable_unit_scenes[slot_index] if slot_index < trainable_unit_scenes.size() else null
 	return production_component.enqueue_unit(self, trainable_unit_data[slot_index], scene_override, play_audio)
@@ -777,7 +789,7 @@ func can_train_unit_data(unit_data: UnitData, scene_override: PackedScene = null
 
 
 func queue_unit_data(unit_data: UnitData, scene_override: PackedScene = null, play_audio: bool = true) -> bool:
-	if not is_powered or production_component == null or unit_data == null:
+	if production_component == null or unit_data == null:
 		return false
 	return production_component.enqueue_unit(self, unit_data, scene_override, play_audio)
 
@@ -789,7 +801,7 @@ func can_research_upgrade(upgrade_index: int) -> bool:
 
 
 func queue_upgrade_research(upgrade_index: int) -> bool:
-	if not is_powered or production_component == null or upgrade_index < 0 or upgrade_index >= researchable_upgrades.size():
+	if production_component == null or upgrade_index < 0 or upgrade_index >= researchable_upgrades.size():
 		return false
 	return production_component.enqueue_upgrade(self, researchable_upgrades[upgrade_index])
 
@@ -1082,6 +1094,14 @@ func start_salvage() -> bool:
 		return false
 	is_salvaging = true
 	salvage_elapsed = 0.0
+	# Immediately refund queued production & reserved Bandwidth and eject staffed Engineers.
+	if production_component != null:
+		production_component.cancel_all_and_refund(self)
+	eject_engineers()
+	var econ_s: EconomyManager = _get_economy_manager()
+	if econ_s != null:
+		econ_s.unregister_constructed_building(self)
+		econ_s.notify_building_tech_changed(team)
 	if provides_power_grid and is_inside_tree():
 		Building.refresh_team_power_grid(get_tree(), int(team), self)
 	if AudioManager != null:
@@ -1096,6 +1116,10 @@ func cancel_salvage() -> void:
 		return
 	is_salvaging = false
 	salvage_elapsed = 0.0
+	var econ_c: EconomyManager = _get_economy_manager()
+	if econ_c != null:
+		econ_c.register_constructed_building(self)
+		econ_c.notify_building_tech_changed(team)
 	if provides_power_grid and is_inside_tree():
 		Building.refresh_team_power_grid(get_tree(), int(team))
 	if AudioManager != null:
@@ -1499,11 +1523,13 @@ func _get_economy_manager() -> EconomyManager:
 
 
 func _register_with_economy() -> void:
-	if not is_constructed or bandwidth_provided <= 0 or not is_inside_tree():
+	if not is_constructed or not is_inside_tree():
 		return
 	var econ: EconomyManager = _get_economy_manager()
 	if econ != null:
-		econ.register_bandwidth_provider(self, team, bandwidth_provided)
+		econ.register_constructed_building(self)
+		if bandwidth_provided > 0:
+			econ.register_bandwidth_provider(self, team, bandwidth_provided)
 
 
 func _unregister_from_economy() -> void:
@@ -1511,4 +1537,6 @@ func _unregister_from_economy() -> void:
 		return
 	var econ: EconomyManager = _get_economy_manager()
 	if econ != null:
+		econ.unregister_constructed_building(self)
 		econ.unregister_bandwidth_provider(self)
+		econ.clear_source_reservations(self)
