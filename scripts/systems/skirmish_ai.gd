@@ -167,22 +167,27 @@ func _run_decision_tick(tick_dt: float) -> void:
 	# Ensure staging anchor is initialized & nav-snapped, and recompute when expansion Nexus Vats complete.
 	army.ensure_staging_anchor(core, count_constructed_command_cores())
 
+	# 0. Shared per-tick allied vision snapshot (zero Fog-of-War cheating)
+	scout_intel.refresh_vision_cache()
+
 	# 1. Fair vision-respecting intel update (every 1.5s)
 	if _intel_scan_timer >= INTEL_SCAN_INTERVAL:
 		_intel_scan_timer = 0.0
 		scout_intel.update_scouted_intel()
 
-	# 2. Safe SalvageCore contesting (throttled by difficulty)
+	# 2. Safe SalvageCore contesting (throttled by difficulty, strictly fog-respecting)
 	var salvage_interval: float = 6.0 if is_relaxed_difficulty() else 3.0
 	if _salvage_scan_timer >= salvage_interval:
 		_salvage_scan_timer = 0.0
 		economy.collect_safe_salvage(core)
 
-	# 3. Assign idle workers, harvesters, engineers, and resume unfinished sites
+	# 3. Worker survival, idle assignments, base repairs, and unfinished sites
+	economy.evacuate_harassed_workers(core)
 	economy.assign_idle_workers(core)
 	economy.assign_idle_harvesters()
 	economy.assign_idle_engineers()
 	economy.resume_unfinished_buildings()
+	economy.manage_base_repairs()
 
 	var aggro_enabled: bool = MatchManager.is_aggro_ai_enabled(get_tree())
 	if not aggro_enabled:
@@ -197,11 +202,12 @@ func _run_decision_tick(tick_dt: float) -> void:
 	economy.manage_economy_and_production(econ, core)
 	economy.manage_overclock_macro()
 
-	# 6. Early scouting dispatch
-	scout_intel.manage_early_scouting(core)
+	# 6. Early scouting dispatch & active SensorRelay capture hold
+	scout_intel.manage_early_scouting(core, tick_dt)
 
-	# 7. Explicit Army State Machine (DEFENDING / RETREATING / BREACHING / ATTACKING / STAGING) & Deploy micro
+	# 7. Multi-squad Army State Machine, opportunistic flank raids & Deploy micro
 	army.tick_army_state_machine(core, tick_dt)
+	army.tick_raid_squad(core, tick_dt)
 	army.manage_deploy_micro(tick_dt)
 
 

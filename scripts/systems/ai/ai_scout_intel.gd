@@ -7,6 +7,12 @@ var ai: SkirmishAICommander = null
 var active_scout: Unit = null
 var next_scout_dispatch_time: float = 75.0
 var scout_quadrant_index: int = 0
+var visible_enemy_units: Dictionary = {} # instance_id -> Unit
+var visible_enemy_buildings: Dictionary = {} # instance_id -> Building
+var _vision_cache_elapsed: float = -1.0
+var _holding_relay: Node2D = null
+var _relay_hold_timer: float = 0.0
+var _scout_resume_waypoints: Array[Vector2] = []
 var scouted_intel: Dictionary = {
 	"saw_heavy_armor": false,
 	"saw_infantry_swarm": false,
@@ -60,17 +66,99 @@ func is_spot_safe(world_pos: Vector2, radius: float, respect_fog: bool) -> bool:
 	return ally_power >= enemy_power * 1.15
 
 
-func manage_early_scouting(core: Building) -> void:
+func refresh_vision_cache(force: bool = false) -> void:
+	if ai == null or not ai.is_inside_tree():
+		return
+	if not force and is_equal_approx(_vision_cache_elapsed, ai.ai_elapsed):
+		return
+	_vision_cache_elapsed = ai.ai_elapsed
+	visible_enemy_units.clear()
+	visible_enemy_buildings.clear()
+
+	for node: Node in ai.get_tree().get_nodes_in_group("units"):
+		if node is Unit and is_instance_valid(node):
+			var u: Unit = node as Unit
+			if not u.is_dead and not u.is_staffed and ai.is_allied_team(int(u.team)):
+				var vr: float = u.data.vision_range if u.data != null else 320.0
+				scan_vision_circle_for_intel(u.global_position, vr, visible_enemy_units, visible_enemy_buildings)
+	for node: Node in ai.get_tree().get_nodes_in_group("buildings"):
+		if node is Building and is_instance_valid(node):
+			var b: Building = node as Building
+			if not b.is_destroyed and ai.is_allied_team(int(b.team)):
+				scan_vision_circle_for_intel(b.global_position, b.get_vision_range(), visible_enemy_units, visible_enemy_buildings)
+	for node: Node in ai.get_tree().get_nodes_in_group("sensor_relays"):
+		if is_instance_valid(node) and node is Node2D and node.has_method("is_active") and bool(node.call("is_active")):
+			var ctrl_t: int = int(node.get("controlling_team"))
+			if ctrl_t >= 0 and ai.is_allied_team(ctrl_t):
+				scan_vision_circle_for_intel((node as Node2D).global_position, float(node.get("vision_radius")), visible_enemy_units, visible_enemy_buildings)
+
+
+func is_world_pos_visible_to_ai(world_pos: Vector2) -> bool:
+	if ai == null or not ai.is_inside_tree():
+		return true
+	var fog: FogOfWarSystem = ai.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	if fog == null or not fog.fog_enabled:
+		return true
+	return fog.is_world_pos_visible_to_team(int(ai.ai_team), world_pos)
+
+
+func manage_early_scouting(core: Building, tick_dt: float = 1.0) -> void:
 	if ai == null:
 		return
 	if active_scout != null:
 		if not is_instance_valid(active_scout) or active_scout.is_dead or active_scout.is_staffed:
 			active_scout = null
+			_holding_relay = null
+			_relay_hold_timer = 0.0
+			_scout_resume_waypoints.clear()
 			var rescout_cd: float = 140.0 if ai.is_relaxed_difficulty() else (65.0 if ai.is_brutal_difficulty() else 95.0)
 			next_scout_dispatch_time = ai.ai_elapsed + rescout_cd
-		elif active_scout.command_state == Unit.CommandState.IDLE and active_scout.command_queue.is_empty():
+			return
+
+		# Active SensorRelay capture hold: pause inside neutral/hostile relay up to 1.0s until flipped to allied control
+		if _holding_relay != null:
+			var relay_valid: bool = is_instance_valid(_holding_relay)
+			var relay_flipped: bool = relay_valid and _holding_relay.has_method("is_active") and bool(_holding_relay.call("is_active")) and ai.is_allied_team(int(_holding_relay.get("controlling_team")))
+			_relay_hold_timer -= tick_dt
+			if not relay_valid or relay_flipped or _relay_hold_timer <= 0.0:
+				_holding_relay = null
+				_relay_hold_timer = 0.0
+				var first_wp: bool = true
+				for wp: Vector2 in _scout_resume_waypoints:
+					active_scout.command_move(wp, not first_wp)
+					first_wp = false
+				_scout_resume_waypoints.clear()
+			else:
+				if active_scout.global_position.distance_squared_to(_holding_relay.global_position) > 48.0 * 48.0 and active_scout.command_state == Unit.CommandState.IDLE:
+					active_scout.command_move(_holding_relay.global_position, false)
+			return
+
+		# Detect arrival near an uncaptured SensorRelay and hold briefly to flip ownership
+		for r_node: Node in ai.get_tree().get_nodes_in_group("sensor_relays"):
+			if not is_instance_valid(r_node) or not (r_node is Node2D):
+				continue
+			var r_active: bool = r_node.has_method("is_active") and bool(r_node.call("is_active"))
+			var r_ctrl: int = int(r_node.get("controlling_team"))
+			if r_active and ai.is_allied_team(r_ctrl):
+				continue
+			var r_2d: Node2D = r_node as Node2D
+			if active_scout.global_position.distance_squared_to(r_2d.global_position) <= 95.0 * 95.0:
+				_scout_resume_waypoints.clear()
+				for q_cmd: Dictionary in active_scout.command_queue:
+					var pt_v: Variant = q_cmd.get("pos", null)
+					if pt_v is Vector2:
+						_scout_resume_waypoints.append(pt_v as Vector2)
+				_holding_relay = r_2d
+				_relay_hold_timer = 1.0
+				active_scout.command_move(r_2d.global_position, false)
+				return
+
+		if active_scout.command_state == Unit.CommandState.IDLE and active_scout.command_queue.is_empty():
 			# Scout finished its loop cleanly; release it back to army pool
 			active_scout = null
+			_holding_relay = null
+			_relay_hold_timer = 0.0
+			_scout_resume_waypoints.clear()
 			var loop_cd: float = 135.0 if ai.is_relaxed_difficulty() else (65.0 if ai.is_brutal_difficulty() else 90.0)
 			next_scout_dispatch_time = ai.ai_elapsed + loop_cd
 		return
@@ -84,6 +172,8 @@ func manage_early_scouting(core: Building) -> void:
 	var fallback_scout: Unit = null
 	for u: Unit in ai.get_team_units(ai.ai_team):
 		if ai.army.wave_units.has(u) and ai.army.army_state == SkirmishAICommander.ArmyState.ATTACKING:
+			continue
+		if ai.army.raid_units.has(u) or ai.army.defense_units.has(u):
 			continue
 		if u.data == null or not u.data.is_combat_unit() or u.data.move_speed <= 0.0:
 			continue
@@ -162,34 +252,9 @@ func update_scouted_intel() -> void:
 	if ai == null or not ai.is_inside_tree():
 		return
 
-	# Collect vision sources belonging to this AI (and allied teams in 2v2) — zero Fog-of-War cheating!
-	var seen_enemy_units: Dictionary = {}
-	var seen_enemy_buildings: Dictionary = {}
-	var observers_units: Array[Unit] = []
-	var observers_buildings: Array[Building] = []
-
-	for node: Node in ai.get_tree().get_nodes_in_group("units"):
-		if node is Unit and is_instance_valid(node):
-			var u: Unit = node as Unit
-			if not u.is_dead and not u.is_staffed and ai.is_allied_team(int(u.team)):
-				observers_units.append(u)
-	for node: Node in ai.get_tree().get_nodes_in_group("buildings"):
-		if node is Building and is_instance_valid(node):
-			var b: Building = node as Building
-			if not b.is_destroyed and ai.is_allied_team(int(b.team)):
-				observers_buildings.append(b)
-
-	for obs_u: Unit in observers_units:
-		var vr: float = obs_u.data.vision_range if obs_u.data != null else 320.0
-		scan_vision_circle_for_intel(obs_u.global_position, vr, seen_enemy_units, seen_enemy_buildings)
-	for obs_b: Building in observers_buildings:
-		var vr_b: float = obs_b.get_vision_range()
-		scan_vision_circle_for_intel(obs_b.global_position, vr_b, seen_enemy_units, seen_enemy_buildings)
-	for node: Node in ai.get_tree().get_nodes_in_group("sensor_relays"):
-		if is_instance_valid(node) and node is Node2D and node.has_method("is_active") and bool(node.call("is_active")):
-			var ctrl_t: int = int(node.get("controlling_team"))
-			if ctrl_t >= 0 and ai.is_allied_team(ctrl_t):
-				scan_vision_circle_for_intel((node as Node2D).global_position, float(node.get("vision_radius")), seen_enemy_units, seen_enemy_buildings)
+	refresh_vision_cache(false)
+	var seen_enemy_units: Dictionary = visible_enemy_units
+	var seen_enemy_buildings: Dictionary = visible_enemy_buildings
 
 	var infantry_count: int = 0
 	var vat_count: int = 0
@@ -197,7 +262,7 @@ func update_scouted_intel() -> void:
 
 	for eu_var: Variant in seen_enemy_units.values():
 		var eu: Unit = eu_var as Unit
-		if eu.data == null:
+		if not is_instance_valid(eu) or eu.is_dead or eu.data == null:
 			continue
 		if eu.data.has_tag(&"artillery") or eu.data.has_tag(&"siege"):
 			scouted_intel["artillery_at"] = now
@@ -208,6 +273,8 @@ func update_scouted_intel() -> void:
 
 	for eb_var: Variant in seen_enemy_buildings.values():
 		var eb: Building = eb_var as Building
+		if not is_instance_valid(eb) or eb.is_destroyed:
+			continue
 		if eb.is_military_production_building() and eb.get_tech_tier() >= 2:
 			scouted_intel["heavy_armor_at"] = now
 			scouted_intel["last_known_enemy_base"] = eb.global_position
@@ -218,6 +285,18 @@ func update_scouted_intel() -> void:
 			scouted_intel["last_known_enemy_base"] = eb.global_position
 		if eb.has_turret:
 			scouted_intel["turrets_at"] = now
+
+	# Clear stale last_known_enemy_base if we currently have vision over it and no enemy buildings remain there
+	var lkeb: Vector2 = scouted_intel.get("last_known_enemy_base", Vector2.INF) as Vector2
+	if lkeb != Vector2.INF and is_world_pos_visible_to_ai(lkeb):
+		var still_occupied: bool = false
+		for eb_chk_var: Variant in seen_enemy_buildings.values():
+			var eb_chk: Building = eb_chk_var as Building
+			if is_instance_valid(eb_chk) and not eb_chk.is_destroyed and eb_chk.global_position.distance_squared_to(lkeb) <= 320.0 * 320.0:
+				still_occupied = true
+				break
+		if not still_occupied:
+			scouted_intel["last_known_enemy_base"] = Vector2.INF
 
 	if vat_count >= 2 or infantry_count >= 6:
 		scouted_intel["infantry_swarm_at"] = now

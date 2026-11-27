@@ -7,6 +7,7 @@ var hub_data: BuildingData = null
 var refinery_data: BuildingData = null
 var supply_data: BuildingData = null
 var compute_hub_data: BuildingData = null
+var turret_data: BuildingData = null
 var barracks_t1_data: BuildingData = null
 var counter_foundry_data: BuildingData = null
 var heavy_t2_data: BuildingData = null
@@ -14,14 +15,24 @@ var worker_data: UnitData = null
 var harvester_data: UnitData = null
 var engineer_data: UnitData = null
 
+var last_macro_goal: String = "BOOT"
+
 var _vat_production_counter: int = 0
 var _foundry_production_counter: int = 0
 var _fab_production_counter: int = 0
 var _tier2_transmission_sent: bool = false
+var _last_block_warn_ms: Dictionary = {}
+var _under_pressure_until: float = 0.0
+var _worker_evac_until: Dictionary = {}
 
 
 func setup(owner_ai: SkirmishAICommander) -> void:
 	ai = owner_ai
+
+
+func note_base_pressure(duration: float = 75.0) -> void:
+	if ai != null:
+		_under_pressure_until = maxf(_under_pressure_until, ai.ai_elapsed + duration)
 
 
 func bind_from_planner(planner: AIBuildPlanner) -> void:
@@ -31,6 +42,7 @@ func bind_from_planner(planner: AIBuildPlanner) -> void:
 	refinery_data = planner.get_building_for_role(&"refinery")
 	supply_data = planner.get_building_for_role(&"supply")
 	compute_hub_data = planner.get_building_for_role(&"compute_hub")
+	turret_data = planner.get_building_for_role(&"turret")
 	barracks_t1_data = planner.get_building_for_role(&"barracks_t1")
 	counter_foundry_data = planner.get_building_for_role(&"counter_foundry")
 	heavy_t2_data = planner.get_building_for_role(&"heavy_t2")
@@ -85,7 +97,7 @@ func collect_safe_salvage(core: Building) -> void:
 	for sc: Node2D in candidate_cores:
 		if is_salvage_already_claimed_by_ally(sc):
 			continue
-		if not ai.scout_intel.is_spot_safe(sc.global_position, 360.0, false):
+		if not ai.scout_intel.is_spot_safe(sc.global_position, 360.0, true):
 			continue
 		var d_sq: float = core.global_position.distance_squared_to(sc.global_position)
 		if d_sq < best_d_sq:
@@ -279,6 +291,183 @@ func assign_idle_engineers() -> void:
 				break
 
 
+func evacuate_harassed_workers(core: Building) -> void:
+	if ai == null or core == null or not is_instance_valid(core) or not ai.is_inside_tree():
+		return
+	var now: float = ai.ai_elapsed
+	var friendly_hubs: Array[Building] = []
+	for b: Building in ai.get_team_buildings(ai.ai_team):
+		if b.is_constructed and not b.is_destroyed and b.is_command_hub():
+			friendly_hubs.append(b)
+	if friendly_hubs.is_empty():
+		friendly_hubs.append(core)
+
+	var safe_bounds: Rect2 = ai.arena_bounds.grow(-48.0)
+	var live_ids: Dictionary = {}
+	for u: Unit in ai.get_team_units(ai.ai_team):
+		if u.data == null or not u.data.can_gather or u.data.auto_gather_on_spawn:
+			continue
+		var uid: int = u.get_instance_id()
+		live_ids[uid] = true
+		if u.command_state != Unit.CommandState.GATHERING and u.command_state != Unit.CommandState.IDLE:
+			continue
+		if now < float(_worker_evac_until.get(uid, 0.0)):
+			continue
+		var wounded: bool = u.current_hp < u.get_max_hp() * 0.85
+		var scan_r: float = 240.0 if wounded else 170.0
+		var near_hostile: Unit = null
+		var best_d_sq: float = scan_r * scan_r
+		var nearby: Array = SpatialGrid.query_units_in_radius(u.global_position, scan_r) if SpatialGrid != null else []
+		for item: Variant in nearby:
+			if not is_instance_valid(item) or not (item is Unit):
+				continue
+			var h: Unit = item as Unit
+			if h.is_dead or h.is_staffed or not ai.is_enemy_team(int(h.team)) or not ai.is_combat_unit(h):
+				continue
+			if not ai.scout_intel.is_entity_visible_to_ai(h):
+				continue
+			var d_sq: float = u.global_position.distance_squared_to(h.global_position)
+			if d_sq <= best_d_sq:
+				best_d_sq = d_sq
+				near_hostile = h
+		if near_hostile == null:
+			continue
+		# Pick safest friendly Command Hub (farthest from hostile)
+		var safest_hub: Building = friendly_hubs[0]
+		var best_hub_d_sq: float = -1.0
+		for fh: Building in friendly_hubs:
+			var hd_sq: float = fh.global_position.distance_squared_to(near_hostile.global_position)
+			if hd_sq > best_hub_d_sq:
+				best_hub_d_sq = hd_sq
+				safest_hub = fh
+		var away: Vector2 = (u.global_position - near_hostile.global_position).normalized()
+		if away.length_squared() < 0.01:
+			away = Vector2.RIGHT
+		var to_hub: Vector2 = (safest_hub.global_position - u.global_position).normalized()
+		var flee_dir: Vector2 = (away * 0.65 + to_hub * 0.35).normalized()
+		if flee_dir.length_squared() < 0.01:
+			flee_dir = away
+		var evac_pos: Vector2 = u.global_position + flee_dir * 210.0
+		if safe_bounds.has_area():
+			evac_pos.x = clampf(evac_pos.x, safe_bounds.position.x, safe_bounds.end.x)
+			evac_pos.y = clampf(evac_pos.y, safe_bounds.position.y, safe_bounds.end.y)
+		u.command_move(evac_pos, false)
+		_worker_evac_until[uid] = now + 4.0
+
+	for k: Variant in _worker_evac_until.keys():
+		if not live_ids.has(k):
+			_worker_evac_until.erase(k)
+
+
+func manage_base_repairs() -> void:
+	if ai == null or ai.is_relaxed_difficulty() or not ai.is_inside_tree():
+		return
+	var econ: EconomyManager = ai.get_economy_manager()
+	if econ == null:
+		return
+	if econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS) < 60 or econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA) < 30:
+		return
+
+	var team_units: Array[Unit] = ai.get_team_units(ai.ai_team)
+	var already_repaired_ids: Dictionary = {}
+	var primary_gatherers: int = 0
+	for u: Unit in team_units:
+		if u.data != null and u.data.can_gather and not u.data.auto_gather_on_spawn and u.command_state == Unit.CommandState.GATHERING:
+			primary_gatherers += 1
+		if u.command_state == Unit.CommandState.REPAIRING and u.repair_component != null:
+			var r_tgt: Variant = u.repair_component.get("target_entity")
+			if r_tgt is Node and is_instance_valid(r_tgt):
+				already_repaired_ids[(r_tgt as Node).get_instance_id()] = true
+
+	var best_target: Node2D = null
+	var best_ratio: float = 1.0
+	for b: Building in ai.get_team_buildings(ai.ai_team):
+		if not b.is_constructed or b.is_destroyed or b.is_salvaging:
+			continue
+		if not (b.is_command_hub() or b.is_military_production_building() or b.has_turret):
+			continue
+		var ratio_b: float = b.current_hp / maxf(1.0, b.max_hp)
+		if ratio_b >= 0.80 or already_repaired_ids.has(b.get_instance_id()):
+			continue
+		if not ai.scout_intel.is_spot_safe(b.global_position, 240.0, true):
+			continue
+		if ratio_b < best_ratio:
+			best_ratio = ratio_b
+			best_target = b
+
+	if best_target == null:
+		for u_h: Unit in team_units:
+			if u_h.data == null or not u_h.data.is_heavy_unit():
+				continue
+			if not (u_h.data.has_tag(&"mechanical") or u_h.data.has_tag(&"synthetic")):
+				continue
+			if u_h.command_state != Unit.CommandState.IDLE:
+				continue
+			var ratio_u: float = u_h.current_hp / maxf(1.0, u_h.get_max_hp())
+			if ratio_u >= 0.75 or already_repaired_ids.has(u_h.get_instance_id()):
+				continue
+			if not ai.scout_intel.is_spot_safe(u_h.global_position, 240.0, true):
+				continue
+			if ratio_u < best_ratio:
+				best_ratio = ratio_u
+				best_target = u_h
+
+	if best_target == null:
+		return
+
+	var best_idle_rep: Unit = null
+	var best_idle_d_sq: float = INF
+	var best_gather_rep: Unit = null
+	var best_gather_d_sq: float = INF
+	for u: Unit in team_units:
+		if not u.can_repair():
+			continue
+		if u.command_state == Unit.CommandState.CONSTRUCTING or u.command_state == Unit.CommandState.SALVAGING or u.command_state == Unit.CommandState.REPAIRING or u.command_state == Unit.CommandState.STAFFING_BUILDING:
+			continue
+		if not u.command_queue.is_empty():
+			continue
+		var d_sq: float = u.global_position.distance_squared_to(best_target.global_position)
+		if u.command_state == Unit.CommandState.IDLE:
+			if d_sq < best_idle_d_sq:
+				best_idle_d_sq = d_sq
+				best_idle_rep = u
+		elif u.command_state == Unit.CommandState.GATHERING and primary_gatherers > 3 and u.data != null and not u.data.auto_gather_on_spawn:
+			if d_sq < best_gather_d_sq:
+				best_gather_d_sq = d_sq
+				best_gather_rep = u
+
+	var chosen_rep: Unit = best_idle_rep if best_idle_rep != null else best_gather_rep
+	if chosen_rep != null:
+		chosen_rep.command_repair(best_target, false)
+
+
+func _can_spend_unreserved(biomass: int, silica: int, compute: int, cost: Dictionary, res_b: int, res_s: int, res_c: int) -> bool:
+	var need_b: int = int(cost.get(EconomyManager.RESOURCE_BIOMASS, 0))
+	var need_s: int = int(cost.get(EconomyManager.RESOURCE_SILICA, 0))
+	var need_c: int = int(cost.get(EconomyManager.RESOURCE_COMPUTE, 0))
+	return (biomass - res_b) >= need_b and (silica - res_s) >= need_s and (compute - res_c) >= need_c
+
+
+func _reserve_building_cost(bdata: BuildingData, res: Dictionary) -> void:
+	if bdata == null:
+		return
+	res["b"] = int(res["b"]) + maxi(0, bdata.biomass_cost)
+	res["s"] = int(res["s"]) + maxi(0, bdata.silica_cost)
+	res["c"] = int(res["c"]) + maxi(0, bdata.compute_cost)
+
+
+func _warn_build_blocked(data: BuildingData, reason: String) -> void:
+	if data == null or ai == null:
+		return
+	var key: String = "%s:%s" % [String(data.building_id), reason]
+	var now_ms: int = Time.get_ticks_msec()
+	var prev_ms: int = int(_last_block_warn_ms.get(key, -999999))
+	if (now_ms - prev_ms) < 30000:
+		return
+	_last_block_warn_ms[key] = now_ms
+	push_warning("AI [Team %d] blocked placing '%s' (reason=%s)." % [int(ai.ai_team) + 1, String(data.building_id), reason])
+
+
 func resume_unfinished_buildings() -> void:
 	for b: Building in ai.get_team_buildings(ai.ai_team):
 		if b.is_destroyed or b.is_constructed:
@@ -321,6 +510,7 @@ func manage_economy_and_production(econ: EconomyManager, core: Building) -> void
 	var constructed_foundries: Array[Building] = []
 	var heavy_plants: Array[Building] = []
 	var constructed_heavy_plants: Array[Building] = []
+	var turrets: Array[Building] = []
 	var unfinished_supply: int = 0
 	var staffed_engineers: int = 0
 	var total_compute_slots: int = 0
@@ -342,6 +532,8 @@ func manage_economy_and_production(econ: EconomyManager, core: Building) -> void
 				constructed_compute_hub = b
 				staffed_engineers += b.get_assigned_engineer_count()
 				total_compute_slots += b.max_staff_slots
+		elif ai.planner.is_role_building(b, &"turret"):
+			turrets.append(b)
 		elif ai.planner.is_role_building(b, &"barracks_t1"):
 			barracks_list.append(b)
 			if b.is_constructed:
@@ -377,16 +569,63 @@ func manage_economy_and_production(econ: EconomyManager, core: Building) -> void
 	var counter_strength: float = ai.scout_intel.get_counter_reaction_strength()
 	var active_posture: StringName = ai.scout_intel.active_counter_posture
 	var rally_pt: Vector2 = ai.army.staging_point if ai.army.staging_point_valid else core.global_position.lerp(Vector2.ZERO, 0.34)
+	var reserved: Dictionary = {"b": 0, "s": 0, "c": 0}
+	var goal_set: bool = false
 
-	# Priority 1: Ensure baseline worker core (3 early on Swarm Rush, 4 baseline).
+	# Priority 0: Emergency Supply Unblock (always precedes worker training when at/near cap, never deadlocks).
+	if needs_supply and supply_data != null and bw_used >= bw_cap - 1:
+		if econ.can_afford(ai.ai_team, supply_data.get_cost_dict()):
+			var away_em: Vector2 = (core.global_position - Vector2.ZERO).normalized()
+			if away_em.length_squared() < 0.01:
+				away_em = Vector2.RIGHT
+			if try_place_and_build(supply_data, core.global_position + away_em * 125.0, core.global_position) != null:
+				unfinished_supply += 1
+				needs_supply = false
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+		else:
+			_reserve_building_cost(supply_data, reserved)
+		if not goal_set:
+			last_macro_goal = "SUPPLY"
+			goal_set = true
+
+	# Priority 1: Ensure baseline worker core (3 early on Swarm Rush, 4 baseline) without hard-returning.
 	var early_workers: int = 3 if is_swarm_rush else 4
-	if total_workers < early_workers:
-		if worker_data != null and core.get_training_queue_size() < 2 and core.can_train_unit_data(worker_data):
-			core.queue_unit_data(worker_data)
-		return
+	if total_workers < early_workers and worker_data != null:
+		if core.get_training_queue_size() < 2 and core.can_train_unit_data(worker_data):
+			if _can_spend_unreserved(biomass, silica, compute, worker_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+				if core.queue_unit_data(worker_data):
+					total_workers += 1
+					biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+					silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+					compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+					if not goal_set:
+						last_macro_goal = "WORKERS"
+						goal_set = true
 
-	# Priority 1.5 (Proactive Power Lattice Recovery — faction-agnostic for any power-grid faction):
-	# If any constructed structure requiring power is dormant, immediately place a replacement power provider nearby.
+	# Priority 1.2: Universal Hub Silica Bootstrapping (fixes MONOLITH_OS 50S vs 60S Smelter deadlock & future factions!).
+	var early_silica_needed: bool = (
+		(refinery_data != null and silica < refinery_data.silica_cost)
+		or (barracks_t1_data != null and silica < barracks_t1_data.silica_cost)
+		or (supply_data != null and silica < supply_data.silica_cost)
+	)
+	var core_trains_harvester: bool = (
+		harvester_data != null
+		and core.accepts_resource(&"silica")
+		and core.can_train_unit_data(harvester_data)
+	)
+	if total_harvesters < 1 and core_trains_harvester and (early_silica_needed or total_workers >= early_workers):
+		if core.get_training_queue_size() < 2 and core.queue_unit_data(harvester_data):
+			total_harvesters += 1
+			biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+			silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+			compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+			if not goal_set:
+				last_macro_goal = "SILICA_BOOT"
+				goal_set = true
+
+	# Priority 1.5 (Proactive Power Lattice Recovery — non-blocking for any power-grid faction):
 	if supply_data != null and supply_data.provides_power_grid and supply_data.power_radius > 0.0:
 		var unpowered_bldg: Building = null
 		for b_chk: Building in buildings:
@@ -401,79 +640,138 @@ func manage_economy_and_production(econ: EconomyManager, core: Building) -> void
 					if b_p.global_position.distance_to(unpowered_bldg.global_position) <= recovery_r:
 						recovery_in_progress = true
 						break
-			if not recovery_in_progress and econ.can_afford(ai.ai_team, supply_data.get_cost_dict()):
-				var to_core_dir: Vector2 = (core.global_position - unpowered_bldg.global_position).normalized()
-				if to_core_dir.length_squared() < 0.01:
-					to_core_dir = Vector2.RIGHT
-				var recovery_offset: float = minf(115.0, supply_data.power_radius * 0.58)
-				var recovery_anchor: Vector2 = unpowered_bldg.global_position + to_core_dir * recovery_offset
-				try_place_and_build(supply_data, recovery_anchor, unpowered_bldg.global_position)
-				return
+			if not recovery_in_progress:
+				if econ.can_afford(ai.ai_team, supply_data.get_cost_dict()):
+					var to_core_dir: Vector2 = (core.global_position - unpowered_bldg.global_position).normalized()
+					if to_core_dir.length_squared() < 0.01:
+						to_core_dir = Vector2.RIGHT
+					var recovery_offset: float = minf(115.0, supply_data.power_radius * 0.58)
+					var recovery_anchor: Vector2 = unpowered_bldg.global_position + to_core_dir * recovery_offset
+					if try_place_and_build(supply_data, recovery_anchor, unpowered_bldg.global_position) != null:
+						unfinished_supply += 1
+						needs_supply = false
+						biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+						silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+						compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+					else:
+						_reserve_building_cost(supply_data, reserved)
+				else:
+					_reserve_building_cost(supply_data, reserved)
+				if not goal_set:
+					last_macro_goal = "POWER"
+					goal_set = true
 
-	# Swarm Rush builds its first Tier-1 Barracks before the Refinery for rapid early pressure.
-	if is_swarm_rush and barracks_list.is_empty() and barracks_t1_data != null:
-		if econ.can_afford(ai.ai_team, barracks_t1_data.get_cost_dict()):
+	# Swarm Rush prioritizes its first Tier-1 Barracks before the Refinery via non-blocking reservation.
+	if is_swarm_rush and barracks_list.is_empty() and barracks_t1_data != null and ai.planner.are_prerequisites_met(barracks_t1_data, econ, int(ai.ai_team)):
+		if _can_spend_unreserved(biomass, silica, compute, barracks_t1_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
 			var to_c_rush: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var rush_b: Building = try_place_and_build(barracks_t1_data, core.global_position + to_c_rush * 175.0, core.global_position)
 			if rush_b != null:
 				rush_b.set_rally_position(rally_pt)
-			return
-		if biomass < barracks_t1_data.biomass_cost:
-			return
+				barracks_list.append(rush_b)
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+			else:
+				_reserve_building_cost(barracks_t1_data, reserved)
+		else:
+			_reserve_building_cost(barracks_t1_data, reserved)
+		if not goal_set:
+			last_macro_goal = "RUSH_T1"
+			goal_set = true
 
-	# Priority 2: Build Silica Refinery near nearest Silica Vein.
-	if refineries.is_empty() and refinery_data != null:
-		if econ.can_afford(ai.ai_team, refinery_data.get_cost_dict()):
+	# Priority 2: Build Silica Refinery near nearest Silica Vein (non-blocking reservation!).
+	if refineries.is_empty() and refinery_data != null and ai.planner.are_prerequisites_met(refinery_data, econ, int(ai.ai_team)):
+		if _can_spend_unreserved(biomass, silica, compute, refinery_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
 			var vein: ResourceNode = ai.find_nearest_resource(core.global_position, &"silica")
 			var anchor: Vector2 = core.global_position.lerp(vein.global_position, 0.58) if vein != null else (core.global_position + Vector2(-120.0, 180.0))
-			try_place_and_build(refinery_data, anchor, core.global_position)
-		return
+			var built_ref: Building = try_place_and_build(refinery_data, anchor, core.global_position)
+			if built_ref != null:
+				refineries.append(built_ref)
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+			else:
+				_reserve_building_cost(refinery_data, reserved)
+		else:
+			_reserve_building_cost(refinery_data, reserved)
+		if not goal_set:
+			last_macro_goal = "REFINERY"
+			goal_set = true
 
-	# Priority 3: Expand Bandwidth cap via Supply Provider before hitting population block.
-	if needs_supply and supply_data != null:
-		if econ.can_afford(ai.ai_team, supply_data.get_cost_dict()):
+	# Priority 3: Expand Bandwidth cap via Supply Provider before hitting population block (non-blocking!).
+	if needs_supply and supply_data != null and ai.planner.are_prerequisites_met(supply_data, econ, int(ai.ai_team)):
+		if _can_spend_unreserved(biomass, silica, compute, supply_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
 			var away_dir: Vector2 = (core.global_position - Vector2.ZERO).normalized()
+			if away_dir.length_squared() < 0.01:
+				away_dir = Vector2.RIGHT
 			var supply_anchor: Vector2 = core.global_position + away_dir * 125.0
-			try_place_and_build(supply_data, supply_anchor, core.global_position)
-		return
+			if try_place_and_build(supply_data, supply_anchor, core.global_position) != null:
+				unfinished_supply += 1
+				needs_supply = false
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+			else:
+				_reserve_building_cost(supply_data, reserved)
+		else:
+			_reserve_building_cost(supply_data, reserved)
+		if not goal_set:
+			last_macro_goal = "SUPPLY"
+			goal_set = true
 
-	# Priority 4: Train automated Harvesters once Refineries are online (respects faction per-vein saturation bonuses).
+	# Priority 4: Train automated Harvesters from Refinery OR Universal Command Hub (respects faction saturation bonuses).
 	var per_vein_cap: int = 2
-	if constructed_refinery != null:
-		var near_vein: ResourceNode = ai.find_nearest_resource(constructed_refinery.global_position, &"silica")
-		if near_vein != null:
-			per_vein_cap = maxi(2, near_vein.get_effective_max_harvesters(int(ai.ai_team)))
+	var ref_origin: Vector2 = constructed_refinery.global_position if constructed_refinery != null else core.global_position
+	var near_vein: ResourceNode = ai.find_nearest_resource(ref_origin, &"silica")
+	if near_vein != null:
+		per_vein_cap = maxi(2, near_vein.get_effective_max_harvesters(int(ai.ai_team)))
 	var desired_harvesters: int = 1
 	if constructed_refineries.size() >= 2:
 		desired_harvesters = mini(6, per_vein_cap * 2) if is_brutal else mini(5, per_vein_cap + 1)
 	elif is_brutal:
 		desired_harvesters = maxi(3, per_vein_cap)
-	elif constructed_barracks.size() >= 1:
+	elif constructed_barracks.size() >= 1 or constructed_refinery != null:
 		desired_harvesters = per_vein_cap
-	if harvester_data != null and constructed_refinery != null and total_harvesters < desired_harvesters:
-		var trainer: Building = constructed_refinery if constructed_refinery.can_train_unit_data(harvester_data) else core
-		if trainer.get_training_queue_size() < 2 and trainer.can_train_unit_data(harvester_data):
-			trainer.queue_unit_data(harvester_data)
-			return
+	var can_hub_harvest: bool = constructed_refinery != null or core.accepts_resource(&"silica")
+	if harvester_data != null and can_hub_harvest and total_harvesters < desired_harvesters:
+		var trainer: Building = constructed_refinery if (constructed_refinery != null and constructed_refinery.can_train_unit_data(harvester_data)) else (core if core.accepts_resource(&"silica") else null)
+		if trainer != null and trainer.get_training_queue_size() < 2 and trainer.can_train_unit_data(harvester_data):
+			var allow_harv_spend: bool = (total_harvesters == 0) or _can_spend_unreserved(biomass, silica, compute, harvester_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"]))
+			if allow_harv_spend and trainer.queue_unit_data(harvester_data):
+				total_harvesters += 1
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+				if not goal_set:
+					last_macro_goal = "HARVESTERS"
+					goal_set = true
 
-	# Priority 5: Construct primary Tier-1 Barracks facing the map center.
-	if barracks_list.is_empty() and barracks_t1_data != null:
-		if econ.can_afford(ai.ai_team, barracks_t1_data.get_cost_dict()):
+	# Priority 5: Construct primary Tier-1 Barracks facing the map center (non-blocking reservation!).
+	if barracks_list.is_empty() and barracks_t1_data != null and ai.planner.are_prerequisites_met(barracks_t1_data, econ, int(ai.ai_team)):
+		if _can_spend_unreserved(biomass, silica, compute, barracks_t1_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
 			var to_center: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var vat_anchor: Vector2 = core.global_position + to_center * 175.0
 			var built_vat: Building = try_place_and_build(barracks_t1_data, vat_anchor, core.global_position)
 			if built_vat != null:
 				built_vat.set_rally_position(rally_pt)
-			return
-		if biomass < barracks_t1_data.biomass_cost:
-			return
+				barracks_list.append(built_vat)
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+			else:
+				_reserve_building_cost(barracks_t1_data, reserved)
+		else:
+			_reserve_building_cost(barracks_t1_data, reserved)
+		if not goal_set:
+			last_macro_goal = "BARRACKS"
+			goal_set = true
 
 	# Priority 6: Saturate workers across all owned Command Hubs (scales +4 workers per expansion hub).
-	var max_workers_cap: int = 8 if ai.is_relaxed_difficulty() else (14 if is_brutal else 11)
+	var max_workers_cap: int = 8 if ai.is_relaxed_difficulty() else (16 if is_brutal else 12)
 	var eff_target_workers: int = mini(max_workers_cap, ai.target_worker_count + 4 * maxi(0, constructed_hubs.size() - 1))
 	if worker_data != null and total_workers < eff_target_workers:
 		var hub_pool: Array[Building] = constructed_hubs if not constructed_hubs.is_empty() else [core]
-		# Prefer hubs with shortest training queue so expansion hubs train their own workers immediately.
 		var sorted_hubs: Array[Building] = hub_pool.duplicate()
 		sorted_hubs.sort_custom(func(a: Building, b: Building) -> bool:
 			return a.get_training_queue_size() < b.get_training_queue_size()
@@ -482,77 +780,168 @@ func manage_economy_and_production(econ: EconomyManager, core: Building) -> void
 			if total_workers >= eff_target_workers:
 				break
 			if hub_t.get_training_queue_size() < 2 and hub_t.can_train_unit_data(worker_data):
-				hub_t.queue_unit_data(worker_data)
-				total_workers += 1
+				if _can_spend_unreserved(biomass, silica, compute, worker_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+					if hub_t.queue_unit_data(worker_data):
+						total_workers += 1
+						biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+						silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+						compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
 
-	# Priority 6.5 (Phase C.1): Natural Expansion Command Hub once Tier-1 + Refinery are online and timing or main depletion triggers.
-	if hub_data != null and command_hubs.size() < 2 and not barracks_list.is_empty() and not refineries.is_empty():
-		var exp_time_gate: float = 150.0 if is_brutal else (270.0 if ai.is_relaxed_difficulty() else 195.0)
-		var main_bio_low: bool = get_main_biomass_ratio(core) < 0.35
-		var hub_buffer: int = 40 if is_brutal else 90
-		if (ai.ai_elapsed >= exp_time_gate or main_bio_low) and biomass >= (hub_data.biomass_cost + hub_buffer):
-			if econ.can_afford(ai.ai_team, hub_data.get_cost_dict()):
-				var exp_spot: Vector2 = find_natural_expansion_hub_spot(core, hub_data)
-				if exp_spot != Vector2.INF:
-					try_place_and_build(hub_data, exp_spot, exp_spot)
+	# Priority 6.5: 2nd & 3rd Expansion Command Hubs.
+	if hub_data != null and not barracks_list.is_empty() and not refineries.is_empty():
+		var main_bio_ratio: float = get_main_biomass_ratio(core)
+		if command_hubs.size() < 2:
+			var exp_time_gate: float = 150.0 if is_brutal else (270.0 if ai.is_relaxed_difficulty() else 195.0)
+			var hub_buffer: int = 40 if is_brutal else 90
+			if (ai.ai_elapsed >= exp_time_gate or main_bio_ratio < 0.35) and (biomass - int(reserved["b"])) >= (hub_data.biomass_cost + hub_buffer):
+				if _can_spend_unreserved(biomass, silica, compute, hub_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+					var exp_spot: Vector2 = find_natural_expansion_hub_spot(core, hub_data)
+					if exp_spot != Vector2.INF and try_place_and_build(hub_data, exp_spot, exp_spot) != null:
+						biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+						silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+						compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+						if not goal_set:
+							last_macro_goal = "EXPAND_2"
+							goal_set = true
+		elif command_hubs.size() < 3 and not ai.is_relaxed_difficulty():
+			if (ai.ai_elapsed >= 390.0 or main_bio_ratio < 0.25) and (biomass - int(reserved["b"])) >= (hub_data.biomass_cost + 140):
+				if _can_spend_unreserved(biomass, silica, compute, hub_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+					var exp3_spot: Vector2 = find_natural_expansion_hub_spot(core, hub_data)
+					if exp3_spot != Vector2.INF and try_place_and_build(hub_data, exp3_spot, exp3_spot) != null:
+						biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+						silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+						compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+						if not goal_set:
+							last_macro_goal = "EXPAND_3"
+							goal_set = true
 
 	# Priority 7: Compute Hubs on natural, expansion, and safe surging Geothermal Compute Vents + Engineers.
 	var exp_vent_biomass: int = 160 if (is_synth_tech or is_brutal) else 220
 	if (not constructed_barracks.is_empty() or is_synth_tech) and compute_hub_data != null:
 		if compute_hubs.is_empty():
 			var vent: ResourceNode = find_nearest_unoccupied_vent(core.global_position, 580.0, true)
-			if vent != null and econ.can_afford(ai.ai_team, compute_hub_data.get_cost_dict()):
-				try_place_and_build_on_vent(compute_hub_data, vent)
-		elif compute_hubs.size() < 3 and constructed_compute_hubs.size() >= 1 and staffed_engineers >= 1 and biomass >= exp_vent_biomass:
+			if vent != null and _can_spend_unreserved(biomass, silica, compute, compute_hub_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+				if try_place_and_build_on_vent(compute_hub_data, vent) != null:
+					biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+					silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+					compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+					if not goal_set:
+						last_macro_goal = "COMPUTE"
+						goal_set = true
+		elif compute_hubs.size() < 3 and constructed_compute_hubs.size() >= 1 and staffed_engineers >= 1 and (biomass - int(reserved["b"])) >= exp_vent_biomass:
 			var surge_vent: ResourceNode = find_nearest_surging_safe_vent(core.global_position, 2200.0)
-			if surge_vent != null and econ.can_afford(ai.ai_team, compute_hub_data.get_cost_dict()):
-				try_place_and_build_on_vent(compute_hub_data, surge_vent)
+			if surge_vent != null and _can_spend_unreserved(biomass, silica, compute, compute_hub_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+				if try_place_and_build_on_vent(compute_hub_data, surge_vent) != null:
+					biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+					silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+					compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
 			elif compute_hubs.size() == 1:
 				var exp_vent: ResourceNode = find_nearest_unoccupied_vent(core.global_position, 1650.0, true)
-				if exp_vent != null and econ.can_afford(ai.ai_team, compute_hub_data.get_cost_dict()):
-					try_place_and_build_on_vent(compute_hub_data, exp_vent)
+				if exp_vent != null and _can_spend_unreserved(biomass, silica, compute, compute_hub_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+					if try_place_and_build_on_vent(compute_hub_data, exp_vent) != null:
+						biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+						silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+						compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
 
 	var desired_engineers: int = mini(6, total_compute_slots)
 	if constructed_compute_hub != null and engineer_data != null and total_engineers < desired_engineers:
 		if core.get_training_queue_size() < 2 and core.can_train_unit_data(engineer_data):
-			core.queue_unit_data(engineer_data)
+			if _can_spend_unreserved(biomass, silica, compute, engineer_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+				if core.queue_unit_data(engineer_data):
+					biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+					silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+					compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+
+	# Priority 7.2: Adaptive Static Defense Turrets (1 per expansion + 1-2 extra under pressure/anti-swarm; capped aggressively).
+	var under_pressure: bool = ai.ai_elapsed < _under_pressure_until
+	var turret_enabled: bool = (not ai.is_relaxed_difficulty()) or under_pressure
+	var max_turrets: int = mini(6, maxi(2, command_hubs.size() * 2))
+	if turret_enabled and turret_data != null and not constructed_barracks.is_empty() and turrets.size() < max_turrets:
+		if ai.planner.are_prerequisites_met(turret_data, econ, int(ai.ai_team)) and _can_spend_unreserved(biomass, silica, compute, turret_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+			var reactive_extra: bool = under_pressure or active_posture == &"ANTI_SWARM"
+			for hub_d: Building in constructed_hubs:
+				var is_main_hub: bool = (hub_d == core)
+				var desired_here: int = (2 if (under_pressure and active_posture == &"ANTI_SWARM") else (1 if reactive_extra else 0)) if is_main_hub else (2 if reactive_extra else 1)
+				if desired_here <= 0:
+					continue
+				var local_turrets: int = 0
+				for t_b: Building in turrets:
+					if is_instance_valid(t_b) and not t_b.is_destroyed and t_b.global_position.distance_squared_to(hub_d.global_position) <= 380.0 * 380.0:
+						local_turrets += 1
+				if local_turrets < desired_here:
+					var fwd_dir: Vector2 = (Vector2.ZERO - hub_d.global_position).normalized()
+					if fwd_dir.length_squared() < 0.01:
+						fwd_dir = Vector2.RIGHT
+					var side_dir: Vector2 = Vector2(-fwd_dir.y, fwd_dir.x)
+					var side_off: float = 0.0 if local_turrets == 0 else (95.0 if (local_turrets % 2 == 1) else -95.0)
+					var t_anchor: Vector2 = hub_d.global_position + fwd_dir * 165.0 + side_dir * side_off
+					var built_t: Building = try_place_and_build(turret_data, t_anchor, hub_d.global_position)
+					if built_t != null:
+						turrets.append(built_t)
+						biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+						silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+						compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+						if not goal_set:
+							last_macro_goal = "TURRET"
+							goal_set = true
+						break
 
 	# Priority 7.5: Expand Silica economy to expansion cluster once Tier-1 is established.
 	var exp_cond_biomass: int = 180 if is_brutal else 240
-	if refineries.size() < 2 and not constructed_refineries.is_empty() and not constructed_barracks.is_empty() and biomass >= exp_cond_biomass and refinery_data != null:
-		if econ.can_afford(ai.ai_team, refinery_data.get_cost_dict()):
+	if refineries.size() < 2 and not constructed_refineries.is_empty() and not constructed_barracks.is_empty() and (biomass - int(reserved["b"])) >= exp_cond_biomass and refinery_data != null:
+		if _can_spend_unreserved(biomass, silica, compute, refinery_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
 			var exp_vein: ResourceNode = find_expansion_silica_vein(core.global_position, refineries)
 			if exp_vein != null:
 				var exp_anchor: Vector2 = exp_vein.global_position.lerp(core.global_position, 0.16)
-				try_place_and_build(refinery_data, exp_anchor, exp_vein.global_position)
+				if try_place_and_build(refinery_data, exp_anchor, exp_vein.global_position) != null:
+					biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+					silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+					compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
 
 	# Priority 8: Mid-game Upgrades at Tier-1 Production (faction-driven upgrade order).
 	if not constructed_barracks.is_empty():
 		var primary_barracks: Building = constructed_barracks[0]
 		if primary_barracks.production_component != null and primary_barracks.get_training_queue_size() < 2:
 			var next_t1_upg: UpgradeData = ai.planner.choose_next_upgrade_for_building(primary_barracks)
-			if next_t1_upg != null:
-				primary_barracks.production_component.enqueue_upgrade(primary_barracks, next_t1_upg)
+			if next_t1_upg != null and _can_spend_unreserved(biomass, silica, compute, next_t1_upg.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+				if primary_barracks.production_component.enqueue_upgrade(primary_barracks, next_t1_upg):
+					biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+					silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+					compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
 
 	# Reactive Counter Foundry priority when ANTI_ARMOR intel is active.
 	var urgent_anti_armor_foundry: bool = (active_posture == &"ANTI_ARMOR" and counter_strength >= 0.70)
 	if urgent_anti_armor_foundry and foundries.is_empty() and constructed_compute_hub != null and counter_foundry_data != null and silica >= counter_foundry_data.silica_cost:
-		if econ.can_afford(ai.ai_team, counter_foundry_data.get_cost_dict()):
+		if _can_spend_unreserved(biomass, silica, compute, counter_foundry_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
 			var to_c_aa: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var perp_aa: Vector2 = Vector2(-to_c_aa.y, to_c_aa.x)
 			var built_aa: Building = try_place_and_build(counter_foundry_data, core.global_position + to_c_aa * 160.0 + perp_aa * 145.0, core.global_position)
 			if built_aa != null:
 				built_aa.set_rally_position(rally_pt)
+				foundries.append(built_aa)
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+				if not goal_set:
+					last_macro_goal = "COUNTER"
+					goal_set = true
 
 	# Priority 9: Late-game Tier-2 Heavy Production.
 	if heavy_plants.is_empty() and heavy_t2_data != null and ai.planner.are_prerequisites_met(heavy_t2_data, econ, int(ai.ai_team)) and compute >= heavy_t2_data.compute_cost:
-		if econ.can_afford(ai.ai_team, heavy_t2_data.get_cost_dict()):
+		if _can_spend_unreserved(biomass, silica, compute, heavy_t2_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
 			var to_center_f: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var perp_f: Vector2 = Vector2(-to_center_f.y, to_center_f.x)
 			var fab_anchor: Vector2 = core.global_position + to_center_f * 165.0 - perp_f * 145.0
 			var built_fab: Building = try_place_and_build(heavy_t2_data, fab_anchor, core.global_position)
 			if built_fab != null:
 				built_fab.set_rally_position(rally_pt)
+				heavy_plants.append(built_fab)
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+				if not goal_set:
+					last_macro_goal = "TECH_T2"
+					goal_set = true
 
 	# Priority 10: Mid-game Counter Foundry for specialized counter tech (and Tier-2 prerequisites like Ballistics Lab -> Siege Gantry).
 	var t2_needs_foundry: bool = (
@@ -562,13 +951,20 @@ func manage_economy_and_production(econ: EconomyManager, core: Building) -> void
 	)
 	var allow_foundry: bool = (not is_synth_tech or not heavy_plants.is_empty() or urgent_anti_armor_foundry or t2_needs_foundry)
 	if allow_foundry and foundries.is_empty() and constructed_compute_hub != null and counter_foundry_data != null and silica >= counter_foundry_data.silica_cost:
-		if econ.can_afford(ai.ai_team, counter_foundry_data.get_cost_dict()):
+		if _can_spend_unreserved(biomass, silica, compute, counter_foundry_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
 			var to_center_cf: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var perp_cf: Vector2 = Vector2(-to_center_cf.y, to_center_cf.x)
 			var cf_anchor: Vector2 = core.global_position + to_center_cf * 160.0 + perp_cf * 145.0
 			var built_cf: Building = try_place_and_build(counter_foundry_data, cf_anchor, core.global_position)
 			if built_cf != null:
 				built_cf.set_rally_position(rally_pt)
+				foundries.append(built_cf)
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+				if not goal_set:
+					last_macro_goal = "FOUNDRY"
+					goal_set = true
 
 	# Priority 11: Tier-2 Heavy Production mix (faction-weighted + reactive intel).
 	for heavy_b: Building in constructed_heavy_plants:
@@ -577,13 +973,19 @@ func manage_economy_and_production(econ: EconomyManager, core: Building) -> void
 		if heavy_b.get_training_queue_size() >= 2:
 			continue
 		var t2_upg: UpgradeData = ai.planner.choose_next_upgrade_for_building(heavy_b)
-		if t2_upg != null and heavy_b.production_component != null:
-			heavy_b.production_component.enqueue_upgrade(heavy_b, t2_upg)
-			continue
+		if t2_upg != null and heavy_b.production_component != null and _can_spend_unreserved(biomass, silica, compute, t2_upg.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+			if heavy_b.production_component.enqueue_upgrade(heavy_b, t2_upg):
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+				continue
 		var heavy_choice: UnitData = ai.planner.choose_unit_for_building(heavy_b, ai.ai_playstyle, active_posture, counter_strength, _fab_production_counter)
-		if heavy_choice != null and heavy_b.can_train_unit_data(heavy_choice):
-			heavy_b.queue_unit_data(heavy_choice)
-			_fab_production_counter += 1
+		if heavy_choice != null and heavy_b.can_train_unit_data(heavy_choice) and _can_spend_unreserved(biomass, silica, compute, heavy_choice.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+			if heavy_b.queue_unit_data(heavy_choice):
+				_fab_production_counter += 1
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
 
 	# Priority 12: Counter Foundry production & tech upgrades (biased by intel & playstyle).
 	for foundry: Building in constructed_foundries:
@@ -592,13 +994,19 @@ func manage_economy_and_production(econ: EconomyManager, core: Building) -> void
 		if foundry.get_training_queue_size() >= 2:
 			continue
 		var foundry_upg: UpgradeData = ai.planner.choose_next_upgrade_for_building(foundry)
-		if foundry_upg != null and foundry.production_component != null:
-			foundry.production_component.enqueue_upgrade(foundry, foundry_upg)
-			continue
+		if foundry_upg != null and foundry.production_component != null and _can_spend_unreserved(biomass, silica, compute, foundry_upg.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+			if foundry.production_component.enqueue_upgrade(foundry, foundry_upg):
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
+				continue
 		var foundry_choice: UnitData = ai.planner.choose_unit_for_building(foundry, ai.ai_playstyle, active_posture, counter_strength, _foundry_production_counter)
-		if foundry_choice != null and foundry.can_train_unit_data(foundry_choice):
-			foundry.queue_unit_data(foundry_choice)
-			_foundry_production_counter += 1
+		if foundry_choice != null and foundry.can_train_unit_data(foundry_choice) and _can_spend_unreserved(biomass, silica, compute, foundry_choice.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+			if foundry.queue_unit_data(foundry_choice):
+				_foundry_production_counter += 1
+				biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+				silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+				compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
 
 	# Priority 13: Tier-1 core army production (weighted by playstyle + reactive intel).
 	var hold_for_t2: bool = is_synth_tech and heavy_plants.is_empty() and constructed_compute_hub != null and compute >= 15
@@ -609,21 +1017,27 @@ func manage_economy_and_production(econ: EconomyManager, core: Building) -> void
 			if bar.get_training_queue_size() >= 2:
 				continue
 			var chosen: UnitData = ai.planner.choose_unit_for_building(bar, ai.ai_playstyle, active_posture, counter_strength, _vat_production_counter)
-			if chosen != null and bar.can_train_unit_data(chosen):
-				bar.queue_unit_data(chosen)
-				_vat_production_counter += 1
+			if chosen != null and bar.can_train_unit_data(chosen) and _can_spend_unreserved(biomass, silica, compute, chosen.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
+				if bar.queue_unit_data(chosen):
+					_vat_production_counter += 1
+					biomass = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_BIOMASS)
+					silica = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_SILICA)
+					compute = econ.get_resource(ai.ai_team, EconomyManager.RESOURCE_COMPUTE)
 
 	# Priority 14: Additional Tier-1 Barracks when floating surplus Biomass.
 	var extra_vat_biomass: int = 200 if is_swarm_rush else (230 if is_brutal else 280)
 	var extra_vat_silica: int = 40 if is_swarm_rush else 60
-	if barracks_t1_data != null and barracks_list.size() < ai.max_cloning_vats and biomass >= extra_vat_biomass and silica >= extra_vat_silica:
-		if econ.can_afford(ai.ai_team, barracks_t1_data.get_cost_dict()):
+	if barracks_t1_data != null and barracks_list.size() < ai.max_cloning_vats and (biomass - int(reserved["b"])) >= extra_vat_biomass and (silica - int(reserved["s"])) >= extra_vat_silica:
+		if _can_spend_unreserved(biomass, silica, compute, barracks_t1_data.get_cost_dict(), int(reserved["b"]), int(reserved["s"]), int(reserved["c"])):
 			var to_center2: Vector2 = (Vector2.ZERO - core.global_position).normalized()
 			var perp: Vector2 = Vector2(-to_center2.y, to_center2.x)
 			var vat_anchor2: Vector2 = core.global_position + to_center2 * 180.0 + perp * 130.0
 			var second_vat: Building = try_place_and_build(barracks_t1_data, vat_anchor2, core.global_position)
 			if second_vat != null:
 				second_vat.set_rally_position(rally_pt)
+
+	if not goal_set:
+		last_macro_goal = "T2_ARMY" if not constructed_heavy_plants.is_empty() else ("ARMY" if not constructed_barracks.is_empty() else "ECON")
 
 
 func manage_overclock_macro() -> void:
@@ -671,12 +1085,14 @@ func try_place_and_build(data: BuildingData, preferred_pos: Vector2, fallback_or
 	if econ == null or data == null or data.resolve_scene() == null:
 		return null
 	if not ai.planner.are_prerequisites_met(data, econ, int(ai.ai_team)):
+		_warn_build_blocked(data, "prereq")
 		return null
 	if not econ.can_afford(ai.ai_team, data.get_cost_dict()):
 		return null
 
 	var worker: Unit = find_available_worker(preferred_pos)
 	if worker == null:
+		_warn_build_blocked(data, "no_worker")
 		return null
 
 	var spot: Vector2 = find_valid_build_position(data, preferred_pos, fallback_origin)
@@ -687,6 +1103,7 @@ func try_place_and_build(data: BuildingData, preferred_pos: Vector2, fallback_or
 				var p_spot: Vector2 = find_valid_build_position(power_data, preferred_pos, fallback_origin)
 				if p_spot != Vector2.INF and econ.spend_resources(ai.ai_team, power_data.get_cost_dict()):
 					return instantiate_ai_building(power_data, p_spot, worker, null)
+		_warn_build_blocked(data, "no_spot")
 		return null
 
 	if not econ.spend_resources(ai.ai_team, data.get_cost_dict()):
@@ -754,7 +1171,10 @@ func on_ai_building_completed(building: Building) -> void:
 		ai.army.sync_military_rallies()
 	elif ai.is_military_production_building(building) and ai.army.staging_point_valid:
 		building.set_rally_position(ai.army.staging_point)
-	var is_heavy_t2: bool = (heavy_t2_data != null and building.building_type_id == heavy_t2_data.building_id) or building.building_type_id == &"synthetics_fabricator" or building.building_type_id == &"siege_gantry"
+	var is_heavy_t2: bool = (
+		(heavy_t2_data != null and building.building_type_id == heavy_t2_data.building_id)
+		or (building.get_tech_tier() >= 2 and building.is_military_production_building())
+	)
 	if not _tier2_transmission_sent and is_heavy_t2:
 		_tier2_transmission_sent = true
 		ai.try_emit_ai_transmission(&"tier2_online", Vector2.INF)
@@ -765,6 +1185,7 @@ func on_ai_building_destroyed_radio(building: Building) -> void:
 		return
 	if building == null or not is_instance_valid(building):
 		return
+	note_base_pressure()
 	ai.try_emit_ai_transmission(&"under_attack", ai.sanitize_transmission_pos(building.global_position, false))
 
 
@@ -785,7 +1206,7 @@ func find_valid_build_position(data: BuildingData, preferred_pos: Vector2, fallb
 		providers.sort_custom(func(a: Building, b: Building) -> bool:
 			return a.global_position.distance_squared_to(preferred_pos) < b.global_position.distance_squared_to(preferred_pos)
 		)
-		var p_steps: int = 12
+		var p_steps: int = 16
 		for prov: Building in providers:
 			var max_r: float = maxf(prov.footprint_radius + footprint_r + 18.0, prov.power_radius - footprint_r - 12.0)
 			var min_r: float = prov.footprint_radius + footprint_r + 16.0
@@ -806,8 +1227,8 @@ func find_valid_build_position(data: BuildingData, preferred_pos: Vector2, fallb
 		return Vector2.INF
 
 	var anchors: Array[Vector2] = [preferred_pos, fallback_origin]
-	var radii: PackedFloat32Array = PackedFloat32Array([0.0, 75.0, 125.0, 175.0, 230.0, 290.0])
-	var angle_steps: int = 12
+	var radii: PackedFloat32Array = PackedFloat32Array([0.0, 75.0, 125.0, 175.0, 230.0, 290.0, 355.0, 420.0])
+	var angle_steps: int = 16
 
 	for anchor: Vector2 in anchors:
 		for r: float in radii:
@@ -1043,6 +1464,8 @@ func find_available_worker(near_pos: Vector2) -> Unit:
 	var best_idle_d_sq: float = INF
 	var best_gathering: Unit = null
 	var best_gather_d_sq: float = INF
+	var best_returning: Unit = null
+	var best_ret_d_sq: float = INF
 
 	for u: Unit in ai.get_team_units(ai.ai_team):
 		if not u.can_construct():
@@ -1058,12 +1481,19 @@ func find_available_worker(near_pos: Vector2) -> Unit:
 				best_idle = u
 		elif u.command_state == Unit.CommandState.GATHERING:
 			if u.gather_component != null and u.gather_component.state == GatherComponent.GatherState.GATHER_RETURNING_TO_BASE and u.is_carrying_cargo():
+				if d_sq < best_ret_d_sq:
+					best_ret_d_sq = d_sq
+					best_returning = u
 				continue
 			if d_sq < best_gather_d_sq:
 				best_gather_d_sq = d_sq
 				best_gathering = u
 
-	return best_idle if best_idle != null else best_gathering
+	if best_idle != null:
+		return best_idle
+	if best_gathering != null:
+		return best_gathering
+	return best_returning
 
 
 func has_worker_building(target_b: Building) -> bool:

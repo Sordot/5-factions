@@ -102,17 +102,24 @@ func get_unit_by_tag(tag: StringName) -> UnitData:
 
 
 func get_ai_building_for_role(role: StringName) -> BuildingData:
+	var val: Variant = null
 	if ai_build_profile.has(role):
-		var val: Variant = ai_build_profile[role]
-		if val is BuildingData:
-			return val as BuildingData
-		if val is StringName:
-			return get_building_by_id(val as StringName)
-		if val is String:
-			var s: String = val as String
-			if s.begins_with("res://"):
-				return load(s) as BuildingData
-			return get_building_by_id(StringName(s))
+		val = ai_build_profile[role]
+	else:
+		var role_str: String = String(role)
+		if ai_build_profile.has(role_str):
+			val = ai_build_profile[role_str]
+	if val == null:
+		return null
+	if val is BuildingData:
+		return val as BuildingData
+	if val is StringName:
+		return get_building_by_id(val as StringName)
+	if val is String:
+		var s: String = val as String
+		if s.begins_with("res://"):
+			return load(s) as BuildingData
+		return get_building_by_id(StringName(s))
 	return null
 
 

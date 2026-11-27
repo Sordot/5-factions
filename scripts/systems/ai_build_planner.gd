@@ -20,8 +20,10 @@ func get_building_for_role(role: StringName) -> BuildingData:
 
 	# Semantic fallback scan across faction.building_roster
 	var primary_t1: BuildingData = null
+	var heavy_t2: BuildingData = null
 	if role == &"counter_foundry":
 		primary_t1 = get_building_for_role(&"barracks_t1")
+		heavy_t2 = get_building_for_role(&"heavy_t2")
 	for b: BuildingData in faction.building_roster:
 		if b == null:
 			continue
@@ -38,11 +40,14 @@ func get_building_for_role(role: StringName) -> BuildingData:
 			&"compute_hub":
 				if b.requires_vent or b.max_staff_slots > 0:
 					return b
+			&"turret":
+				if b.has_turret:
+					return b
 			&"barracks_t1":
 				if b.is_military_production and b.tech_tier == 1:
 					return b
 			&"counter_foundry":
-				if b != primary_t1 and b.is_military_production and b.tech_tier == 1:
+				if b != primary_t1 and b != heavy_t2 and b.is_military_production and b.tech_tier <= 2:
 					return b
 			&"heavy_t2":
 				if b.is_military_production and b.tech_tier >= 2:
@@ -100,12 +105,32 @@ func get_salvage_unit_ids() -> Array[StringName]:
 	return out
 
 
+func _dict_get_key(dict: Dictionary, key: StringName, fallback: Variant = null) -> Variant:
+	if dict.has(key):
+		return dict[key]
+	var key_str: String = String(key)
+	if dict.has(key_str):
+		return dict[key_str]
+	return fallback
+
+
+func _array_find_id(arr: Array, id: StringName) -> int:
+	var id_str: String = String(id)
+	for i: int in range(arr.size()):
+		var item: Variant = arr[i]
+		if item is StringName and (item as StringName) == id:
+			return i
+		if item is String and (item as String) == id_str:
+			return i
+	return -1
+
+
 func is_breach_capable(unit: Unit) -> bool:
 	if unit == null or not is_instance_valid(unit) or unit.is_dead or unit.data == null:
 		return false
-	if faction != null and faction.ai_counter_units.has(&"BREACH"):
-		var breach_list: Variant = faction.ai_counter_units[&"BREACH"]
-		if breach_list is Array and (breach_list as Array).has(unit.get_unit_type_id()):
+	if faction != null:
+		var breach_list: Variant = _dict_get_key(faction.ai_counter_units, &"BREACH", null)
+		if breach_list is Array and _array_find_id(breach_list as Array, unit.get_unit_type_id()) >= 0:
 			return true
 	return (
 		unit.data.has_tag(&"anti_armor")
@@ -155,14 +180,14 @@ func choose_unit_for_building(
 
 	var style_key: StringName = get_playstyle_key(playstyle_idx)
 	var style_map: Dictionary = {}
-	if faction != null and faction.ai_playstyle_weights.has(style_key):
-		var raw_style: Variant = faction.ai_playstyle_weights[style_key]
+	if faction != null:
+		var raw_style: Variant = _dict_get_key(faction.ai_playstyle_weights, style_key, null)
 		if raw_style is Dictionary:
 			style_map = raw_style as Dictionary
 
 	var counter_list: Array = []
-	if faction != null and counter_posture != &"NONE" and faction.ai_counter_units.has(counter_posture):
-		var raw_cnt: Variant = faction.ai_counter_units[counter_posture]
+	if faction != null and counter_posture != &"NONE":
+		var raw_cnt: Variant = _dict_get_key(faction.ai_counter_units, counter_posture, null)
 		if raw_cnt is Array:
 			counter_list = raw_cnt as Array
 
@@ -170,11 +195,11 @@ func choose_unit_for_building(
 		if udata == null or not bldg.can_train_unit_data(udata):
 			continue
 		var uid: StringName = udata.unit_type_id
-		var w: float = float(style_map.get(uid, 1.0))
+		var w: float = float(_dict_get_key(style_map, uid, 1.0))
 		if w <= 0.0:
 			w = 0.5
 		if not counter_list.is_empty() and counter_strength > 0.0:
-			var c_idx: int = counter_list.find(uid)
+			var c_idx: int = _array_find_id(counter_list, uid)
 			if c_idx == 0:
 				w += 2.6 * counter_strength
 			elif c_idx == 1:
@@ -225,6 +250,8 @@ func is_role_building(bldg: Building, role: StringName) -> bool:
 			return bldg.is_resource_dropoff and not bldg.is_command_hub()
 		&"compute_hub":
 			return bldg.max_staff_slots > 0
+		&"turret":
+			return bldg.has_turret
 		&"barracks_t1":
 			return bldg.is_military_production_building() and bldg.get_tech_tier() == 1
 		&"heavy_t2":
