@@ -7,7 +7,7 @@
 script = ExtResource("1_ab")
 ability_id = &"build_calibration_foundry"
 display_name = "Calibration Foundry"
-hotkey_label = "Y"
+hotkey_label = "T"
 cooldown_duration = 0.0
 cast_range = 0.0
 target_type = 3

@@ -122,6 +122,7 @@ var patrol_index: int = 0
 var defensive_anchor: Vector2 = Vector2.ZERO
 var move_group_id: int = 0
 var last_settled_group_id: int = 0
+var weapon_aim_angle: float = 0.0
 
 var _construction_target: Building = null
 var _salvage_target: Node2D = null
@@ -235,6 +236,8 @@ func _ready() -> void:
 		gather_bar_root.visible = false
 
 	_register_with_economy()
+	if data != null and data.tether_emit_radius > 0.0 and data.tether_max_links > 0:
+		add_to_group("tether_emitters")
 	if SpatialGrid != null:
 		SpatialGrid.register_unit(self)
 	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
@@ -381,9 +384,11 @@ func command_cast_ability(ability: AbilityData, target_pos: Vector2, target_unit
 	}
 	if append_to_queue:
 		return issue_command(cmd, true)
-	# Instant self-cast abilities trigger immediately without interrupting active movement or queues.
+	# Instant self-cast or fire-while-moving in-range abilities trigger without interrupting active movement.
 	if ability.target_type == AbilityData.TargetType.INSTANT:
 		return ability_component.request_cast(self, ability, global_position, self)
+	if ability.can_cast_while_moving and ability_component.is_in_cast_range(self, ability, target_pos, target_unit):
+		return ability_component.request_cast(self, ability, target_pos, target_unit)
 	return issue_command(cmd, false)
 
 
@@ -397,7 +402,7 @@ func _start_cast_ability(ability: AbilityData, target_pos: Vector2, target_unit:
 	if ability.target_type == AbilityData.TargetType.UNIT_TARGET:
 		if target_unit == null or not is_instance_valid(target_unit) or target_unit.is_dead or target_unit.is_queued_for_deletion():
 			return CMD_EXEC_FAILED
-	if not ability_component.is_ability_ready(ability):
+	if not is_ability_ready(ability):
 		return CMD_EXEC_FAILED
 	_cancel_active_tasks(false)
 	var accepted: bool = ability_component.request_cast(self, ability, target_pos, target_unit)
@@ -758,8 +763,12 @@ func find_clear_approach_point(
 func heal(amount: float) -> void:
 	if is_dead or amount <= 0.0 or data == null:
 		return
+	var heal_mult: float = float(status_effect_component.call("get_heal_received_multiplier")) if status_effect_component != null else 1.0
+	var eff_amount: float = amount * maxf(0.0, heal_mult)
+	if eff_amount <= 0.0:
+		return
 	var max_hp_val: float = get_max_hp()
-	var next_hp: float = minf(max_hp_val, current_hp + amount)
+	var next_hp: float = minf(max_hp_val, current_hp + eff_amount)
 	if is_equal_approx(next_hp, current_hp):
 		return
 	current_hp = next_hp
@@ -1032,12 +1041,11 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 				_trigger_shield_shatter_feedback(shatter_dir)
 		_emit_hit_feedback_pip(HitFeedbackOverlay.KIND_SHIELD_ABSORB, int(round(absorbed_temp + absorbed_native)))
 
-	# Layer 3 — Hull HP (Mitigated)
+	# Layer 3 — Hull HP (Mitigated; damage_taken_mult was already applied once at Layer 0)
 	var hull_damaged: bool = false
 	if remaining > 0.0:
 		var mitigation: float = get_effective_damage_reduction()
-		var dmg_mult: float = float(status_effect_component.call("get_damage_taken_multiplier")) if status_effect_component != null else 1.0
-		var effective_damage: float = remaining * (1.0 - mitigation) * dmg_mult
+		var effective_damage: float = remaining * (1.0 - mitigation)
 		if effective_damage > 0.0:
 			current_hp = maxf(0.0, current_hp - effective_damage)
 			hull_damaged = true
@@ -1204,10 +1212,10 @@ func has_unit_tag(tag: StringName) -> bool:
 	return status_effect_component != null and bool(status_effect_component.call("has_tag", tag))
 
 
-func add_damage_shield(amount: float, duration: float = -1.0, label: String = "Barrier") -> void:
+func add_damage_shield(amount: float, duration: float = -1.0, label: String = "Barrier", source_id: StringName = &"") -> void:
 	if is_dead or status_effect_component == null:
 		return
-	status_effect_component.call("add_damage_shield", amount, duration, label)
+	status_effect_component.call("add_damage_shield", amount, duration, label, source_id)
 	queue_redraw()
 	status_changed.emit(self)
 
@@ -1338,6 +1346,8 @@ func get_effective_damage_reduction() -> float:
 			dr += econ.get_goliath_extra_damage_reduction(team)
 	if is_deployed() and data.deployed_damage_reduction_bonus > 0.0:
 		dr += data.deployed_damage_reduction_bonus
+	if status_effect_component != null:
+		dr += float(status_effect_component.call("get_armor_delta"))
 	return clampf(dr, 0.0, 0.75)
 
 
@@ -1501,6 +1511,8 @@ func _physics_process(delta: float) -> void:
 
 	if movement_component != null:
 		movement_component.call("finish_physics_step", self, delta)
+	if body_visual != null and (data == null or not data.can_fire_while_moving):
+		weapon_aim_angle = body_visual.rotation
 
 	var in_rail_windup: bool = combat_component != null and combat_component.is_in_windup() and get_effective_weapon_tracer_style() == &"rail_lance"
 	if in_rail_windup or _was_in_rail_windup:
@@ -1600,7 +1612,7 @@ func _process_idle(delta: float) -> void:
 		else:
 			_maybe_retarget_higher_threat(delta, eff_atk_r)
 		if current_target != null and is_instance_valid(current_target):
-			if combat_component.is_within_attack_envelope(self, current_target):
+			if combat_component.can_continue_or_start_attack(self, current_target):
 				_face_point(current_target.global_position, delta)
 				combat_component.process_attack_at(self, current_target, delta)
 			elif combat_component.is_target_inside_min_range(self, current_target):
@@ -1611,7 +1623,7 @@ func _process_idle(delta: float) -> void:
 				_request_nav_toward_point(current_target.global_position, 8.0)
 		return
 
-	if current_target == null or not combat_component.is_within_attack_envelope(self, current_target):
+	if current_target == null or not combat_component.can_continue_or_start_attack(self, current_target):
 		current_target = combat_component.find_nearest_enemy(self, eff_atk_r)
 	else:
 		_maybe_retarget_higher_threat(delta, eff_atk_r)
@@ -1653,7 +1665,7 @@ func _process_defensive_stance(delta: float) -> void:
 		_maybe_retarget_higher_threat(delta, attack_r)
 
 	if current_target != null and is_instance_valid(current_target):
-		if combat_component.is_within_attack_envelope(self, current_target):
+		if combat_component.can_continue_or_start_attack(self, current_target):
 			_face_point(current_target.global_position, delta)
 			combat_component.process_attack_at(self, current_target, delta)
 			return
@@ -1685,6 +1697,25 @@ func _return_to_defensive_anchor() -> void:
 		velocity = Vector2.ZERO
 
 
+func _tick_fire_on_the_move(delta: float) -> void:
+	if data == null or not data.can_fire_while_moving or not _can_attack() or combat_component == null:
+		return
+	var eff_atk_r: float = get_effective_attack_range()
+	if current_target != null and (not is_instance_valid(current_target) or not combat_component.can_continue_or_start_attack(self, current_target)):
+		current_target = null
+	if current_target == null:
+		current_target = combat_component.find_nearest_enemy(self, eff_atk_r)
+	else:
+		_maybe_retarget_higher_threat(delta, eff_atk_r)
+	if current_target != null and is_instance_valid(current_target) and combat_component.can_continue_or_start_attack(self, current_target):
+		var to_t: Vector2 = current_target.global_position - global_position
+		if to_t.length_squared() > 0.01:
+			weapon_aim_angle = to_t.angle()
+		combat_component.process_attack_at(self, current_target, delta)
+	elif body_visual != null:
+		weapon_aim_angle = body_visual.rotation
+
+
 func _process_moving(delta: float) -> void:
 	if nav_agent == null:
 		_advance_command_queue()
@@ -1706,6 +1737,8 @@ func _process_moving(delta: float) -> void:
 				_try_start_auto_gather()
 		return
 	_compute_nav_desired_velocity()
+	if data != null and data.can_fire_while_moving:
+		_tick_fire_on_the_move(delta)
 
 
 func _process_attack_moving(delta: float) -> void:
@@ -1724,17 +1757,20 @@ func _process_attack_moving(delta: float) -> void:
 			_maybe_retarget_higher_threat(delta, eff_atk_am)
 
 	if current_target != null and is_instance_valid(current_target) and combat_component != null:
-		_reset_progress_tracker()
-		if combat_component.is_within_attack_envelope(self, current_target):
-			_face_point(current_target.global_position, delta)
-			combat_component.process_attack_at(self, current_target, delta)
-			return
-		combat_component.cancel_attack_animation()
-		if combat_component.is_target_inside_min_range(self, current_target):
-			current_target = null
+		if data != null and data.can_fire_while_moving:
+			_tick_fire_on_the_move(delta)
 		else:
-			_request_nav_toward_point(current_target.global_position, 8.0)
-			return
+			_reset_progress_tracker()
+			if combat_component.can_continue_or_start_attack(self, current_target):
+				_face_point(current_target.global_position, delta)
+				combat_component.process_attack_at(self, current_target, delta)
+				return
+			combat_component.cancel_attack_animation()
+			if combat_component.is_target_inside_min_range(self, current_target):
+				current_target = null
+			else:
+				_request_nav_toward_point(current_target.global_position, 8.0)
+				return
 
 	if nav_agent == null:
 		_advance_command_queue()
@@ -1759,7 +1795,7 @@ func _process_attacking_target(delta: float) -> void:
 		_advance_command_queue()
 		return
 
-	if combat_component.is_within_attack_envelope(self, current_target):
+	if combat_component.can_continue_or_start_attack(self, current_target):
 		_face_point(current_target.global_position, delta)
 		combat_component.process_attack_at(self, current_target, delta)
 		return
@@ -1783,7 +1819,7 @@ func _process_hold_position(delta: float) -> void:
 	if current_target != null and not is_instance_valid(current_target):
 		current_target = null
 	var eff_atk_r: float = get_effective_attack_range()
-	if current_target == null or not combat_component.is_within_attack_envelope(self, current_target):
+	if current_target == null or not combat_component.can_continue_or_start_attack(self, current_target):
 		current_target = combat_component.find_nearest_enemy(self, eff_atk_r)
 	else:
 		_maybe_retarget_higher_threat(delta, eff_atk_r)
@@ -1930,17 +1966,20 @@ func _process_patrolling(delta: float) -> void:
 		current_target = null
 
 	if current_target != null and is_instance_valid(current_target) and combat_component != null:
-		_reset_progress_tracker()
-		if combat_component.is_within_attack_envelope(self, current_target):
-			_face_point(current_target.global_position, delta)
-			combat_component.process_attack_at(self, current_target, delta)
-			return
-		combat_component.cancel_attack_animation()
-		if combat_component.is_target_inside_min_range(self, current_target):
-			current_target = null
+		if data != null and data.can_fire_while_moving:
+			_tick_fire_on_the_move(delta)
 		else:
-			_request_nav_toward_point(current_target.global_position, 8.0)
-			return
+			_reset_progress_tracker()
+			if combat_component.can_continue_or_start_attack(self, current_target):
+				_face_point(current_target.global_position, delta)
+				combat_component.process_attack_at(self, current_target, delta)
+				return
+			combat_component.cancel_attack_animation()
+			if combat_component.is_target_inside_min_range(self, current_target):
+				current_target = null
+			else:
+				_request_nav_toward_point(current_target.global_position, 8.0)
+				return
 
 	if nav_agent == null:
 		patrol_waypoints.clear()

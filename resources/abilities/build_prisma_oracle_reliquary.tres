@@ -7,7 +7,7 @@
 script = ExtResource("1_ab")
 ability_id = &"build_prisma_oracle_reliquary"
 display_name = "Oracle Reliquary"
-hotkey_label = "R"
+hotkey_label = "E"
 cooldown_duration = 0.0
 cast_range = 0.0
 target_type = 3

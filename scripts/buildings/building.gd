@@ -62,6 +62,8 @@ signal rally_changed(building: Building)
 @export var turret_attack_range: float = 260.0
 @export var turret_min_range: float = 0.0
 @export var turret_splash_radius: float = 0.0
+@export var turret_splash_inner_ratio: float = 0.35
+@export var turret_splash_edge_damage_ratio: float = 0.45
 @export var turret_bonus_vs_armored: float = 1.0
 @export var turret_tracer_style: StringName = &"pulse"
 @export var turret_turn_speed: float = 7.0
@@ -221,6 +223,8 @@ func _ready() -> void:
 		if econ_ready != null:
 			econ_ready.notify_building_tech_changed(team)
 	add_to_group("nav_bake_obstacles")
+	if tether_emit_radius > 0.0 and tether_max_links > 0 and not is_in_group("tether_emitters"):
+		add_to_group("tether_emitters")
 	if SettingsManager != null and not SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.connect(_on_settings_changed)
 	_request_navmesh_rebake()
@@ -387,6 +391,8 @@ func begin_construction(data: BuildingData, target_team: Unit.Team, vent: Resour
 	if not is_in_group("nav_bake_obstacles"):
 		add_to_group("nav_bake_obstacles")
 		_request_navmesh_rebake()
+	if tether_emit_radius > 0.0 and tether_max_links > 0 and not is_in_group("tether_emitters"):
+		add_to_group("tether_emitters")
 
 	if build_time <= 0.0:
 		_complete_construction()
@@ -401,6 +407,8 @@ func _sync_turret_from_data(data: BuildingData) -> void:
 	turret_attack_range = data.turret_attack_range
 	turret_min_range = data.turret_min_range
 	turret_splash_radius = data.turret_splash_radius
+	turret_splash_inner_ratio = data.turret_splash_inner_ratio
+	turret_splash_edge_damage_ratio = data.turret_splash_edge_damage_ratio
 	turret_bonus_vs_armored = data.turret_bonus_vs_armored
 	turret_tracer_style = data.turret_tracer_style
 	turret_turn_speed = data.turret_turn_speed

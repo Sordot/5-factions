@@ -7,7 +7,7 @@
 script = ExtResource("1_ab")
 ability_id = &"build_prisma_sanctum_core"
 display_name = "Sanctum Core"
-hotkey_label = "Q"
+hotkey_label = "F"
 cooldown_duration = 0.0
 cast_range = 0.0
 target_type = 3

@@ -11,12 +11,14 @@ enum AttackPhase {
 	BACKSWING = 2,
 }
 
-const TIER_COMBAT_UNIT: int = 1
-const TIER_SUPPORT_OR_ECON: int = 2
-const TIER_BUILDING: int = 3
+const TIER_COMBAT_UNIT: int = CombatTargeting.TIER_COMBAT_UNIT
+const TIER_SUPPORT_OR_ECON: int = CombatTargeting.TIER_SUPPORT_OR_ECON
+const TIER_BUILDING: int = CombatTargeting.TIER_BUILDING
 const BACKSWING_DURATION: float = 0.10
+const WINDUP_RANGE_SLOP: float = 12.0
 
 var _attack_cooldown_timer: float = 0.0
+var _cooldown_overshoot: float = 0.0
 var attack_phase: AttackPhase = AttackPhase.IDLE
 var _windup_timer: float = 0.0
 var _backswing_timer: float = 0.0
@@ -24,11 +26,22 @@ var _windup_target: Node2D = null
 var _beam_lock_target: Node2D = null
 var _beam_ramp_elapsed: float = 0.0
 var _beam_grace_timer: float = 0.0
+var _beam_precharge_pending: bool = false
+var _fog_cache: FogOfWarSystem = null
+var _scratch_units: Array = []
 
 
 func tick_cooldown(delta: float) -> void:
 	if _attack_cooldown_timer > 0.0:
-		_attack_cooldown_timer = maxf(0.0, _attack_cooldown_timer - delta)
+		var next_cd: float = _attack_cooldown_timer - delta
+		if next_cd <= 0.0:
+			_cooldown_overshoot = minf(-next_cd, delta)
+			_attack_cooldown_timer = 0.0
+		else:
+			_cooldown_overshoot = 0.0
+			_attack_cooldown_timer = next_cd
+	else:
+		_cooldown_overshoot = 0.0
 	if attack_phase == AttackPhase.BACKSWING:
 		_backswing_timer = maxf(0.0, _backswing_timer - delta)
 		if _backswing_timer <= 0.0:
@@ -47,8 +60,11 @@ func boost_beam_ramp_fraction(owner_unit: Unit, fraction: float) -> void:
 	var ramp_dur: float = maxf(0.1, owner_unit.data.beam_ramp_duration)
 	_beam_ramp_elapsed = clampf(_beam_ramp_elapsed + ramp_dur * maxf(0.0, fraction), 0.0, ramp_dur)
 	_beam_grace_timer = maxf(_beam_grace_timer, maxf(0.65, owner_unit.data.beam_ramp_decay_delay))
-	if _beam_lock_target == null and owner_unit.current_target != null and is_instance_valid(owner_unit.current_target):
-		_beam_lock_target = owner_unit.current_target as Node2D
+	if _beam_lock_target == null:
+		if owner_unit.current_target != null and is_instance_valid(owner_unit.current_target):
+			_beam_lock_target = owner_unit.current_target as Node2D
+		else:
+			_beam_precharge_pending = true
 
 
 func tick_beam_decay(owner_unit: Unit, delta: float) -> void:
@@ -65,6 +81,7 @@ func tick_beam_decay(owner_unit: Unit, delta: float) -> void:
 		if _beam_ramp_elapsed <= 0.001:
 			_beam_ramp_elapsed = 0.0
 			_beam_lock_target = null
+			_beam_precharge_pending = false
 
 
 func cancel_attack_animation() -> void:
@@ -138,44 +155,29 @@ func should_pursue_targets(owner_unit: Unit) -> bool:
 	return true
 
 
+func _get_fog(owner_unit: Unit) -> FogOfWarSystem:
+	if _fog_cache != null and is_instance_valid(_fog_cache):
+		return _fog_cache
+	if owner_unit != null and owner_unit.is_inside_tree():
+		_fog_cache = owner_unit.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+		return _fog_cache
+	return null
+
+
 func _are_teams_hostile(team_a: int, team_b: int) -> bool:
-	if TeamManager != null:
-		return TeamManager.are_enemies(team_a, team_b)
-	return team_a != team_b
+	return CombatTargeting.are_teams_hostile(team_a, team_b)
 
 
 func can_target_entity(owner_unit: Unit, target: Node2D) -> bool:
 	if owner_unit == null or not is_instance_valid(owner_unit) or target == null or not is_instance_valid(target):
 		return false
-	if target is Unit:
-		var u: Unit = target as Unit
-		if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
-			return false
-		if not _are_teams_hostile(int(owner_unit.team), int(u.team)):
-			return false
-		if u.has_method("has_unit_tag"):
-			if bool(u.call("has_unit_tag", &"untargetable")) or bool(u.call("has_unit_tag", &"phase_invulnerable")):
-				return false
-		if not _has_elevation_sight(owner_unit, u.global_position):
-			return false
-		return true
-	if target is Building:
-		var b: Building = target as Building
-		if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(int(owner_unit.team), int(b.team)):
-			return false
-		return _has_elevation_sight(owner_unit, b.global_position)
-	if target.is_in_group("destructible_barricades"):
-		return not bool(target.get("is_destroyed")) and not target.is_queued_for_deletion()
-	return false
+	return CombatTargeting.can_team_target_entity(int(owner_unit.team), target, _get_fog(owner_unit))
 
 
 func _has_elevation_sight(owner_unit: Unit, target_pos: Vector2) -> bool:
 	if owner_unit == null or not owner_unit.is_inside_tree():
 		return true
-	var fog: FogOfWarSystem = owner_unit.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
-	if fog == null or not fog.fog_enabled:
-		return true
-	return fog.is_world_pos_visible_to_team(int(owner_unit.team), target_pos)
+	return CombatTargeting.is_world_pos_visible_to_team(_get_fog(owner_unit), int(owner_unit.team), target_pos)
 
 
 func is_valid_target(owner_unit: Unit, candidate: Variant) -> bool:
@@ -203,6 +205,22 @@ func is_within_attack_envelope(owner_unit: Unit, target: Variant) -> bool:
 	return dist <= owner_unit.get_effective_attack_range() and dist >= owner_unit.get_effective_min_attack_range()
 
 
+func is_within_windup_completion_envelope(owner_unit: Unit, target: Variant) -> bool:
+	if target == null or not is_instance_valid(target):
+		return false
+	if not is_valid_target(owner_unit, target) or owner_unit.data == null:
+		return false
+	var target_node: Node2D = target as Node2D
+	var dist: float = distance_to_target_edge(owner_unit, target_node)
+	return dist <= owner_unit.get_effective_attack_range() + WINDUP_RANGE_SLOP and dist >= maxf(0.0, owner_unit.get_effective_min_attack_range() - 4.0)
+
+
+func can_continue_or_start_attack(owner_unit: Unit, target: Variant) -> bool:
+	if attack_phase == AttackPhase.WINDUP and _windup_target != null and _windup_target == target:
+		return is_within_windup_completion_envelope(owner_unit, target)
+	return is_within_attack_envelope(owner_unit, target)
+
+
 func is_target_inside_min_range(owner_unit: Unit, target: Variant) -> bool:
 	if target == null or not is_instance_valid(target):
 		return false
@@ -219,68 +237,17 @@ func is_target_inside_min_range(owner_unit: Unit, target: Variant) -> bool:
 func distance_to_target_edge(owner_unit: Unit, target: Variant) -> float:
 	if owner_unit == null or not is_instance_valid(owner_unit) or target == null or not is_instance_valid(target) or not (target is Node2D):
 		return INF
-	var target_node: Node2D = target as Node2D
-	var center_dist: float = owner_unit.global_position.distance_to(target_node.global_position)
 	var my_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 16.0
-	var other_r: float = 16.0
-	if target_node is Unit:
-		var u: Unit = target_node
-		other_r = u.data.collision_radius if u.data != null else 16.0
-	elif target_node is Building:
-		other_r = (target_node as Building).footprint_radius
-	elif target_node.is_in_group("destructible_barricades") and target_node.has_method("get_footprint_radius"):
-		other_r = float(target_node.call("get_footprint_radius"))
-	return maxf(0.0, center_dist - my_r - other_r)
+	return CombatTargeting.distance_between_edges(owner_unit.global_position, my_r, target as Node2D)
 
 
 func get_target_priority_tier(candidate: Variant) -> int:
-	if candidate == null or not is_instance_valid(candidate):
-		return TIER_BUILDING
-	if candidate is Building:
-		return TIER_BUILDING
-	if candidate is Unit:
-		var u: Unit = candidate
-		if u.data == null:
-			return TIER_SUPPORT_OR_ECON
-		if u.data.is_worker_class() or u.data.has_tag(&"support") or u.data.has_tag(&"dummy"):
-			return TIER_SUPPORT_OR_ECON
-		if u.data.attack_damage > 0.0:
-			return TIER_COMBAT_UNIT
-		return TIER_SUPPORT_OR_ECON
-	return TIER_BUILDING
+	return CombatTargeting.get_priority_tier(candidate)
 
 
 func _score_auto_target(owner_unit: Unit, candidate: Node2D, dist: float, max_range: float) -> float:
-	var tier: int = get_target_priority_tier(candidate)
-	var score: float = 100.0
-	if tier == TIER_COMBAT_UNIT:
-		score = 1000.0
-	elif tier == TIER_SUPPORT_OR_ECON:
-		score = 500.0
-
-	if candidate is Unit:
-		var u: Unit = candidate
-		# Prioritize enemies actively attacking this unit or nearby friendly units
-		if u.current_target != null and is_instance_valid(u.current_target):
-			if u.current_target == owner_unit:
-				score += 180.0
-			elif u.current_target is Unit and (u.current_target as Unit).team == owner_unit.team:
-				if (u.current_target as Unit).global_position.distance_squared_to(owner_unit.global_position) <= 260.0 * 260.0:
-					score += 95.0
-
-		# Anti-armor affinity: Lance-Rig prefers armored heavy targets (Goliath, Arc-Lancer, Chrysalis Mortar)
-		if owner_unit.data != null and owner_unit.data.bonus_vs_armored > 0.0 and u.data != null and u.data.is_armored:
-			score += 240.0
-
-		# Slight finish-off bias toward damaged units so squads focus down wounded enemies cleanly
-		if u.data != null and u.data.max_hp > 0.0:
-			var hp_ratio: float = clampf(u.current_hp / u.data.max_hp, 0.0, 1.0)
-			score += (1.0 - hp_ratio) * 35.0
-
-	# Closer equal-tier threats always win cleanly
-	var norm_dist: float = clampf(dist / maxf(1.0, max_range), 0.0, 1.5)
-	score -= norm_dist * 220.0
-	return score
+	var prefers_armored: bool = owner_unit != null and owner_unit.data != null and owner_unit.data.bonus_vs_armored > 0.0
+	return CombatTargeting.score_target_candidate(owner_unit, int(owner_unit.team), candidate, dist, max_range, prefers_armored)
 
 
 func find_best_target(owner_unit: Unit, max_range: float) -> Node2D:
@@ -291,23 +258,32 @@ func find_nearest_enemy(owner_unit: Unit, max_range: float) -> Node2D:
 	if owner_unit == null or not is_instance_valid(owner_unit) or not owner_unit.is_inside_tree():
 		return null
 
-	var min_range: float = owner_unit.get_effective_min_attack_range() if owner_unit != null else 0.0
+	var fog: FogOfWarSystem = _get_fog(owner_unit)
+	var obs_team: int = int(owner_unit.team)
+	var prefers_armored: bool = owner_unit.data != null and owner_unit.data.bonus_vs_armored > 0.0
+	var min_range: float = owner_unit.get_effective_min_attack_range()
 	var my_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 16.0
 	var query_r: float = max_range + my_r + 16.0
 	var best_target: Node2D = null
 	var best_score: float = -INF
 
-	var unit_candidates: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, query_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
-	for node: Variant in unit_candidates:
+	if SpatialGrid != null:
+		SpatialGrid.query_units_into(owner_unit.global_position, query_r, _scratch_units)
+	else:
+		_scratch_units.clear()
+		for n_u: Node in owner_unit.get_tree().get_nodes_in_group("units"):
+			_scratch_units.append(n_u)
+
+	for node: Variant in _scratch_units:
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
-		var candidate: Unit = node
-		if not can_target_entity(owner_unit, candidate):
+		var candidate: Unit = node as Unit
+		if not CombatTargeting.can_team_target_entity(obs_team, candidate, fog):
 			continue
-		var dist: float = distance_to_target_edge(owner_unit, candidate)
+		var dist: float = CombatTargeting.distance_between_edges(owner_unit.global_position, my_r, candidate)
 		if dist < min_range or dist > max_range:
 			continue
-		var s: float = _score_auto_target(owner_unit, candidate, dist, max_range)
+		var s: float = CombatTargeting.score_target_candidate(owner_unit, obs_team, candidate, dist, max_range, prefers_armored)
 		if s > best_score:
 			best_score = s
 			best_target = candidate
@@ -316,13 +292,13 @@ func find_nearest_enemy(owner_unit: Unit, max_range: float) -> Node2D:
 	for node: Variant in bldg_candidates:
 		if not is_instance_valid(node) or not (node is Building):
 			continue
-		var b: Building = node
-		if not can_target_entity(owner_unit, b):
+		var b: Building = node as Building
+		if not CombatTargeting.can_team_target_entity(obs_team, b, fog):
 			continue
-		var dist: float = distance_to_target_edge(owner_unit, b)
+		var dist: float = CombatTargeting.distance_between_edges(owner_unit.global_position, my_r, b)
 		if dist < min_range or dist > max_range:
 			continue
-		var s: float = _score_auto_target(owner_unit, b, dist, max_range)
+		var s: float = CombatTargeting.score_target_candidate(owner_unit, obs_team, b, dist, max_range, prefers_armored)
 		if s > best_score:
 			best_score = s
 			best_target = b
@@ -365,33 +341,58 @@ func process_attack_at(owner_unit: Unit, target: Variant, delta: float) -> bool:
 		if attack_phase == AttackPhase.WINDUP:
 			cancel_attack_animation()
 		return false
-	if target == null or not is_instance_valid(target) or not is_within_attack_envelope(owner_unit, target):
+	if target == null or not is_instance_valid(target):
 		if attack_phase == AttackPhase.WINDUP:
 			cancel_attack_animation()
 		return false
 	var target_node: Node2D = target as Node2D
 
 	if attack_phase == AttackPhase.WINDUP:
+		if not is_within_windup_completion_envelope(owner_unit, target_node):
+			cancel_attack_animation()
+			return false
 		_windup_target = target_node
+		var overshoot: float = maxf(0.0, delta - _windup_timer)
 		_windup_timer = maxf(0.0, _windup_timer - delta)
 		if _windup_timer <= 0.0:
 			attack_phase = AttackPhase.BACKSWING
 			_backswing_timer = BACKSWING_DURATION
 			_windup_target = null
-			return _execute_weapon_shot(owner_unit, target_node)
+			return _execute_weapon_shot(owner_unit, target_node, overshoot)
+		return false
+
+	if not is_within_attack_envelope(owner_unit, target_node):
 		return false
 
 	if _attack_cooldown_timer > 0.0:
 		return false
 
-	var windup: float = get_effective_windup(owner_unit)
-	if windup <= 0.001:
+	# Seamless post-lock continuous beam ticking: run initial windup once per target lock,
+	# then tick smoothly without windup stutter while locked onto the same target.
+	var is_beam_locked: bool = (
+		owner_unit.data != null
+		and owner_unit.data.is_continuous_beam
+		and _beam_lock_target == target_node
+		and _beam_ramp_elapsed > 0.0
+	)
+	if is_beam_locked:
+		var beam_ov: float = _cooldown_overshoot
+		_cooldown_overshoot = 0.0
 		attack_phase = AttackPhase.BACKSWING
 		_backswing_timer = BACKSWING_DURATION
-		return _execute_weapon_shot(owner_unit, target_node)
+		return _execute_weapon_shot(owner_unit, target_node, beam_ov)
+
+	var windup: float = get_effective_windup(owner_unit)
+	if windup <= 0.001:
+		var instant_ov: float = _cooldown_overshoot
+		_cooldown_overshoot = 0.0
+		attack_phase = AttackPhase.BACKSWING
+		_backswing_timer = BACKSWING_DURATION
+		return _execute_weapon_shot(owner_unit, target_node, instant_ov)
 
 	attack_phase = AttackPhase.WINDUP
-	_windup_timer = windup
+	_windup_timer = maxf(0.0, windup - _cooldown_overshoot)
+	_cooldown_overshoot = 0.0
 	_windup_target = target_node
 	return false
 
@@ -403,14 +404,15 @@ func try_fire_at(owner_unit: Unit, target: Variant) -> bool:
 		return false
 	attack_phase = AttackPhase.BACKSWING
 	_backswing_timer = BACKSWING_DURATION
-	return _execute_weapon_shot(owner_unit, target as Node2D)
+	return _execute_weapon_shot(owner_unit, target as Node2D, 0.0)
 
 
-func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
-	if owner_unit == null or owner_unit.is_deploy_transitioning() or target_node == null or not is_instance_valid(target_node) or not is_within_attack_envelope(owner_unit, target_node):
+func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D, cooldown_overshoot: float = 0.0) -> bool:
+	if owner_unit == null or owner_unit.is_deploy_transitioning() or target_node == null or not is_instance_valid(target_node) or not is_within_windup_completion_envelope(owner_unit, target_node):
 		return false
-	_attack_cooldown_timer = owner_unit.get_effective_attack_cooldown()
-	var muzzle_offset: Vector2 = Vector2.RIGHT.rotated(owner_unit.body_visual.rotation) * owner_unit.data.collision_radius
+	_attack_cooldown_timer = maxf(0.0, owner_unit.get_effective_attack_cooldown() - maxf(0.0, cooldown_overshoot))
+	var muzzle_angle: float = owner_unit.weapon_aim_angle if (owner_unit.data != null and owner_unit.data.can_fire_while_moving) else owner_unit.body_visual.rotation
+	var muzzle_offset: Vector2 = Vector2.RIGHT.rotated(muzzle_angle) * owner_unit.data.collision_radius
 	var tracer_origin: Vector2 = owner_unit.global_position + muzzle_offset
 	var tracer_end: Vector2 = target_node.global_position
 
@@ -472,7 +474,10 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 	if is_continuous_beam:
 		if _beam_lock_target != target_node:
 			_beam_lock_target = target_node
-			_beam_ramp_elapsed = 0.0
+			if _beam_precharge_pending:
+				_beam_precharge_pending = false
+			else:
+				_beam_ramp_elapsed = 0.0
 		var ramp_speed_mult: float = owner_unit.get_effective_beam_ramp_speed_multiplier()
 		var tick_dt: float = owner_unit.get_effective_attack_cooldown()
 		var ramp_dur: float = maxf(0.1, owner_unit.data.beam_ramp_duration)
@@ -505,18 +510,40 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D) -> bool:
 			AudioManager.call("notify_combat_activity", 0.35)
 
 	if aoe_radius > 0.0:
-		# Artillery / lobbed parabolic shell with ground impact telegraph ring & delayed splash
+		# Artillery / lobbed parabolic shell with deterministic simulation detonation & radial falloff
 		var flight_dist: float = tracer_origin.distance_to(tracer_end)
 		var flight_time: float = clampf(flight_dist / 560.0, 0.36, 0.54)
 		var arc_h: float = clampf(flight_dist * 0.26, 48.0, 86.0)
 		var tree: SceneTree = owner_unit.get_tree()
-		var attacker_team: Unit.Team = owner_unit.team
+		var attacker_team: int = int(owner_unit.team)
 		var impact_pos: Vector2 = tracer_end
-		var on_impact: Callable = func() -> void:
-			var valid_attacker: Unit = owner_unit if (is_instance_valid(owner_unit) and not owner_unit.is_dead) else null
-			_apply_aoe_damage_for_team(tree, valid_attacker, attacker_team, impact_pos, aoe_radius, base_dmg, bonus_armored)
-			_trigger_camera_shake(tree, 2.8, 0.14, impact_pos)
-		_spawn_mortar_shell_vfx(owner_unit, tracer_origin, impact_pos, aoe_radius, flight_time, arc_h, shot_col, on_impact)
+		var inner_ratio: float = owner_unit.data.splash_inner_radius_ratio if owner_unit.data != null else 0.35
+		var edge_ratio: float = owner_unit.data.splash_edge_damage_ratio if owner_unit.data != null else 0.45
+		var ord_mgr: CombatOrdnanceManager = tree.get_first_node_in_group("combat_ordnance_manager") as CombatOrdnanceManager if tree != null else null
+		if ord_mgr != null:
+			ord_mgr.schedule_ground_detonation({
+				"delay": flight_time,
+				"attacker_ref": weakref(owner_unit),
+				"attacker_team": attacker_team,
+				"center": impact_pos,
+				"radius": aoe_radius,
+				"inner_ratio": inner_ratio,
+				"edge_ratio": edge_ratio,
+				"base_dmg": base_dmg,
+				"bonus_armored": bonus_armored,
+				"armor_mult": 1.0,
+				"shake_intensity": 2.8,
+				"shake_duration": 0.14,
+				"scar_kind": &"scorch_large" if aoe_radius >= 50.0 else &"scorch_small",
+				"vfx_color": shot_col,
+			})
+			_spawn_mortar_shell_vfx(owner_unit, tracer_origin, impact_pos, aoe_radius, flight_time, arc_h, shot_col, Callable(), inner_ratio)
+		else:
+			var on_impact: Callable = func() -> void:
+				var valid_attacker: Unit = owner_unit if (is_instance_valid(owner_unit) and not owner_unit.is_dead) else null
+				CombatOrdnanceManager.apply_aoe_damage(tree, valid_attacker, attacker_team, impact_pos, aoe_radius, base_dmg, bonus_armored, 1.0, inner_ratio, edge_ratio)
+				_trigger_camera_shake(tree, 2.8, 0.14, impact_pos)
+			_spawn_mortar_shell_vfx(owner_unit, tracer_origin, impact_pos, aoe_radius, flight_time, arc_h, shot_col, on_impact, inner_ratio)
 		return true
 
 	if pierce_width > 0.0:
@@ -685,14 +712,7 @@ func _apply_refract_split_damage(
 
 
 func _is_armored_target(target: Variant) -> bool:
-	if target is Building:
-		return true
-	if target is Node and (target as Node).is_in_group("destructible_barricades"):
-		return bool((target as Node).get("is_armored"))
-	if target is Unit:
-		var u: Unit = target
-		return u.data != null and u.data.is_armored
-	return false
+	return CombatTargeting.is_armored_target(target)
 
 
 func _apply_damage_to_target(owner_unit: Unit, target: Variant, base_dmg: float, bonus_vs_armored: float) -> void:
@@ -750,66 +770,9 @@ func _apply_aoe_damage_for_team(
 	base_dmg: float,
 	bonus_vs_armored: float
 ) -> void:
-	if tree == null:
-		return
-	var entities: Array = SpatialGrid.query_entities_in_radius(center, radius, true, true) if SpatialGrid != null else []
-	if SpatialGrid != null:
-		for node: Variant in entities:
-			if not is_instance_valid(node):
-				continue
-			if node is Unit:
-				var candidate: Unit = node
-				if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not _are_teams_hostile(int(attacker_team), int(candidate.team)):
-					continue
-				var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
-				if candidate.global_position.distance_to(center) <= radius + enemy_r:
-					var dmg: float = base_dmg + (bonus_vs_armored if (candidate.data != null and candidate.data.is_armored) else 0.0)
-					candidate.take_damage(dmg, attacker)
-			elif node is Building:
-				var b: Building = node
-				if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(int(attacker_team), int(b.team)):
-					continue
-				if b.global_position.distance_to(center) <= radius + b.footprint_radius:
-					b.take_damage(base_dmg + bonus_vs_armored, attacker)
-			elif node is Node2D and (node as Node).is_in_group("destructible_barricades"):
-				var bar: Node2D = node as Node2D
-				if bool(bar.get("is_destroyed")) or bar.is_queued_for_deletion():
-					continue
-				var bar_r: float = float(bar.call("get_footprint_radius")) if bar.has_method("get_footprint_radius") else 40.0
-				if bar.global_position.distance_to(center) <= radius + bar_r:
-					var bar_dmg: float = base_dmg + (bonus_vs_armored if bool(bar.get("is_armored")) else 0.0)
-					bar.call("take_damage", bar_dmg, attacker)
-		return
-
-	for node: Node in tree.get_nodes_in_group("units"):
-		if not is_instance_valid(node) or not (node is Unit):
-			continue
-		var candidate: Unit = node
-		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not _are_teams_hostile(int(attacker_team), int(candidate.team)):
-			continue
-		var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
-		if candidate.global_position.distance_to(center) <= radius + enemy_r:
-			var dmg: float = base_dmg + (bonus_vs_armored if (candidate.data != null and candidate.data.is_armored) else 0.0)
-			candidate.take_damage(dmg, attacker)
-
-	for node: Node in tree.get_nodes_in_group("buildings"):
-		if not is_instance_valid(node) or not (node is Building):
-			continue
-		var b: Building = node
-		if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(int(attacker_team), int(b.team)):
-			continue
-		if b.global_position.distance_to(center) <= radius + b.footprint_radius:
-			b.take_damage(base_dmg + bonus_vs_armored, attacker)
-
-	for node: Node in tree.get_nodes_in_group("destructible_barricades"):
-		if not is_instance_valid(node) or not (node is Node2D):
-			continue
-		if bool(node.get("is_destroyed")) or node.is_queued_for_deletion():
-			continue
-		var bar_r: float = float(node.call("get_footprint_radius")) if node.has_method("get_footprint_radius") else 40.0
-		if (node as Node2D).global_position.distance_to(center) <= radius + bar_r:
-			var bar_dmg: float = base_dmg + (bonus_vs_armored if bool(node.get("is_armored")) else 0.0)
-			node.call("take_damage", bar_dmg, attacker)
+	var inner_r: float = attacker.data.splash_inner_radius_ratio if (attacker != null and attacker.data != null) else 0.35
+	var edge_r: float = attacker.data.splash_edge_damage_ratio if (attacker != null and attacker.data != null) else 0.45
+	CombatOrdnanceManager.apply_aoe_damage(tree, attacker, int(attacker_team), center, radius, base_dmg, bonus_vs_armored, 1.0, inner_r, edge_r)
 
 
 func _apply_line_pierce_damage(
@@ -825,11 +788,16 @@ func _apply_line_pierce_damage(
 		return
 	var seg_mid: Vector2 = (seg_start + seg_end) * 0.5
 	var seg_r: float = seg_start.distance_to(seg_end) * 0.5 + half_width + 24.0
-	var unit_list: Array = SpatialGrid.query_units_in_radius(seg_mid, seg_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
-	for node: Variant in unit_list:
+	if SpatialGrid != null:
+		SpatialGrid.query_units_into(seg_mid, seg_r, _scratch_units)
+	else:
+		_scratch_units.clear()
+		for n_u: Node in owner_unit.get_tree().get_nodes_in_group("units"):
+			_scratch_units.append(n_u)
+	for node: Variant in _scratch_units:
 		if not is_instance_valid(node) or not (node is Unit) or node == primary_target:
 			continue
-		var candidate: Unit = node
+		var candidate: Unit = node as Unit
 		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not _are_teams_hostile(int(owner_unit.team), int(candidate.team)):
 			continue
 		var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
@@ -841,7 +809,7 @@ func _apply_line_pierce_damage(
 	for node: Variant in bldg_list:
 		if not is_instance_valid(node) or not (node is Building) or node == primary_target:
 			continue
-		var b: Building = node
+		var b: Building = node as Building
 		if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(int(owner_unit.team), int(b.team)):
 			continue
 		var closest_b: Vector2 = Geometry2D.get_closest_point_to_segment(b.global_position, seg_start, seg_end)
@@ -882,19 +850,19 @@ func _spawn_mortar_shell_vfx(
 	flight_time: float,
 	arc_height: float,
 	vfx_color: Color,
-	on_impact: Callable
+	on_impact: Callable,
+	inner_core_ratio: float = 0.35
 ) -> void:
 	if owner_unit.get_parent() == null:
 		if on_impact.is_valid():
 			on_impact.call()
 		return
-	# Always spawn mortar node so delayed splash damage always fires reliably even through Fog of War
 	var fx: CombatVFX = VFXPool.acquire_combat_vfx(52) if VFXPool != null else null
 	if fx == null:
 		fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
 		fx.z_index = 52
 		owner_unit.get_parent().add_child(fx)
-	fx.setup_mortar_shell(from_pos, target_pos, splash_radius, flight_time, arc_height, vfx_color, on_impact)
+	fx.setup_mortar_shell(from_pos, target_pos, splash_radius, flight_time, arc_height, vfx_color, on_impact, inner_core_ratio)
 
 
 func _spawn_melee_cleave_vfx(owner_unit: Unit, origin_pos: Vector2, target_pos: Vector2, vfx_color: Color) -> void:
@@ -941,7 +909,7 @@ func _trigger_camera_shake(tree: SceneTree, intensity: float, duration: float, w
 func _is_point_visible_local(owner_unit: Unit, world_pos: Vector2) -> bool:
 	if owner_unit == null or not owner_unit.is_inside_tree():
 		return false
-	var fog: FogOfWarSystem = owner_unit.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	var fog: FogOfWarSystem = _get_fog(owner_unit)
 	if fog != null and fog.fog_enabled:
 		return fog.is_world_pos_visible_strict(world_pos)
 	return true

@@ -57,6 +57,9 @@ extends Resource
 @export var audio_bark_class: StringName = &"swarm" # &"worker", &"swarm", &"counter", &"support", &"heavy"
 @export var minimap_icon_shape: StringName = &"dot" # &"dot", &"worker", &"triangle_heavy"
 @export var role_tags_display: String = ""
+@export var can_fire_while_moving: bool = false
+@export var splash_inner_radius_ratio: float = 0.35
+@export var splash_edge_damage_ratio: float = 0.45
 
 # Optional Deploy / Anchor Stance Overrides (Milestone 3.0a)
 @export var can_deploy: bool = false

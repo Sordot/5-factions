@@ -30,6 +30,7 @@ var _radius: float = 64.0
 var _flight_time: float = 0.48
 var _blast_duration: float = 0.28
 var _arc_height: float = 72.0
+var _inner_core_ratio: float = 0.35
 var _impacted: bool = false
 var _on_impact: Callable = Callable()
 
@@ -61,6 +62,7 @@ func reset_for_pool() -> void:
 	_flight_time = 0.48
 	_blast_duration = 0.28
 	_arc_height = 72.0
+	_inner_core_ratio = 0.35
 	_impacted = false
 	_on_impact = Callable()
 	_dir = Vector2.RIGHT
@@ -89,7 +91,8 @@ func setup_mortar_shell(
 	flight_time: float,
 	arc_height: float,
 	vfx_color: Color,
-	on_impact_callback: Callable = Callable()
+	on_impact_callback: Callable = Callable(),
+	inner_core_ratio: float = 0.35
 ) -> void:
 	_mode = VFXMode.MORTAR_SHELL
 	_from_world = from_world
@@ -99,6 +102,7 @@ func setup_mortar_shell(
 	_blast_duration = 0.28
 	_duration = _flight_time + _blast_duration
 	_arc_height = maxf(28.0, arc_height)
+	_inner_core_ratio = clampf(inner_core_ratio, 0.0, 1.0)
 	_color = vfx_color
 	_on_impact = on_impact_callback
 	_impacted = false
@@ -256,7 +260,8 @@ func setup_solar_convergence(
 	target_world: Vector2,
 	radius: float,
 	telegraph_time: float = 1.4,
-	on_impact_callback: Callable = Callable()
+	on_impact_callback: Callable = Callable(),
+	inner_core_ratio: float = 0.40
 ) -> void:
 	_mode = VFXMode.SOLAR_CONVERGENCE
 	_from_world = target_world
@@ -265,6 +270,7 @@ func setup_solar_convergence(
 	_flight_time = maxf(0.25, telegraph_time)
 	_blast_duration = 0.42
 	_duration = _flight_time + _blast_duration
+	_inner_core_ratio = clampf(inner_core_ratio, 0.0, 1.0)
 	_color = Color(0.98, 0.80, 0.14, 1.0)
 	_on_impact = on_impact_callback
 	_impacted = false
@@ -278,12 +284,12 @@ func _process(delta: float) -> void:
 	if _mode == VFXMode.MORTAR_SHELL or _mode == VFXMode.SOLAR_CONVERGENCE:
 		if not _impacted and _elapsed >= _flight_time:
 			_impacted = true
-			if is_inside_tree():
-				var scars: Node = get_tree().get_first_node_in_group("battle_scars")
-				if scars != null and scars.has_method("add_scar"):
-					var scar_kind: StringName = &"scorch_large" if (_radius >= 50.0 or _mode == VFXMode.SOLAR_CONVERGENCE) else &"scorch_small"
-					scars.call("add_scar", scar_kind, _target_world, clampf(_radius * 0.62, 16.0, 58.0), _color)
 			if _on_impact.is_valid():
+				if is_inside_tree():
+					var scars: Node = get_tree().get_first_node_in_group("battle_scars")
+					if scars != null and scars.has_method("add_scar"):
+						var scar_kind: StringName = &"scorch_large" if (_radius >= 50.0 or _mode == VFXMode.SOLAR_CONVERGENCE) else &"scorch_small"
+						scars.call("add_scar", scar_kind, _target_world, clampf(_radius * 0.62, 16.0, 58.0), _color)
 				_on_impact.call()
 		_refresh_fog_visibility()
 	if _elapsed >= _duration:
@@ -356,6 +362,11 @@ func _draw_mortar_shell() -> void:
 		var warn_alpha: float = lerpf(0.42, 0.92, u)
 		var ring_col: Color = Color(_color.r, _color.g, _color.b, warn_alpha)
 		_draw_dashed_circle(p1, _radius, ring_col, 2.0, 20)
+		# Subtle inner 100%-lethal core boundary so players read center vs. outer falloff cleanly
+		if _inner_core_ratio > 0.05 and _inner_core_ratio < 0.95:
+			var core_r: float = _radius * _inner_core_ratio
+			draw_circle(p1, core_r, Color(_color.r, _color.g, _color.b, 0.08 + 0.10 * u))
+			draw_arc(p1, core_r, 0.0, TAU, 24, Color(1.0, 0.97, 0.90, 0.34 + 0.38 * u), 1.3, true)
 		# Filling inner telegraph pulse that reaches outer splash radius right at impact
 		var fill_r: float = lerpf(_radius * 0.14, _radius, u)
 		draw_circle(p1, fill_r, Color(_color.r, _color.g, _color.b, 0.07 + 0.14 * u))
@@ -705,6 +716,11 @@ func _draw_solar_convergence() -> void:
 		# Outer hazard boundary (dashed gold) + subtle tinted interior
 		draw_circle(p, _radius, Color(magenta.r, magenta.g, magenta.b, 0.06 + 0.10 * ease_in))
 		_draw_dashed_circle(p, _radius, Color(gold.r, gold.g, gold.b, alpha), 2.4, 24)
+		# Subtle inner 100%-lethal core ring
+		if _inner_core_ratio > 0.05 and _inner_core_ratio < 0.95:
+			var solar_core_r: float = _radius * _inner_core_ratio
+			draw_circle(p, solar_core_r, Color(gold.r, gold.g, gold.b, 0.10 + 0.12 * ease_in))
+			draw_arc(p, solar_core_r, 0.0, TAU, 28, Color(bone.r, bone.g, bone.b, 0.36 + 0.42 * u), 1.4, true)
 
 		# Converging inner Bauhaus sacred lens ring + rotating inscribed diamond
 		var conv_r: float = lerpf(_radius * 0.96, _radius * 0.12, u)

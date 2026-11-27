@@ -7,7 +7,7 @@
 script = ExtResource("1_ab")
 ability_id = &"build_cloning_vat"
 display_name = "Cloning Vat"
-hotkey_label = "T"
+hotkey_label = "R"
 cooldown_duration = 0.0
 cast_range = 0.0
 target_type = 3

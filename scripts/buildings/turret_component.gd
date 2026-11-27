@@ -6,9 +6,9 @@ const COMBAT_VFX_SCRIPT: GDScript = preload("res://ui/overlays/combat_vfx.gd")
 
 const SCAN_INTERVAL: float = 0.22
 const FIRE_ALIGN_TOLERANCE: float = 0.24
-const TIER_COMBAT_UNIT: int = 1
-const TIER_SUPPORT_OR_ECON: int = 2
-const TIER_BUILDING: int = 3
+const TIER_COMBAT_UNIT: int = CombatTargeting.TIER_COMBAT_UNIT
+const TIER_SUPPORT_OR_ECON: int = CombatTargeting.TIER_SUPPORT_OR_ECON
+const TIER_BUILDING: int = CombatTargeting.TIER_BUILDING
 
 var owner_building: Building = null
 var turret_angle: float = 0.0
@@ -18,6 +18,8 @@ var current_target: Node2D = null
 var explicit_target: Node2D = null
 
 var _scan_timer: float = 0.0
+var _fog_cache: FogOfWarSystem = null
+var _scratch_units: Array = []
 
 
 func bind_building(building: Building) -> void:
@@ -92,42 +94,23 @@ func tick(delta: float) -> void:
 			_fire_at(current_target)
 
 
+func _get_fog() -> FogOfWarSystem:
+	if _fog_cache != null and is_instance_valid(_fog_cache):
+		return _fog_cache
+	if owner_building != null and owner_building.is_inside_tree():
+		_fog_cache = owner_building.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+		return _fog_cache
+	return null
+
+
 func _are_teams_hostile(team_a: int, team_b: int) -> bool:
-	if TeamManager != null:
-		return TeamManager.are_enemies(team_a, team_b)
-	return team_a != team_b
+	return CombatTargeting.are_teams_hostile(team_a, team_b)
 
 
 func can_target_entity(target: Node2D) -> bool:
 	if owner_building == null or not is_instance_valid(owner_building) or target == null or not is_instance_valid(target):
 		return false
-	if target is Unit:
-		var u: Unit = target as Unit
-		if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
-			return false
-		if not _are_teams_hostile(int(owner_building.team), int(u.team)):
-			return false
-		if u.has_method("has_unit_tag"):
-			if bool(u.call("has_unit_tag", &"untargetable")) or bool(u.call("has_unit_tag", &"phase_invulnerable")):
-				return false
-		return _has_elevation_sight(u.global_position)
-	if target is Building:
-		var b: Building = target as Building
-		if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(int(owner_building.team), int(b.team)):
-			return false
-		return _has_elevation_sight(b.global_position)
-	if target.is_in_group("destructible_barricades"):
-		return not bool(target.get("is_destroyed")) and not target.is_queued_for_deletion()
-	return false
-
-
-func _has_elevation_sight(target_pos: Vector2) -> bool:
-	if owner_building == null or not owner_building.is_inside_tree():
-		return true
-	var fog: FogOfWarSystem = owner_building.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
-	if fog == null or not fog.fog_enabled:
-		return true
-	return fog.is_world_pos_visible_to_team(int(owner_building.team), target_pos)
+	return CombatTargeting.can_team_target_entity(int(owner_building.team), target, _get_fog())
 
 
 func is_valid_target(candidate: Variant) -> bool:
@@ -139,17 +122,7 @@ func is_valid_target(candidate: Variant) -> bool:
 func distance_to_target_edge(target: Node2D) -> float:
 	if owner_building == null or not is_instance_valid(owner_building) or target == null or not is_instance_valid(target):
 		return INF
-	var center_dist: float = owner_building.global_position.distance_to(target.global_position)
-	var my_r: float = owner_building.footprint_radius
-	var other_r: float = 16.0
-	if target is Unit:
-		var u: Unit = target
-		other_r = u.data.collision_radius if u.data != null else 16.0
-	elif target is Building:
-		other_r = (target as Building).footprint_radius
-	elif target.is_in_group("destructible_barricades") and target.has_method("get_footprint_radius"):
-		other_r = float(target.call("get_footprint_radius"))
-	return maxf(0.0, center_dist - my_r - other_r)
+	return CombatTargeting.distance_between_edges(owner_building.global_position, owner_building.footprint_radius, target)
 
 
 func _get_effective_turret_range() -> float:
@@ -172,76 +145,44 @@ func is_in_attack_range(target: Node2D) -> bool:
 
 
 func _get_priority_tier(candidate: Node2D) -> int:
-	if candidate is Building:
-		return TIER_BUILDING
-	if candidate is Unit:
-		var u: Unit = candidate
-		if u.data == null:
-			return TIER_SUPPORT_OR_ECON
-		var uid: StringName = u.data.unit_type_id
-		if u.data.can_gather or u.data.can_staff_compute:
-			return TIER_SUPPORT_OR_ECON
-		if uid == &"symbiote" or uid == &"signal_jammer" or uid == &"worker" or uid == &"silica_harvester" or uid == &"engineer" or uid == &"target_dummy":
-			return TIER_SUPPORT_OR_ECON
-		if u.data.attack_damage > 0.0:
-			return TIER_COMBAT_UNIT
-		return TIER_SUPPORT_OR_ECON
-	return TIER_BUILDING
+	return CombatTargeting.get_priority_tier(candidate)
 
 
 func _score_candidate(candidate: Node2D, dist: float, max_range: float) -> float:
-	var tier: int = _get_priority_tier(candidate)
-	var score: float = 100.0
-	if tier == TIER_COMBAT_UNIT:
-		score = 1000.0
-	elif tier == TIER_SUPPORT_OR_ECON:
-		score = 500.0
-
-	if candidate is Unit:
-		var u: Unit = candidate
-		if u.current_target != null and is_instance_valid(u.current_target):
-			if u.current_target == owner_building:
-				score += 180.0
-			elif u.current_target is Unit and (u.current_target as Unit).team == owner_building.team:
-				if (u.current_target as Unit).global_position.distance_squared_to(owner_building.global_position) <= 280.0 * 280.0:
-					score += 95.0
-			elif u.current_target is Building and (u.current_target as Building).team == owner_building.team:
-				score += 110.0
-
-		if owner_building.turret_bonus_vs_armored > 1.0 and u.data != null and u.data.is_armored:
-			score += 240.0
-
-		if u.data != null and u.data.max_hp > 0.0:
-			var hp_ratio: float = clampf(u.current_hp / u.data.max_hp, 0.0, 1.0)
-			score += (1.0 - hp_ratio) * 35.0
-	elif candidate is Building and owner_building.turret_bonus_vs_armored > 1.0:
-		score += 80.0
-
-	var norm_dist: float = clampf(dist / maxf(1.0, max_range), 0.0, 1.5)
-	score -= norm_dist * 220.0
-	return score
+	var prefers_armored: bool = owner_building != null and owner_building.turret_bonus_vs_armored > 1.0
+	return CombatTargeting.score_target_candidate(owner_building, int(owner_building.team), candidate, dist, max_range, prefers_armored)
 
 
 func _find_best_target() -> Node2D:
 	if owner_building == null or not owner_building.is_inside_tree():
 		return null
+	var fog: FogOfWarSystem = _get_fog()
+	var obs_team: int = int(owner_building.team)
+	var prefers_armored: bool = owner_building.turret_bonus_vs_armored > 1.0
 	var max_range: float = _get_effective_turret_range()
 	var min_range: float = owner_building.turret_min_range
-	var query_r: float = max_range + owner_building.footprint_radius + 20.0
+	var my_r: float = owner_building.footprint_radius
+	var query_r: float = max_range + my_r + 20.0
 	var best_target: Node2D = null
 	var best_score: float = -INF
 
-	var unit_candidates: Array = SpatialGrid.query_units_in_radius(owner_building.global_position, query_r) if SpatialGrid != null else owner_building.get_tree().get_nodes_in_group("units")
-	for node: Variant in unit_candidates:
+	if SpatialGrid != null:
+		SpatialGrid.query_units_into(owner_building.global_position, query_r, _scratch_units)
+	else:
+		_scratch_units.clear()
+		for n_u: Node in owner_building.get_tree().get_nodes_in_group("units"):
+			_scratch_units.append(n_u)
+
+	for node: Variant in _scratch_units:
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
-		var u: Unit = node
-		if not can_target_entity(u):
+		var u: Unit = node as Unit
+		if not CombatTargeting.can_team_target_entity(obs_team, u, fog):
 			continue
-		var dist: float = distance_to_target_edge(u)
+		var dist: float = CombatTargeting.distance_between_edges(owner_building.global_position, my_r, u)
 		if dist < min_range or dist > max_range:
 			continue
-		var s: float = _score_candidate(u, dist, max_range)
+		var s: float = CombatTargeting.score_target_candidate(owner_building, obs_team, u, dist, max_range, prefers_armored)
 		if s > best_score:
 			best_score = s
 			best_target = u
@@ -253,13 +194,13 @@ func _find_best_target() -> Node2D:
 	for node: Variant in bldg_candidates:
 		if not is_instance_valid(node) or not (node is Building):
 			continue
-		var b: Building = node
-		if not can_target_entity(b):
+		var b: Building = node as Building
+		if not CombatTargeting.can_team_target_entity(obs_team, b, fog):
 			continue
-		var dist: float = distance_to_target_edge(b)
+		var dist: float = CombatTargeting.distance_between_edges(owner_building.global_position, my_r, b)
 		if dist < min_range or dist > max_range:
 			continue
-		var s: float = _score_candidate(b, dist, max_range)
+		var s: float = CombatTargeting.score_target_candidate(owner_building, obs_team, b, dist, max_range, prefers_armored)
 		if s > best_score:
 			best_score = s
 			best_target = b
@@ -268,14 +209,7 @@ func _find_best_target() -> Node2D:
 
 
 func _is_armored_target(target: Variant) -> bool:
-	if target is Building:
-		return true
-	if target is Node and (target as Node).is_in_group("destructible_barricades"):
-		return bool((target as Node).get("is_armored"))
-	if target is Unit:
-		var u: Unit = target
-		return u.data != null and u.data.is_armored
-	return false
+	return CombatTargeting.is_armored_target(target)
 
 
 func _compute_damage(target: Variant) -> float:
@@ -325,11 +259,33 @@ func _fire_at(target: Node2D) -> void:
 		var atk_team: int = int(owner_building.team)
 		var base_dmg: float = _get_effective_turret_damage()
 		var armor_mult: float = owner_building.turret_bonus_vs_armored
+		var inner_r: float = owner_building.turret_splash_inner_ratio
+		var edge_r: float = owner_building.turret_splash_edge_damage_ratio
 		var impact_pos: Vector2 = end_pos
-		var on_impact: Callable = func() -> void:
-			var valid_atk: Building = atk_bldg if (is_instance_valid(atk_bldg) and not atk_bldg.is_destroyed) else null
-			_apply_splash_damage(tree, valid_atk, atk_team, impact_pos, splash_r, base_dmg, armor_mult)
-		_spawn_mortar_vfx(origin, impact_pos, splash_r, flight_time, arc_h, team_col, on_impact)
+		var ord_mgr: CombatOrdnanceManager = tree.get_first_node_in_group("combat_ordnance_manager") as CombatOrdnanceManager if tree != null else null
+		if ord_mgr != null:
+			ord_mgr.schedule_ground_detonation({
+				"delay": flight_time,
+				"attacker_ref": weakref(atk_bldg),
+				"attacker_team": atk_team,
+				"center": impact_pos,
+				"radius": splash_r,
+				"inner_ratio": inner_r,
+				"edge_ratio": edge_r,
+				"base_dmg": base_dmg,
+				"bonus_armored": 0.0,
+				"armor_mult": armor_mult,
+				"shake_intensity": 2.2,
+				"shake_duration": 0.12,
+				"scar_kind": &"scorch_large" if splash_r >= 50.0 else &"scorch_small",
+				"vfx_color": team_col,
+			})
+			_spawn_mortar_vfx(origin, impact_pos, splash_r, flight_time, arc_h, team_col, Callable(), inner_r)
+		else:
+			var on_impact: Callable = func() -> void:
+				var valid_atk: Building = atk_bldg if (is_instance_valid(atk_bldg) and not atk_bldg.is_destroyed) else null
+				CombatOrdnanceManager.apply_aoe_damage(tree, valid_atk, atk_team, impact_pos, splash_r, base_dmg, 0.0, armor_mult, inner_r, edge_r)
+			_spawn_mortar_vfx(origin, impact_pos, splash_r, flight_time, arc_h, team_col, on_impact, inner_r)
 		return
 
 	match style:
@@ -373,50 +329,10 @@ func _apply_direct_damage(target: Node2D, dmg: float) -> void:
 		target.call("take_damage", dmg, owner_building)
 
 
-func _apply_splash_damage(
-	tree: SceneTree,
-	attacker: Building,
-	attacker_team: int,
-	center: Vector2,
-	radius: float,
-	base_dmg: float,
-	armor_mult: float
-) -> void:
-	if tree == null or base_dmg <= 0.0:
-		return
-	var entities: Array = SpatialGrid.query_entities_in_radius(center, radius, true, true) if SpatialGrid != null else tree.get_nodes_in_group("units")
-	for node: Variant in entities:
-		if not is_instance_valid(node):
-			continue
-		if node is Unit:
-			var u: Unit = node
-			if u.is_dead or u.is_staffed or u.is_queued_for_deletion() or not _are_teams_hostile(attacker_team, int(u.team)):
-				continue
-			var r: float = u.data.collision_radius if u.data != null else 16.0
-			if u.global_position.distance_to(center) <= radius + r:
-				var d: float = base_dmg * (armor_mult if (armor_mult > 1.0 and u.data != null and u.data.is_armored) else 1.0)
-				u.take_damage(d, attacker)
-		elif node is Building:
-			var b: Building = node
-			if b.is_destroyed or b.is_queued_for_deletion() or not _are_teams_hostile(attacker_team, int(b.team)):
-				continue
-			if b.global_position.distance_to(center) <= radius + b.footprint_radius:
-				var db: float = base_dmg * (armor_mult if armor_mult > 1.0 else 1.0)
-				b.take_damage(db, attacker)
-		elif node is Node2D and (node as Node).is_in_group("destructible_barricades"):
-			var bar: Node2D = node as Node2D
-			if bool(bar.get("is_destroyed")) or bar.is_queued_for_deletion():
-				continue
-			var bar_r: float = float(bar.call("get_footprint_radius")) if bar.has_method("get_footprint_radius") else 40.0
-			if bar.global_position.distance_to(center) <= radius + bar_r:
-				var dbar: float = base_dmg * (armor_mult if (armor_mult > 1.0 and bool(bar.get("is_armored"))) else 1.0)
-				bar.call("take_damage", dbar, attacker)
-
-
 func _is_point_visible_local(world_pos: Vector2) -> bool:
 	if owner_building == null or not owner_building.is_inside_tree():
 		return false
-	var fog: FogOfWarSystem = owner_building.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	var fog: FogOfWarSystem = _get_fog()
 	if fog != null and fog.fog_enabled:
 		return fog.is_world_pos_visible_strict(world_pos)
 	return true
@@ -487,7 +403,8 @@ func _spawn_mortar_vfx(
 	flight_time: float,
 	arc_h: float,
 	col: Color,
-	on_impact: Callable
+	on_impact: Callable,
+	inner_core_ratio: float = 0.35
 ) -> void:
 	if owner_building == null or not owner_building.is_inside_tree():
 		if on_impact.is_valid():
@@ -503,4 +420,4 @@ func _spawn_mortar_vfx(
 		fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
 		fx.z_index = 50
 		host.add_child(fx)
-	fx.setup_mortar_shell(origin, impact_pos, splash_r, flight_time, arc_h, col, on_impact)
+	fx.setup_mortar_shell(origin, impact_pos, splash_r, flight_time, arc_h, col, on_impact, inner_core_ratio)

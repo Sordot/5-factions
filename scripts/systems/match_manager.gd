@@ -25,6 +25,7 @@ const HOLDOUT_CONTROLLER_SCRIPT: GDScript = preload("res://scripts/systems/holdo
 const GAUNTLET_CONTROLLER_SCRIPT: GDScript = preload("res://scripts/systems/gauntlet_mode_controller.gd")
 const OPTICAL_TETHER_SYSTEM_SCRIPT: GDScript = preload("res://scripts/systems/optical_tether_system.gd")
 const OPTICAL_TETHER_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/optical_tether_overlay.gd")
+const COMBAT_ORDNANCE_MANAGER_SCRIPT: GDScript = preload("res://scripts/systems/combat_ordnance_manager.gd")
 
 signal match_ended(winner_team: int, stats: Dictionary)
 signal aggro_ai_toggled(enabled: bool)
@@ -184,6 +185,7 @@ func _initialize_match_runtime() -> void:
 		return
 	_ensure_pause_menu()
 	_ensure_optical_tether_system()
+	_ensure_combat_ordnance_manager()
 	var proc_gen: Node = get_tree().get_first_node_in_group("procedural_arena_generator")
 	if proc_gen != null and is_instance_valid(proc_gen) and proc_gen.has_method("generate_arena"):
 		proc_gen.call("generate_arena")
@@ -225,6 +227,16 @@ func _ensure_optical_tether_system() -> void:
 		var ov: OpticalTetherOverlay = OPTICAL_TETHER_OVERLAY_SCRIPT.new() as OpticalTetherOverlay
 		ov.name = "OpticalTetherOverlay"
 		host.add_child(ov)
+
+
+func _ensure_combat_ordnance_manager() -> void:
+	if not is_inside_tree():
+		return
+	var host: Node = get_parent() if get_parent() != null else self
+	if get_tree().get_first_node_in_group("combat_ordnance_manager") == null:
+		var ord: CombatOrdnanceManager = COMBAT_ORDNANCE_MANAGER_SCRIPT.new() as CombatOrdnanceManager
+		ord.name = "CombatOrdnanceManager"
+		host.add_child(ord)
 
 
 func _start_holdout_controller() -> void:
@@ -998,6 +1010,10 @@ func _prepare_clean_scene_transition() -> void:
 			sel.call("reset_command_cursors")
 	Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	if is_inside_tree():
+		var ord: Node = get_tree().get_first_node_in_group("combat_ordnance_manager")
+		if ord != null and is_instance_valid(ord) and ord.has_method("clear_all"):
+			ord.call("clear_all")
 	if VFXPool != null:
 		VFXPool.clear_pool()
 	if SpatialGrid != null and SpatialGrid.has_method("clear_all"):

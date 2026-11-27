@@ -17,6 +17,28 @@ var pending_ability: AbilityData = null
 var pending_target_pos: Vector2 = Vector2.ZERO
 var pending_target_unit: Unit = null
 
+var _fog_cache: FogOfWarSystem = null
+var _scratch_units: Array = []
+
+
+func _get_fog_cached(owner_unit: Unit) -> FogOfWarSystem:
+	if _fog_cache != null and is_instance_valid(_fog_cache):
+		return _fog_cache
+	if owner_unit != null and owner_unit.is_inside_tree():
+		_fog_cache = owner_unit.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+		return _fog_cache
+	return null
+
+
+func _query_units_into_scratch(owner_unit: Unit, center: Vector2, radius: float) -> void:
+	if SpatialGrid != null:
+		SpatialGrid.query_units_into(center, radius, _scratch_units)
+		return
+	_scratch_units.clear()
+	if owner_unit != null and owner_unit.is_inside_tree():
+		for node: Node in owner_unit.get_tree().get_nodes_in_group("units"):
+			_scratch_units.append(node)
+
 
 func init_autocast_defaults(owner_unit: Unit) -> void:
 	if owner_unit == null or owner_unit.data == null:
@@ -53,42 +75,42 @@ func tick_autocast(owner_unit: Unit, delta: float) -> void:
 		return
 	_autocast_timer = 0.0
 
+	var fog: FogOfWarSystem = _get_fog_cached(owner_unit)
 	for ab: AbilityData in owner_unit.data.abilities:
 		if ab == null or not ab.allow_autocast:
 			continue
-		if not is_autocast_enabled(ab.ability_id) or not is_ability_ready(ab):
+		if not is_autocast_enabled(ab.ability_id) or not owner_unit.is_ability_ready(ab):
 			continue
 		if ab.target_type == AbilityData.TargetType.INSTANT:
 			if _should_trigger_autocast(owner_unit, ab):
 				request_cast(owner_unit, ab, owner_unit.global_position, owner_unit)
 				return
 		elif ab.target_type == AbilityData.TargetType.POINT_AOE:
-			var auto_pos: Vector2 = _find_autocast_point_target(owner_unit, ab)
+			var auto_pos: Vector2 = _find_autocast_point_target(owner_unit, ab, fog)
 			if auto_pos != Vector2.INF:
 				request_cast(owner_unit, ab, auto_pos, null)
 				return
 
 
-func _find_autocast_point_target(owner_unit: Unit, ability: AbilityData) -> Vector2:
+func _find_autocast_point_target(owner_unit: Unit, ability: AbilityData, fog: FogOfWarSystem) -> Vector2:
 	var ab_id: StringName = ability.ability_id
 	var cast_r: float = maxf(60.0, ability.cast_range)
+	var obs_team: int = int(owner_unit.team)
 
 	if ab_id == &"monolith_shield_overcharge":
-		var allies: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, cast_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		_query_units_into_scratch(owner_unit, owner_unit.global_position, cast_r)
 		var best_pos: Vector2 = Vector2.INF
 		var best_score: float = 0.0
-		for node: Variant in allies:
+		for node: Variant in _scratch_units:
 			if not is_instance_valid(node) or not (node is Unit):
 				continue
 			var u: Unit = node as Unit
 			if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
 				continue
-			var is_ally: bool = (int(u.team) == int(owner_unit.team)) or (TeamManager != null and TeamManager.are_allies(int(owner_unit.team), int(u.team)))
-			if not is_ally:
+			if not CombatTargeting.are_teams_allied(obs_team, int(u.team)):
 				continue
 			if u.global_position.distance_to(owner_unit.global_position) > cast_r:
 				continue
-			# Trigger on friendly combat units (or self if under fire) whose shield < 50% or hull damaged
 			var is_combat: bool = u.data != null and (not u.data.can_gather and not u.data.can_staff_compute)
 			if not is_combat:
 				continue
@@ -109,23 +131,22 @@ func _find_autocast_point_target(owner_unit: Unit, ability: AbilityData) -> Vect
 		return best_pos
 
 	if ab_id == &"monolith_suppressive_lock":
-		# Only auto-cast suppressive lock against enemies within cast range (prefer current target or fast flankers)
+		# Only auto-cast suppressive lock against visible hostile enemies within cast range
 		if owner_unit.current_target != null and is_instance_valid(owner_unit.current_target) and owner_unit.current_target is Unit:
 			var cur_u: Unit = owner_unit.current_target as Unit
-			if not cur_u.is_dead and not cur_u.is_staffed and cur_u.global_position.distance_to(owner_unit.global_position) <= cast_r:
+			if CombatTargeting.can_team_target_entity(obs_team, cur_u, fog) and cur_u.global_position.distance_to(owner_unit.global_position) <= cast_r:
 				if not cur_u.has_status_effect(&"static_slow"):
 					return cur_u.global_position
-		var enemies: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, cast_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		_query_units_into_scratch(owner_unit, owner_unit.global_position, cast_r)
 		var best_enemy_pos: Vector2 = Vector2.INF
 		var best_enemy_score: float = 0.0
-		for node: Variant in enemies:
+		for node: Variant in _scratch_units:
 			if not is_instance_valid(node) or not (node is Unit):
 				continue
 			var e: Unit = node as Unit
-			if e.is_dead or e.is_staffed or e.is_queued_for_deletion():
+			if not CombatTargeting.can_team_target_entity(obs_team, e, fog):
 				continue
-			var is_hostile: bool = TeamManager.are_enemies(int(owner_unit.team), int(e.team)) if TeamManager != null else (e.team != owner_unit.team)
-			if not is_hostile or e.global_position.distance_to(owner_unit.global_position) > cast_r:
+			if e.global_position.distance_to(owner_unit.global_position) > cast_r:
 				continue
 			if e.has_status_effect(&"static_slow"):
 				continue
@@ -143,16 +164,13 @@ func _find_autocast_point_target(owner_unit: Unit, ability: AbilityData) -> Vect
 
 	if ab_id == &"grav_pulse":
 		var gp_r: float = maxf(60.0, ability.aoe_radius)
-		var raw_enemies: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, cast_r + gp_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		_query_units_into_scratch(owner_unit, owner_unit.global_position, cast_r + gp_r)
 		var hostile_combat: Array[Unit] = []
-		for node: Variant in raw_enemies:
+		for node: Variant in _scratch_units:
 			if not is_instance_valid(node) or not (node is Unit):
 				continue
 			var e: Unit = node as Unit
-			if e.is_dead or e.is_staffed or e.is_queued_for_deletion():
-				continue
-			var is_hostile: bool = TeamManager.are_enemies(int(owner_unit.team), int(e.team)) if TeamManager != null else (e.team != owner_unit.team)
-			if not is_hostile:
+			if not CombatTargeting.can_team_target_entity(obs_team, e, fog):
 				continue
 			if e.data != null and (e.data.can_gather or e.data.can_staff_compute):
 				continue
@@ -176,7 +194,7 @@ func _find_autocast_point_target(owner_unit: Unit, ability: AbilityData) -> Vect
 			if cluster_count < 2 or un_slowed_count <= 0:
 				continue
 			var centroid: Vector2 = center_sum / float(cluster_count)
-			if centroid.distance_to(owner_unit.global_position) > cast_r:
+			if centroid.distance_to(owner_unit.global_position) > cast_r or not CombatTargeting.is_world_pos_visible_to_team(fog, obs_team, centroid):
 				centroid = cand.global_position
 			var gp_score: float = float(cluster_count) * 18.0 + float(un_slowed_count) * 12.0
 			if gp_score > best_gp_score:
@@ -186,16 +204,15 @@ func _find_autocast_point_target(owner_unit: Unit, ability: AbilityData) -> Vect
 
 	if ab_id == &"luminous_mend":
 		var lm_r: float = maxf(60.0, ability.aoe_radius)
-		var allies_lm: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, cast_r + lm_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		_query_units_into_scratch(owner_unit, owner_unit.global_position, cast_r + lm_r)
 		var wounded_allies: Array[Unit] = []
-		for node: Variant in allies_lm:
+		for node: Variant in _scratch_units:
 			if not is_instance_valid(node) or not (node is Unit):
 				continue
 			var u: Unit = node as Unit
 			if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
 				continue
-			var is_ally: bool = (int(u.team) == int(owner_unit.team)) or (TeamManager != null and TeamManager.are_allies(int(owner_unit.team), int(u.team)))
-			if not is_ally:
+			if not CombatTargeting.are_teams_allied(obs_team, int(u.team)):
 				continue
 			if u.current_hp < u.get_max_hp() * 0.85:
 				wounded_allies.append(u)
@@ -223,16 +240,13 @@ func _find_autocast_point_target(owner_unit: Unit, ability: AbilityData) -> Vect
 
 	if ab_id == &"blinding_glare":
 		var bg_r: float = maxf(60.0, ability.aoe_radius)
-		var raw_bg: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, cast_r + bg_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+		_query_units_into_scratch(owner_unit, owner_unit.global_position, cast_r + bg_r)
 		var hostiles_bg: Array[Unit] = []
-		for node: Variant in raw_bg:
+		for node: Variant in _scratch_units:
 			if not is_instance_valid(node) or not (node is Unit):
 				continue
 			var e: Unit = node as Unit
-			if e.is_dead or e.is_staffed or e.is_queued_for_deletion():
-				continue
-			var is_hostile: bool = TeamManager.are_enemies(int(owner_unit.team), int(e.team)) if TeamManager != null else (e.team != owner_unit.team)
-			if not is_hostile:
+			if not CombatTargeting.can_team_target_entity(obs_team, e, fog):
 				continue
 			if e.data != null and (e.data.can_gather or e.data.can_staff_compute):
 				continue
@@ -259,7 +273,7 @@ func _find_autocast_point_target(owner_unit: Unit, ability: AbilityData) -> Vect
 			if sc_bg > best_bg_score:
 				best_bg_score = sc_bg
 				var c_pt2: Vector2 = sum_p / float(maxi(1, cnt))
-				best_bg_pos = c_pt2 if c_pt2.distance_to(owner_unit.global_position) <= cast_r else cand.global_position
+				best_bg_pos = c_pt2 if (c_pt2.distance_to(owner_unit.global_position) <= cast_r and CombatTargeting.is_world_pos_visible_to_team(fog, obs_team, c_pt2)) else cand.global_position
 		return best_bg_pos
 
 	return Vector2.INF
@@ -322,8 +336,31 @@ func tick_cooldowns(delta: float) -> void:
 			cooldowns.erase(ability_id)
 
 
+func _is_valid_unit_target_for_ability(owner_unit: Unit, ability: AbilityData, target_unit: Unit) -> bool:
+	if owner_unit == null or ability == null or target_unit == null or not is_instance_valid(target_unit):
+		return false
+	if target_unit.is_dead or target_unit.is_staffed or target_unit.is_queued_for_deletion():
+		return false
+	var obs_team: int = int(owner_unit.team)
+	var fog: FogOfWarSystem = _get_fog_cached(owner_unit)
+	match ability.target_filter:
+		AbilityData.TargetFilter.ENEMY:
+			return CombatTargeting.can_team_target_entity(obs_team, target_unit, fog)
+		AbilityData.TargetFilter.ALLY:
+			return CombatTargeting.are_teams_allied(obs_team, int(target_unit.team))
+		AbilityData.TargetFilter.SELF:
+			return target_unit == owner_unit
+		_:
+			if target_unit.has_method("has_unit_tag"):
+				if bool(target_unit.call("has_unit_tag", &"untargetable")) or bool(target_unit.call("has_unit_tag", &"phase_invulnerable")):
+					return false
+			if CombatTargeting.are_teams_hostile(obs_team, int(target_unit.team)):
+				return CombatTargeting.is_world_pos_visible_to_team(fog, obs_team, target_unit.global_position)
+			return true
+
+
 func request_cast(owner_unit: Unit, ability: AbilityData, target_pos: Vector2, target_unit: Unit = null) -> bool:
-	if owner_unit == null or owner_unit.is_dead or not is_ability_ready(ability):
+	if owner_unit == null or owner_unit.is_dead or not owner_unit.is_ability_ready(ability):
 		return false
 
 	if ability.target_type == AbilityData.TargetType.INSTANT:
@@ -332,7 +369,7 @@ func request_cast(owner_unit: Unit, ability: AbilityData, target_pos: Vector2, t
 		return true
 
 	if ability.target_type == AbilityData.TargetType.UNIT_TARGET:
-		if target_unit == null or not is_instance_valid(target_unit) or target_unit.is_dead or target_unit.team == owner_unit.team:
+		if not _is_valid_unit_target_for_ability(owner_unit, ability, target_unit):
 			return false
 		if is_in_cast_range(owner_unit, ability, target_unit.global_position, target_unit):
 			cancel_pending_cast()
@@ -358,10 +395,8 @@ func is_in_cast_range(owner_unit: Unit, ability: AbilityData, target_pos: Vector
 	if ability.cast_range <= 0.0 or ability.target_type == AbilityData.TargetType.INSTANT:
 		return true
 	if target_unit != null and is_instance_valid(target_unit):
-		var center_dist: float = owner_unit.global_position.distance_to(target_unit.global_position)
 		var my_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 16.0
-		var other_r: float = target_unit.data.collision_radius if target_unit.data != null else 16.0
-		return maxf(0.0, center_dist - my_r - other_r) <= ability.cast_range
+		return CombatTargeting.distance_between_edges(owner_unit.global_position, my_r, target_unit) <= ability.cast_range
 	return owner_unit.global_position.distance_to(target_pos) <= ability.cast_range
 
 
@@ -374,11 +409,11 @@ func get_pending_destination() -> Vector2:
 func try_complete_pending_cast(owner_unit: Unit) -> bool:
 	if pending_ability == null:
 		return false
-	if not is_ability_ready(pending_ability):
+	if owner_unit == null or not owner_unit.is_ability_ready(pending_ability):
 		cancel_pending_cast()
 		return true
 	if pending_ability.target_type == AbilityData.TargetType.UNIT_TARGET:
-		if pending_target_unit == null or not is_instance_valid(pending_target_unit) or pending_target_unit.is_dead:
+		if not _is_valid_unit_target_for_ability(owner_unit, pending_ability, pending_target_unit):
 			cancel_pending_cast()
 			return true
 
@@ -412,7 +447,7 @@ func execute_ability(owner_unit: Unit, ability: AbilityData, target_pos: Vector2
 		var is_local_caster: bool = TeamManager.is_team_controlled_by_local_human(int(owner_unit.team)) if TeamManager != null else (owner_unit.team == Unit.Team.PLAYER)
 		var sfx_visible: bool = is_local_caster or owner_unit.visible
 		if not sfx_visible and ability.ability_id == &"solar_convergence" and owner_unit.is_inside_tree():
-			var fog: FogOfWarSystem = owner_unit.get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+			var fog: FogOfWarSystem = _get_fog_cached(owner_unit)
 			sfx_visible = fog == null or not fog.fog_enabled or fog.is_world_pos_visible_strict(target_pos)
 		if sfx_visible:
 			AudioManager.play_ability_sfx(ability.ability_id, sfx_pos)
@@ -426,20 +461,44 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 		var base_dmg: float = ability.damage_or_value if ability.damage_or_value > 0.0 else 75.0
 		var bonus_armored: float = 45.0
 		var blast_radius: float = ability.aoe_radius if ability.aoe_radius > 0.0 else 95.0
+		var inner_r: float = ability.splash_inner_radius_ratio
+		var edge_r: float = ability.splash_edge_damage_ratio
 		var tree: SceneTree = owner_unit.get_tree()
-		var caster_team: Unit.Team = owner_unit.team
+		var caster_team: int = int(owner_unit.team)
 		var caster_ref: WeakRef = weakref(owner_unit)
-		var on_impact: Callable = func() -> void:
-			_detonate_solar_convergence(tree, caster_team, caster_ref, target_pos, blast_radius, base_dmg, bonus_armored)
+		var ord_mgr: CombatOrdnanceManager = tree.get_first_node_in_group("combat_ordnance_manager") as CombatOrdnanceManager if tree != null else null
 		var fx: CombatVFX = VFXPool.acquire_combat_vfx(55) if VFXPool != null else null
 		if fx == null and owner_unit.get_parent() != null:
 			fx = load("res://ui/overlays/combat_vfx.gd").new() as CombatVFX
 			fx.z_index = 55
 			owner_unit.get_parent().add_child(fx)
-		if fx != null:
-			fx.setup_solar_convergence(target_pos, blast_radius, telegraph_time, on_impact)
+		if ord_mgr != null:
+			ord_mgr.schedule_ground_detonation({
+				"delay": telegraph_time,
+				"attacker_ref": caster_ref,
+				"attacker_team": caster_team,
+				"center": target_pos,
+				"radius": blast_radius,
+				"inner_ratio": inner_r,
+				"edge_ratio": edge_r,
+				"base_dmg": base_dmg,
+				"bonus_armored": bonus_armored,
+				"armor_mult": 1.0,
+				"shake_intensity": 2.6,
+				"shake_duration": 0.20,
+				"impact_sfx": &"ability_solar_convergence_impact",
+				"scar_kind": &"scorch_large",
+				"vfx_color": Color(0.98, 0.80, 0.14, 1.0),
+			})
+			if fx != null:
+				fx.setup_solar_convergence(target_pos, blast_radius, telegraph_time, Callable(), inner_r)
 		else:
-			on_impact.call()
+			var on_impact: Callable = func() -> void:
+				_detonate_solar_convergence(tree, caster_team, caster_ref, target_pos, blast_radius, base_dmg, bonus_armored, inner_r, edge_r)
+			if fx != null:
+				fx.setup_solar_convergence(target_pos, blast_radius, telegraph_time, on_impact, inner_r)
+			else:
+				on_impact.call()
 		return
 
 	if ability.ability_id == &"grav_pulse":
@@ -448,19 +507,20 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 		_spawn_prism_burst_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
 	else:
 		_spawn_aoe_effect(owner_unit, target_pos, ability.aoe_radius, ability.effect_color)
-	var unit_list: Array = SpatialGrid.query_units_in_radius(target_pos, ability.aoe_radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+
+	var obs_team: int = int(owner_unit.team)
+	_query_units_into_scratch(owner_unit, target_pos, ability.aoe_radius)
 
 	# Allied Luminous Mend (PRISMA_DEI Cantor)
 	if ability.ability_id == &"luminous_mend":
 		var heal_amt: float = ability.damage_or_value if ability.damage_or_value > 0.0 else 45.0
-		for node: Variant in unit_list:
+		for node: Variant in _scratch_units:
 			if not is_instance_valid(node) or not (node is Unit):
 				continue
 			var ally: Unit = node as Unit
 			if ally.is_dead or ally.is_staffed or ally.is_queued_for_deletion():
 				continue
-			var is_ally: bool = (int(ally.team) == int(owner_unit.team)) or (TeamManager != null and TeamManager.are_allies(int(owner_unit.team), int(ally.team)))
-			if not is_ally:
+			if not CombatTargeting.are_teams_allied(obs_team, int(ally.team)):
 				continue
 			var ally_r: float = ally.data.collision_radius if ally.data != null else 16.0
 			if ally.global_position.distance_to(target_pos) <= ability.aoe_radius + ally_r:
@@ -471,33 +531,47 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 	if ability.ability_id == &"monolith_shield_overcharge":
 		var restore_amt: float = ability.damage_or_value if ability.damage_or_value > 0.0 else 45.0
 		var barrier_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 6.0
-		for node: Variant in unit_list:
+		for node: Variant in _scratch_units:
 			if not is_instance_valid(node) or not (node is Unit):
 				continue
 			var ally: Unit = node as Unit
 			if ally.is_dead or ally.is_staffed or ally.is_queued_for_deletion():
 				continue
-			var is_ally: bool = (int(ally.team) == int(owner_unit.team)) or (TeamManager != null and TeamManager.are_allies(int(owner_unit.team), int(ally.team)))
-			if not is_ally:
+			if not CombatTargeting.are_teams_allied(obs_team, int(ally.team)):
 				continue
 			var ally_r: float = ally.data.collision_radius if ally.data != null else 16.0
 			if ally.global_position.distance_to(target_pos) <= ability.aoe_radius + ally_r:
 				if ally.has_shields():
 					ally.restore_shield(restore_amt)
-				ally.add_damage_shield(30.0, barrier_dur, "Shield Overcharge")
+				ally.add_damage_shield(30.0, barrier_dur, "Shield Overcharge", &"shield_overcharge")
 		return
 
-	for node: Variant in unit_list:
+	# Offensive Point AoE: unified damage with radial falloff + destructible barricade support
+	if ability.damage_or_value > 0.0:
+		CombatOrdnanceManager.apply_aoe_damage(
+			owner_unit.get_tree(),
+			owner_unit,
+			obs_team,
+			target_pos,
+			ability.aoe_radius,
+			ability.damage_or_value,
+			0.0,
+			1.0,
+			ability.splash_inner_radius_ratio,
+			ability.splash_edge_damage_ratio
+		)
+
+	# Status debuffs apply reliably across the full AoE radius
+	for node: Variant in _scratch_units:
 		if not is_instance_valid(node) or not (node is Unit):
 			continue
-		var candidate: Unit = node
-		var is_hostile: bool = TeamManager.are_enemies(int(owner_unit.team), int(candidate.team)) if TeamManager != null else (candidate.team != owner_unit.team)
-		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not is_hostile:
+		var candidate: Unit = node as Unit
+		if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion():
+			continue
+		if not CombatTargeting.are_teams_hostile(obs_team, int(candidate.team)):
 			continue
 		var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
 		if candidate.global_position.distance_to(target_pos) <= ability.aoe_radius + enemy_r:
-			if ability.damage_or_value > 0.0:
-				candidate.take_damage(ability.damage_or_value, owner_unit)
 			if ability.ability_id == &"grav_pulse":
 				var gp_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 5.0
 				var mv_mult: float = clampf(1.0 + ability.move_speed_modifier, 0.25, 1.0) if ability.move_speed_modifier < 0.0 else 0.50
@@ -505,6 +579,7 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 				candidate.apply_status_effect(&"grav_pulse", {
 					"duration": gp_dur,
 					"label": "Grav-Pulse",
+					"category": &"debuff",
 					"move_speed_mult": mv_mult,
 					"attack_speed_mult": atk_mult,
 				})
@@ -515,23 +590,12 @@ func _execute_point_aoe(owner_unit: Unit, ability: AbilityData, target_pos: Vect
 				candidate.apply_status_effect(&"blinding_glare", {
 					"duration": bg_dur,
 					"label": "Blinding Glare",
+					"category": &"debuff",
 					"move_speed_mult": bg_mv,
 					"attack_speed_mult": bg_atk,
 				})
 			elif ability.effect_duration > 0.0 and (ability.move_speed_modifier < 0.0 or ability.attack_speed_modifier < 0.0):
 				candidate.apply_slow_debuff(ability.effect_duration, absf(ability.move_speed_modifier), absf(ability.attack_speed_modifier))
-
-	if ability.damage_or_value > 0.0:
-		var bldg_list: Array = SpatialGrid.query_buildings_in_radius(target_pos, ability.aoe_radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("buildings")
-		for node: Variant in bldg_list:
-			if not is_instance_valid(node) or not (node is Building):
-				continue
-			var b: Building = node
-			var is_hostile_b: bool = TeamManager.are_enemies(int(owner_unit.team), int(b.team)) if TeamManager != null else (b.team != owner_unit.team)
-			if b.is_destroyed or b.is_queued_for_deletion() or not is_hostile_b:
-				continue
-			if b.global_position.distance_to(target_pos) <= ability.aoe_radius + b.footprint_radius:
-				b.take_damage(ability.damage_or_value, owner_unit)
 
 
 func _execute_unit_target(owner_unit: Unit, ability: AbilityData, target_unit: Unit) -> void:
@@ -543,6 +607,7 @@ func _execute_unit_target(owner_unit: Unit, ability: AbilityData, target_unit: U
 		target_unit.apply_status_effect(&"radiant_mark", {
 			"duration": rm_dur,
 			"label": "Radiant Mark (+15% Dmg)",
+			"category": &"debuff",
 			"damage_taken_mult": amp_mult,
 		})
 		_spawn_prism_burst_effect(owner_unit, target_unit.global_position, maxf(30.0, ability.aoe_radius), ability.effect_color)
@@ -560,6 +625,7 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 		owner_unit.apply_status_effect(&"solar_step", {
 			"duration": ss_dur,
 			"label": "Solar Step",
+			"category": &"buff",
 			"move_speed_mult": ss_mv,
 		})
 		_spawn_prism_burst_effect(owner_unit, owner_unit.global_position, maxf(34.0, ability.aoe_radius), ability.effect_color)
@@ -571,6 +637,7 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 		owner_unit.apply_status_effect(&"aureole_surge", {
 			"duration": as_dur,
 			"label": "Aureole Surge",
+			"category": &"buff",
 			"beam_ramp_speed_mult": as_ramp,
 			"bonus_refract_bounces": 1,
 			"damage_taken_mult": 1.15,
@@ -587,6 +654,7 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 		owner_unit.apply_status_effect(&"focus_alignment", {
 			"duration": fa_dur,
 			"label": "Focus Alignment",
+			"category": &"buff",
 			"bonus_attack_range": fa_rng,
 			"move_speed_mult": fa_mv,
 		})
@@ -607,7 +675,7 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 	if ab_id == &"kinetic_barrier":
 		var kb_amt: float = ability.damage_or_value if ability.damage_or_value > 0.0 else 180.0
 		var kb_dur: float = ability.effect_duration if ability.effect_duration > 0.0 else 7.0
-		owner_unit.add_damage_shield(kb_amt, kb_dur, "Kinetic Barrier")
+		owner_unit.add_damage_shield(kb_amt, kb_dur, "Kinetic Barrier", &"kinetic_barrier")
 		if owner_unit.has_shields():
 			owner_unit.restore_shield(40.0)
 		_spawn_hex_barrier_effect(owner_unit, maxf(36.0, ability.aoe_radius), ability.effect_color)
@@ -616,6 +684,7 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 	if ab_id == &"static_pulse" or ab_id == &"seismic_slam":
 		var radius: float = maxf(32.0, ability.aoe_radius)
 		var origin: Vector2 = owner_unit.global_position
+		var obs_team: int = int(owner_unit.team)
 		if ab_id == &"seismic_slam":
 			_spawn_seismic_slam(owner_unit, radius, ability.effect_color)
 			var cam: Node = owner_unit.get_tree().get_first_node_in_group("rts_camera")
@@ -626,35 +695,38 @@ func _execute_instant(owner_unit: Unit, ability: AbilityData) -> void:
 				scars.call("add_scar", &"scorch_large", origin, clampf(radius * 0.56, 28.0, 62.0), ability.effect_color)
 		else:
 			_spawn_self_pulse(owner_unit, radius, ability.effect_color)
-		var unit_list2: Array = SpatialGrid.query_units_in_radius(origin, radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
-		for node: Variant in unit_list2:
-			if not is_instance_valid(node) or not (node is Unit):
-				continue
-			var enemy: Unit = node
-			var is_hostile_e: bool = TeamManager.are_enemies(int(owner_unit.team), int(enemy.team)) if TeamManager != null else (enemy.team != owner_unit.team)
-			if enemy.is_dead or enemy.is_staffed or enemy.is_queued_for_deletion() or not is_hostile_e:
-				continue
-			var enemy_r: float = enemy.data.collision_radius if enemy.data != null else 16.0
-			if enemy.global_position.distance_to(origin) <= radius + enemy_r:
-				if ability.damage_or_value > 0.0:
-					enemy.take_damage(ability.damage_or_value, owner_unit)
-				if ability.effect_duration > 0.0 and (ability.move_speed_modifier < 0.0 or ability.attack_speed_modifier < 0.0):
+
+		if ability.damage_or_value > 0.0:
+			CombatOrdnanceManager.apply_aoe_damage(
+				owner_unit.get_tree(),
+				owner_unit,
+				obs_team,
+				origin,
+				radius,
+				ability.damage_or_value,
+				0.0,
+				1.0,
+				ability.splash_inner_radius_ratio,
+				ability.splash_edge_damage_ratio
+			)
+
+		if ability.effect_duration > 0.0 and (ability.move_speed_modifier < 0.0 or ability.attack_speed_modifier < 0.0):
+			_query_units_into_scratch(owner_unit, origin, radius)
+			for node: Variant in _scratch_units:
+				if not is_instance_valid(node) or not (node is Unit):
+					continue
+				var enemy: Unit = node as Unit
+				if enemy.is_dead or enemy.is_staffed or enemy.is_queued_for_deletion():
+					continue
+				if not CombatTargeting.are_teams_hostile(obs_team, int(enemy.team)):
+					continue
+				var enemy_r: float = enemy.data.collision_radius if enemy.data != null else 16.0
+				if enemy.global_position.distance_to(origin) <= radius + enemy_r:
 					enemy.apply_slow_debuff(
 						ability.effect_duration,
 						absf(ability.move_speed_modifier),
 						absf(ability.attack_speed_modifier)
 					)
-		if ability.damage_or_value > 0.0:
-			var bldg_list2: Array = SpatialGrid.query_buildings_in_radius(origin, radius) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("buildings")
-			for node: Variant in bldg_list2:
-				if not is_instance_valid(node) or not (node is Building):
-					continue
-				var b: Building = node
-				var is_hostile_b2: bool = TeamManager.are_enemies(int(owner_unit.team), int(b.team)) if TeamManager != null else (b.team != owner_unit.team)
-				if b.is_destroyed or b.is_queued_for_deletion() or not is_hostile_b2:
-					continue
-				if b.global_position.distance_to(origin) <= radius + b.footprint_radius:
-					b.take_damage(ability.damage_or_value, owner_unit)
 		return
 
 	# Default instant heal (e.g. Nanite Surge)
@@ -731,78 +803,24 @@ func _spawn_prism_burst_effect(owner_unit: Unit, target_pos: Vector2, radius: fl
 
 func _detonate_solar_convergence(
 	tree: SceneTree,
-	caster_team: Unit.Team,
+	caster_team: int,
 	caster_ref: WeakRef,
 	center: Vector2,
 	radius: float,
 	base_dmg: float,
-	bonus_armored: float
+	bonus_armored: float,
+	inner_ratio: float = 0.40,
+	edge_ratio: float = 0.50
 ) -> void:
 	if tree == null:
 		return
 	var caster_obj: Variant = caster_ref.get_ref() if caster_ref != null else null
 	var attacker: Unit = caster_obj as Unit if (caster_obj != null and is_instance_valid(caster_obj) and caster_obj is Unit) else null
 
-	var entities: Array = SpatialGrid.query_entities_in_radius(center, radius, true, true) if SpatialGrid != null else []
-	if SpatialGrid != null:
-		for node: Variant in entities:
-			if not is_instance_valid(node):
-				continue
-			if node is Unit:
-				var candidate: Unit = node as Unit
-				var is_hostile: bool = TeamManager.are_enemies(int(caster_team), int(candidate.team)) if TeamManager != null else (candidate.team != caster_team)
-				if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not is_hostile:
-					continue
-				var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
-				if candidate.global_position.distance_to(center) <= radius + enemy_r:
-					var dmg: float = base_dmg + (bonus_armored if (candidate.data != null and candidate.data.is_armored) else 0.0)
-					candidate.take_damage(dmg, attacker)
-			elif node is Building:
-				var b: Building = node as Building
-				var is_hostile_b: bool = TeamManager.are_enemies(int(caster_team), int(b.team)) if TeamManager != null else (b.team != caster_team)
-				if b.is_destroyed or b.is_queued_for_deletion() or not is_hostile_b:
-					continue
-				if b.global_position.distance_to(center) <= radius + b.footprint_radius:
-					b.take_damage(base_dmg + bonus_armored, attacker)
-			elif node is Node2D and (node as Node).is_in_group("destructible_barricades"):
-				var bar: Node2D = node as Node2D
-				if bool(bar.get("is_destroyed")) or bar.is_queued_for_deletion():
-					continue
-				var bar_r: float = float(bar.call("get_footprint_radius")) if bar.has_method("get_footprint_radius") else 40.0
-				if bar.global_position.distance_to(center) <= radius + bar_r:
-					bar.call("take_damage", base_dmg + bonus_armored, attacker)
-	else:
-		for node: Node in tree.get_nodes_in_group("units"):
-			if not is_instance_valid(node) or not (node is Unit):
-				continue
-			var candidate: Unit = node as Unit
-			var is_hostile: bool = TeamManager.are_enemies(int(caster_team), int(candidate.team)) if TeamManager != null else (candidate.team != caster_team)
-			if candidate.is_dead or candidate.is_staffed or candidate.is_queued_for_deletion() or not is_hostile:
-				continue
-			var enemy_r: float = candidate.data.collision_radius if candidate.data != null else 16.0
-			if candidate.global_position.distance_to(center) <= radius + enemy_r:
-				var dmg: float = base_dmg + (bonus_armored if (candidate.data != null and candidate.data.is_armored) else 0.0)
-				candidate.take_damage(dmg, attacker)
-		for node: Node in tree.get_nodes_in_group("buildings"):
-			if not is_instance_valid(node) or not (node is Building):
-				continue
-			var b: Building = node as Building
-			var is_hostile_b: bool = TeamManager.are_enemies(int(caster_team), int(b.team)) if TeamManager != null else (b.team != caster_team)
-			if b.is_destroyed or b.is_queued_for_deletion() or not is_hostile_b:
-				continue
-			if b.global_position.distance_to(center) <= radius + b.footprint_radius:
-				b.take_damage(base_dmg + bonus_armored, attacker)
-		for node: Node in tree.get_nodes_in_group("destructible_barricades"):
-			if not is_instance_valid(node) or not (node is Node2D):
-				continue
-			if bool(node.get("is_destroyed")) or node.is_queued_for_deletion():
-				continue
-			var bar_r: float = float(node.call("get_footprint_radius")) if node.has_method("get_footprint_radius") else 40.0
-			if (node as Node2D).global_position.distance_to(center) <= radius + bar_r:
-				node.call("take_damage", base_dmg + bonus_armored, attacker)
+	CombatOrdnanceManager.apply_aoe_damage(tree, attacker, caster_team, center, radius, base_dmg, bonus_armored, 1.0, inner_ratio, edge_ratio)
 
 	var fog: FogOfWarSystem = tree.get_first_node_in_group("fog_of_war") as FogOfWarSystem
-	var is_local: bool = TeamManager.is_team_controlled_by_local_human(int(caster_team)) if TeamManager != null else (caster_team == Unit.Team.PLAYER)
+	var is_local: bool = TeamManager.is_team_controlled_by_local_human(caster_team) if TeamManager != null else (caster_team == int(Unit.Team.PLAYER))
 	var visible_to_local: bool = is_local or fog == null or not fog.fog_enabled or fog.is_world_pos_visible_strict(center)
 	if visible_to_local:
 		if AudioManager != null:

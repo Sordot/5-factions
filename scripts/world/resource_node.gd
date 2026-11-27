@@ -673,7 +673,7 @@ func get_inspection_data() -> Dictionary:
 			{"label": "Status", "value": status_text},
 			{"label": "Yield Rate", "value": yield_str},
 			{"label": "Capacity", "value": "Infinite Geothermal"},
-			{"label": "Structure", "value": "Compute Node [W]"},
+			{"label": "Structure", "value": "Compute Node [E]"},
 		]
 		if surging_now:
 			vent_stats.append({
@@ -691,7 +691,7 @@ func get_inspection_data() -> Dictionary:
 			"show_primary_bar": false,
 			"stats": vent_stats,
 			"is_commandable": false,
-			"readonly_label": "READ-ONLY TELEMETRY  —  BUILD COMPUTE NODE [W]",
+			"readonly_label": "READ-ONLY TELEMETRY  —  BUILD COMPUTE NODE [E]",
 		}
 
 	var is_silica: bool = (resource_type == &"silica")
