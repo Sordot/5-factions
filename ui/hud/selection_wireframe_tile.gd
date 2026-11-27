@@ -6,6 +6,7 @@ extends Control
 ## micro-bars, and crisp 2-3px corner status pips with zero runtime node churn.
 
 signal tile_clicked(entity: Node, shift_held: bool, ctrl_held: bool, is_double_click: bool)
+signal tile_right_clicked(entity: Node)
 signal tile_hovered(entity: Node, tile_global_rect: Rect2)
 signal tile_unhovered(entity: Node)
 
@@ -29,7 +30,7 @@ var _bg_color: Color = Color(0.06, 0.09, 0.13, 0.92)
 
 func _init() -> void:
 	custom_minimum_size = Vector2(34.0, 32.0)
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_filter = Control.MOUSE_FILTER_PASS
 	focus_mode = Control.FOCUS_NONE
 
 
@@ -75,11 +76,16 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+		if mb.button_index == MOUSE_BUTTON_LEFT:
 			accept_event()
-			var shift_held: bool = mb.shift_pressed or Input.is_key_pressed(KEY_SHIFT)
-			var ctrl_held: bool = mb.ctrl_pressed or mb.meta_pressed or Input.is_key_pressed(KEY_CTRL)
-			tile_clicked.emit(entity_ref, shift_held, ctrl_held, mb.double_click)
+			if mb.pressed:
+				var shift_held: bool = mb.shift_pressed or Input.is_key_pressed(KEY_SHIFT)
+				var ctrl_held: bool = mb.ctrl_pressed or mb.meta_pressed or Input.is_key_pressed(KEY_CTRL)
+				tile_clicked.emit(entity_ref, shift_held, ctrl_held, mb.double_click)
+		elif mb.button_index == MOUSE_BUTTON_RIGHT:
+			accept_event()
+			if mb.pressed:
+				tile_right_clicked.emit(entity_ref)
 
 
 func _on_mouse_entered() -> void:

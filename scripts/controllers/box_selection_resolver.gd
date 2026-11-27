@@ -12,13 +12,15 @@ static func circle_intersects_rect(center: Vector2, radius: float, rect: Rect2) 
 
 static func collect_box_candidates(sc: SelectionController, world_rect: Rect2) -> Dictionary:
 	var local_t: Unit.Team = sc._get_local_human_team_enum()
+	var local_int: int = int(local_t)
 	var all_unit_hits: Array[Unit] = []
 	var combat_hits: Array[Unit] = []
 	var utility_hits: Array[Unit] = []
-	for node: Node in sc.get_tree().get_nodes_in_group("selectable_units"):
+	var unit_candidates: Array = SpatialGrid.query_units_in_rect(world_rect, local_int) if SpatialGrid != null else sc.get_tree().get_nodes_in_group("selectable_units")
+	for node: Variant in unit_candidates:
 		if not (node is Unit):
 			continue
-		var unit: Unit = node
+		var unit: Unit = node as Unit
 		if not is_instance_valid(unit) or unit.is_dead or unit.is_staffed or unit.team != local_t:
 			continue
 		if circle_intersects_rect(unit.global_position, unit.get_selection_radius(), world_rect):
@@ -35,10 +37,11 @@ static func collect_box_candidates(sc: SelectionController, world_rect: Rect2) -
 
 	var b_hits: Array[Building] = []
 	if unit_hits.is_empty():
-		for node: Node in sc.get_tree().get_nodes_in_group("selectable_buildings"):
+		var b_candidates: Array = SpatialGrid.query_buildings_in_rect(world_rect, local_int) if SpatialGrid != null else sc.get_tree().get_nodes_in_group("selectable_buildings")
+		for node: Variant in b_candidates:
 			if not (node is Building) or not is_instance_valid(node):
 				continue
-			var b: Building = node
+			var b: Building = node as Building
 			if b.is_destroyed or b.team != local_t:
 				continue
 			if circle_intersects_rect(b.global_position, b.footprint_radius * 0.75, world_rect):
@@ -110,12 +113,17 @@ static func find_visible_units_of_type(sc: SelectionController, type_id: StringN
 	var use_view_rect: bool = false
 	if cam != null:
 		var vp_size: Vector2 = sc.get_viewport_rect().size / cam.zoom
-		view_rect = Rect2(cam.global_position - vp_size * 0.5, vp_size)
+		view_rect = Rect2(cam.global_position - vp_size * 0.5, vp_size).grow(24.0)
 		use_view_rect = true
-	for node: Node in sc.get_tree().get_nodes_in_group("selectable_units"):
+	var candidates: Array = (
+		SpatialGrid.query_units_in_rect(view_rect, int(target_team))
+		if (SpatialGrid != null and use_view_rect)
+		else sc.get_tree().get_nodes_in_group("selectable_units")
+	)
+	for node: Variant in candidates:
 		if not (node is Unit) or not is_instance_valid(node):
 			continue
-		var unit: Unit = node
+		var unit: Unit = node as Unit
 		if unit.is_dead or unit.is_staffed or unit.team != target_team or unit.get_unit_type_id() != type_id:
 			continue
 		if not use_view_rect or view_rect.has_point(unit.global_position):
@@ -130,12 +138,17 @@ static func find_visible_buildings_of_type(sc: SelectionController, type_id: Str
 	var use_view_rect: bool = false
 	if cam != null:
 		var vp_size: Vector2 = sc.get_viewport_rect().size / cam.zoom
-		view_rect = Rect2(cam.global_position - vp_size * 0.5, vp_size)
+		view_rect = Rect2(cam.global_position - vp_size * 0.5, vp_size).grow(24.0)
 		use_view_rect = true
-	for node: Node in sc.get_tree().get_nodes_in_group("selectable_buildings"):
+	var candidates: Array = (
+		SpatialGrid.query_buildings_in_rect(view_rect, int(target_team))
+		if (SpatialGrid != null and use_view_rect)
+		else sc.get_tree().get_nodes_in_group("selectable_buildings")
+	)
+	for node: Variant in candidates:
 		if not (node is Building) or not is_instance_valid(node):
 			continue
-		var b: Building = node
+		var b: Building = node as Building
 		if b.is_destroyed or b.team != target_team or b.building_type_id != type_id:
 			continue
 		if not use_view_rect or view_rect.has_point(b.global_position):

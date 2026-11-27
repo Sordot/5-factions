@@ -8,6 +8,7 @@ signal camera_toast(message: String)
 const EDGE_BOUNDS_TOLERANCE_PX: float = 4.0
 const MAX_FRAME_DELTA: float = 0.05
 const ALERT_CYCLE_WINDOW_MS: int = 2500
+const MAX_BOOKMARKS: int = 8
 
 @export var pan_speed: float = 650.0
 @export var edge_pan_enabled: bool = true
@@ -27,8 +28,12 @@ const ALERT_CYCLE_WINDOW_MS: int = 2500
 
 var camera_bookmarks: Dictionary = {}
 
+var _arena_bounds: Rect2 = Rect2()
 var _target_position: Vector2 = Vector2.ZERO
 var _target_zoom: float = 1.0
+var _zoom_anchor_active: bool = false
+var _zoom_anchor_world: Vector2 = Vector2.ZERO
+var _zoom_anchor_screen_offset: Vector2 = Vector2.ZERO
 var _is_middle_dragging: bool = false
 var _mouse_in_window: bool = true
 var _base_hub_cycle_index: int = -1
@@ -46,8 +51,32 @@ func _ready() -> void:
 		SettingsManager.settings_changed.connect(_on_settings_changed)
 	_target_zoom = clampf(zoom.x, min_zoom, max_zoom)
 	zoom = Vector2(_target_zoom, _target_zoom)
+	_resolve_arena_bounds()
 	_target_position = _clamp_point(global_position)
 	global_position = _target_position
+
+
+func set_arena_bounds(bounds: Rect2) -> void:
+	if bounds.has_area():
+		_arena_bounds = bounds
+		_target_position = _clamp_point(_target_position)
+		global_position = _clamp_point(global_position)
+
+
+func _resolve_arena_bounds() -> void:
+	if _arena_bounds.has_area() or not is_inside_tree():
+		return
+	var nav_reg: Node = get_tree().get_first_node_in_group("arena_nav_region")
+	if nav_reg != null and is_instance_valid(nav_reg):
+		var nav_b: Variant = nav_reg.get("arena_bounds")
+		if nav_b is Rect2 and (nav_b as Rect2).has_area():
+			_arena_bounds = nav_b as Rect2
+			return
+	var fog: Node = get_tree().get_first_node_in_group("fog_of_war")
+	if fog != null and is_instance_valid(fog):
+		var fog_b: Variant = fog.get("arena_bounds")
+		if fog_b is Rect2 and (fog_b as Rect2).has_area():
+			_arena_bounds = fog_b as Rect2
 
 
 func _on_settings_changed(category: StringName) -> void:
@@ -85,6 +114,11 @@ func _notification(what: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_MIDDLE and not mb.pressed:
+			_is_middle_dragging = false
+		return
 	# Recover mouse-in-window tracking automatically if cursor was already inside on launch or focus regain.
 	if event is InputEventMouseMotion:
 		var vp: Viewport = get_viewport()
@@ -94,7 +128,8 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-	var dt: float = minf(delta, MAX_FRAME_DELTA)
+	# Unscaled real-time delta so pan, zoom, and shake feel identical across 0.5x..2.0x game speeds.
+	var real_dt: float = minf(delta / maxf(0.1, Engine.time_scale), MAX_FRAME_DELTA)
 	var kb_input: Vector2 = Input.get_vector(
 		"camera_pan_left",
 		"camera_pan_right",
@@ -105,6 +140,7 @@ func _process(delta: float) -> void:
 	var combined_dir: Vector2 = (kb_input + edge_vec).limit_length(1.0)
 
 	if combined_dir != Vector2.ZERO:
+		_zoom_anchor_active = false
 		var base_speed: float = pan_speed
 		var apply_zoom_scale: bool = true
 		if edge_vec != Vector2.ZERO and kb_input == Vector2.ZERO:
@@ -115,24 +151,32 @@ func _process(delta: float) -> void:
 			apply_zoom_scale = scale_speed_with_zoom
 
 		var effective_speed: float = base_speed / maxf(0.1, zoom.x) if apply_zoom_scale else base_speed
-		_target_position = _clamp_point(_target_position + combined_dir * effective_speed * dt)
+		_target_position = _clamp_point(_target_position + combined_dir * effective_speed * real_dt)
 
 	# Frame-rate-independent exponential chase for silky SC2 / LoL / Dota camera motion.
-	if pan_smoothing > 0.0:
-		var pan_alpha: float = 1.0 - exp(-pan_smoothing * dt)
-		global_position = global_position.lerp(_target_position, pan_alpha)
-		if global_position.distance_squared_to(_target_position) < 0.04:
+	if not _zoom_anchor_active:
+		if pan_smoothing > 0.0:
+			var pan_alpha: float = 1.0 - exp(-pan_smoothing * real_dt)
+			global_position = global_position.lerp(_target_position, pan_alpha)
+			if global_position.distance_squared_to(_target_position) < 0.04:
+				global_position = _target_position
+		else:
 			global_position = _target_position
-	else:
-		global_position = _target_position
 
-	var zoom_alpha: float = 1.0 - exp(-zoom_smoothness * dt)
+	var zoom_alpha: float = 1.0 - exp(-zoom_smoothness * real_dt)
 	var next_zoom: float = lerpf(zoom.x, _target_zoom, zoom_alpha)
 	if absf(next_zoom - _target_zoom) < 0.0005:
 		next_zoom = _target_zoom
 	zoom = Vector2(next_zoom, next_zoom)
 
-	_update_camera_shake(dt)
+	# Exact pixel-locked zoom-to-cursor solver: holds the world point under cursor steady throughout zoom easing.
+	if _zoom_anchor_active:
+		global_position = _clamp_point(_zoom_anchor_world - _zoom_anchor_screen_offset / maxf(0.05, zoom.x))
+		_target_position = global_position
+		if absf(zoom.x - _target_zoom) < 0.0005:
+			_zoom_anchor_active = false
+
+	_update_camera_shake(real_dt)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -149,9 +193,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			ctrl_down = ctrl_down or k_mod.ctrl_pressed
 			alt_down = alt_down or k_mod.alt_pressed
 
-		for slot: int in range(1, 5):
+		for slot: int in range(1, MAX_BOOKMARKS + 1):
 			var act_name: StringName = StringName("cam_bookmark_%d" % slot)
-			if event.is_action_pressed(act_name):
+			if InputMap.has_action(act_name) and event.is_action_pressed(act_name):
 				if ctrl_down:
 					save_camera_bookmark(slot)
 				else:
@@ -178,6 +222,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			else:
 				_is_middle_dragging = mouse_event.pressed
 				if _is_middle_dragging:
+					_zoom_anchor_active = false
 					_target_position = global_position
 		elif mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			var delta_up: float = -zoom_step if invert_zoom else zoom_step
@@ -187,6 +232,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_apply_zoom_delta(delta_dn)
 	elif event is InputEventMouseMotion and _is_middle_dragging:
 		var motion_event: InputEventMouseMotion = event
+		_zoom_anchor_active = false
 		_target_position = _clamp_point(_target_position - (motion_event.relative * middle_drag_speed) / zoom)
 		global_position = _target_position
 
@@ -209,9 +255,10 @@ func _apply_zoom_delta(zoom_delta: float) -> void:
 	if vp_size.x <= 1.0 or vp_size.y <= 1.0:
 		return
 	var mouse_offset: Vector2 = vp.get_mouse_position() - vp_size * 0.5
-	# Shift camera target so the world point under the mouse cursor stays anchored through the zoom step.
-	var world_shift: Vector2 = mouse_offset * ((1.0 / maxf(0.05, old_target_zoom)) - (1.0 / maxf(0.05, next_target_zoom)))
-	_target_position = _clamp_point(_target_position + world_shift)
+	var world_under_mouse: Vector2 = global_position + mouse_offset / maxf(0.05, zoom.x)
+	_zoom_anchor_world = world_under_mouse
+	_zoom_anchor_screen_offset = mouse_offset
+	_zoom_anchor_active = true
 
 
 func set_edge_pan_enabled(enabled: bool) -> void:
@@ -234,23 +281,35 @@ func toggle_edge_pan() -> bool:
 	return edge_pan_enabled
 
 
+func _flash_minimap_ring(world_pos: Vector2, color: Color = Color(0.45, 0.96, 1.0, 0.90), duration: float = 0.75) -> void:
+	if not is_inside_tree():
+		return
+	var mm_ui: Node = get_tree().get_first_node_in_group("tactical_minimap")
+	if mm_ui != null and is_instance_valid(mm_ui) and mm_ui.has_method("flash_ping"):
+		mm_ui.call("flash_ping", world_pos, color, duration)
+
+
 func save_camera_bookmark(slot: int) -> void:
-	if slot < 1 or slot > 4:
+	if slot < 1 or slot > MAX_BOOKMARKS:
 		return
 	camera_bookmarks[slot] = global_position
+	_flash_minimap_ring(global_position, Color(0.45, 0.96, 1.0, 0.90), 0.75)
 	if AudioManager != null:
 		AudioManager.play_ui_click()
 	camera_toast.emit("Camera Bookmark %d Saved" % slot)
 
 
 func recall_camera_bookmark(slot: int) -> bool:
+	if slot < 1 or slot > MAX_BOOKMARKS:
+		return false
 	if not camera_bookmarks.has(slot):
 		if AudioManager != null:
 			AudioManager.play_error()
 		camera_toast.emit("Bookmark %d Empty (Ctrl+%s to Save)" % [slot, SettingsManager.get_action_key_label(StringName("cam_bookmark_%d" % slot)) if SettingsManager != null else ("F%d" % slot)])
 		return false
 	var target_pos: Vector2 = camera_bookmarks[slot] as Vector2
-	smooth_center_on(target_pos)
+	center_on(target_pos)
+	_flash_minimap_ring(target_pos, Color(0.45, 0.96, 1.0, 0.90), 0.75)
 	if AudioManager != null:
 		AudioManager.play_sfx(&"unit_select", -6.0, 0.03)
 	return true
@@ -276,7 +335,10 @@ func jump_to_next_base_hub() -> bool:
 	hubs.sort_custom(func(a: Building, b: Building) -> bool:
 		return a.get_instance_id() < b.get_instance_id()
 	)
-	_base_hub_cycle_index = (_base_hub_cycle_index + 1) % hubs.size()
+	var next_idx: int = (_base_hub_cycle_index + 1) % hubs.size()
+	if hubs.size() >= 2 and hubs[next_idx].global_position.distance_squared_to(global_position) <= 120.0 * 120.0:
+		next_idx = (next_idx + 1) % hubs.size()
+	_base_hub_cycle_index = next_idx
 	smooth_center_on(hubs[_base_hub_cycle_index].global_position)
 	if AudioManager != null:
 		AudioManager.play_sfx(&"unit_select", -6.0, 0.02)
@@ -307,6 +369,7 @@ func jump_to_last_alert() -> bool:
 
 
 func smooth_center_on(world_pos: Vector2) -> void:
+	_zoom_anchor_active = false
 	_target_position = _clamp_point(world_pos)
 
 
@@ -340,6 +403,7 @@ func toggle_fullscreen() -> bool:
 
 
 func center_on(world_pos: Vector2) -> void:
+	_zoom_anchor_active = false
 	_target_position = _clamp_point(world_pos)
 	global_position = _target_position
 
@@ -390,8 +454,44 @@ func _update_camera_shake(dt: float) -> void:
 		_shake_intensity = 0.0
 
 
+func _is_modal_or_overlay_open() -> bool:
+	if not is_inside_tree():
+		return false
+	var tree: SceneTree = get_tree()
+	var post_match_inspect: bool = false
+	var mm: Node = tree.get_first_node_in_group("match_manager")
+	if mm != null and is_instance_valid(mm):
+		post_match_inspect = bool(mm.get("is_inspecting_post_match"))
+	if tree.paused and not post_match_inspect:
+		return true
+	var pause_node: Node = tree.get_first_node_in_group("pause_menu")
+	if pause_node != null and is_instance_valid(pause_node):
+		if pause_node.has_method("is_open") and bool(pause_node.call("is_open")):
+			return true
+		if pause_node.has_method("is_settings_open") and bool(pause_node.call("is_settings_open")):
+			return true
+		if pause_node.has_method("is_tech_tree_open") and bool(pause_node.call("is_tech_tree_open")):
+			return true
+		if pause_node.has_method("is_controls_help_open") and bool(pause_node.call("is_controls_help_open")):
+			return true
+		if pause_node is CanvasLayer and (pause_node as CanvasLayer).visible:
+			return true
+	for grp: String in ["settings_menu", "tech_tree_overlay", "controls_reference_overlay", "match_end_overlay"]:
+		var ov: Node = tree.get_first_node_in_group(grp)
+		if ov != null and is_instance_valid(ov):
+			if grp == "match_end_overlay" and post_match_inspect:
+				continue
+			if ov is CanvasLayer and (ov as CanvasLayer).visible:
+				return true
+			if ov is CanvasItem and (ov as CanvasItem).visible:
+				return true
+	return false
+
+
 func _get_edge_pan_vector() -> Vector2:
 	if not edge_pan_enabled or not _mouse_in_window or _is_middle_dragging:
+		return Vector2.ZERO
+	if _is_modal_or_overlay_open():
 		return Vector2.ZERO
 	var win: Window = get_window()
 	if win == null or not win.has_focus():
@@ -452,6 +552,21 @@ func _get_edge_pan_vector() -> Vector2:
 
 
 func _clamp_point(pos: Vector2) -> Vector2:
+	_resolve_arena_bounds()
+	if _arena_bounds.has_area():
+		var z: float = maxf(0.35, zoom.x)
+		var vp: Viewport = get_viewport()
+		var half_vp: Vector2 = (vp.get_visible_rect().size / (2.0 * z)) if vp != null else Vector2(640.0 / z, 360.0 / z)
+		var inset_x: float = minf(half_vp.x * 0.65, _arena_bounds.size.x * 0.45)
+		var inset_y: float = minf(half_vp.y * 0.65, _arena_bounds.size.y * 0.45)
+		var bottom_hud_allowance: float = minf(150.0 / z, 240.0)
+		var min_x: float = _arena_bounds.position.x + inset_x
+		var max_x: float = _arena_bounds.end.x - inset_x
+		var min_y: float = _arena_bounds.position.y + inset_y
+		var max_y: float = _arena_bounds.end.y - inset_y + bottom_hud_allowance
+		var cx: float = _arena_bounds.get_center().x if min_x >= max_x else clampf(pos.x, min_x, max_x)
+		var cy: float = _arena_bounds.get_center().y if min_y >= max_y else clampf(pos.y, min_y, max_y)
+		return Vector2(cx, cy)
 	if not pan_bounds.has_area():
 		return pos
 	return Vector2(

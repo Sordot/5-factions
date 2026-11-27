@@ -522,7 +522,8 @@ func get_carried_type() -> StringName:
 func is_idle_worker() -> bool:
 	if is_dead or is_staffed or is_queued_for_deletion() or not is_inside_tree() or data == null:
 		return false
-	if team != Team.PLAYER or current_hp <= 0.0:
+	var local_t: int = TeamManager.get_local_human_team() if TeamManager != null else int(Team.PLAYER)
+	if local_t < 0 or int(team) != local_t or current_hp <= 0.0:
 		return false
 	if not data.is_worker_class():
 		return false

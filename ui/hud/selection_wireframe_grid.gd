@@ -6,6 +6,7 @@ extends VBoxContainer
 ## tiles never jump under the cursor mid-fight, refreshing live HP/shield/status at 0.15s.
 
 signal entity_tile_clicked(entity: Node, shift_held: bool, ctrl_held: bool, is_double_click: bool)
+signal entity_tile_right_clicked(entity: Node)
 signal entity_tile_hovered(entity: Node, tile_global_rect: Rect2)
 signal entity_tile_unhovered(entity: Node)
 
@@ -22,6 +23,7 @@ var _page_label: Label = null
 
 var _ordered_entries: Array[Dictionary] = [] # { "entity": Node, "is_active": bool }
 var _current_page: int = 0
+var _last_active_subgroup_key: StringName = &""
 var _redraw_acc: float = 0.0
 var _faction_id: StringName = &"genesis_v2"
 var _faction_accent: Color = Color(0.20, 0.83, 0.60, 1.0)
@@ -37,6 +39,7 @@ func _ready() -> void:
 	_grid = GridContainer.new()
 	_grid.name = "WireframeTilesGrid"
 	_grid.columns = 8
+	_grid.mouse_filter = Control.MOUSE_FILTER_PASS
 	_grid.add_theme_constant_override("h_separation", 3)
 	_grid.add_theme_constant_override("v_separation", 3)
 	_grid.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
@@ -48,6 +51,7 @@ func _ready() -> void:
 		tile.name = "WireTile%02d" % i
 		tile.visible = false
 		tile.tile_clicked.connect(_on_tile_clicked)
+		tile.tile_right_clicked.connect(_on_tile_right_clicked)
 		tile.tile_hovered.connect(_on_tile_hovered)
 		tile.tile_unhovered.connect(_on_tile_unhovered)
 		tile.apply_faction_theme(_faction_id, _faction_accent)
@@ -107,9 +111,23 @@ func apply_faction_theme(faction_id: StringName, accent: Color) -> void:
 		_page_label.add_theme_color_override("font_color", accent.lerp(Color.WHITE, 0.35))
 
 
+func _gui_input(event: InputEvent) -> void:
+	if not visible or _ordered_entries.size() <= SLOTS_PER_PAGE:
+		return
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_on_prev_page()
+			accept_event()
+		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_on_next_page()
+			accept_event()
+
+
 func set_unit_subgroups(subgroups: Array[Dictionary], active_subgroup_index: int) -> void:
 	var entries: Array[Dictionary] = []
 	var safe_active: int = clampi(active_subgroup_index, 0, maxi(0, subgroups.size() - 1))
+	var active_key: StringName = &""
 	for gi: int in range(subgroups.size()):
 		var grp: Dictionary = subgroups[gi]
 		var raw_units: Array = grp.get("units", [])
@@ -123,13 +141,18 @@ func set_unit_subgroups(subgroups: Array[Dictionary], active_subgroup_index: int
 			return a.get_instance_id() < b.get_instance_id()
 		)
 		var is_act: bool = (gi == safe_active)
+		if is_act:
+			active_key = grp.get("type_id", &"") as StringName
 		for u: Unit in valid_units:
 			entries.append({"entity": u, "is_active": is_act})
-	_apply_entries(entries)
+	var should_jump: bool = (active_key != _last_active_subgroup_key and active_key != &"")
+	_last_active_subgroup_key = active_key
+	_apply_entries(entries, should_jump)
 
 
 func set_building_subgroups(b_subgroups: Array[Dictionary], active_subgroup_index: int, fallback_buildings: Array[Building] = []) -> void:
 	var entries: Array[Dictionary] = []
+	var active_key: StringName = &""
 	if not b_subgroups.is_empty():
 		var safe_active: int = clampi(active_subgroup_index, 0, maxi(0, b_subgroups.size() - 1))
 		for gi: int in range(b_subgroups.size()):
@@ -145,6 +168,8 @@ func set_building_subgroups(b_subgroups: Array[Dictionary], active_subgroup_inde
 				return a.get_instance_id() < b.get_instance_id()
 			)
 			var is_act: bool = (gi == safe_active)
+			if is_act:
+				active_key = grp.get("type_id", &"") as StringName
 			for b: Building in valid_bldgs:
 				entries.append({"entity": b, "is_active": is_act})
 	else:
@@ -157,12 +182,15 @@ func set_building_subgroups(b_subgroups: Array[Dictionary], active_subgroup_inde
 		)
 		for b: Building in valid_fb:
 			entries.append({"entity": b, "is_active": true})
-	_apply_entries(entries)
+	var should_jump: bool = (active_key != _last_active_subgroup_key and active_key != &"")
+	_last_active_subgroup_key = active_key
+	_apply_entries(entries, should_jump)
 
 
 func clear_grid() -> void:
 	_ordered_entries.clear()
 	_current_page = 0
+	_last_active_subgroup_key = &""
 	for tile: SelectionWireframeTile in _tiles:
 		if is_instance_valid(tile):
 			tile.clear_slot()
@@ -176,10 +204,16 @@ func redraw_visible_tiles() -> void:
 			tile.queue_redraw()
 
 
-func _apply_entries(entries: Array[Dictionary]) -> void:
+func _apply_entries(entries: Array[Dictionary], jump_to_active: bool = false) -> void:
 	_ordered_entries = entries
 	var total: int = _ordered_entries.size()
 	var total_pages: int = maxi(1, ceili(float(total) / float(SLOTS_PER_PAGE)))
+	if jump_to_active and total > SLOTS_PER_PAGE:
+		for i: int in range(total):
+			if bool(_ordered_entries[i].get("is_active", false)):
+				@warning_ignore("integer_division")
+				_current_page = i / SLOTS_PER_PAGE
+				break
 	_current_page = clampi(_current_page, 0, total_pages - 1)
 	_redraw_acc = 0.0
 	_bind_current_page()
@@ -228,6 +262,10 @@ func _on_next_page() -> void:
 
 func _on_tile_clicked(entity: Node, shift_held: bool, ctrl_held: bool, is_double_click: bool) -> void:
 	entity_tile_clicked.emit(entity, shift_held, ctrl_held, is_double_click)
+
+
+func _on_tile_right_clicked(entity: Node) -> void:
+	entity_tile_right_clicked.emit(entity)
 
 
 func _on_tile_hovered(entity: Node, tile_global_rect: Rect2) -> void:

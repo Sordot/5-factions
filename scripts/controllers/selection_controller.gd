@@ -142,6 +142,12 @@ func _exit_tree() -> void:
 	_clear_custom_cursor()
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_cancel_drag_box()
+		_clear_custom_cursor()
+
+
 func _on_settings_changed(category: StringName) -> void:
 	if category != &"gameplay" and category != &"all":
 		return
@@ -192,7 +198,17 @@ func _process(delta: float) -> void:
 			var ib: Building = inspected_entity
 			var ib_local: bool = TeamManager.is_team_controlled_by_local_human(int(ib.team)) if TeamManager != null else (ib.team == Unit.Team.PLAYER)
 			if not ib_local and not ib.visible:
-				_set_inspected_entity(null)
+				var handoff_ghost: Node = null
+				var ghost_ov: Node = get_tree().get_first_node_in_group("fog_ghost_overlay")
+				if ghost_ov != null and is_instance_valid(ghost_ov):
+					if ghost_ov.has_method("get_ghost_handle_for_id"):
+						handoff_ghost = ghost_ov.call("get_ghost_handle_for_id", ib.get_instance_id()) as Node
+					elif ghost_ov.has_method("get_ghost_handle_at_point"):
+						handoff_ghost = ghost_ov.call("get_ghost_handle_at_point", ib.global_position) as Node
+				if handoff_ghost != null:
+					_set_inspected_entity(handoff_ghost, false)
+				else:
+					_set_inspected_entity(null)
 
 	if active_targeting_ability == null or command_router == null:
 		if is_overclock_targeting:
@@ -427,12 +443,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if _try_handle_building_hotkey_event(event, &"cmd_ability_f", &"facility_special", 0):
 		return
-	if event is InputEventKey:
-		var g_key: InputEventKey = event as InputEventKey
-		if g_key.pressed and not g_key.echo and not g_key.ctrl_pressed and not g_key.alt_pressed and (g_key.physical_keycode == KEY_G or g_key.keycode == KEY_G):
-			if not selected_units.is_empty() and request_ability_by_hotkey("G", g_key.shift_pressed or Input.is_key_pressed(KEY_SHIFT)):
-				get_viewport().set_input_as_handled()
-				return
+	if _try_handle_ability_hotkey_event(event, "cmd_ability_g", "G"):
+		return
 
 	# Convenience fallback: E still ejects engineers on pure compute facilities (0 trainable units).
 	if event.is_action_pressed("cmd_ability_e") and not event.is_echo() and selected_units.is_empty() and inspected_entity is Building:
@@ -587,45 +599,41 @@ func _unhandled_input(event: InputEvent) -> void:
 		_update_active_drag_marquee()
 
 
-func clear_selection() -> void:
+func cancel_all_targeting() -> void:
 	cancel_ability_targeting()
 	cancel_overclock_targeting()
 	cancel_attack_move_targeting()
 	cancel_patrol_targeting()
+
+
+func clear_selection() -> void:
+	cancel_all_targeting()
 	_set_selected_buildings([])
 	_set_inspected_entity(null)
 	_set_selected_units([])
 
 
 func select_in_world_rect(world_rect: Rect2) -> void:
-	cancel_ability_targeting()
-	cancel_overclock_targeting()
-	cancel_attack_move_targeting()
-	cancel_patrol_targeting()
+	cancel_all_targeting()
 	_select_in_rect(world_rect, false)
 
 
 func select_at_world_point(world_point: Vector2) -> void:
-	cancel_ability_targeting()
-	cancel_overclock_targeting()
-	cancel_attack_move_targeting()
-	cancel_patrol_targeting()
+	cancel_all_targeting()
 	_select_at_point(world_point, false)
 
 
 func select_single_entity(entity: Node, focus_camera: bool = false) -> void:
 	if entity == null or not is_instance_valid(entity):
 		return
-	cancel_ability_targeting()
-	cancel_overclock_targeting()
-	cancel_attack_move_targeting()
-	cancel_patrol_targeting()
+	cancel_all_targeting()
+	var local_t: Unit.Team = _get_local_human_team_enum()
 	if entity is Building:
 		var b: Building = entity
 		if b.is_destroyed or b.is_queued_for_deletion():
 			return
 		_set_selected_units([])
-		if b.team == Unit.Team.PLAYER:
+		if b.team == local_t:
 			_set_selected_buildings([b])
 		else:
 			_set_selected_buildings([])
@@ -640,7 +648,7 @@ func select_single_entity(entity: Node, focus_camera: bool = false) -> void:
 			return
 		_set_selected_buildings([])
 		_set_inspected_entity(null)
-		if u.team == Unit.Team.PLAYER:
+		if u.team == local_t:
 			_set_selected_units([u])
 		else:
 			_set_selected_units([])
@@ -772,8 +780,8 @@ func request_ability_slot(ability: AbilityData, shift_queued: bool = false) -> b
 			return false
 		var local_t: Unit.Team = _get_local_human_team_enum()
 		var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
-		if ability.building_to_build.required_building_id != &"":
-			if econ == null or not econ.has_constructed_building(local_t, ability.building_to_build.required_building_id):
+		for req_id: StringName in ability.building_to_build.get_prerequisite_ids():
+			if econ == null or not econ.has_constructed_building(local_t, req_id):
 				if AudioManager != null:
 					AudioManager.play_error()
 				return false
@@ -831,12 +839,24 @@ func confirm_ability_target_at(world_pos: Vector2, shift_queued: bool = false) -
 		return placed
 
 	var subgroup_units: Array[Unit] = get_active_subgroup_units()
-	var target_enemy: Unit = command_router.find_hostile_unit_at_point(world_pos, int(_get_local_human_team_enum()))
-	if ability.target_type == AbilityData.TargetType.UNIT_TARGET and target_enemy == null:
-		return false
+	var local_int: int = int(_get_local_human_team_enum())
+	var target_unit: Unit = null
+	if ability.target_type == AbilityData.TargetType.UNIT_TARGET:
+		match ability.target_filter:
+			AbilityData.TargetFilter.ALLY:
+				target_unit = command_router.find_allied_unit_at_point(world_pos, local_int)
+			AbilityData.TargetFilter.ANY:
+				target_unit = command_router.find_any_unit_at_point(world_pos)
+			_:
+				target_unit = command_router.find_hostile_unit_at_point(world_pos, local_int)
+		if target_unit == null:
+			return false
+	else:
+		target_unit = command_router.find_hostile_unit_at_point(world_pos, local_int)
 
-	var accepted: bool = command_router.issue_ability_order(subgroup_units, ability, world_pos, target_enemy, shift_queued)
-	cancel_ability_targeting()
+	var accepted: bool = command_router.issue_ability_order(subgroup_units, ability, world_pos, target_unit, shift_queued)
+	if not (shift_queued and accepted and SubgroupHelper.has_any_ready_caster(subgroup_units, ability)):
+		cancel_ability_targeting()
 	return accepted
 
 
@@ -1163,9 +1183,7 @@ func select_all_army(allow_double_tap_center: bool = true) -> int:
 	var army: Array[Unit] = get_army_units()
 	if army.is_empty():
 		return 0
-	cancel_ability_targeting()
-	cancel_attack_move_targeting()
-	cancel_patrol_targeting()
+	cancel_all_targeting()
 	_set_selected_buildings([])
 	_set_inspected_entity(null)
 	_set_selected_units(army)
@@ -1213,10 +1231,7 @@ func select_next_idle_production(allow_center_on_repeat: bool = true, select_all
 		_refresh_idle_workers(false)
 		return 0
 
-	cancel_ability_targeting()
-	cancel_overclock_targeting()
-	cancel_attack_move_targeting()
-	cancel_patrol_targeting()
+	cancel_all_targeting()
 	_set_selected_units([])
 
 	if select_all:
@@ -1290,10 +1305,7 @@ func select_next_command_hub(focus_camera: bool = true, select_all: bool = false
 		_hub_cycle_index = -1
 		return null
 
-	cancel_ability_targeting()
-	cancel_overclock_targeting()
-	cancel_attack_move_targeting()
-	cancel_patrol_targeting()
+	cancel_all_targeting()
 	_set_selected_units([])
 
 	if select_all:
@@ -1319,13 +1331,30 @@ func select_next_command_hub(focus_camera: bool = true, select_all: bool = false
 
 
 func _refresh_idle_workers(force_emit: bool = false) -> void:
-	var idle_list: Array[Unit] = get_idle_workers()
+	var idle_list: Array[Unit] = []
+	var cur_army_count: int = 0
+	var spectator: bool = TeamManager != null and TeamManager.is_spectator_mode()
+	if is_inside_tree() and not spectator:
+		var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+		for node: Node in get_tree().get_nodes_in_group("units"):
+			if not is_instance_valid(node) or not (node is Unit):
+				continue
+			var u: Unit = node as Unit
+			if u.is_dead or u.is_staffed or u.is_queued_for_deletion() or int(u.team) != local_team or u.data == null:
+				continue
+			if u.is_idle_worker():
+				idle_list.append(u)
+			if u.data.is_combat_unit():
+				cur_army_count += 1
+		idle_list.sort_custom(func(a: Unit, b: Unit) -> bool:
+			return a.get_instance_id() < b.get_instance_id()
+		)
+
 	var ids: PackedInt64Array = PackedInt64Array()
 	ids.resize(idle_list.size())
 	for i: int in range(idle_list.size()):
 		ids[i] = idle_list[i].get_instance_id()
 
-	var cur_army_count: int = get_army_units().size()
 	if force_emit or cur_army_count != army_unit_count:
 		army_unit_count = cur_army_count
 		army_count_updated.emit(army_unit_count)
@@ -1397,6 +1426,10 @@ func get_control_group_summaries() -> Dictionary:
 	return _control_group_mgr.get_rich_summaries(self)
 
 
+func clear_control_group(group_num: int) -> void:
+	_control_group_mgr.clear_group(self, group_num)
+
+
 func clear_control_groups() -> void:
 	_control_group_mgr.clear(self)
 
@@ -1423,22 +1456,81 @@ func _center_camera_on_units(units: Array[Unit]) -> void:
 	_center_camera_on_nodes(units)
 
 
+func focus_camera_on_entity(entity: Node) -> void:
+	if entity == null or not is_instance_valid(entity) or not (entity is Node2D):
+		return
+	if entity is Unit and ((entity as Unit).is_dead or (entity as Unit).is_staffed):
+		return
+	if entity is Building and (entity as Building).is_destroyed:
+		return
+	var target_pos: Vector2 = (entity as Node2D).global_position
+	var cam: RTSCamera = _get_rts_camera()
+	if cam != null:
+		cam.center_on(target_pos)
+	if is_inside_tree():
+		var mm_ui: Node = get_tree().get_first_node_in_group("tactical_minimap")
+		if mm_ui != null and is_instance_valid(mm_ui) and mm_ui.has_method("flash_ping"):
+			mm_ui.call("flash_ping", target_pos, Color(0.95, 0.99, 1.0, 0.90), 0.65)
+	if AudioManager != null:
+		AudioManager.play_ui_click()
+
+
 func _center_camera_on_nodes(nodes: Array) -> void:
 	if nodes.is_empty():
 		return
 	var cam: RTSCamera = _get_rts_camera()
 	if cam == null:
 		return
-	var centroid: Vector2 = Vector2.ZERO
-	var valid_count: int = 0
+	var positions: Array[Vector2] = []
 	for item: Variant in nodes:
 		if is_instance_valid(item) and item is Node2D:
-			centroid += (item as Node2D).global_position
-			valid_count += 1
-	if valid_count <= 0:
+			positions.append((item as Node2D).global_position)
+	var count: int = positions.size()
+	if count <= 0:
 		return
-	centroid /= float(valid_count)
-	cam.center_on(centroid)
+	if count <= 2:
+		var avg: Vector2 = Vector2.ZERO
+		for p: Vector2 in positions:
+			avg += p
+		cam.center_on(avg / float(count))
+		return
+
+	# Largest-cluster BFS centroid (420px radius) so 1 stray reinforcement never pulls camera off the main fight.
+	const CLUSTER_RADIUS_SQ: float = 420.0 * 420.0
+	var visited: PackedByteArray = PackedByteArray()
+	visited.resize(count)
+	visited.fill(0)
+
+	var best_size: int = 0
+	var best_centroid: Vector2 = positions[0]
+	var best_cam_dist_sq: float = INF
+
+	for i: int in range(count):
+		if visited[i] != 0:
+			continue
+		visited[i] = 1
+		var queue: Array[int] = [i]
+		var q_head: int = 0
+		var sum_pos: Vector2 = Vector2.ZERO
+		var cluster_cnt: int = 0
+		while q_head < queue.size():
+			var cur_idx: int = queue[q_head]
+			q_head += 1
+			var cur_pos: Vector2 = positions[cur_idx]
+			sum_pos += cur_pos
+			cluster_cnt += 1
+			for j: int in range(count):
+				if visited[j] == 0 and cur_pos.distance_squared_to(positions[j]) <= CLUSTER_RADIUS_SQ:
+					visited[j] = 1
+					queue.append(j)
+		var c_pos: Vector2 = sum_pos / float(maxi(1, cluster_cnt))
+		var d_cam_sq: float = c_pos.distance_squared_to(cam.global_position)
+		if cluster_cnt > best_size or (cluster_cnt == best_size and d_cam_sq < best_cam_dist_sq):
+			best_size = cluster_cnt
+			best_centroid = c_pos
+			best_cam_dist_sq = d_cam_sq
+
+	cam.center_on(best_centroid)
 
 
 func _get_rts_camera() -> RTSCamera:
@@ -1608,7 +1700,14 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 			var same_b: Array[Building] = _find_visible_buildings_of_type(clicked_building.building_type_id, local_t)
 			_last_click_building = null
 			_last_click_building_time_ms = 0
-			_set_selected_buildings(same_b)
+			if shift_pressed and not selected_buildings.is_empty():
+				var merged_b: Array[Building] = selected_buildings.duplicate()
+				for sb: Building in same_b:
+					if not merged_b.has(sb):
+						merged_b.append(sb)
+				_set_selected_buildings(merged_b, true)
+			else:
+				_set_selected_buildings(same_b)
 		elif shift_pressed:
 			var next_b: Array[Building] = selected_buildings.duplicate()
 			if next_b.has(clicked_building):
@@ -2169,7 +2268,15 @@ func _set_inspected_entity(entity: Node, emit_audio: bool = true) -> void:
 	var prev_building: Building = selected_building
 	inspected_entity = next_entity
 	selected_building = inspected_entity as Building if inspected_entity is Building else null
-	inspected_enemy = inspected_entity as Unit if (inspected_entity is Unit and (inspected_entity as Unit).team == Unit.Team.ENEMY) else null
+	var local_int_ie: int = int(_get_local_human_team_enum())
+	inspected_enemy = (
+		inspected_entity as Unit
+		if (
+			inspected_entity is Unit
+			and (TeamManager.are_enemies(local_int_ie, int((inspected_entity as Unit).team)) if TeamManager != null else ((inspected_entity as Unit).team != Unit.Team.PLAYER))
+		)
+		else null
+	)
 
 	if inspected_entity != null:
 		if inspected_entity is Building:

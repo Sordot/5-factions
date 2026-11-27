@@ -231,6 +231,8 @@ func _get_ability_action_name(hotkey_label: String) -> StringName:
 			return &"cmd_ability_y"
 		"F":
 			return &"cmd_ability_f"
+		"G":
+			return &"cmd_ability_g"
 	return &""
 
 
@@ -792,6 +794,7 @@ func _setup_wireframe_selection_grid() -> void:
 	_wireframe_grid.name = "SelectionWireframeGrid"
 	_wireframe_grid.visible = false
 	_wireframe_grid.entity_tile_clicked.connect(_on_wireframe_tile_clicked)
+	_wireframe_grid.entity_tile_right_clicked.connect(_on_wireframe_tile_right_clicked)
 	_wireframe_grid.entity_tile_hovered.connect(_on_wireframe_tile_hovered)
 	_wireframe_grid.entity_tile_unhovered.connect(_on_wireframe_tile_unhovered)
 	center_panel.add_child(_wireframe_grid)
@@ -811,6 +814,14 @@ func _on_wireframe_tile_clicked(entity: Node, shift_held: bool, ctrl_held: bool,
 		_selection_controller.deselect_entity(entity)
 	else:
 		_selection_controller.select_only_entity(entity)
+
+
+func _on_wireframe_tile_right_clicked(entity: Node) -> void:
+	if _selection_controller == null or entity == null or not is_instance_valid(entity):
+		return
+	if command_tooltip != null:
+		command_tooltip.hide_tooltip()
+	_selection_controller.focus_camera_on_entity(entity)
 
 
 func _on_wireframe_tile_hovered(entity: Node, _tile_global_rect: Rect2) -> void:

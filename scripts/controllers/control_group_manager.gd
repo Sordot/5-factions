@@ -1,6 +1,8 @@
 class_name ControlGroupManager
 extends RefCounted
 
+const MAX_GROUPS: int = 10
+
 var control_groups: Dictionary = {}
 var _last_recall_group: int = -1
 var _last_recall_time_ms: int = 0
@@ -12,7 +14,7 @@ func cleanup() -> void:
 
 
 func assign(sc: SelectionController, group_num: int) -> void:
-	if sc == null or group_num < 1 or group_num > 9:
+	if sc == null or group_num < 1 or group_num > MAX_GROUPS:
 		return
 	_owner_sc = sc
 	sc._prune_invalid_units()
@@ -28,7 +30,7 @@ func assign(sc: SelectionController, group_num: int) -> void:
 
 
 func append(sc: SelectionController, group_num: int) -> void:
-	if sc == null or group_num < 1 or group_num > 9:
+	if sc == null or group_num < 1 or group_num > MAX_GROUPS:
 		return
 	_owner_sc = sc
 	sc._prune_invalid_units()
@@ -54,7 +56,7 @@ func append(sc: SelectionController, group_num: int) -> void:
 
 
 func remove(sc: SelectionController, group_num: int) -> void:
-	if sc == null or group_num < 1 or group_num > 9 or not control_groups.has(group_num):
+	if sc == null or group_num < 1 or group_num > MAX_GROUPS or not control_groups.has(group_num):
 		return
 	_owner_sc = sc
 	sc._prune_invalid_units()
@@ -83,8 +85,19 @@ func remove(sc: SelectionController, group_num: int) -> void:
 		sc._emit_control_groups_changed()
 
 
+func clear_group(sc: SelectionController, group_num: int) -> void:
+	if group_num < 1 or group_num > MAX_GROUPS or not control_groups.has(group_num):
+		return
+	control_groups.erase(group_num)
+	if _last_recall_group == group_num:
+		_last_recall_group = -1
+		_last_recall_time_ms = 0
+	if sc != null:
+		sc._emit_control_groups_changed()
+
+
 func steal_assign(sc: SelectionController, group_num: int) -> void:
-	if sc == null or group_num < 1 or group_num > 9:
+	if sc == null or group_num < 1 or group_num > MAX_GROUPS:
 		return
 	_owner_sc = sc
 	sc._prune_invalid_units()
@@ -102,7 +115,7 @@ func steal_assign(sc: SelectionController, group_num: int) -> void:
 
 
 func steal_append(sc: SelectionController, group_num: int) -> void:
-	if sc == null or group_num < 1 or group_num > 9:
+	if sc == null or group_num < 1 or group_num > MAX_GROUPS:
 		return
 	_owner_sc = sc
 	sc._prune_invalid_units()
@@ -130,15 +143,13 @@ func steal_append(sc: SelectionController, group_num: int) -> void:
 
 
 func recall(sc: SelectionController, group_num: int, allow_double_tap_center: bool = true) -> void:
-	if sc == null or group_num < 1 or group_num > 9:
+	if sc == null or group_num < 1 or group_num > MAX_GROUPS:
 		return
 	_owner_sc = sc
 	var group_units: Array[Unit] = get_pruned_units(sc, group_num)
 	if not group_units.is_empty():
 		control_groups[group_num] = group_units
-		sc.cancel_ability_targeting()
-		sc.cancel_attack_move_targeting()
-		sc.cancel_patrol_targeting()
+		sc.cancel_all_targeting()
 		sc._set_selected_buildings([])
 		sc._set_inspected_entity(null)
 		sc._set_selected_units(group_units)
@@ -157,10 +168,7 @@ func recall(sc: SelectionController, group_num: int, allow_double_tap_center: bo
 	var group_buildings: Array[Building] = get_pruned_buildings(sc, group_num)
 	if not group_buildings.is_empty():
 		control_groups[group_num] = group_buildings
-		sc.cancel_ability_targeting()
-		sc.cancel_overclock_targeting()
-		sc.cancel_attack_move_targeting()
-		sc.cancel_patrol_targeting()
+		sc.cancel_all_targeting()
 		sc._set_selected_units([])
 		sc._set_selected_buildings(group_buildings)
 		sc._emit_control_groups_changed()
@@ -194,10 +202,12 @@ func handle_key(sc: SelectionController, group_num: int, key_event: InputEventKe
 
 func get_key_group_num(key_event: InputEventKey) -> int:
 	var code: Key = key_event.physical_keycode
-	if code < KEY_1 or code > KEY_9:
+	if code < KEY_0 or code > KEY_9:
 		code = key_event.keycode
 	if code >= KEY_1 and code <= KEY_9:
 		return int(code - KEY_1) + 1
+	if code == KEY_0:
+		return 10
 	return 0
 
 
@@ -233,7 +243,7 @@ func get_pruned_buildings(sc: SelectionController, group_num: int) -> Array[Buil
 
 func get_summary(sc: SelectionController) -> Dictionary:
 	var summary: Dictionary = {}
-	for num: int in range(1, 10):
+	for num: int in range(1, MAX_GROUPS + 1):
 		if not control_groups.has(num):
 			continue
 		var group_units: Array[Unit] = get_pruned_units(sc, num)
@@ -254,7 +264,7 @@ func get_rich_summaries(sc: SelectionController) -> Dictionary:
 	var out: Dictionary = {}
 	if sc == null:
 		return out
-	for num: int in range(1, 10):
+	for num: int in range(1, MAX_GROUPS + 1):
 		if not control_groups.has(num):
 			continue
 		var group_units: Array[Unit] = get_pruned_units(sc, num)
@@ -301,7 +311,7 @@ func clear(sc: SelectionController) -> void:
 
 
 func _strip_from_other_groups(sc: SelectionController, exclude_group: int, units_to_strip: Array[Unit], buildings_to_strip: Array[Building]) -> void:
-	for num: int in range(1, 10):
+	for num: int in range(1, MAX_GROUPS + 1):
 		if num == exclude_group or not control_groups.has(num):
 			continue
 		if not units_to_strip.is_empty():
@@ -334,6 +344,8 @@ func _watch_units(sc: SelectionController, units: Array[Unit]) -> void:
 		if is_instance_valid(u) and not u.is_dead:
 			if not u.died.is_connected(_on_unit_removed):
 				u.died.connect(_on_unit_removed)
+			if not u.staffed_state_changed.is_connected(_on_unit_staffed_changed):
+				u.staffed_state_changed.connect(_on_unit_staffed_changed)
 
 
 func _watch_buildings(sc: SelectionController, buildings: Array[Building]) -> void:
@@ -345,6 +357,11 @@ func _watch_buildings(sc: SelectionController, buildings: Array[Building]) -> vo
 
 
 func _on_unit_removed(_unit: Unit) -> void:
+	if _owner_sc != null and is_instance_valid(_owner_sc):
+		_owner_sc._emit_control_groups_changed()
+
+
+func _on_unit_staffed_changed(_unit: Unit, _staffed: bool) -> void:
 	if _owner_sc != null and is_instance_valid(_owner_sc):
 		_owner_sc._emit_control_groups_changed()
 

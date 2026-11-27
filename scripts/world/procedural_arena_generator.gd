@@ -203,6 +203,7 @@ func _sync_scene_bounds_and_biome(scene_root: Node) -> void:
 	var cam: RTSCamera = scene_root.get_node_or_null("RTSCamera") as RTSCamera
 	if cam != null:
 		cam.pan_bounds = generated_bounds.grow(190.0)
+		cam.set_arena_bounds(generated_bounds)
 
 	var sel: Node = scene_root.get_node_or_null("SelectionController")
 	if sel != null:

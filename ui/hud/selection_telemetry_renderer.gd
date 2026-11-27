@@ -312,34 +312,56 @@ func rebuild_control_group_row(hud: SelectionHUD, summary: Dictionary) -> void:
 		return
 
 	hud.control_group_row.visible = true
-	for num: int in range(1, 10):
+	var pill_count: int = 0
+	for cnt_num: int in range(1, 11):
+		if rich.has(cnt_num) or summary.has(cnt_num):
+			pill_count += 1
+	var compact_font: int = 9 if pill_count > 7 else 10
+	for num: int in range(1, 11):
 		if not rich.has(num) and not summary.has(num):
 			continue
 		var info: Dictionary = rich.get(num, {}) as Dictionary
 		var count: int = int(info.get("count", summary.get(num, 0)))
 		if count <= 0:
 			continue
+		var key_str: String = "0" if num == 10 else str(num)
 		var label_str: String = String(info.get("label", "Group"))
 		var is_active: bool = bool(info.get("is_active", false))
 		var is_building: bool = bool(info.get("is_building", false))
 		var pill: Button = Button.new()
 		pill.focus_mode = Control.FOCUS_NONE
 		pill.add_to_group("blocks_edge_pan")
-		pill.add_theme_font_size_override("font_size", 10)
-		pill.text = ("[%d] %s ×%d" % [num, shorten_name(label_str), count]) if is_building else ("[%d] ×%d" % [num, count])
+		pill.add_theme_font_size_override("font_size", compact_font)
+		if pill_count > 7:
+			pill.text = "[%s]×%d" % [key_str, count]
+		else:
+			pill.text = ("[%s] %s ×%d" % [key_str, shorten_name(label_str), count]) if is_building else ("[%s] ×%d" % [key_str, count])
 		pill.modulate = hud._active_hud_accent if is_active else (Color(0.96, 0.84, 0.44, 0.92) if is_building else Color(0.76, 0.88, 0.94, 0.90))
 		var captured_num: int = num
 		pill.pressed.connect(func() -> void:
 			if is_instance_valid(hud) and hud._selection_controller != null:
-				hud._selection_controller.recall_control_group(captured_num, true)
+				if Input.is_key_pressed(KEY_SHIFT):
+					hud._selection_controller.append_control_group(captured_num)
+				else:
+					hud._selection_controller.recall_control_group(captured_num, true)
+		)
+		pill.gui_input.connect(func(ev: InputEvent) -> void:
+			if ev is InputEventMouseButton:
+				var mb: InputEventMouseButton = ev as InputEventMouseButton
+				if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+					if is_instance_valid(hud) and hud._selection_controller != null:
+						hud._selection_controller.clear_control_group(captured_num)
+						if AudioManager != null:
+							AudioManager.play_ui_click()
+					pill.accept_event()
 		)
 		var kind_label: String = "Structure(s)" if is_building else "Unit(s)"
 		hud._attach_tooltip(
 			pill,
-			"Control Group %d — %s" % [num, label_str],
-			str(num),
+			"Control Group %s — %s" % [key_str, label_str],
+			key_str,
 			"%d %s Assigned" % [count, kind_label],
-			"Click or press %d to select. Double-tap to center. Ctrl+%d assign, Shift+%d add, Alt+%d steal." % [num, num, num, num]
+			"LMB Select • Shift+LMB Add • RMB Clear. Double-tap to center. Ctrl+%s assign, Shift+%s add, Alt+%s steal." % [key_str, key_str, key_str]
 		)
 		hud.control_group_row.add_child(pill)
 
@@ -396,5 +418,5 @@ func show_wireframe_hover_tooltip(hud: SelectionHUD, entity: Node) -> void:
 		title,
 		badge,
 		" • ".join(meta_parts),
-		"LMB Isolate • Shift Remove • Ctrl / 2xLMB Type • Ctrl+Shift Drop Type"
+		"LMB Isolate • RMB Focus • Shift Remove • Ctrl Type"
 	)

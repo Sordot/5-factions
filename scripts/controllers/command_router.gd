@@ -577,9 +577,10 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 				result["reason"] = "Blocked by landmark"
 				return result
 
-	for node: Node in get_tree().get_nodes_in_group("destructible_barricades"):
-		if is_instance_valid(node) and node.has_method("overlaps_circle"):
-			if bool(node.call("overlaps_circle", place_pos, new_radius + 8.0)):
+	var bar_candidates: Array = SpatialGrid.query_barricades_in_radius(place_pos, new_radius + 96.0) if SpatialGrid != null else get_tree().get_nodes_in_group("destructible_barricades")
+	for node: Variant in bar_candidates:
+		if is_instance_valid(node) and not bool((node as Node).get("is_destroyed")) and (node as Node).has_method("overlaps_circle"):
+			if bool((node as Node).call("overlaps_circle", place_pos, new_radius + 8.0)):
 				result["reason"] = "Blocked by barricade"
 				return result
 
@@ -606,10 +607,11 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 				result["reason"] = "Too close to Sensor Relay"
 				return result
 
-	for node: Node in get_tree().get_nodes_in_group("buildings"):
+	var bldg_candidates: Array = SpatialGrid.query_buildings_in_radius(place_pos, new_radius + 96.0) if SpatialGrid != null else get_tree().get_nodes_in_group("buildings")
+	for node: Variant in bldg_candidates:
 		if not (node is Building) or not is_instance_valid(node):
 			continue
-		var existing: Building = node
+		var existing: Building = node as Building
 		if existing.is_destroyed:
 			continue
 		var min_dist: float = existing.footprint_radius + new_radius + 10.0
@@ -617,10 +619,11 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 			result["reason"] = "Blocked by structure"
 			return result
 
-	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+	var res_candidates: Array = SpatialGrid.query_resources_in_radius(place_pos, new_radius + 64.0, false) if SpatialGrid != null else get_tree().get_nodes_in_group("resource_nodes")
+	for node: Variant in res_candidates:
 		if not (node is ResourceNode) or not is_instance_valid(node):
 			continue
-		var res_node: ResourceNode = node
+		var res_node: ResourceNode = node as ResourceNode
 		if res_node.is_depleted() or res_node.is_vent:
 			continue
 		var min_dist: float = res_node.collision_radius + new_radius + 8.0
@@ -629,9 +632,9 @@ func evaluate_build_placement(building_data: BuildingData, cursor_world: Vector2
 			return result
 
 	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
-	if building_data.required_building_id != &"":
-		if econ == null or not econ.has_constructed_building(target_team, building_data.required_building_id):
-			var req_name: String = String(building_data.required_building_id).replace("_", " ").capitalize()
+	for req_id: StringName in building_data.get_prerequisite_ids():
+		if econ == null or not econ.has_constructed_building(target_team, req_id):
+			var req_name: String = String(req_id).replace("_", " ").capitalize()
 			result["reason"] = "Requires %s" % req_name
 			return result
 
@@ -706,16 +709,20 @@ func confirm_build_placement(ability: AbilityData, world_pos: Vector2, subgroup_
 
 func find_closest_builder(units: Array[Unit], target_pos: Vector2) -> Unit:
 	var best: Unit = null
-	var best_dist_sq: float = INF
+	var best_score: float = INF
 	for item: Variant in units:
 		if not is_instance_valid(item) or not (item is Unit):
 			continue
-		var unit: Unit = item
+		var unit: Unit = item as Unit
 		if not unit.can_construct():
 			continue
-		var d_sq: float = unit.global_position.distance_squared_to(target_pos)
-		if d_sq < best_dist_sq:
-			best_dist_sq = d_sq
+		var build_load: int = 1 if unit.command_state == Unit.CommandState.CONSTRUCTING else 0
+		for cmd: Dictionary in unit.command_queue:
+			if (cmd.get("type", &"") as StringName) == &"build":
+				build_load += 1
+		var score: float = float(build_load) * 1200.0 + unit.global_position.distance_to(target_pos)
+		if score < best_score:
+			best_score = score
 			best = unit
 	return best
 
@@ -723,10 +730,11 @@ func find_closest_builder(units: Array[Unit], target_pos: Vector2) -> Unit:
 func find_nearest_unoccupied_vent(world_point: Vector2, max_radius: float) -> ResourceNode:
 	var best: ResourceNode = null
 	var best_dist_sq: float = max_radius * max_radius
-	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+	var candidates: Array = SpatialGrid.query_resources_in_radius(world_point, max_radius, true) if SpatialGrid != null else get_tree().get_nodes_in_group("resource_nodes")
+	for node: Variant in candidates:
 		if not (node is ResourceNode) or not is_instance_valid(node):
 			continue
-		var res_node: ResourceNode = node
+		var res_node: ResourceNode = node as ResourceNode
 		if not res_node.is_vent or res_node.is_occupied():
 			continue
 		var d_sq: float = res_node.global_position.distance_squared_to(world_point)
@@ -789,26 +797,29 @@ func find_hyper_uplink_at_point(world_point: Vector2) -> Node2D:
 func find_barricade_at_point(world_point: Vector2) -> Node2D:
 	var closest: Node2D = null
 	var closest_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("destructible_barricades"):
+	var candidates: Array = SpatialGrid.query_barricades_in_radius(world_point, 80.0) if SpatialGrid != null else get_tree().get_nodes_in_group("destructible_barricades")
+	for node: Variant in candidates:
 		if not is_instance_valid(node) or not (node is Node2D):
 			continue
-		if bool(node.get("is_destroyed")) or node.is_queued_for_deletion():
+		var bar: Node2D = node as Node2D
+		if bool(bar.get("is_destroyed")) or bar.is_queued_for_deletion():
 			continue
-		if node.has_method("contains_point") and bool(node.call("contains_point", world_point)):
-			var d_sq: float = (node as Node2D).global_position.distance_squared_to(world_point)
+		if bar.has_method("contains_point") and bool(bar.call("contains_point", world_point)):
+			var d_sq: float = bar.global_position.distance_squared_to(world_point)
 			if d_sq < closest_dist_sq:
 				closest_dist_sq = d_sq
-				closest = node as Node2D
+				closest = bar
 	return closest
 
 
 func find_hostile_unit_at_point(world_point: Vector2, viewer_team: int) -> Unit:
 	var closest: Unit = null
 	var closest_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
+	var candidates: Array = SpatialGrid.query_units_in_radius(world_point, 48.0) if SpatialGrid != null else get_tree().get_nodes_in_group("selectable_units")
+	for node: Variant in candidates:
 		if not (node is Unit):
 			continue
-		var unit: Unit = node
+		var unit: Unit = node as Unit
 		if not is_instance_valid(unit) or unit.is_dead or not unit.visible:
 			continue
 		var is_hostile: bool = TeamManager.are_enemies(viewer_team, int(unit.team)) if (TeamManager != null and viewer_team >= 0) else (unit.team != Unit.Team.PLAYER)
@@ -825,10 +836,11 @@ func find_hostile_unit_at_point(world_point: Vector2, viewer_team: int) -> Unit:
 func find_hostile_building_at_point(world_point: Vector2, viewer_team: int) -> Building:
 	var closest: Building = null
 	var closest_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
+	var candidates: Array = SpatialGrid.query_buildings_in_radius(world_point, 76.0) if SpatialGrid != null else get_tree().get_nodes_in_group("selectable_buildings")
+	for node: Variant in candidates:
 		if not (node is Building):
 			continue
-		var b: Building = node
+		var b: Building = node as Building
 		if not is_instance_valid(b) or b.is_destroyed or not b.visible:
 			continue
 		var is_hostile: bool = TeamManager.are_enemies(viewer_team, int(b.team)) if (TeamManager != null and viewer_team >= 0) else (b.team != Unit.Team.PLAYER)
@@ -845,10 +857,11 @@ func find_hostile_building_at_point(world_point: Vector2, viewer_team: int) -> B
 func find_any_unit_at_point(world_point: Vector2) -> Unit:
 	var closest: Unit = null
 	var closest_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
+	var candidates: Array = SpatialGrid.query_units_in_radius(world_point, 48.0) if SpatialGrid != null else get_tree().get_nodes_in_group("selectable_units")
+	for node: Variant in candidates:
 		if not (node is Unit):
 			continue
-		var u: Unit = node
+		var u: Unit = node as Unit
 		if not is_instance_valid(u) or u.is_dead or not u.visible:
 			continue
 		if u.contains_point(world_point):
@@ -862,10 +875,11 @@ func find_any_unit_at_point(world_point: Vector2) -> Unit:
 func find_any_building_at_point(world_point: Vector2) -> Building:
 	var closest: Building = null
 	var closest_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
+	var candidates: Array = SpatialGrid.query_buildings_in_radius(world_point, 76.0) if SpatialGrid != null else get_tree().get_nodes_in_group("selectable_buildings")
+	for node: Variant in candidates:
 		if not (node is Building):
 			continue
-		var b: Building = node
+		var b: Building = node as Building
 		if not is_instance_valid(b) or b.is_destroyed or not b.visible:
 			continue
 		if b.contains_point(world_point):
@@ -879,10 +893,11 @@ func find_any_building_at_point(world_point: Vector2) -> Building:
 func find_unit_at_point(world_point: Vector2, target_team: Unit.Team) -> Unit:
 	var closest: Unit = null
 	var closest_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
+	var candidates: Array = SpatialGrid.query_units_in_radius(world_point, 48.0, int(target_team)) if SpatialGrid != null else get_tree().get_nodes_in_group("selectable_units")
+	for node: Variant in candidates:
 		if not (node is Unit):
 			continue
-		var unit: Unit = node
+		var unit: Unit = node as Unit
 		if not is_instance_valid(unit) or unit.is_dead or unit.team != target_team:
 			continue
 		# Block targeting or inspecting hostile units hidden in Fog of War.
@@ -896,13 +911,35 @@ func find_unit_at_point(world_point: Vector2, target_team: Unit.Team) -> Unit:
 	return closest
 
 
+func find_allied_unit_at_point(world_point: Vector2, viewer_team: int) -> Unit:
+	var closest: Unit = null
+	var closest_dist_sq: float = INF
+	var candidates: Array = SpatialGrid.query_units_in_radius(world_point, 48.0) if SpatialGrid != null else get_tree().get_nodes_in_group("selectable_units")
+	for node: Variant in candidates:
+		if not (node is Unit):
+			continue
+		var unit: Unit = node as Unit
+		if not is_instance_valid(unit) or unit.is_dead or not unit.visible:
+			continue
+		var is_ally: bool = TeamManager.are_allies(viewer_team, int(unit.team)) if (TeamManager != null and viewer_team >= 0) else (int(unit.team) == viewer_team)
+		if not is_ally:
+			continue
+		if unit.contains_point(world_point):
+			var dist_sq: float = unit.global_position.distance_squared_to(world_point)
+			if dist_sq < closest_dist_sq:
+				closest_dist_sq = dist_sq
+				closest = unit
+	return closest
+
+
 func find_building_at_point(world_point: Vector2, target_team: Unit.Team) -> Building:
 	var closest: Building = null
 	var closest_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
+	var candidates: Array = SpatialGrid.query_buildings_in_radius(world_point, 76.0, int(target_team)) if SpatialGrid != null else get_tree().get_nodes_in_group("selectable_buildings")
+	for node: Variant in candidates:
 		if not (node is Building):
 			continue
-		var building: Building = node
+		var building: Building = node as Building
 		if not is_instance_valid(building) or building.is_destroyed or building.team != target_team:
 			continue
 		# Block targeting or inspecting hostile buildings hidden in unexplored Fog of War.
@@ -919,10 +956,11 @@ func find_building_at_point(world_point: Vector2, target_team: Unit.Team) -> Bui
 func find_resource_node_at_point(world_point: Vector2) -> ResourceNode:
 	var closest: ResourceNode = null
 	var closest_dist_sq: float = INF
-	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+	var candidates: Array = SpatialGrid.query_resources_in_radius(world_point, 56.0, true) if SpatialGrid != null else get_tree().get_nodes_in_group("resource_nodes")
+	for node: Variant in candidates:
 		if not (node is ResourceNode):
 			continue
-		var res_node: ResourceNode = node
+		var res_node: ResourceNode = node as ResourceNode
 		if not is_instance_valid(res_node) or res_node.is_depleted():
 			continue
 		if res_node.contains_point(world_point):
@@ -946,8 +984,14 @@ func assign_group_destinations(units: Array[Unit], center_pos: Vector2) -> Array
 		assigned.append(single_pos)
 		return assigned
 
-	var unit_radius: float = units[0].data.collision_radius if units[0].data != null else DEFAULT_UNIT_RADIUS
-	var spacing: float = unit_radius * RING_SPACING_MULTIPLIER
+	var sum_r: float = 0.0
+	var r_count: int = 0
+	for u_item: Unit in units:
+		if is_instance_valid(u_item):
+			sum_r += u_item.data.collision_radius if u_item.data != null else DEFAULT_UNIT_RADIUS
+			r_count += 1
+	var avg_radius: float = clampf(sum_r / float(maxi(1, r_count)), 12.0, 26.0)
+	var spacing: float = avg_radius * RING_SPACING_MULTIPLIER
 	var slots: Array[Vector2] = _generate_ring_slots(count, center_pos, spacing, map_rid, has_map)
 
 	var used: Array[bool] = []
@@ -992,8 +1036,9 @@ func _generate_ring_slots(count: int, center_pos: Vector2, spacing: float, map_r
 	var first_pos: Vector2 = NavigationServer2D.map_get_closest_point(map_rid, center_pos) if has_map else center_pos
 	slots.append(first_pos)
 
+	var min_sep_sq: float = (spacing * 0.45) * (spacing * 0.45)
 	var ring: int = 1
-	while slots.size() < count:
+	while slots.size() < count and ring <= 10:
 		var ring_radius: float = float(ring) * spacing
 		var circumference: float = TAU * ring_radius
 		var ring_slots: int = maxi(6, int(round(circumference / spacing)))
@@ -1005,8 +1050,35 @@ func _generate_ring_slots(count: int, center_pos: Vector2, spacing: float, map_r
 			var candidate: Vector2 = center_pos + Vector2.RIGHT.rotated(angle) * ring_radius
 			if has_map:
 				candidate = NavigationServer2D.map_get_closest_point(map_rid, candidate)
+			var collapsed: bool = false
+			for prev_s: Vector2 in slots:
+				if candidate.distance_squared_to(prev_s) < min_sep_sq:
+					collapsed = true
+					break
+			if collapsed:
+				var nudged: Vector2 = candidate.lerp(first_pos, 0.25)
+				if has_map:
+					nudged = NavigationServer2D.map_get_closest_point(map_rid, nudged)
+				var still_collapsed: bool = false
+				for prev_s2: Vector2 in slots:
+					if nudged.distance_squared_to(prev_s2) < min_sep_sq:
+						still_collapsed = true
+						break
+				if still_collapsed:
+					continue
+				candidate = nudged
 			slots.append(candidate)
 		ring += 1
+
+	# Safety fill if a tight corner prevented full deduplicated expansion
+	while slots.size() < count:
+		var idx: int = slots.size()
+		var ang_fb: float = float(idx) * 2.3999632 # golden angle spread
+		var r_fb: float = spacing * 0.65 * sqrt(float(idx))
+		var pt_fb: Vector2 = first_pos + Vector2.RIGHT.rotated(ang_fb) * r_fb
+		if has_map:
+			pt_fb = NavigationServer2D.map_get_closest_point(map_rid, pt_fb)
+		slots.append(pt_fb)
 
 	return slots
 

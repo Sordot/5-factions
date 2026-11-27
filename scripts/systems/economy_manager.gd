@@ -111,6 +111,14 @@ func _init_team_state(team: int, biomass: int, silica: int, compute: int) -> voi
 func _ensure_team(team: int) -> void:
 	if not _resources.has(team):
 		_init_team_state(team, 0, 0, 0)
+	if not _constructed_building_counts.has(team):
+		_constructed_building_counts[team] = {}
+	if not _income_heads.has(team):
+		_income_heads[team] = {
+			RESOURCE_BIOMASS: 0,
+			RESOURCE_SILICA: 0,
+			RESOURCE_COMPUTE: 0,
+		}
 
 
 func reset_economy() -> void:
@@ -561,6 +569,8 @@ func register_constructed_building(building: Building) -> void:
 		"team": team,
 		"type_id": type_id,
 	}
+	if not _constructed_building_counts.has(team):
+		_constructed_building_counts[team] = {}
 	var counts: Dictionary = _constructed_building_counts[team] as Dictionary
 	counts[type_id] = int(counts.get(type_id, 0)) + 1
 

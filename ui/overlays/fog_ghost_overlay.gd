@@ -56,6 +56,15 @@ func has_ghost_at_point(world_point: Vector2) -> bool:
 	return not _fog_system.find_building_ghost_at_point(world_point).is_empty()
 
 
+func get_ghost_handle_for_id(gid: int) -> FogGhostInspectHandle:
+	if gid < 0 or _fog_system == null or not is_instance_valid(_fog_system) or _inspect_handle == null:
+		return null
+	if _fog_system.get_building_ghost_by_id(gid).is_empty():
+		return null
+	_inspect_handle.bind_ghost(gid, _fog_system, self)
+	return _inspect_handle
+
+
 func get_ghost_handle_at_point(world_point: Vector2) -> FogGhostInspectHandle:
 	if _fog_system == null or not is_instance_valid(_fog_system) or _inspect_handle == null:
 		return null

@@ -150,6 +150,80 @@ func query_units_in_radius(center: Vector2, radius: float, filter_team: int = -9
 	return results
 
 
+func query_units_in_rect(world_rect: Rect2, filter_team: int = -99) -> Array[Unit]:
+	var results: Array[Unit] = []
+	var padded: Rect2 = world_rect.grow(36.0)
+	var min_c: Vector2i = world_to_cell(padded.position)
+	var max_c: Vector2i = world_to_cell(padded.end)
+
+	for cy: int in range(min_c.y, max_c.y + 1):
+		for cx: int in range(min_c.x, max_c.x + 1):
+			var key: Vector2i = Vector2i(cx, cy)
+			if not _unit_buckets.has(key):
+				continue
+			var bucket: Array = _unit_buckets[key]
+			var i: int = bucket.size() - 1
+			while i >= 0:
+				var item: Variant = bucket[i]
+				if not is_instance_valid(item) or not (item is Unit):
+					var last: int = bucket.size() - 1
+					if i != last:
+						bucket[i] = bucket[last]
+					bucket.pop_back()
+					i -= 1
+					continue
+				var u: Unit = item as Unit
+				if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
+					i -= 1
+					continue
+				if filter_team != -99 and int(u.team) != filter_team:
+					i -= 1
+					continue
+				if padded.has_point(u.global_position):
+					results.append(u)
+				i -= 1
+			if bucket.is_empty():
+				_unit_buckets.erase(key)
+	return results
+
+
+func query_buildings_in_rect(world_rect: Rect2, filter_team: int = -99) -> Array[Building]:
+	var results: Array[Building] = []
+	var padded: Rect2 = world_rect.grow(72.0)
+	var min_c: Vector2i = world_to_cell(padded.position)
+	var max_c: Vector2i = world_to_cell(padded.end)
+
+	for cy: int in range(min_c.y, max_c.y + 1):
+		for cx: int in range(min_c.x, max_c.x + 1):
+			var key: Vector2i = Vector2i(cx, cy)
+			if not _building_buckets.has(key):
+				continue
+			var bucket: Array = _building_buckets[key]
+			var i: int = bucket.size() - 1
+			while i >= 0:
+				var item: Variant = bucket[i]
+				if not is_instance_valid(item) or not (item is Building):
+					var last: int = bucket.size() - 1
+					if i != last:
+						bucket[i] = bucket[last]
+					bucket.pop_back()
+					i -= 1
+					continue
+				var b: Building = item as Building
+				if b.is_destroyed or b.is_queued_for_deletion():
+					i -= 1
+					continue
+				if filter_team != -99 and int(b.team) != filter_team:
+					i -= 1
+					continue
+				if padded.has_point(b.global_position):
+					results.append(b)
+				i -= 1
+			if bucket.is_empty():
+				_building_buckets.erase(key)
+	return results
+
+
 func query_buildings_in_radius(center: Vector2, radius: float, filter_team: int = -99) -> Array[Building]:
 	var results: Array[Building] = []
 	var safe_r: float = maxf(0.0, radius)
