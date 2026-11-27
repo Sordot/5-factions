@@ -4,6 +4,8 @@ extends Node2D
 signal controller_changed(new_team: int)
 signal capture_state_changed(progress: float, contested: bool, controller: int)
 
+const SCAN_INTERVAL: float = 0.15
+
 @export var capture_radius: float = 140.0
 @export var capture_time: float = 8.0
 @export var production_bonus_pct: float = 0.05
@@ -19,11 +21,19 @@ var is_hovered: bool = false
 
 var _pulse_time: float = 0.0
 var _occupant_count: int = 0
+var _scan_accum: float = 0.0
+var _fog_cache: FogOfWarSystem = null
+var _last_known_controller: int = -1
+var _last_known_capturing: int = -1
+var _last_known_progress: float = 0.0
+var _last_known_contested: bool = false
+var _last_known_occupants: int = 0
 
 
 func _ready() -> void:
 	add_to_group("hyper_uplinks")
 	z_index = -5
+	_sync_last_known_if_visible()
 	queue_redraw()
 
 
@@ -33,9 +43,52 @@ func reset_uplink() -> void:
 	controlling_alliance = -1
 	is_contested = false
 	_occupant_count = 0
+	_scan_accum = 0.0
+	_last_known_controller = -1
+	_last_known_capturing = -1
+	_last_known_progress = 0.0
+	_last_known_contested = false
+	_last_known_occupants = 0
 	_set_controller(-1)
 	capture_state_changed.emit(capture_progress, is_contested, controlling_team)
 	queue_redraw()
+
+
+func is_live_visible_to_viewer() -> bool:
+	if GameConfig != null and GameConfig.is_spectator_mode():
+		return true
+	if not is_inside_tree():
+		return true
+	if _fog_cache == null or not is_instance_valid(_fog_cache):
+		_fog_cache = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	if _fog_cache == null or not _fog_cache.fog_enabled:
+		return true
+	return _fog_cache.is_world_pos_visible_strict(global_position)
+
+
+func _sync_last_known_if_visible() -> void:
+	if is_live_visible_to_viewer():
+		_last_known_controller = controlling_team
+		_last_known_capturing = capturing_team
+		_last_known_progress = capture_progress
+		_last_known_contested = is_contested
+		_last_known_occupants = _occupant_count
+
+
+func _is_on_screen() -> bool:
+	if not is_inside_tree():
+		return false
+	var vp: Viewport = get_viewport()
+	var cam: Camera2D = vp.get_camera_2d() if vp != null else null
+	if cam == null:
+		return true
+	var zoom_x: float = maxf(0.15, cam.zoom.x)
+	var zoom_y: float = maxf(0.15, cam.zoom.y)
+	var vis_sz: Vector2 = vp.get_visible_rect().size
+	var pad: float = capture_radius + 80.0
+	var half_world: Vector2 = Vector2(vis_sz.x / zoom_x, vis_sz.y / zoom_y) * 0.5 + Vector2(pad, pad)
+	var cam_rect: Rect2 = Rect2(cam.get_screen_center_position() - half_world, half_world * 2.0)
+	return cam_rect.has_point(global_position)
 
 
 func contains_point(world_point: Vector2) -> bool:
@@ -58,6 +111,17 @@ func set_hovered(hovered: bool) -> void:
 
 func _process(delta: float) -> void:
 	_pulse_time += delta
+	if is_selected or is_hovered or _is_on_screen():
+		queue_redraw()
+
+
+func _physics_process(delta: float) -> void:
+	_scan_accum += delta
+	if _scan_accum < SCAN_INTERVAL:
+		return
+	var step_dt: float = _scan_accum
+	_scan_accum = 0.0
+
 	var alliance_units: Dictionary = {} # alliance_id -> {team_id: count}
 	var radius_sq: float = capture_radius * capture_radius
 	var occ_total: int = 0
@@ -68,6 +132,8 @@ func _process(delta: float) -> void:
 			continue
 		var unit: Unit = node as Unit
 		if unit.is_dead or unit.is_staffed or unit.is_queued_for_deletion():
+			continue
+		if unit.data == null or not unit.data.is_combat_unit():
 			continue
 		if global_position.distance_squared_to(unit.global_position) <= radius_sq:
 			occ_total += 1
@@ -89,7 +155,7 @@ func _process(delta: float) -> void:
 		is_contested = false
 		var sole_ally: int = int(alliance_units.keys()[0])
 		var bucket: Dictionary = alliance_units[sole_ally]
-		# Pick the team in the occupying alliance with the most units inside the zone (tie-break: current controller/lowest tid)
+		# Pick the team in the occupying alliance with the most combat units inside the zone (tie-break: current controller/lowest tid)
 		var lead_team: int = -1
 		var lead_count: int = -1
 		for raw_t: Variant in bucket.keys():
@@ -106,12 +172,12 @@ func _process(delta: float) -> void:
 		if capturing_team < 0 or same_alliance_as_owner:
 			if capturing_team < 0:
 				capturing_team = lead_team
-			capture_progress = minf(1.0, capture_progress + rate * delta)
+			capture_progress = minf(1.0, capture_progress + rate * step_dt)
 			if capture_progress >= 1.0:
 				_set_controller(capturing_team)
 		else:
 			# Neutralize hostile control first, then flip ownership
-			capture_progress = maxf(0.0, capture_progress - rate * delta)
+			capture_progress = maxf(0.0, capture_progress - rate * step_dt)
 			if capture_progress <= 0.0:
 				capturing_team = lead_team
 				if controlling_team >= 0:
@@ -119,7 +185,7 @@ func _process(delta: float) -> void:
 	else:
 		is_contested = false
 		# Gently decay partial uncaptured progress back toward current owner when unoccupied.
-		var decay_rate: float = rate * 0.35 * delta
+		var decay_rate: float = rate * 0.35 * step_dt
 		if controlling_team >= 0:
 			capture_progress = minf(1.0, capture_progress + decay_rate)
 			capturing_team = controlling_team
@@ -127,6 +193,8 @@ func _process(delta: float) -> void:
 			capture_progress = maxf(0.0, capture_progress - decay_rate)
 			if capture_progress <= 0.0:
 				capturing_team = -1
+
+	_sync_last_known_if_visible()
 
 	if not is_equal_approx(prev_progress, capture_progress) or prev_contested != is_contested:
 		capture_state_changed.emit(capture_progress, is_contested, controlling_team)
@@ -137,8 +205,6 @@ func _process(delta: float) -> void:
 				if mm.has_method("emit_tactical_event"):
 					mm.call("emit_tactical_event", &"objective", "Hyper-Uplink Contested!", global_position, Color(1.0, 0.80, 0.24, 1.0))
 
-	queue_redraw()
-
 
 func _set_controller(next_team: int) -> void:
 	if controlling_team == next_team:
@@ -148,6 +214,7 @@ func _set_controller(next_team: int) -> void:
 		controlling_alliance = TeamManager.get_team_alliance(controlling_team) if TeamManager != null else controlling_team
 	else:
 		controlling_alliance = -1
+	_sync_last_known_if_visible()
 	var econ: EconomyManager = get_tree().get_first_node_in_group("economy_manager") as EconomyManager
 	if econ != null:
 		econ.set_uplink_controller(controlling_team, production_bonus_pct)
@@ -156,20 +223,17 @@ func _set_controller(next_team: int) -> void:
 		var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 		var is_friendly: bool = local_team >= 0 and (TeamManager.are_allies(local_team, controlling_team) if TeamManager != null else (controlling_team == local_team))
 		var team_tag: String = TeamManager.get_team_short_label(controlling_team, true) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (controlling_team + 1))
-		var msg: String = "Hyper-Uplink Captured (+5%%)" if is_friendly else ("%s Captured Hyper-Uplink!" % team_tag)
+		var pct_int: int = int(round(production_bonus_pct * 100.0))
+		var msg: String = ("Hyper-Uplink Captured (+%d%%)" % pct_int) if is_friendly else ("%s Captured Hyper-Uplink (+%d%%)" % [team_tag, pct_int])
 		mm.push_tactical_alert(global_position, &"uplink_contested", msg)
 		if mm.has_method("emit_tactical_event"):
-			var feed_msg: String = "%s Captured Hyper-Uplink (+5%%)" % team_tag
+			var feed_msg: String = "%s Captured Hyper-Uplink (+%d%%)" % [team_tag, pct_int]
 			mm.call("emit_tactical_event", &"objective", feed_msg, global_position, Color(1.0, 0.84, 0.28, 1.0))
 	controller_changed.emit(controlling_team)
 
 
 func _draw() -> void:
-	var has_live_vision: bool = true
-	if is_inside_tree():
-		var fog: Node = get_tree().get_first_node_in_group("fog_of_war")
-		if fog != null and fog.has_method("is_world_pos_visible") and fog.get("fog_enabled"):
-			has_live_vision = fog.is_world_pos_visible(global_position)
+	var has_live_vision: bool = is_live_visible_to_viewer()
 
 	var base_col: Color = Color(0.62, 0.72, 0.82, 0.8)
 	var status_text: String = "DATA HYPER-UPLINK  —  NEUTRAL"
@@ -212,6 +276,19 @@ func _draw() -> void:
 		var arc_c: Color = TeamManager.get_team_color(capturing_team) if TeamManager != null else Color(0.18, 0.98, 0.92, 1.0)
 		draw_arc(Vector2.ZERO, capture_radius - 6.0, -PI * 0.5, -PI * 0.5 + TAU * mag, 56, Color(arc_c.r, arc_c.g, arc_c.b, 0.98), 5.0, true)
 
+	# Alternating segmented contest warning ring when opposing combat units clash inside
+	if has_live_vision and is_contested:
+		var seg_count: int = 16
+		var seg_step: float = TAU / float(seg_count)
+		var rot_off: float = _pulse_time * 0.95
+		var warn_amber: Color = Color(1.0, 0.80, 0.22, 0.92)
+		var warn_crimson: Color = Color(1.0, 0.26, 0.24, 0.90)
+		for s_i: int in range(seg_count):
+			var a0: float = rot_off + float(s_i) * seg_step + 0.045
+			var a1: float = rot_off + float(s_i + 1) * seg_step - 0.045
+			var s_col: Color = warn_amber if (s_i % 2 == 0) else warn_crimson
+			draw_arc(Vector2.ZERO, capture_radius + 3.0, a0, a1, 6, s_col, 3.2, true)
+
 	# Central uplink pylon geometry + hover/selection ring
 	if is_hovered and not is_selected:
 		draw_arc(Vector2.ZERO, selection_radius, 0.0, TAU, 32, Color(0.28, 0.88, 1.0, 0.60), 1.6, true)
@@ -237,24 +314,37 @@ func _draw() -> void:
 
 
 func get_inspection_data() -> Dictionary:
+	var live_vis: bool = is_live_visible_to_viewer()
+	if live_vis:
+		_sync_last_known_if_visible()
+
+	var disp_controller: int = controlling_team if live_vis else _last_known_controller
+	var disp_progress: float = capture_progress if live_vis else _last_known_progress
+	var disp_contested: bool = is_contested if live_vis else _last_known_contested
+	var disp_occupants: int = _occupant_count if live_vis else _last_known_occupants
+
 	var accent: Color = Color(0.98, 0.82, 0.30, 1.0)
 	var controller_str: String = "Neutral"
 	var affiliation: StringName = &"neutral"
 	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 
-	if is_contested:
+	if disp_contested:
 		controller_str = "CONTESTED"
 		accent = Color(1.0, 0.72, 0.22, 1.0)
-	elif controlling_team >= 0:
-		accent = TeamManager.get_team_color(controlling_team) if TeamManager != null else Color(0.20, 0.96, 0.88, 1.0)
-		controller_str = TeamManager.get_team_short_label(controlling_team, true) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (controlling_team + 1))
-		var is_ally: bool = local_team < 0 or (TeamManager.are_allies(local_team, controlling_team) if TeamManager != null else (controlling_team == local_team))
+	elif disp_controller >= 0:
+		accent = TeamManager.get_team_color(disp_controller) if TeamManager != null else Color(0.20, 0.96, 0.88, 1.0)
+		controller_str = TeamManager.get_team_short_label(disp_controller, true) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (disp_controller + 1))
+		var is_ally: bool = local_team < 0 or (TeamManager.are_allies(local_team, disp_controller) if TeamManager != null else (disp_controller == local_team))
 		affiliation = &"player" if is_ally else &"enemy"
 
-	var cap_pct: int = int(round(clampf(capture_progress, 0.0, 1.0) * 100.0))
+	if not live_vis:
+		controller_str = "%s (LAST KNOWN)" % controller_str
+
+	var cap_pct: int = int(round(clampf(disp_progress, 0.0, 1.0) * 100.0))
+	var cap_val_str: String = ("%d%% (%d Combat Units)" % [cap_pct, disp_occupants]) if live_vis else ("%d%% (LAST KNOWN)" % cap_pct)
 	var stats: Array[Dictionary] = [
 		{"label": "Controller", "value": controller_str, "color": accent},
-		{"label": "Capture", "value": "%d%% (%d Units)" % [cap_pct, _occupant_count]},
+		{"label": "Capture", "value": cap_val_str},
 		{"label": "Alliance Bonus", "value": "+%d%% Prod Speed" % int(round(production_bonus_pct * 100.0)), "color": Color(0.28, 0.98, 0.86, 1.0)},
 	]
 
@@ -288,7 +378,7 @@ func get_inspection_data() -> Dictionary:
 
 	return {
 		"title": "Data Hyper-Uplink",
-		"subtitle": "STRATEGIC SECTOR OBJECTIVE",
+		"subtitle": "STRATEGIC SECTOR OBJECTIVE" if live_vis else "STRATEGIC SECTOR OBJECTIVE (LAST KNOWN)",
 		"affiliation": affiliation,
 		"accent_color": accent,
 		"ring_color": accent,
@@ -300,5 +390,5 @@ func get_inspection_data() -> Dictionary:
 		"primary_bar_color": accent,
 		"stats": stats,
 		"is_commandable": false,
-		"readonly_label": "STRATEGIC OBJECTIVE — CAPTURE WITH UNITS",
+		"readonly_label": "STRATEGIC OBJECTIVE — CAPTURE WITH COMBAT UNITS",
 	}

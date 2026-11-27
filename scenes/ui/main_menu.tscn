@@ -464,6 +464,17 @@ theme_override_font_sizes/font_size = 10
 clip_text = true
 fit_to_longest_item = false
 
+[node name="OptProcArchetype" type="OptionButton" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ProcMapOptionsBox/ProcRow1"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 22)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+tooltip_text = "Tactical map layout archetype (blind scouting preserved — no minimap preview)"
+theme_override_font_sizes/font_size = 10
+clip_text = true
+fit_to_longest_item = false
+
 [node name="ProcRow2" type="HBoxContainer" parent="RootMargin/RootVBox/BodyHBox/ConfigPanel/ConfigVBox/SkirmishConfigBox/ProcMapOptionsBox"]
 layout_mode = 2
 theme_override_constants/separation = 4

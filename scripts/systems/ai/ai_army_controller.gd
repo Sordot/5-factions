@@ -589,7 +589,9 @@ func tick_attacking_state(core: Building) -> void:
 	if not idle_wave.is_empty():
 		current_attack_target = select_wave_target(wave_number, core)
 		var router: CommandRouter = ai.get_command_router()
-		var slots: Array[Vector2] = router.assign_group_destinations(idle_wave, current_attack_target) if router != null else []
+		var slots: Array[Vector2] = []
+		if router != null:
+			slots = router.assign_group_destinations(idle_wave, current_attack_target)
 		var repush_gid: int = CommandRouter.allocate_move_group_id() if idle_wave.size() > 1 else 0
 		for i: int in range(idle_wave.size()):
 			var dest: Vector2 = slots[i] if i < slots.size() else current_attack_target
@@ -764,7 +766,9 @@ func launch_wave_from_units(squad: Array[Unit], core: Building, allow_flank: boo
 		ai.try_emit_ai_transmission(&"wave_launch", Vector2.INF)
 
 	var router: CommandRouter = ai.get_command_router()
-	var destinations: Array[Vector2] = router.assign_group_destinations(wave_units, current_attack_target) if router != null else []
+	var destinations: Array[Vector2] = []
+	if router != null:
+		destinations = router.assign_group_destinations(wave_units, current_attack_target)
 
 	var use_flank: bool = allow_flank and wave_number >= 2 and (wave_number % 2) == 0
 	var flank_wp: Vector2 = Vector2.ZERO
@@ -835,7 +839,9 @@ func rally_idle_combat_to_staging(exclude_active_wave: bool = false) -> void:
 	var core_ref: Building = ai.find_ai_command_core()
 	var back_pos: Vector2 = core_ref.global_position if core_ref != null else Vector2.ZERO
 	var router: CommandRouter = ai.get_command_router()
-	var slots: Array[Vector2] = router.assign_group_destinations(strays, staging_point) if router != null else []
+	var slots: Array[Vector2] = []
+	if router != null:
+		slots = router.assign_group_destinations(strays, staging_point)
 	var rally_gid: int = CommandRouter.allocate_move_group_id() if strays.size() > 1 else 0
 	for i: int in range(strays.size()):
 		var dest: Vector2 = slots[i] if i < slots.size() else staging_point

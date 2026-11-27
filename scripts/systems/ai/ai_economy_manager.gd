@@ -771,8 +771,11 @@ func manage_economy_and_production(econ: EconomyManager, core: Building) -> void
 	var max_workers_cap: int = 8 if ai.is_relaxed_difficulty() else (16 if is_brutal else 12)
 	var eff_target_workers: int = mini(max_workers_cap, ai.target_worker_count + 4 * maxi(0, constructed_hubs.size() - 1))
 	if worker_data != null and total_workers < eff_target_workers:
-		var hub_pool: Array[Building] = constructed_hubs if not constructed_hubs.is_empty() else [core]
-		var sorted_hubs: Array[Building] = hub_pool.duplicate()
+		var sorted_hubs: Array[Building] = []
+		if not constructed_hubs.is_empty():
+			sorted_hubs = constructed_hubs.duplicate()
+		elif core != null:
+			sorted_hubs.append(core)
 		sorted_hubs.sort_custom(func(a: Building, b: Building) -> bool:
 			return a.get_training_queue_size() < b.get_training_queue_size()
 		)

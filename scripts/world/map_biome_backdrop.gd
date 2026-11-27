@@ -8,13 +8,55 @@ extends Node2D
 @export var biome_id: StringName = &"vat_basin"
 @export var arena_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 
+var _spawn_pts: Array[Vector2] = []
+var _uplink_pt: Vector2 = Vector2.ZERO
+var _barricade_pts: Array[Dictionary] = [] # {"pos": Vector2, "rot": float}
+var _anchors_collected: bool = false
+
 
 func _ready() -> void:
 	z_index = -100
 	set_process(false)
 	set_physics_process(false)
 	_sync_bounds_from_nav_region()
+	_collect_dynamic_anchors()
 	queue_redraw()
+
+
+func refresh_anchors() -> void:
+	_sync_bounds_from_nav_region()
+	_collect_dynamic_anchors()
+	queue_redraw()
+
+
+func _collect_dynamic_anchors() -> void:
+	_spawn_pts.clear()
+	_uplink_pt = Vector2.ZERO
+	_barricade_pts.clear()
+	if not is_inside_tree():
+		return
+	var tree: SceneTree = get_tree()
+	for node: Node in tree.get_nodes_in_group("spawn_anchors"):
+		if is_instance_valid(node) and node is Node2D:
+			_spawn_pts.append(to_local((node as Node2D).global_position))
+	var uplink: Node = tree.get_first_node_in_group("hyper_uplinks")
+	if is_instance_valid(uplink) and uplink is Node2D:
+		_uplink_pt = to_local((uplink as Node2D).global_position)
+	for b_node: Node in tree.get_nodes_in_group("destructible_barricades"):
+		if is_instance_valid(b_node) and b_node is Node2D:
+			var bn: Node2D = b_node as Node2D
+			_barricade_pts.append({"pos": to_local(bn.global_position), "rot": bn.rotation})
+	_anchors_collected = true
+
+
+func _get_spawn_points_or_fallback(fallback: Array) -> Array[Vector2]:
+	if not _spawn_pts.is_empty():
+		return _spawn_pts
+	var out: Array[Vector2] = []
+	for pt: Variant in fallback:
+		if pt is Vector2:
+			out.append(pt as Vector2)
+	return out
 
 
 func _sync_bounds_from_nav_region() -> void:
@@ -28,6 +70,8 @@ func _sync_bounds_from_nav_region() -> void:
 
 
 func _draw() -> void:
+	if not _anchors_collected and is_inside_tree():
+		_collect_dynamic_anchors()
 	match biome_id:
 		&"twin_causeway":
 			_draw_twin_causeway()
@@ -37,6 +81,7 @@ func _draw() -> void:
 			_draw_triad_sanctum()
 		_:
 			_draw_vat_basin()
+	_draw_arena_perimeter_frame()
 
 
 # =============================================================================
@@ -55,11 +100,14 @@ func _draw_vat_basin() -> void:
 	# 1. Base bio-basin deck fill
 	draw_rect(b, Color.html("#081018"), true)
 
+	var bases: Array[Vector2] = _get_spawn_points_or_fallback([Vector2(-900.0, 560.0), Vector2(900.0, -560.0)])
+	var center_pt: Vector2 = _uplink_pt
+
 	# 2. Soft recessed basin gradient rings (very low alpha so units pop)
-	draw_circle(Vector2.ZERO, 620.0, Color(0.06, 0.17, 0.22, 0.14))
-	draw_circle(Vector2.ZERO, 390.0, Color(0.08, 0.24, 0.28, 0.11))
-	draw_circle(Vector2(-900.0, 560.0), 340.0, Color(0.06, 0.20, 0.24, 0.12))
-	draw_circle(Vector2(900.0, -560.0), 340.0, Color(0.06, 0.20, 0.24, 0.12))
+	draw_circle(center_pt, 620.0, Color(0.06, 0.17, 0.22, 0.14))
+	draw_circle(center_pt, 390.0, Color(0.08, 0.24, 0.28, 0.11))
+	for base_pt: Vector2 in bases:
+		draw_circle(base_pt, 340.0, Color(0.06, 0.20, 0.24, 0.12))
 
 	# 3. Orthogonal laboratory grid: 64px faint minor / 128px subtle major
 	var minor_col: Color = Color(0.20, 0.56, 0.62, 0.055)
@@ -75,42 +123,47 @@ func _draw_vat_basin() -> void:
 		draw_line(Vector2(min_x, y), Vector2(max_x, y), major_col if is_major_y else minor_col, 1.0)
 		y += 64.0
 
-	# 4. Faint diagonal bio-conduit channels connecting bases -> plaza & NW/SE terraces
+	# 4. Faint diagonal bio-conduit channels connecting each real spawn base -> plaza
 	var conduit_outer: Color = Color(0.14, 0.64, 0.60, 0.085)
 	var conduit_core: Color = Color(0.28, 0.88, 0.76, 0.095)
-	var conduits: Array[Array] = [
-		[Vector2(-900.0, 560.0), Vector2(-380.0, 220.0), Vector2.ZERO],
-		[Vector2(900.0, -560.0), Vector2(380.0, -220.0), Vector2.ZERO],
-		[Vector2(-900.0, 560.0), Vector2(-820.0, -480.0), Vector2(-260.0, -260.0), Vector2.ZERO],
-		[Vector2(900.0, -560.0), Vector2(820.0, 480.0), Vector2(260.0, 260.0), Vector2.ZERO],
-	]
-	for path_pts: Array in conduits:
-		var packed: PackedVector2Array = PackedVector2Array()
-		for pt: Vector2 in path_pts:
-			packed.append(pt)
+	for base_pt: Vector2 in bases:
+		var mid_pt: Vector2 = base_pt.lerp(center_pt, 0.56)
+		var packed: PackedVector2Array = PackedVector2Array([base_pt, mid_pt, center_pt])
 		draw_polyline(packed, conduit_outer, 14.0, true)
 		draw_polyline(packed, conduit_core, 2.0, true)
+	if _spawn_pts.is_empty():
+		var static_flanks: Array[Array] = [
+			[Vector2(-900.0, 560.0), Vector2(-820.0, -480.0), Vector2(-260.0, -260.0), center_pt],
+			[Vector2(900.0, -560.0), Vector2(820.0, 480.0), Vector2(260.0, 260.0), center_pt],
+		]
+		for path_pts: Array in static_flanks:
+			var packed_f: PackedVector2Array = PackedVector2Array()
+			for pt: Vector2 in path_pts:
+				packed_f.append(pt)
+			draw_polyline(packed_f, conduit_outer, 14.0, true)
+			draw_polyline(packed_f, conduit_core, 2.0, true)
 
-	# 5. Concentric topographic basin contour rings around central Hyper-Uplink (0,0)
+	# 5. Concentric topographic basin contour rings around central Hyper-Uplink
 	var contour_col: Color = Color(0.26, 0.78, 0.76, 0.11)
 	var contour_faint: Color = Color(0.22, 0.68, 0.70, 0.075)
 	for rad: float in [150.0, 250.0, 360.0, 490.0, 640.0]:
 		var col: Color = contour_col if rad <= 360.0 else contour_faint
-		draw_arc(Vector2.ZERO, rad, 0.0, TAU, 64, col, 1.4, true)
+		draw_arc(center_pt, rad, 0.0, TAU, 64, col, 1.4, true)
 		# Subtle cardinal registration ticks
 		for ang: float in [0.0, PI * 0.5, PI, PI * 1.5]:
 			var dir: Vector2 = Vector2.from_angle(ang)
-			draw_line(dir * (rad - 6.0), dir * (rad + 6.0), col, 1.2)
+			draw_line(center_pt + dir * (rad - 6.0), center_pt + dir * (rad + 6.0), col, 1.2)
 
-	# 6. Circular pad contours around the two corner Vat Basins + NW/SE expansion pads
-	for base_center: Vector2 in [Vector2(-900.0, 560.0), Vector2(900.0, -560.0)]:
+	# 6. Circular pad contours around each actual spawn base (+ classic NW/SE pads on static fallback)
+	for base_center: Vector2 in bases:
 		draw_arc(base_center, 155.0, 0.0, TAU, 48, contour_col, 1.5, true)
 		draw_arc(base_center, 235.0, 0.0, TAU, 56, contour_faint, 1.2, true)
 		draw_arc(base_center, 315.0, 0.0, TAU, 64, Color(0.20, 0.62, 0.66, 0.055), 1.0, true)
 
-	for exp_center: Vector2 in [Vector2(-820.0, -480.0), Vector2(820.0, 480.0)]:
-		draw_arc(exp_center, 115.0, 0.0, TAU, 36, contour_faint, 1.2, true)
-		draw_arc(exp_center, 185.0, 0.0, TAU, 44, Color(0.20, 0.62, 0.66, 0.055), 1.0, true)
+	if _spawn_pts.is_empty():
+		for exp_center: Vector2 in [Vector2(-820.0, -480.0), Vector2(820.0, 480.0)]:
+			draw_arc(exp_center, 115.0, 0.0, TAU, 36, contour_faint, 1.2, true)
+			draw_arc(exp_center, 185.0, 0.0, TAU, 44, Color(0.20, 0.62, 0.66, 0.055), 1.0, true)
 
 
 # =============================================================================
@@ -163,41 +216,48 @@ func _draw_twin_causeway() -> void:
 		py += plate_h
 		row_idx += 1
 
-	# 4. Industrial hazard striping (#FF9F1C at ~0.11 alpha) framing key tactical lanes
+	# 4. Industrial hazard striping (#FF9F1C at ~0.11 alpha) framing key tactical lanes & barricades
 	var amber_hazard: Color = Color(1.0, 0.624, 0.11, 0.115)
 	var amber_border: Color = Color(1.0, 0.624, 0.11, 0.16)
-	# Central Causeway Bridge north & south apron stripes (flanking the CausewayWalls at y = ±340)
-	_draw_hazard_strip(Rect2(-460.0, -296.0, 920.0, 22.0), amber_hazard, amber_border, 22.0)
-	_draw_hazard_strip(Rect2(-460.0, 274.0, 920.0, 22.0), amber_hazard, amber_border, 22.0)
-	# Barricade-sealed North & South flank bypass corridors (around x = ±160, y = ±760)
-	_draw_hazard_strip(Rect2(-340.0, -854.0, 360.0, 16.0), amber_hazard, amber_border, 18.0)
-	_draw_hazard_strip(Rect2(-340.0, -682.0, 360.0, 16.0), amber_hazard, amber_border, 18.0)
-	_draw_hazard_strip(Rect2(-20.0, 666.0, 360.0, 16.0), amber_hazard, amber_border, 18.0)
-	_draw_hazard_strip(Rect2(-20.0, 838.0, 360.0, 16.0), amber_hazard, amber_border, 18.0)
-	# NW & SE Vault Seal vertical hazard markers (around (-720, -240) and (720, 240))
-	_draw_hazard_strip(Rect2(-804.0, -252.0, 168.0, 14.0), amber_hazard, amber_border, 16.0)
-	_draw_hazard_strip(Rect2(636.0, 238.0, 168.0, 14.0), amber_hazard, amber_border, 16.0)
+	var center_pt: Vector2 = _uplink_pt
+	# Central Causeway Bridge north & south apron stripes
+	_draw_hazard_strip(Rect2(center_pt + Vector2(-460.0, -296.0), Vector2(920.0, 22.0)), amber_hazard, amber_border, 22.0)
+	_draw_hazard_strip(Rect2(center_pt + Vector2(-460.0, 274.0), Vector2(920.0, 22.0)), amber_hazard, amber_border, 22.0)
 
-	# 5. Subtle central loading-bay frame around the Bridge Plaza (0,0)
-	draw_rect(Rect2(-240.0, -180.0, 480.0, 360.0), Color(0.75, 0.80, 0.86, 0.08), false, 1.8)
-	draw_line(Vector2(-460.0, 0.0), Vector2(-140.0, 0.0), Color(1.0, 0.624, 0.11, 0.085), 2.0)
-	draw_line(Vector2(140.0, 0.0), Vector2(460.0, 0.0), Color(1.0, 0.624, 0.11, 0.085), 2.0)
+	if not _barricade_pts.is_empty():
+		for b_entry: Dictionary in _barricade_pts:
+			var bp: Vector2 = b_entry["pos"] as Vector2
+			var br: float = float(b_entry["rot"])
+			_draw_rotated_hazard_strip(bp, br, 176.0, 22.0, amber_hazard, amber_border, 18.0)
+	else:
+		# Classic skirmish_arena_02.tscn fallback hazard markers
+		_draw_hazard_strip(Rect2(-340.0, -854.0, 360.0, 16.0), amber_hazard, amber_border, 18.0)
+		_draw_hazard_strip(Rect2(-340.0, -682.0, 360.0, 16.0), amber_hazard, amber_border, 18.0)
+		_draw_hazard_strip(Rect2(-20.0, 666.0, 360.0, 16.0), amber_hazard, amber_border, 18.0)
+		_draw_hazard_strip(Rect2(-20.0, 838.0, 360.0, 16.0), amber_hazard, amber_border, 18.0)
+		_draw_hazard_strip(Rect2(-804.0, -252.0, 168.0, 14.0), amber_hazard, amber_border, 16.0)
+		_draw_hazard_strip(Rect2(636.0, 238.0, 168.0, 14.0), amber_hazard, amber_border, 16.0)
+
+	# 5. Subtle central loading-bay frame around the Bridge Plaza
+	draw_rect(Rect2(center_pt + Vector2(-240.0, -180.0), Vector2(480.0, 360.0)), Color(0.75, 0.80, 0.86, 0.08), false, 1.8)
+	draw_line(center_pt + Vector2(-460.0, 0.0), center_pt + Vector2(-140.0, 0.0), Color(1.0, 0.624, 0.11, 0.085), 2.0)
+	draw_line(center_pt + Vector2(140.0, 0.0), center_pt + Vector2(460.0, 0.0), Color(1.0, 0.624, 0.11, 0.085), 2.0)
 
 	# 6. Etched directional lane chevrons pointing toward the center objective
 	var chev_col: Color = Color(0.84, 0.86, 0.88, 0.095)
 	for cx: float in [-420.0, -340.0, -260.0]:
-		_draw_chevron(Vector2(cx, 0.0), Vector2.RIGHT, 24.0, 38.0, chev_col)
+		_draw_chevron(center_pt + Vector2(cx, 0.0), Vector2.RIGHT, 24.0, 38.0, chev_col)
 	for cx_e: float in [420.0, 340.0, 260.0]:
-		_draw_chevron(Vector2(cx_e, 0.0), Vector2.LEFT, 24.0, 38.0, chev_col)
-	# Diagonal approach chevrons from West/East bases toward center bridge
-	for t: float in [0.28, 0.44]:
-		var w_pt: Vector2 = Vector2(-900.0, 420.0).lerp(Vector2(-320.0, 80.0), t)
-		_draw_chevron(w_pt, (Vector2(-320.0, 80.0) - Vector2(-900.0, 420.0)).normalized(), 18.0, 28.0, Color(0.76, 0.80, 0.84, 0.075))
-		var e_pt: Vector2 = Vector2(900.0, -420.0).lerp(Vector2(320.0, -80.0), t)
-		_draw_chevron(e_pt, (Vector2(320.0, -80.0) - Vector2(900.0, -420.0)).normalized(), 18.0, 28.0, Color(0.76, 0.80, 0.84, 0.075))
+		_draw_chevron(center_pt + Vector2(cx_e, 0.0), Vector2.LEFT, 24.0, 38.0, chev_col)
 
-	# 7. Industrial base pad frames around West & East Causeway Basins
-	for base_pos: Vector2 in [Vector2(-900.0, 420.0), Vector2(900.0, -420.0)]:
+	var bases: Array[Vector2] = _get_spawn_points_or_fallback([Vector2(-900.0, 420.0), Vector2(900.0, -420.0)])
+	for base_pos: Vector2 in bases:
+		var approach_dir: Vector2 = (center_pt - base_pos).normalized()
+		if approach_dir.length_squared() > 0.01:
+			for t: float in [0.28, 0.44]:
+				var pt_c: Vector2 = base_pos.lerp(center_pt, t)
+				_draw_chevron(pt_c, approach_dir, 18.0, 28.0, Color(0.76, 0.80, 0.84, 0.075))
+		# 7. Industrial base pad frames around each spawn anchor
 		var pad_r: Rect2 = Rect2(base_pos - Vector2(180.0, 160.0), Vector2(360.0, 320.0))
 		draw_rect(pad_r, Color(0.62, 0.68, 0.74, 0.085), false, 1.5)
 		_draw_corner_brackets(pad_r, 24.0, Color(1.0, 0.624, 0.11, 0.15), 2.2)
@@ -235,32 +295,40 @@ func _draw_quad_nexus() -> void:
 		draw_line(Vector2(min_x, gy), Vector2(max_x, gy), grid_major if is_major_y else grid_minor, 1.0)
 		gy += 80.0
 
-	# Cardinal meridian divider axes radiating cleanly from (0,0)
+	# Cardinal meridian divider axes radiating cleanly from Hyper-Uplink
+	var center_pt: Vector2 = _uplink_pt
 	var axis_col: Color = Color(0.42, 0.66, 0.96, 0.115)
-	draw_line(Vector2(min_x, 0.0), Vector2(max_x, 0.0), axis_col, 1.6)
-	draw_line(Vector2(0.0, min_y), Vector2(0.0, max_y), axis_col, 1.6)
+	draw_line(Vector2(min_x, center_pt.y), Vector2(max_x, center_pt.y), axis_col, 1.6)
+	draw_line(Vector2(center_pt.x, min_y), Vector2(center_pt.x, max_y), axis_col, 1.6)
 
-	# 3. Clean 45° diagonal bus traces linking all 4 spawn corners to the central Hyper-Uplink ring
+	# 3. Diagonal circuit bus traces linking each actual spawn anchor toward the central Hyper-Uplink ring
 	var bus_outer: Color = Color(0.32, 0.56, 0.94, 0.085)
 	var bus_inner: Color = Color(0.52, 0.78, 1.0, 0.125)
-	for sx: float in [-1.0, 1.0]:
-		for sy: float in [-1.0, 1.0]:
-			var corner_pt: Vector2 = Vector2(sx * 1180.0, sy * 1120.0)
-			var diag_start: Vector2 = Vector2(sx * 1080.0, sy * 1080.0)
-			var diag_end: Vector2 = Vector2(sx * 140.0, sy * 140.0)
-			var perp: Vector2 = Vector2(-sy, sx).normalized()
-			# Triple parallel circuit bus trace along exact 45° diagonal
-			draw_line(diag_start, diag_end, bus_outer, 14.0, true)
-			draw_line(diag_start, diag_end, bus_inner, 1.8, true)
-			draw_line(diag_start + perp * 16.0, diag_end + perp * 16.0, bus_outer, 1.4, true)
-			draw_line(diag_start - perp * 16.0, diag_end - perp * 16.0, bus_outer, 1.4, true)
-			# Small circuit node pads along the diagonal bus
-			for d: float in [420.0, 680.0, 920.0]:
-				var node_pt: Vector2 = Vector2(sx * d, sy * d)
+	var bases: Array[Vector2] = _get_spawn_points_or_fallback([
+		Vector2(-1180.0, -1120.0),
+		Vector2(1180.0, -1120.0),
+		Vector2(-1180.0, 1120.0),
+		Vector2(1180.0, 1120.0),
+	])
+	for corner_pt: Vector2 in bases:
+		var delta_v: Vector2 = corner_pt - center_pt
+		var total_d: float = delta_v.length()
+		if total_d > 220.0:
+			var dir_c: Vector2 = delta_v / total_d
+			var perp: Vector2 = Vector2(-dir_c.y, dir_c.x)
+			var bus_start: Vector2 = corner_pt - dir_c * 84.0
+			var bus_end: Vector2 = center_pt + dir_c * 175.0
+			# Triple parallel circuit bus trace along spawn -> uplink axis
+			draw_line(bus_start, bus_end, bus_outer, 14.0, true)
+			draw_line(bus_start, bus_end, bus_inner, 1.8, true)
+			draw_line(bus_start + perp * 16.0, bus_end + perp * 16.0, bus_outer, 1.4, true)
+			draw_line(bus_start - perp * 16.0, bus_end - perp * 16.0, bus_outer, 1.4, true)
+			# Circuit node pads spaced cleanly along each trace
+			for frac: float in [0.26, 0.54, 0.80]:
+				var node_pt: Vector2 = bus_end.lerp(bus_start, frac)
 				draw_circle(node_pt, 5.0, bus_inner)
 				draw_arc(node_pt, 10.0, 0.0, TAU, 16, bus_outer, 1.2, true)
-			# Short connector from corner basin into diagonal bus
-			draw_line(corner_pt, diag_start, bus_inner, 1.8, true)
+			draw_line(corner_pt, bus_start, bus_inner, 1.8, true)
 
 	# 4. Concentric octagonal telemetry rings around central plaza (180 px, 320 px, 520 px)
 	var oct_cols: Array[Color] = [
@@ -270,28 +338,31 @@ func _draw_quad_nexus() -> void:
 	]
 	var oct_rads: Array[float] = [180.0, 320.0, 520.0]
 	for idx: int in range(oct_rads.size()):
-		_draw_octagon(Vector2.ZERO, oct_rads[idx], oct_cols[idx], 1.6 if idx == 0 else 1.3)
+		_draw_octagon(center_pt, oct_rads[idx], oct_cols[idx], 1.6 if idx == 0 else 1.3)
 
-	# 5. Perimeter outer-corridor lane markers aligning with the 4 barricaded flank gates (±1060)
+	# 5. Perimeter outer-corridor lane markers & barricade gate alignment ticks
 	var corr_col: Color = Color(0.40, 0.66, 0.96, 0.095)
-	var corr_dash: Color = Color(0.52, 0.78, 1.0, 0.11)
-	var corr_rect_outer: Rect2 = Rect2(-1135.0, -1135.0, 2270.0, 2270.0)
-	var corr_rect_inner: Rect2 = Rect2(-985.0, -985.0, 1970.0, 1970.0)
-	draw_rect(corr_rect_outer, corr_col, false, 1.4)
-	draw_rect(corr_rect_inner, corr_col, false, 1.4)
-	# Subtle gate-lane alignment ticks around the 4 cardinal barricade seals
-	for gate_pos: Vector2 in [Vector2(0.0, -1060.0), Vector2(0.0, 1060.0), Vector2(-1060.0, 0.0), Vector2(1060.0, 0.0)]:
-		draw_rect(Rect2(gate_pos - Vector2(96.0, 44.0), Vector2(192.0, 88.0)), corr_dash, false, 1.4)
+	var corr_dash: Color = Color(0.52, 0.78, 1.0, 0.12)
+	var corr_outer: Rect2 = b.grow(-185.0)
+	var corr_inner: Rect2 = b.grow(-315.0)
+	if corr_outer.has_area():
+		draw_rect(corr_outer, corr_col, false, 1.4)
+	if corr_inner.has_area():
+		draw_rect(corr_inner, corr_col, false, 1.4)
+	if not _barricade_pts.is_empty():
+		for b_entry: Dictionary in _barricade_pts:
+			_draw_rotated_box_outline(b_entry["pos"] as Vector2, float(b_entry["rot"]), Vector2(96.0, 44.0), corr_dash, 1.4)
+	else:
+		for gate_pos: Vector2 in [Vector2(0.0, -1060.0), Vector2(0.0, 1060.0), Vector2(-1060.0, 0.0), Vector2(1060.0, 0.0)]:
+			draw_rect(Rect2(gate_pos - Vector2(96.0, 44.0), Vector2(192.0, 88.0)), corr_dash, false, 1.4)
 
-	# 6. Neutral quadrant corner brackets marking all 4 spawn sectors (zero team color bias)
+	# 6. Neutral spawn sector brackets aligned 1:1 with each actual spawn anchor
 	var neutral_bracket: Color = Color(0.68, 0.76, 0.90, 0.16)
 	var neutral_frame: Color = Color(0.46, 0.58, 0.78, 0.075)
-	for sx_q: float in [-1.0, 1.0]:
-		for sy_q: float in [-1.0, 1.0]:
-			var sector_center: Vector2 = Vector2(sx_q * 1180.0, sy_q * 1120.0)
-			var sector_rect: Rect2 = Rect2(sector_center - Vector2(210.0, 190.0), Vector2(420.0, 380.0))
-			draw_rect(sector_rect, neutral_frame, false, 1.2)
-			_draw_corner_brackets(sector_rect, 32.0, neutral_bracket, 2.4)
+	for sector_center: Vector2 in bases:
+		var sector_rect: Rect2 = Rect2(sector_center - Vector2(210.0, 190.0), Vector2(420.0, 380.0))
+		draw_rect(sector_rect, neutral_frame, false, 1.2)
+		_draw_corner_brackets(sector_rect, 32.0, neutral_bracket, 2.4)
 
 
 # =============================================================================
@@ -311,9 +382,10 @@ func _draw_triad_sanctum() -> void:
 	# 1. Deep obsidian-slate floor
 	draw_rect(b, Color(0.065, 0.068, 0.095, 1.0), true)
 
-	# 2. Subtle obsidian-violet radial floor wash centered on (0, 0)
-	draw_circle(Vector2.ZERO, 680.0, Color(0.11, 0.10, 0.16, 0.22))
-	draw_circle(Vector2.ZERO, 360.0, Color(0.14, 0.12, 0.20, 0.16))
+	# 2. Subtle obsidian-violet radial floor wash centered on Hyper-Uplink
+	var center_pt: Vector2 = _uplink_pt
+	draw_circle(center_pt, 680.0, Color(0.11, 0.10, 0.16, 0.22))
+	draw_circle(center_pt, 360.0, Color(0.14, 0.12, 0.20, 0.16))
 
 	# 3. 60° / 120° isometric-triangular alabaster lattice hairlines (low alpha 0.06-0.085)
 	var tri_minor: Color = Color(0.92, 0.90, 0.86, 0.062)
@@ -340,40 +412,46 @@ func _draw_triad_sanctum() -> void:
 		var b2: Vector2 = Vector2(ox, 0.0) + dir_120 * span
 		_draw_clipped_line(a2, b2, b, col_d, 1.0)
 
-	# 4. Concentric liturgical-gold & slate astrolabe rings around (0, 0)
+	# 4. Concentric liturgical-gold & slate astrolabe rings around Hyper-Uplink
 	var gold_ring: Color = Color(0.98, 0.80, 0.082, 0.13)
 	var gold_soft: Color = Color(0.98, 0.80, 0.082, 0.075)
 	var slate_ring: Color = Color(0.76, 0.78, 0.86, 0.085)
 	for rad: float in [165.0, 260.0, 410.0, 620.0, 900.0]:
 		var rc: Color = gold_ring if (rad <= 260.0 or is_equal_approx(rad, 900.0)) else slate_ring
-		draw_arc(Vector2.ZERO, rad, 0.0, TAU, 72, rc, 1.6 if rad <= 260.0 else 1.2, true)
+		draw_arc(center_pt, rad, 0.0, TAU, 72, rc, 1.6 if rad <= 260.0 else 1.2, true)
 	# Subtle inscribed 6-point sacred triangle ring at 260 px
 	var tri_a: PackedVector2Array = PackedVector2Array()
 	var tri_b: PackedVector2Array = PackedVector2Array()
 	for ti: int in range(4):
 		var ang_a: float = deg_to_rad(-90.0 + float(ti % 3) * 120.0)
 		var ang_b: float = deg_to_rad(90.0 + float(ti % 3) * 120.0)
-		tri_a.append(Vector2.from_angle(ang_a) * 260.0)
-		tri_b.append(Vector2.from_angle(ang_b) * 260.0)
+		tri_a.append(center_pt + Vector2.from_angle(ang_a) * 260.0)
+		tri_b.append(center_pt + Vector2.from_angle(ang_b) * 260.0)
 	draw_polyline(tri_a, gold_soft, 1.3, true)
 	draw_polyline(tri_b, slate_ring, 1.1, true)
 
-	# 5. Three crisp 120° radial meridian lines pointing toward the 3 corner sanctum basins (150°, 30°, -90°)
+	# 5. Radial meridian lines & sanctum pad rings aligned to each actual spawn anchor
 	var meridian_outer: Color = Color(0.98, 0.80, 0.082, 0.075)
 	var meridian_core: Color = Color(0.98, 0.80, 0.082, 0.15)
-	var spawn_angles: Array[float] = [deg_to_rad(150.0), deg_to_rad(30.0), deg_to_rad(-90.0)]
-	for ang_s: float in spawn_angles:
-		var dir_s: Vector2 = Vector2.from_angle(ang_s)
-		var basin_pt: Vector2 = dir_s * 900.0
-		draw_line(dir_s * 165.0, basin_pt, meridian_outer, 12.0, true)
-		draw_line(dir_s * 165.0, basin_pt, meridian_core, 1.8, true)
+	var bases: Array[Vector2] = _get_spawn_points_or_fallback([
+		center_pt + Vector2.from_angle(deg_to_rad(150.0)) * 900.0,
+		center_pt + Vector2.from_angle(deg_to_rad(30.0)) * 900.0,
+		center_pt + Vector2.from_angle(deg_to_rad(-90.0)) * 900.0,
+	])
+	var half_sector_ang: float = PI / maxf(2.0, float(bases.size()))
+	for basin_pt: Vector2 in bases:
+		var delta_s: Vector2 = basin_pt - center_pt
+		var dist_s: float = delta_s.length()
+		if dist_s > 170.0:
+			var dir_s: Vector2 = delta_s / dist_s
+			draw_line(center_pt + dir_s * 165.0, basin_pt, meridian_outer, 12.0, true)
+			draw_line(center_pt + dir_s * 165.0, basin_pt, meridian_core, 1.8, true)
+			var mid_dir: Vector2 = Vector2.from_angle(dir_s.angle() + half_sector_ang)
+			draw_line(center_pt + mid_dir * 260.0, center_pt + mid_dir * minf(1020.0, dist_s + 80.0), Color(0.85, 0.35, 0.94, 0.075), 1.4, true)
+			draw_arc(center_pt + mid_dir * minf(980.0, dist_s + 40.0), 125.0, 0.0, TAU, 36, gold_soft, 1.2, true)
 		# Observatory sanctum pad rings around each corner spawn basin (neutral alabaster-gold)
 		draw_arc(basin_pt, 145.0, 0.0, TAU, 48, gold_ring, 1.5, true)
 		draw_arc(basin_pt, 235.0, 0.0, TAU, 56, slate_ring, 1.2, true)
-		# Mid-flank counterpoint meridian ticks at +60°
-		var mid_dir: Vector2 = Vector2.from_angle(ang_s + deg_to_rad(60.0))
-		draw_line(mid_dir * 260.0, mid_dir * 1020.0, Color(0.85, 0.35, 0.94, 0.075), 1.4, true)
-		draw_arc(mid_dir * 980.0, 125.0, 0.0, TAU, 36, gold_soft, 1.2, true)
 
 
 func _draw_clipped_line(p0: Vector2, p1: Vector2, bounds: Rect2, col: Color, width: float) -> void:
@@ -467,3 +545,84 @@ func _draw_corner_brackets(rect: Rect2, arm: float, col: Color, width: float) ->
 	draw_line(Vector2(l, b), Vector2(l, b - arm), col, width)
 	draw_line(Vector2(r, b), Vector2(r - arm, b), col, width)
 	draw_line(Vector2(r, b), Vector2(r, b - arm), col, width)
+
+
+func _draw_rotated_hazard_strip(center: Vector2, rot: float, length: float, thickness: float, stripe_col: Color, border_col: Color, pitch: float) -> void:
+	var dir_l: Vector2 = Vector2.from_angle(rot)
+	var dir_t: Vector2 = Vector2(-dir_l.y, dir_l.x)
+	var hl: float = length * 0.5
+	var ht: float = thickness * 0.5
+	var p0: Vector2 = center - dir_l * hl - dir_t * ht
+	var p1: Vector2 = center + dir_l * hl - dir_t * ht
+	var p2: Vector2 = center + dir_l * hl + dir_t * ht
+	var p3: Vector2 = center - dir_l * hl + dir_t * ht
+	draw_polyline(PackedVector2Array([p0, p1, p2, p3, p0]), border_col, 1.2, true)
+
+	var half_p: float = pitch * 0.45
+	var sx: float = -hl - thickness
+	while sx < hl:
+		var t_l: float = clampf(sx + thickness, -hl, hl)
+		var t_r: float = clampf(sx + thickness + half_p, -hl, hl)
+		var b_r: float = clampf(sx + half_p, -hl, hl)
+		var b_l: float = clampf(sx, -hl, hl)
+		if t_r > t_l + 1.0 and b_r > b_l + 1.0:
+			var poly: PackedVector2Array = PackedVector2Array([
+				center + dir_l * t_l - dir_t * ht,
+				center + dir_l * t_r - dir_t * ht,
+				center + dir_l * b_r + dir_t * ht,
+				center + dir_l * b_l + dir_t * ht,
+			])
+			draw_colored_polygon(poly, stripe_col)
+		sx += pitch
+
+
+func _draw_rotated_box_outline(center: Vector2, rot: float, half_ext: Vector2, col: Color, width: float) -> void:
+	var dir_x: Vector2 = Vector2.from_angle(rot)
+	var dir_y: Vector2 = Vector2(-dir_x.y, dir_x.x)
+	var c0: Vector2 = center - dir_x * half_ext.x - dir_y * half_ext.y
+	var c1: Vector2 = center + dir_x * half_ext.x - dir_y * half_ext.y
+	var c2: Vector2 = center + dir_x * half_ext.x + dir_y * half_ext.y
+	var c3: Vector2 = center - dir_x * half_ext.x + dir_y * half_ext.y
+	draw_polyline(PackedVector2Array([c0, c1, c2, c3, c0]), col, width, true)
+
+
+func _draw_arena_perimeter_frame() -> void:
+	var b: Rect2 = arena_bounds
+	if not b.has_area():
+		return
+	var min_x: float = b.position.x
+	var max_x: float = b.end.x
+	var min_y: float = b.position.y
+	var max_y: float = b.end.y
+
+	# Subtle recessed dark inner apron so arena borders read cleanly without affecting unit contrast
+	var apron: float = 28.0
+	var shade: Color = Color(0.015, 0.022, 0.032, 0.34)
+	draw_rect(Rect2(min_x, min_y, b.size.x, apron), shade, true)
+	draw_rect(Rect2(min_x, max_y - apron, b.size.x, apron), shade, true)
+	draw_rect(Rect2(min_x, min_y + apron, apron, maxf(0.0, b.size.y - apron * 2.0)), shade, true)
+	draw_rect(Rect2(max_x - apron, min_y + apron, apron, maxf(0.0, b.size.y - apron * 2.0)), shade, true)
+
+	var inner_frame: Rect2 = b.grow(-14.0)
+	var line_col: Color = Color(0.68, 0.78, 0.88, 0.14)
+	var tick_col: Color = Color(0.74, 0.86, 0.96, 0.20)
+	if inner_frame.has_area():
+		draw_rect(inner_frame, line_col, false, 1.2)
+		_draw_corner_brackets(inner_frame, 36.0, tick_col, 2.0)
+
+	# 256 px coordinate registration tick marks along all 4 perimeter edges
+	var tx: float = ceilf(min_x / 256.0) * 256.0
+	while tx <= max_x:
+		var is_origin_x: bool = is_zero_approx(tx)
+		var t_len: float = 18.0 if is_origin_x else 10.0
+		draw_line(Vector2(tx, min_y + 2.0), Vector2(tx, min_y + 2.0 + t_len), tick_col, 1.4 if is_origin_x else 1.1)
+		draw_line(Vector2(tx, max_y - 2.0), Vector2(tx, max_y - 2.0 - t_len), tick_col, 1.4 if is_origin_x else 1.1)
+		tx += 256.0
+
+	var ty: float = ceilf(min_y / 256.0) * 256.0
+	while ty <= max_y:
+		var is_origin_y: bool = is_zero_approx(ty)
+		var t_len_y: float = 18.0 if is_origin_y else 10.0
+		draw_line(Vector2(min_x + 2.0, ty), Vector2(min_x + 2.0 + t_len_y, ty), tick_col, 1.4 if is_origin_y else 1.1)
+		draw_line(Vector2(max_x - 2.0, ty), Vector2(max_x - 2.0 - t_len_y, ty), tick_col, 1.4 if is_origin_y else 1.1)
+		ty += 256.0

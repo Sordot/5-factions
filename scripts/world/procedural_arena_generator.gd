@@ -15,7 +15,9 @@ const BASE_PLATEAU_EXCLUSION_DEFAULT: float = 560.0
 const BASE_PLATEAU_EXCLUSION_MIN: float = 520.0
 const RESOURCE_PLATEAU_MIN_CLEARANCE: float = 115.0
 const RAMP_APPROACH_CLEAR_DEPTH: float = 135.0
+const RESOURCE_MIN_GAP: float = 64.0
 
+const ARCHETYPE_POOL: Array = [&"open_macro", &"twin_ridges", &"bridge_chokes", &"triad_observatory"]
 const BIOME_POOL: Array = [&"vat_basin", &"twin_causeway", &"quad_nexus", &"triad_sanctum"]
 const BIOME_PALETTES: Dictionary = {
 	&"vat_basin": {
@@ -45,6 +47,7 @@ const BASIN_NAMES: Array = ["Alpha Sector", "Omega Sector", "Sigma Sector", "Del
 
 var generated_seed: int = 0
 var generated_biome: StringName = &"vat_basin"
+var generated_archetype: StringName = &"open_macro"
 var generated_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 var _has_generated: bool = false
 
@@ -81,12 +84,14 @@ func generate_arena() -> void:
 	var hg_level: int = 1
 	var richness: int = 1
 	var biome_pref: StringName = &"auto"
+	var arch_pref: StringName = &"auto"
 	if GameConfig != null:
 		p_count = clampi(GameConfig.player_count, 2, 4)
 		chokes = clampi(GameConfig.proc_map_chokes, 0, 2)
 		hg_level = clampi(GameConfig.proc_map_high_ground, 0, 2)
 		richness = clampi(GameConfig.proc_map_richness, 0, 2)
 		biome_pref = GameConfig.proc_map_biome
+		arch_pref = GameConfig.proc_map_archetype
 		if GameConfig.proc_map_active_seed <= 0:
 			GameConfig.resolve_procedural_seed()
 		generated_seed = GameConfig.proc_map_active_seed
@@ -112,6 +117,15 @@ func generate_arena() -> void:
 		generated_biome = biome_pref
 	else:
 		generated_biome = BIOME_POOL[_rng.randi() % BIOME_POOL.size()] as StringName
+
+	if arch_pref != &"auto" and ARCHETYPE_POOL.has(arch_pref):
+		generated_archetype = arch_pref
+	elif _symmetry_count == 3 and _rng.randf() < 0.50:
+		generated_archetype = &"triad_observatory"
+	else:
+		generated_archetype = ARCHETYPE_POOL[_rng.randi() % ARCHETYPE_POOL.size()] as StringName
+	if GameConfig != null:
+		GameConfig.proc_map_active_archetype = generated_archetype
 
 	_reserved_circles.clear()
 	_reserved_corridors.clear()
@@ -145,12 +159,14 @@ func generate_arena() -> void:
 	_spawn_expansions(res_parent, nat_base_pos, richness, yield_mult)
 
 	# Step 5 — Spacious High-Ground Plateaus with Wide Assault Ramps (180-220 px)
-	if hg_level >= 1:
+	if hg_level >= 1 or generated_archetype == &"twin_ridges":
 		_spawn_high_ground_plateaus(hg_parent, hg_level)
 
-	# Step 6 — Symmetric Cover Monoliths & Barricaded Flanks (strictly clear of ramp zones)
+	# Step 6 — Archetype Framing Walls, Symmetric Cover Monoliths & Barricaded Flanks
+	if generated_archetype == &"bridge_chokes":
+		_spawn_bridge_causeway_walls(obs_parent)
 	_spawn_cover_monoliths(obs_parent, chokes)
-	if chokes >= 1:
+	if chokes >= 1 or generated_archetype == &"bridge_chokes":
 		_spawn_flank_barricades(bar_parent)
 
 	# Step 7 — Flank Sensor Relays
@@ -358,8 +374,9 @@ func _spawn_corner_anchors_and_corridors(anchor_parent: Node, lm_parent: Node) -
 		_reserved_circles.append({"pos": npos, "r": 185.0})
 
 		# Anti-trap corridor reservations: (1) Spawn->Natural, (2) Spawn->Center, (3) Spawn->Flank, (4) Natural->Center
+		var center_half_w: float = 108.0 if generated_archetype == &"open_macro" else 88.0
 		_reserved_corridors.append({"a": spos, "b": npos, "half_w": 92.0})
-		_reserved_corridors.append({"a": spos, "b": Vector2.ZERO, "half_w": 88.0})
+		_reserved_corridors.append({"a": spos, "b": Vector2.ZERO, "half_w": center_half_w})
 		_reserved_corridors.append({"a": spos, "b": flank_wps[i], "half_w": 84.0})
 		_reserved_corridors.append({"a": npos, "b": Vector2.ZERO, "half_w": 80.0})
 
@@ -415,8 +432,10 @@ func _spawn_expansions(res_parent: Node, nat_base: Vector2, richness: int, yield
 	var nat_vent: Vector2 = _clamp_inside_arena(nat_base + Vector2(cos(away_ang + 1.35), sin(away_ang + 1.35)) * 150.0, 96.0)
 	_place_mirrored_resource(res_parent, COMPUTE_VENT_SCENE, nat_vent, yield_mult)
 
-	# Contested side-pocket expansion on Rich / Abundant (High-Yield contested flashpoints!)
-	if richness >= 1:
+	# Contested side-pocket expansion on Rich / Abundant, or guaranteed on Open Macro & Triad Observatory
+	var spawn_contested_pockets: bool = (richness >= 1 or generated_archetype == &"open_macro" or generated_archetype == &"triad_observatory")
+	var macro_bonus_nodes: bool = (generated_archetype == &"open_macro" and richness >= 1)
+	if spawn_contested_pockets:
 		if _symmetry_count == 3:
 			var mid_ang: float = deg_to_rad(210.0) # -150°, rotating to 90° and -30°
 			var mid_base: Vector2 = Vector2.from_angle(mid_ang) * _rng.randf_range(935.0, 985.0)
@@ -427,6 +446,8 @@ func _spawn_expansions(res_parent: Node, nat_base: Vector2, richness: int, yield
 			_place_mirrored_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(mid_base + perp_o * 112.0, 82.0), yield_mult, true)
 			_place_mirrored_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(mid_base - perp_o * 112.0, 82.0), yield_mult, true)
 			_place_mirrored_resource(res_parent, COMPUTE_VENT_SCENE, _clamp_inside_arena(mid_base + dir_o * 64.0, 92.0), yield_mult, false)
+			if macro_bonus_nodes:
+				_place_mirrored_resource(res_parent, BIOMASS_SCENE, _clamp_inside_arena(mid_base - dir_o * 112.0, 82.0), yield_mult, true)
 			for mp3: Vector2 in _mirror_points(mid_base):
 				_reserved_circles.append({"pos": mp3, "r": 180.0})
 		elif _is_four_way:
@@ -439,6 +460,8 @@ func _spawn_expansions(res_parent: Node, nat_base: Vector2, richness: int, yield
 				_spawn_single_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(mid_pt + perp * 88.0, 76.0), yield_mult, true)
 				_spawn_single_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(mid_pt - perp * 88.0, 76.0), yield_mult, true)
 				_spawn_single_resource(res_parent, COMPUTE_VENT_SCENE, _clamp_inside_arena(mid_pt + dir_out * 45.0, 86.0), yield_mult, false)
+				if macro_bonus_nodes:
+					_spawn_single_resource(res_parent, BIOMASS_SCENE, _clamp_inside_arena(mid_pt - dir_out * 124.0, 76.0), yield_mult, true)
 				_reserved_circles.append({"pos": mid_pt, "r": 160.0})
 		else:
 			var pocket_base: Vector2 = Vector2(-_rng.randf_range(880.0, 975.0), -_rng.randf_range(540.0, 640.0))
@@ -447,12 +470,49 @@ func _spawn_expansions(res_parent: Node, nat_base: Vector2, richness: int, yield
 			_place_mirrored_resource(res_parent, BIOMASS_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang + 0.35), sin(p_ang + 0.35)) * 96.0, 80.0), yield_mult, true)
 			_place_mirrored_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang + 1.25), sin(p_ang + 1.25)) * 112.0, 80.0), yield_mult, true)
 			_place_mirrored_resource(res_parent, COMPUTE_VENT_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang - 1.25), sin(p_ang - 1.25)) * 124.0, 92.0), yield_mult, false)
+			if macro_bonus_nodes:
+				_place_mirrored_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang + 1.75), sin(p_ang + 1.75)) * 130.0, 80.0), yield_mult, true)
 			for mp: Vector2 in _mirror_points(pocket_base):
 				_reserved_circles.append({"pos": mp, "r": 175.0})
 
 
+func _resolve_spaced_resource_pos(raw_pos: Vector2, margin: float, min_gap: float = RESOURCE_MIN_GAP) -> Vector2:
+	var clamped: Vector2 = _clamp_inside_arena(raw_pos, margin)
+	var min_gap_sq: float = min_gap * min_gap
+	var is_clear: bool = true
+	for existing: Vector2 in _resource_positions:
+		if clamped.distance_squared_to(existing) < min_gap_sq:
+			is_clear = false
+			break
+	if is_clear:
+		return clamped
+
+	var base_dir: Vector2 = clamped.normalized() if clamped.length_squared() > 1.0 else Vector2.RIGHT
+	var best_pos: Vector2 = clamped
+	var best_min_d_sq: float = -1.0
+	var step_dist: float = min_gap + 6.0
+
+	for ring_mult: float in [1.0, 1.55, 2.15]:
+		for k: int in range(8):
+			var ang: float = base_dir.angle() + float(k) * (TAU / 8.0)
+			var cand: Vector2 = _clamp_inside_arena(clamped + Vector2.from_angle(ang) * (step_dist * ring_mult), margin)
+			var nearest_sq: float = INF
+			for existing: Vector2 in _resource_positions:
+				var d_sq: float = cand.distance_squared_to(existing)
+				if d_sq < nearest_sq:
+					nearest_sq = d_sq
+			if nearest_sq >= min_gap_sq:
+				return cand
+			if nearest_sq > best_min_d_sq:
+				best_min_d_sq = nearest_sq
+				best_pos = cand
+	return best_pos
+
+
 func _place_mirrored_resource(parent: Node, scene: PackedScene, base_pos: Vector2, yield_mult: float, high_yield: bool = false) -> void:
-	var pts: Array[Vector2] = _mirror_points(base_pos)
+	var margin: float = 92.0 if scene == COMPUTE_VENT_SCENE else 76.0
+	var safe_base: Vector2 = _resolve_spaced_resource_pos(base_pos, margin, RESOURCE_MIN_GAP)
+	var pts: Array[Vector2] = _mirror_points(safe_base)
 	for pt: Vector2 in pts:
 		_spawn_single_resource(parent, scene, pt, yield_mult, high_yield)
 
@@ -461,7 +521,9 @@ func _spawn_single_resource(parent: Node, scene: PackedScene, pos: Vector2, yiel
 	var rn: ResourceNode = scene.instantiate() as ResourceNode
 	if rn == null:
 		return
-	rn.position = pos
+	var margin: float = 92.0 if rn.is_vent else 74.0
+	var final_pos: Vector2 = _resolve_spaced_resource_pos(pos, margin, RESOURCE_MIN_GAP)
+	rn.position = final_pos
 	var eff_mult: float = yield_mult
 	if high_yield and not rn.is_vent:
 		rn.is_high_yield = true
@@ -471,8 +533,8 @@ func _spawn_single_resource(parent: Node, scene: PackedScene, pos: Vector2, yiel
 		rn.max_amount = scaled
 		rn.remaining_amount = scaled
 	parent.add_child(rn)
-	_resource_positions.append(pos)
-	_reserved_circles.append({"pos": pos, "r": 108.0})
+	_resource_positions.append(final_pos)
+	_reserved_circles.append({"pos": final_pos, "r": 108.0})
 
 
 ## Deterministic chamfered octagon whose cardinal edges have exact controllable widths in [180, 220] px:
@@ -500,20 +562,26 @@ func _build_wide_ramp_octagon(total_w: float, total_h: float, ramp_h_len: float,
 func _spawn_high_ground_plateaus(hg_parent: Node, hg_level: int) -> void:
 	var pal: Dictionary = BIOME_PALETTES.get(generated_biome, BIOME_PALETTES[&"vat_basin"]) as Dictionary
 	var tint: Color = pal["plateau_tint"] as Color
+	var eff_hg: int = maxi(1, hg_level) if generated_archetype == &"twin_ridges" else hg_level
 
-	var target_sets: int = 2 if (hg_level >= 2 and _symmetry_count == 2) else 1
+	var target_sets: int = 1
+	if generated_archetype == &"open_macro":
+		target_sets = 1
+	elif generated_archetype == &"twin_ridges":
+		target_sets = 2 if (hg_level >= 1 and _symmetry_count == 2) else 1
+	elif eff_hg >= 2 and _symmetry_count == 2:
+		target_sets = 2
 
 	for set_i: int in range(target_sets):
 		var base_poly: PackedVector2Array
 		var ramp_options: Array[PackedInt32Array] = []
 		if set_i == 0:
-			# Major Contested Mid-Field Ridge:
-			# - Mid Plateaus: 380x280 px (ramps: 200 px & 192 px)
-			# - High Ground+: 430x305 px (ramps: 212 px & 200 px) in 2P, or 390x280 px (202 px & 194 px) in 4P
-			var maj_w: float = 380.0 if hg_level == 1 else (390.0 if _is_four_way else (400.0 if _symmetry_count == 3 else 430.0))
-			var maj_h: float = 280.0 if hg_level == 1 else (280.0 if _is_four_way else (285.0 if _symmetry_count == 3 else 305.0))
-			var rh_len: float = 200.0 if hg_level == 1 else (202.0 if _is_four_way else (204.0 if _symmetry_count == 3 else 212.0))
-			var rv_len: float = 192.0 if hg_level == 1 else (194.0 if _is_four_way else (194.0 if _symmetry_count == 3 else 200.0))
+			# Major Contested Mid-Field Ridge (ramps strictly 192-215 px wide)
+			var is_twin: bool = (generated_archetype == &"twin_ridges")
+			var maj_w: float = 415.0 if (is_twin and _symmetry_count == 2) else (380.0 if eff_hg == 1 else (390.0 if _is_four_way else (400.0 if _symmetry_count == 3 else 430.0)))
+			var maj_h: float = 295.0 if (is_twin and _symmetry_count == 2) else (280.0 if eff_hg == 1 else (280.0 if _is_four_way else (285.0 if _symmetry_count == 3 else 305.0)))
+			var rh_len: float = 212.0 if is_twin else (200.0 if eff_hg == 1 else (202.0 if _is_four_way else (204.0 if _symmetry_count == 3 else 212.0)))
+			var rv_len: float = 198.0 if is_twin else (192.0 if eff_hg == 1 else (194.0 if _is_four_way else (194.0 if _symmetry_count == 3 else 200.0)))
 			base_poly = _build_wide_ramp_octagon(maj_w, maj_h, rh_len, rv_len)
 			# Always 2 wide ramps (one center/flank-facing, one base/natural-facing)
 			ramp_options = [
@@ -523,14 +591,22 @@ func _spawn_high_ground_plateaus(hg_parent: Node, hg_level: int) -> void:
 				PackedInt32Array([4, 6]),
 			]
 		else:
-			# Secondary Flank Lookout Ledge (High Ground+ 2P): 350x255 px with 1 wide ramp (194 px or 190 px)
-			base_poly = _build_wide_ramp_octagon(350.0, 255.0, 194.0, 190.0)
-			ramp_options = [
-				PackedInt32Array([2]),
-				PackedInt32Array([4]),
-				PackedInt32Array([0]),
-				PackedInt32Array([6]),
-			]
+			# Secondary Flank Lookout Ledge (High Ground+ / Twin Ridges 2P): 350x255 px with 2 wide ramps on Twin Ridges or 1 wide ramp otherwise
+			base_poly = _build_wide_ramp_octagon(350.0, 255.0, 198.0, 194.0)
+			if generated_archetype == &"twin_ridges":
+				ramp_options = [
+					PackedInt32Array([0, 2]),
+					PackedInt32Array([4, 6]),
+					PackedInt32Array([2]),
+					PackedInt32Array([4]),
+				]
+			else:
+				ramp_options = [
+					PackedInt32Array([2]),
+					PackedInt32Array([4]),
+					PackedInt32Array([0]),
+					PackedInt32Array([6]),
+				]
 
 		var placed: bool = false
 		# Pass 0 enforces strict 560 px base clearance; Pass 1 relaxes only to the 520 px hard minimum.
@@ -551,14 +627,29 @@ func _sample_plateau_candidate(set_i: int) -> Vector2:
 	if _symmetry_count == 3:
 		# Sample mid-field overlook around 84°-104° (guarantees >= 560 px clearance from all 3 hubs while overlooking center & flank)
 		var ang_3: float = deg_to_rad(_rng.randf_range(84.0, 104.0))
-		var rad_3: float = _rng.randf_range(445.0, 535.0)
+		var rad_3: float = _rng.randf_range(420.0, 505.0) if generated_archetype == &"twin_ridges" else _rng.randf_range(445.0, 535.0)
 		return Vector2.from_angle(ang_3) * rad_3
 	if _is_four_way:
+		if generated_archetype == &"twin_ridges":
+			return Vector2(
+				-_rng.randf_range(310.0, 520.0),
+				_rng.randf_range(240.0, 420.0)
+			)
 		return Vector2(
 			-_rng.randf_range(340.0, 620.0),
 			_rng.randf_range(260.0, 500.0)
 		)
 	if set_i == 0:
+		if generated_archetype == &"twin_ridges":
+			return Vector2(
+				-_rng.randf_range(250.0, 490.0),
+				-_rng.randf_range(205.0, 390.0)
+			)
+		if generated_archetype == &"open_macro":
+			return Vector2(
+				-_rng.randf_range(440.0, 720.0),
+				-_rng.randf_range(310.0, 540.0)
+			)
 		# Spacious mid-field ridges in either the off-diagonal overlook quadrant or mid-flank overlook
 		if _rng.randf() < 0.72:
 			return Vector2(
@@ -569,7 +660,7 @@ func _sample_plateau_candidate(set_i: int) -> Vector2:
 			-_rng.randf_range(220.0, 420.0),
 			_rng.randf_range(210.0, 460.0)
 		)
-	# Secondary flank lookout ledge (High Ground+ 2P)
+	# Secondary flank lookout ledge (High Ground+ / Twin Ridges 2P)
 	return Vector2(
 		-_rng.randf_range(250.0, 740.0),
 		_rng.randf_range(-560.0, 520.0)
@@ -802,9 +893,108 @@ func _overlaps_any_ramp_zone(pt: Vector2, radius: float) -> bool:
 	return false
 
 
+func _can_place_bridge_wall(pt: Vector2, foot_r: float) -> bool:
+	var safe_rect: Rect2 = generated_bounds.grow(-(foot_r + 64.0))
+	if not safe_rect.has_point(pt):
+		return false
+	if _overlaps_any_ramp_zone(pt, foot_r + 18.0):
+		return false
+	for pl: Dictionary in _placed_plateaus:
+		if _point_to_polygon_distance(pt, pl["poly"] as PackedVector2Array) < (foot_r + 48.0):
+			return false
+	for rpos: Vector2 in _resource_positions:
+		if pt.distance_to(rpos) < (foot_r + 88.0):
+			return false
+	for spos: Vector2 in _spawn_positions:
+		if pt.distance_to(spos) < (foot_r + 240.0):
+			return false
+	for sol: Dictionary in _placed_solids:
+		if pt.distance_to(sol["pos"] as Vector2) < (foot_r + float(sol["r"]) + 52.0):
+			return false
+	return true
+
+
+func _spawn_bridge_causeway_walls(obs_parent: Node) -> void:
+	# Structured symmetric central causeway framing walls flanking (0,0) while leaving a 280-340 px corridor open.
+	var wall_specs: Array[Dictionary] = []
+	if _symmetry_count == 3:
+		# 3 radial framing walls at 90°, 210°, -30° (bisecting the 3 spawn lanes), leaving a ~340 px central ring clear
+		var rad_3: float = 250.0
+		var sz_3: Vector2 = Vector2(168.0, 48.0)
+		for idx: int in range(3):
+			var ang: float = deg_to_rad(90.0 + float(idx) * 120.0)
+			wall_specs.append({
+				"pos": Vector2.from_angle(ang) * rad_3,
+				"rot": ang + PI * 0.5,
+				"size": sz_3,
+			})
+	elif _is_four_way:
+		# 4 cardinal causeway piers framing (0,0) with ~320 px inner clear lanes
+		var sz_h: Vector2 = Vector2(180.0, 48.0)
+		var sz_v: Vector2 = Vector2(48.0, 180.0)
+		wall_specs = [
+			{"pos": Vector2(0.0, -210.0), "rot": 0.0, "size": sz_h},
+			{"pos": Vector2(0.0, 210.0), "rot": 0.0, "size": sz_h},
+			{"pos": Vector2(-245.0, 0.0), "rot": 0.0, "size": sz_v},
+			{"pos": Vector2(245.0, 0.0), "rot": 0.0, "size": sz_v},
+		]
+	else:
+		# 2P symmetric horizontal bridge apron walls at y = ±188 px (size 248x52 -> 324 px open central bridge corridor)
+		var sz_2: Vector2 = Vector2(248.0, 52.0)
+		wall_specs = [
+			{"pos": Vector2(0.0, -188.0), "rot": 0.0, "size": sz_2},
+			{"pos": Vector2(0.0, 188.0), "rot": 0.0, "size": sz_2},
+		]
+
+	for spec: Dictionary in wall_specs:
+		var w_sz: Vector2 = spec["size"] as Vector2
+		var foot_r: float = maxf(w_sz.x, w_sz.y) * 0.5 + 10.0
+		if not _can_place_bridge_wall(spec["pos"] as Vector2, foot_r):
+			return
+
+	for i: int in range(wall_specs.size()):
+		var spec: Dictionary = wall_specs[i]
+		var w_sz: Vector2 = spec["size"] as Vector2
+		var obs: StaticBody2D = TERRAIN_OBSTACLE_SCRIPT.new() as StaticBody2D
+		if obs != null:
+			obs.name = "ProcBridgeWall_%d" % i
+			obs.position = spec["pos"] as Vector2
+			obs.rotation = float(spec["rot"])
+			obs.set("obstacle_size", w_sz)
+			obs_parent.add_child(obs)
+			_placed_solids.append({"pos": obs.position, "r": maxf(w_sz.x, w_sz.y) * 0.5 + 14.0})
+
+
 func _spawn_cover_monoliths(obs_parent: Node, chokes: int) -> void:
 	var cluster_count: int = 2 if chokes == 0 else (4 if chokes == 1 else 6)
+	if generated_archetype == &"open_macro":
+		cluster_count = maxi(1, chokes)
+	elif generated_archetype == &"bridge_chokes":
+		cluster_count = maxi(2, cluster_count - 1)
 	var min_clearance: float = 132.0
+
+	# Triad Observatory: radial monolith cover arcs around the central observatory ring
+	if generated_archetype == &"triad_observatory":
+		var arc_sz: Vector2 = Vector2(158.0, 52.0)
+		var arc_r: float = maxf(arc_sz.x, arc_sz.y) * 0.5 + 14.0
+		for _a_try: int in range(28):
+			var base_ang: float = deg_to_rad(_rng.randf_range(100.0, 145.0)) if _symmetry_count == 3 else deg_to_rad(_rng.randf_range(125.0, 165.0))
+			var ring_dist: float = _rng.randf_range(330.0, 415.0)
+			var cand_arc: Vector2 = Vector2.from_angle(base_ang) * ring_dist
+			if not _is_mirrored_spot_clear(cand_arc, arc_r, 118.0):
+				continue
+			var arc_pts: Array[Vector2] = _mirror_points(cand_arc)
+			for sym_i: int in range(arc_pts.size()):
+				var obs_arc: StaticBody2D = TERRAIN_OBSTACLE_SCRIPT.new() as StaticBody2D
+				if obs_arc != null:
+					obs_arc.name = "ProcObservatoryArc_%d" % sym_i
+					obs_arc.position = arc_pts[sym_i]
+					obs_arc.rotation = arc_pts[sym_i].angle() + PI * 0.5
+					obs_arc.set("obstacle_size", arc_sz)
+					obs_parent.add_child(obs_arc)
+					_placed_solids.append({"pos": arc_pts[sym_i], "r": arc_r})
+			cluster_count = maxi(1, cluster_count - 1)
+			break
 
 	for c_idx: int in range(cluster_count):
 		var is_horizontal: bool = ((c_idx + _rng.randi()) % 2 == 0)
@@ -882,28 +1072,36 @@ func _spawn_flank_barricades(bar_parent: Node) -> void:
 
 func _spawn_sensor_relays(obj_parent: Node) -> void:
 	var names: Array = ["West Flank Sensor Relay", "East Flank Sensor Relay", "North Flank Sensor Relay", "SE Flank Sensor Relay"]
-	for _attempt: int in range(40):
-		var cand: Vector2
-		if _symmetry_count == 3:
-			var r_ang: float = deg_to_rad(_rng.randf_range(202.0, 218.0))
-			cand = Vector2.from_angle(r_ang) * _rng.randf_range(660.0, 760.0)
-		else:
-			cand = Vector2(
-				-_rng.randf_range(640.0, 880.0),
-				-_rng.randf_range(120.0, 320.0) if not _is_four_way else _rng.randf_range(180.0, 440.0)
-			)
-		if not _is_mirrored_spot_clear(cand, 62.0, 88.0, true):
-			continue
-		var pts: Array[Vector2] = _mirror_points(cand)
-		for sym_i: int in range(pts.size()):
-			var relay: Node2D = SENSOR_RELAY_SCENE.instantiate() as Node2D
-			if relay != null:
-				relay.name = "ProcSensorRelay_%d" % sym_i
-				relay.position = pts[sym_i]
-				relay.set("relay_name", String(names[sym_i % names.size()]))
-				obj_parent.add_child(relay)
-				_reserved_circles.append({"pos": pts[sym_i], "r": 68.0})
-		return
+	var target_sets: int = 2 if (generated_archetype == &"triad_observatory" and _symmetry_count == 2) else 1
+	for set_idx: int in range(target_sets):
+		for _attempt: int in range(40):
+			var cand: Vector2
+			if _symmetry_count == 3:
+				var r_ang: float = deg_to_rad(_rng.randf_range(202.0, 218.0))
+				var r_dist: float = _rng.randf_range(580.0, 700.0) if generated_archetype == &"triad_observatory" else _rng.randf_range(660.0, 760.0)
+				cand = Vector2.from_angle(r_ang) * r_dist
+			elif set_idx == 1:
+				cand = Vector2(
+					-_rng.randf_range(340.0, 580.0),
+					_rng.randf_range(520.0, 720.0)
+				)
+			else:
+				cand = Vector2(
+					-_rng.randf_range(640.0, 880.0),
+					-_rng.randf_range(120.0, 320.0) if not _is_four_way else _rng.randf_range(180.0, 440.0)
+				)
+			if not _is_mirrored_spot_clear(cand, 62.0, 88.0, true):
+				continue
+			var pts: Array[Vector2] = _mirror_points(cand)
+			for sym_i: int in range(pts.size()):
+				var relay: Node2D = SENSOR_RELAY_SCENE.instantiate() as Node2D
+				if relay != null:
+					relay.name = "ProcSensorRelay_%d_%d" % [set_idx, sym_i]
+					relay.position = pts[sym_i]
+					relay.set("relay_name", String(names[(sym_i + set_idx * 2) % names.size()]))
+					obj_parent.add_child(relay)
+					_reserved_circles.append({"pos": pts[sym_i], "r": 68.0})
+			break
 
 
 func _is_mirrored_spot_clear(
@@ -966,6 +1164,9 @@ func _clamp_inside_arena(pt: Vector2, margin: float) -> Vector2:
 
 
 func _finalize_systems(scene_root: Node) -> void:
+	var backdrop: Node = scene_root.get_node_or_null("MapBiomeBackdrop")
+	if backdrop != null and backdrop.has_method("refresh_anchors"):
+		backdrop.call("refresh_anchors")
 	var nav: ArenaNavRegion = scene_root.get_node_or_null("NavigationRegion2D") as ArenaNavRegion
 	if nav != null:
 		nav.rebake_navmesh()

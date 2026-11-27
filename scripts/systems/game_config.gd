@@ -145,7 +145,9 @@ var proc_map_active_seed: int = 482915
 var proc_map_chokes: int = 1 # 0 = Open, 1 = Balanced, 2 = Tight
 var proc_map_high_ground: int = 1 # 0 = Flat, 1 = Moderate, 2 = Elevated
 var proc_map_richness: int = 1 # 0 = Standard, 1 = Rich, 2 = Abundant
-var proc_map_biome: StringName = &"auto" # &"auto", &"vat_basin", &"twin_causeway", &"quad_nexus"
+var proc_map_biome: StringName = &"auto" # &"auto", &"vat_basin", &"twin_causeway", &"quad_nexus", &"triad_sanctum"
+var proc_map_archetype: StringName = &"auto" # &"auto", &"open_macro", &"twin_ridges", &"bridge_chokes", &"triad_observatory"
+var proc_map_active_archetype: StringName = &"open_macro"
 
 var selected_faction_id: StringName = &"genesis_v2"
 var selected_map_path: String = MAP_SKIRMISH_01
@@ -501,11 +503,27 @@ func resolve_procedural_seed() -> int:
 	return proc_map_active_seed
 
 
+func get_procedural_archetype_label(arch: StringName = &"") -> String:
+	var resolved: StringName = proc_map_active_archetype if arch == &"" else arch
+	match resolved:
+		&"open_macro":
+			return "Open Macro"
+		&"twin_ridges":
+			return "Twin Ridges"
+		&"bridge_chokes":
+			return "Bridge Chokes"
+		&"triad_observatory":
+			return "Triad Obs."
+		_:
+			return "Auto"
+
+
 func get_procedural_summary_tag() -> String:
+	var arch_lbl: String = get_procedural_archetype_label(proc_map_active_archetype)
 	var choke_lbl: String = "Open" if proc_map_chokes == 0 else ("Tight" if proc_map_chokes >= 2 else "Balanced")
 	var hg_lbl: String = "Flat" if proc_map_high_ground == 0 else ("High+" if proc_map_high_ground >= 2 else "Mid HG")
 	var rich_lbl: String = "Std" if proc_map_richness == 0 else ("Abundant" if proc_map_richness >= 2 else "Rich")
-	return "SEED %d • %s • %s • %s" % [proc_map_active_seed, choke_lbl, hg_lbl, rich_lbl]
+	return "SEED %d • %s • %s • %s • %s" % [proc_map_active_seed, arch_lbl, choke_lbl, hg_lbl, rich_lbl]
 
 
 func get_gauntlet_drill_info(drill_id: StringName = &"") -> Dictionary:

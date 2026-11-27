@@ -51,10 +51,24 @@ func configure_payload(silica_amt: int, compute_amt: int, unit_label: String = "
 	queue_redraw()
 
 
-func _process(delta: float) -> void:
+func _is_on_screen() -> bool:
+	if not is_inside_tree():
+		return false
+	var vp: Viewport = get_viewport()
+	var cam: Camera2D = vp.get_camera_2d() if vp != null else null
+	if cam == null:
+		return true
+	var zoom_x: float = maxf(0.15, cam.zoom.x)
+	var zoom_y: float = maxf(0.15, cam.zoom.y)
+	var vis_sz: Vector2 = vp.get_visible_rect().size
+	var half_world: Vector2 = Vector2(vis_sz.x / zoom_x, vis_sz.y / zoom_y) * 0.5 + Vector2(64.0, 64.0)
+	var cam_rect: Rect2 = Rect2(cam.get_screen_center_position() - half_world, half_world * 2.0)
+	return cam_rect.has_point(global_position)
+
+
+func _physics_process(delta: float) -> void:
 	if is_claimed:
 		return
-	_anim_time += delta
 	remaining_lifetime = maxf(0.0, remaining_lifetime - delta)
 	_hud_tick_timer += delta
 	if _hud_tick_timer >= 0.25:
@@ -63,6 +77,15 @@ func _process(delta: float) -> void:
 			status_changed.emit(self)
 	if remaining_lifetime <= 0.0:
 		_dissolve()
+
+
+func _process(delta: float) -> void:
+	if is_claimed:
+		return
+	_anim_time += delta
+	if not visible and not is_selected:
+		return
+	if not is_selected and not is_hovered and not _is_on_screen():
 		return
 	queue_redraw()
 
@@ -103,7 +126,7 @@ func advance_extraction(extractor: Node, delta: float) -> bool:
 	var speed_mult: float = 1.0
 	if extractor is Unit:
 		var u: Unit = extractor as Unit
-		if u.data != null and (u.data.can_staff_compute or u.get_unit_type_id() == &"engineer"):
+		if u.data != null and (u.data.can_staff_compute or u.data.has_tag(&"engineer")):
 			speed_mult = ENGINEER_SPEED_MULT
 	extraction_progress = clampf(extraction_progress + (delta * speed_mult) / BASE_EXTRACTION_DURATION, 0.0, 1.0)
 	if is_selected:
@@ -191,7 +214,7 @@ func get_inspection_data() -> Dictionary:
 		{"label": "Silica", "value": "+%d Silica" % salvage_silica},
 		{"label": "Compute", "value": "+%d Compute" % salvage_compute},
 		{"label": "Decay", "value": "%.1fs Left" % remaining_lifetime},
-		{"label": "Extract", "value": "Worker 2.5s / Eng 1.8s"},
+		{"label": "Extract", "value": "Worker 2.5s / Specialist 1.8s"},
 	]
 	return {
 		"title": display_name,
@@ -207,7 +230,7 @@ func get_inspection_data() -> Dictionary:
 		"primary_bar_color": Color(0.30, 0.96, 1.0, 1.0) if extraction_progress > 0.01 else Color(1.0, 0.78, 0.28, 1.0),
 		"stats": stats,
 		"is_commandable": false,
-		"readonly_label": "RIGHT-CLICK WITH WORKER OR ENGINEER TO EXTRACT",
+		"readonly_label": "RIGHT-CLICK WITH WORKER OR SPECIALIST TO EXTRACT",
 	}
 
 
@@ -266,9 +289,13 @@ func _draw() -> void:
 	draw_colored_polygon(inner_hex, Color(amber.r, amber.g, amber.b, (0.72 + pulse * 0.24) * flicker_alpha))
 	draw_circle(Vector2.ZERO, 3.6 + pulse * 1.0, Color(0.95, 1.0, 1.0, 0.92 * flicker_alpha))
 
-	# Extraction progress ring when workers are channeling
+	# Extraction progress ring + subtle inward-pulsing energy ring while channeling
 	if extraction_progress > 0.01:
 		draw_arc(Vector2.ZERO, r + 10.0, -PI * 0.5, -PI * 0.5 + TAU * extraction_progress, 28, Color(0.28, 1.0, 0.76, 0.96), 2.8, true)
+		var inward_t: float = fmod(_anim_time * 1.4, 1.0)
+		var ring_r: float = lerpf(r + 8.0, 3.0, inward_t)
+		var ring_a: float = sin(inward_t * PI) * 0.72 * flicker_alpha
+		draw_arc(Vector2.ZERO, ring_r, 0.0, TAU, 24, Color(0.32, 1.0, 0.84, ring_a), 1.8, true)
 
 	# Compact payload hint when selected or actively being extracted
 	if is_selected or extraction_progress > 0.01:

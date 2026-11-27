@@ -27,6 +27,7 @@ const SETTINGS_MENU_SCENE: PackedScene = preload("res://scenes/ui/settings_menu.
 @onready var proc_seed_input: LineEdit = %ProcSeedInput
 @onready var btn_roll_seed: Button = %BtnRollSeed
 @onready var opt_proc_biome: OptionButton = %OptProcBiome
+@onready var opt_proc_archetype: OptionButton = %OptProcArchetype
 @onready var opt_proc_chokes: OptionButton = %OptProcChokes
 @onready var opt_proc_high_ground: OptionButton = %OptProcHighGround
 @onready var opt_proc_richness: OptionButton = %OptProcRichness
@@ -107,7 +108,9 @@ var _proc_chokes: int = 1
 var _proc_high_ground: int = 1
 var _proc_richness: int = 1
 var _proc_biome: StringName = &"auto"
+var _proc_archetype: StringName = &"auto"
 const PROC_BIOME_IDS: Array = [&"auto", &"vat_basin", &"twin_causeway", &"quad_nexus", &"triad_sanctum"]
+const PROC_ARCHETYPE_IDS: Array = [&"auto", &"open_macro", &"twin_ridges", &"bridge_chokes", &"triad_observatory"]
 
 var _selected_map_path: String = GameConfig.MAP_SKIRMISH_01
 var _player_count: int = 2
@@ -151,6 +154,7 @@ func _ready() -> void:
 	_proc_high_ground = GameConfig.proc_map_high_ground
 	_proc_richness = GameConfig.proc_map_richness
 	_proc_biome = GameConfig.proc_map_biome
+	_proc_archetype = GameConfig.proc_map_archetype
 
 	_slot_configs.clear()
 	for i: int in range(4):
@@ -329,7 +333,7 @@ func _ready() -> void:
 		btn_holdout_fac_gen, btn_holdout_fac_mono, btn_holdout_fac_prisma, btn_holdout_fac_mixed,
 		btn_holdout_diff_relaxed, btn_holdout_diff_standard, btn_holdout_diff_brutal,
 		btn_roll_seed,
-		opt_proc_biome, opt_proc_chokes, opt_proc_high_ground, opt_proc_richness,
+		opt_proc_biome, opt_proc_archetype, opt_proc_chokes, opt_proc_high_ground, opt_proc_richness,
 		map_option, btn_players_2, btn_players_3, btn_players_4,
 		opt_team_preset, btn_ai_standard, btn_ai_passive, btn_res_standard, btn_res_fast,
 		chk_mutator_yield, chk_mutator_no_fog, chk_mutator_fast_build, chk_uplink_victory,
@@ -954,6 +958,22 @@ func _init_procedural_map_controls() -> void:
 			_proc_biome = PROC_BIOME_IDS[idx] as StringName
 			_refresh_ui()
 		)
+	if opt_proc_archetype != null:
+		opt_proc_archetype.clear()
+		opt_proc_archetype.add_item("Auto Layout", 0)
+		opt_proc_archetype.add_item("Open Macro", 1)
+		opt_proc_archetype.add_item("Twin Ridges", 2)
+		opt_proc_archetype.add_item("Bridge Chokes", 3)
+		opt_proc_archetype.add_item("Triad Obs.", 4)
+		var a_idx: int = maxi(0, PROC_ARCHETYPE_IDS.find(_proc_archetype))
+		opt_proc_archetype.select(a_idx)
+		opt_proc_archetype.item_selected.connect(func(idx: int) -> void:
+			if _suppress_callbacks or idx < 0 or idx >= PROC_ARCHETYPE_IDS.size():
+				return
+			AudioManager.play_ui_click()
+			_proc_archetype = PROC_ARCHETYPE_IDS[idx] as StringName
+			_refresh_ui()
+		)
 	if opt_proc_chokes != null:
 		opt_proc_chokes.clear()
 		opt_proc_chokes.add_item("Open Lanes", 0)
@@ -1302,7 +1322,8 @@ func _refresh_ui() -> void:
 		var proc_tag: String = ""
 		if GameConfig.is_procedural_map_selected(_selected_map_path):
 			var seed_str: String = ("SEED %d" % _proc_seed) if _proc_seed > 0 else "SEED RANDOM"
-			proc_tag = " [%s]" % seed_str
+			var arch_str: String = (" • %s" % GameConfig.get_procedural_archetype_label(_proc_archetype)) if _proc_archetype != &"auto" else ""
+			proc_tag = " [%s%s]" % [seed_str, arch_str]
 		summary_label.text = "%s  •  %s%s\nTEAMS: %s\nWIN: %s  •  RES: %s%s" % [mode_tag, map_name, proc_tag, matchup_str, win_tag, res_str, mut_suffix]
 	_suppress_callbacks = false
 
@@ -1352,6 +1373,7 @@ func _on_launch_pressed() -> void:
 	GameConfig.proc_map_high_ground = _proc_high_ground
 	GameConfig.proc_map_richness = _proc_richness
 	GameConfig.proc_map_biome = _proc_biome
+	GameConfig.proc_map_archetype = _proc_archetype
 	if GameConfig.is_procedural_map_selected(_selected_map_path):
 		GameConfig.resolve_procedural_seed()
 	GameConfig.set_lobby_config(
