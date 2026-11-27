@@ -135,6 +135,8 @@ func _build_event_pill(category: StringName, message: String, world_pos: Vector2
 			tag_lbl.text = "TECH"
 		&"transmission":
 			tag_lbl.text = "RADIO"
+		&"surge":
+			tag_lbl.text = "SURGE"
 		_:
 			tag_lbl.text = "SYS"
 	hbox.add_child(tag_lbl)

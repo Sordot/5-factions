@@ -28,6 +28,7 @@ const RAMP_CORNER_INSET: float = 5.0
 @export var choke_ramp_edge_indices: PackedInt32Array = PackedInt32Array()
 @export var elevation_level: int = 1
 @export var biome_tint: Color = Color(0.14, 0.20, 0.26, 1.0)
+@export var rim_highlight_override: Color = Color(0.0, 0.0, 0.0, 0.0)
 @export var cliff_thickness: float = 12.0
 @export var cliff_drop_height: float = 14.0
 
@@ -218,8 +219,9 @@ func _draw() -> void:
 	var wall_stripe: Color = biome_tint.darkened(0.72)
 	wall_stripe.a = 0.72
 	var rim_dark: Color = Color(0.03, 0.05, 0.08, 0.92)
-	var rim_hi: Color = biome_tint.lightened(0.32)
-	rim_hi.a = 0.85
+	var rim_hi: Color = rim_highlight_override if rim_highlight_override.a > 0.01 else biome_tint.lightened(0.32)
+	if rim_highlight_override.a <= 0.01:
+		rim_hi.a = 0.85
 
 	# 1. Soft ground shadow beneath plateau footprint
 	var shadow_poly: PackedVector2Array = PackedVector2Array()
@@ -252,12 +254,12 @@ func _draw() -> void:
 	ramp_fill.a = 0.92
 	var ramp_lower_shade: Color = biome_tint.darkened(0.42)
 	ramp_lower_shade.a = 0.55
-	var rail_col: Color = biome_tint.lightened(0.38)
+	var rail_col: Color = rim_highlight_override.lerp(biome_tint.lightened(0.38), 0.25) if rim_highlight_override.a > 0.01 else biome_tint.lightened(0.38)
 	rail_col.a = 0.78
-	var step_col: Color = biome_tint.lightened(0.26)
+	var step_col: Color = rim_highlight_override.lerp(biome_tint.lightened(0.26), 0.45) if rim_highlight_override.a > 0.01 else biome_tint.lightened(0.26)
 	step_col.a = 0.50
-	var crest_col: Color = biome_tint.lightened(0.48)
-	crest_col.a = 0.65
+	var crest_col: Color = rim_highlight_override if rim_highlight_override.a > 0.01 else biome_tint.lightened(0.48)
+	crest_col.a = 0.68 if rim_highlight_override.a > 0.01 else 0.65
 
 	for rseg: Dictionary in _ramp_segments:
 		var a: Vector2 = rseg["a"] as Vector2

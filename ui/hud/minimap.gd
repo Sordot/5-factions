@@ -413,7 +413,8 @@ func _on_map_viewport_draw() -> void:
 			MapLandmarkScript.VisualStyle.PLAZA_BEACON:
 				map_viewport.draw_arc(lp, 5.4, 0.0, TAU, 14, Color(lcol.r, lcol.g, lcol.b, 0.42), 1.1)
 
-	# 3. Resource nodes (Biomass green, Silica gold, Compute Vents violet/cyan).
+	# 3. Resource nodes (Biomass green, Silica gold, Compute Vents violet/cyan; high-yield gleam + surging vent ping).
+	var pulse: float = 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.0045)
 	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
 		if not (node is ResourceNode) or not is_instance_valid(node):
 			continue
@@ -424,13 +425,30 @@ func _on_map_viewport_draw() -> void:
 		if rn.is_vent:
 			map_viewport.draw_arc(p, 3.4, 0.0, TAU, 12, Color(0.58, 0.64, 1.0, 0.96), 1.3)
 			map_viewport.draw_circle(p, 1.5, Color(0.32, 0.94, 1.0, 0.92))
+			if rn.is_surging():
+				var sr_v: float = 5.4 + pulse * 3.0
+				var v_dia: PackedVector2Array = PackedVector2Array([
+					p + Vector2(0.0, -sr_v),
+					p + Vector2(sr_v, 0.0),
+					p + Vector2(0.0, sr_v),
+					p + Vector2(-sr_v, 0.0),
+				])
+				map_viewport.draw_polyline(v_dia + PackedVector2Array([v_dia[0]]), Color(0.28, 0.98, 1.0, 0.72 + pulse * 0.26), 1.4)
+				map_viewport.draw_arc(p, 4.2 + pulse * 2.2, 0.0, TAU, 16, Color(1.0, 0.86, 0.30, 0.55 + pulse * 0.25), 1.0)
 		elif rn.resource_type == &"silica":
-			map_viewport.draw_circle(p, 2.3, Color(0.98, 0.78, 0.28, 0.95))
+			if rn.is_high_yield:
+				map_viewport.draw_circle(p, 2.5, Color(1.0, 0.84, 0.26, 0.98))
+				map_viewport.draw_arc(p, 3.6, 0.0, TAU, 12, Color(1.0, 0.98, 0.80, 0.88), 1.0)
+			else:
+				map_viewport.draw_circle(p, 2.3, Color(0.98, 0.78, 0.28, 0.95))
 		else:
-			map_viewport.draw_circle(p, 2.2, Color(0.24, 0.94, 0.56, 0.92))
+			if rn.is_high_yield:
+				map_viewport.draw_circle(p, 2.4, Color(0.36, 1.0, 0.72, 0.98))
+				map_viewport.draw_arc(p, 3.5, 0.0, TAU, 12, Color(1.0, 0.94, 0.56, 0.86), 1.0)
+			else:
+				map_viewport.draw_circle(p, 2.2, Color(0.24, 0.94, 0.56, 0.92))
 
 	# 4. Central Data Hyper-Uplink (crisp concentric gold/white beacon ring + diamond core).
-	var pulse: float = 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.0045)
 	for node: Node in get_tree().get_nodes_in_group("hyper_uplinks"):
 		if not (node is HyperUplink) or not is_instance_valid(node):
 			continue

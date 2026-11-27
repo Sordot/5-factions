@@ -418,48 +418,60 @@ position = Vector2(930, 1340)
 
 [node name="PocketNorthBiomass" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
 position = Vector2(0, -1260)
+is_high_yield = true
 
 [node name="PocketNorthSilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(-115, -1370)
+is_high_yield = true
 
 [node name="PocketNorthSilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(115, -1370)
+is_high_yield = true
 
 [node name="PocketNorthVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
 position = Vector2(0, -1450)
 
 [node name="PocketSouthBiomass" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
 position = Vector2(0, 1260)
+is_high_yield = true
 
 [node name="PocketSouthSilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(-115, 1370)
+is_high_yield = true
 
 [node name="PocketSouthSilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(115, 1370)
+is_high_yield = true
 
 [node name="PocketSouthVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
 position = Vector2(0, 1450)
 
 [node name="PocketWestBiomass" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
 position = Vector2(-1260, 0)
+is_high_yield = true
 
 [node name="PocketWestSilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(-1370, -115)
+is_high_yield = true
 
 [node name="PocketWestSilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(-1370, 115)
+is_high_yield = true
 
 [node name="PocketWestVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
 position = Vector2(-1450, 0)
 
 [node name="PocketEastBiomass" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
 position = Vector2(1260, 0)
+is_high_yield = true
 
 [node name="PocketEastSilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(1370, -115)
+is_high_yield = true
 
 [node name="PocketEastSilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(1370, 115)
+is_high_yield = true
 
 [node name="PocketEastVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
 position = Vector2(1450, 0)

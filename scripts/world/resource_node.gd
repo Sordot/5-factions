@@ -17,6 +17,8 @@ signal depleted(node: ResourceNode)
 @export var interaction_radius: float = 28.0
 @export var max_harvesters: int = 3
 @export var is_vent: bool = false
+@export var is_high_yield: bool = false
+@export var high_yield_multiplier: float = 1.35
 
 @onready var visual_root: Node2D = get_node_or_null("VisualRoot") as Node2D
 @onready var highlight_ring: Line2D = get_node_or_null("HighlightRing") as Line2D
@@ -25,6 +27,13 @@ signal depleted(node: ResourceNode)
 var occupied_by_building: Building = null
 var is_inspected: bool = false
 var is_hovered: bool = false
+var surge_remaining: float = 0.0
+var surge_duration_total: float = 45.0
+var surge_multiplier: float = 2.0
+var _surge_anim_time: float = 0.0
+var _last_surge_sec_int: int = -1
+var _gleam_anim_time: float = 0.0
+var _gleam_redraw_acc: float = 0.0
 var _pulse_timer: float = 0.0
 var _is_highlighted: bool = false
 var _assigned_workers: Array[Unit] = []
@@ -40,9 +49,64 @@ func _ready() -> void:
 	add_to_group("resource_nodes")
 	if SpatialGrid != null:
 		SpatialGrid.register_resource(self)
+	if is_high_yield and not is_vent:
+		var default_max: int = 2500 if resource_type == &"silica" else 1500
+		if max_amount <= default_max:
+			var old_max: int = max_amount
+			max_amount = int(round(float(max_amount) * 1.25))
+			if remaining_amount >= old_max or remaining_amount <= 0:
+				remaining_amount = max_amount
+		if resource_type == &"silica":
+			if display_name.is_empty() or display_name == "Silica Vein":
+				display_name = "Rich Silica Vein"
+		elif resource_type == &"biomass":
+			if display_name.is_empty() or display_name == "Biomass Cluster":
+				display_name = "Dense Biomass Cluster"
+		_apply_high_yield_styling()
 	remaining_amount = clampi(remaining_amount, 0, maxi(1, max_amount))
 	_update_ring_visual()
 	_update_visuals()
+	if is_high_yield and not is_vent:
+		queue_redraw()
+
+
+func _apply_high_yield_styling() -> void:
+	if amount_label != null:
+		var lbl_col: Color = Color(1.0, 0.90, 0.36, 0.98) if resource_type == &"silica" else Color(0.54, 1.0, 0.78, 0.98)
+		amount_label.add_theme_color_override("font_color", lbl_col)
+	if visual_root != null:
+		var rim: Line2D = visual_root.get_node_or_null("RimOutline") as Line2D
+		if rim != null:
+			rim.width = 2.2
+			rim.default_color = Color(1.0, 0.88, 0.32, 0.95) if resource_type == &"silica" else Color(0.46, 1.0, 0.76, 0.95)
+
+
+func get_effective_carry_capacity(base_capacity: int) -> int:
+	if is_high_yield and not is_vent:
+		return maxi(base_capacity + 1, int(round(float(base_capacity) * high_yield_multiplier)))
+	return base_capacity
+
+
+func is_surging() -> bool:
+	return is_vent and surge_remaining > 0.0
+
+
+func get_compute_surge_multiplier() -> float:
+	return surge_multiplier if is_surging() else 1.0
+
+
+func start_overpressure_surge(duration: float = 45.0, mult: float = 2.0) -> void:
+	if not is_vent:
+		return
+	surge_duration_total = maxf(1.0, duration)
+	surge_remaining = surge_duration_total
+	surge_multiplier = maxf(1.0, mult)
+	_surge_anim_time = 0.0
+	_last_surge_sec_int = int(ceil(surge_remaining))
+	queue_redraw()
+	status_changed.emit(self)
+	if occupied_by_building != null and is_instance_valid(occupied_by_building):
+		occupied_by_building.status_changed.emit(occupied_by_building)
 
 
 func _exit_tree() -> void:
@@ -63,7 +127,26 @@ func _process(delta: float) -> void:
 		if _pulse_timer <= 0.0 and visual_root != null:
 			visual_root.modulate = Color.WHITE
 
-	if not is_vent and not is_depleted():
+	if is_vent:
+		if surge_remaining > 0.0:
+			surge_remaining = maxf(0.0, surge_remaining - delta)
+			_surge_anim_time += delta
+			var sec_now: int = int(ceil(surge_remaining))
+			if sec_now != _last_surge_sec_int or surge_remaining <= 0.0:
+				_last_surge_sec_int = sec_now
+				status_changed.emit(self)
+				if occupied_by_building != null and is_instance_valid(occupied_by_building):
+					occupied_by_building.status_changed.emit(occupied_by_building)
+			queue_redraw()
+		return
+
+	if not is_depleted():
+		if is_high_yield:
+			_gleam_anim_time += delta
+			_gleam_redraw_acc += delta
+			if _gleam_redraw_acc >= 0.06:
+				_gleam_redraw_acc = 0.0
+				queue_redraw()
 		_badge_timer += delta
 		if _badge_timer >= BADGE_REFRESH_INTERVAL:
 			_badge_timer = 0.0
@@ -109,6 +192,75 @@ func set_hovered(hovered: bool) -> void:
 
 
 func _draw() -> void:
+	if is_surging():
+		var s_pulse: float = 0.5 + 0.5 * sin(_surge_anim_time * 5.2)
+		var ring_phase_a: float = fmod(_surge_anim_time * 0.85, 1.0)
+		var ring_phase_b: float = fmod(_surge_anim_time * 0.85 + 0.5, 1.0)
+		var base_r: float = maxf(interaction_radius + 8.0, 44.0)
+		var r_a: float = lerpf(base_r, base_r + 28.0, ring_phase_a)
+		var r_b: float = lerpf(base_r, base_r + 28.0, ring_phase_b)
+		var cyan_col: Color = Color(0.28, 0.96, 1.0, (1.0 - ring_phase_a) * 0.88)
+		var gold_col: Color = Color(1.0, 0.84, 0.24, (1.0 - ring_phase_b) * 0.78)
+		draw_circle(Vector2.ZERO, base_r + 4.0, Color(0.22, 0.92, 1.0, 0.06 + s_pulse * 0.05))
+		draw_arc(Vector2.ZERO, r_a, 0.0, TAU, 40, cyan_col, 2.2, true)
+		draw_arc(Vector2.ZERO, r_b, 0.0, TAU, 40, gold_col, 1.8, true)
+		# Crisp 45s radial countdown arc around vent perimeter (remains clearly visible around occupying Compute facility)
+		var arc_r: float = base_r + 5.0
+		var frac: float = clampf(surge_remaining / maxf(1.0, surge_duration_total), 0.0, 1.0)
+		draw_arc(Vector2.ZERO, arc_r, 0.0, TAU, 44, Color(0.06, 0.14, 0.20, 0.55), 3.6, true)
+		draw_arc(Vector2.ZERO, arc_r, -PI * 0.5, -PI * 0.5 + TAU * frac, 44, Color(0.32, 0.98, 1.0, 0.92), 2.8, true)
+		# Small "2x" badge above arc
+		var s_font: Font = ThemeDB.fallback_font
+		if s_font != null:
+			var s_txt: String = "2x SURGE %ds" % int(ceil(surge_remaining))
+			var s_sz: Vector2 = s_font.get_string_size(s_txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
+			var s_pos: Vector2 = Vector2(-s_sz.x * 0.5, -arc_r - 7.0)
+			draw_rect(Rect2(s_pos + Vector2(-4.0, -s_sz.y + 1.0), s_sz + Vector2(8.0, 4.0)), Color(0.03, 0.08, 0.14, 0.86), true)
+			draw_string(s_font, s_pos, s_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.38, 0.98, 1.0, 0.98))
+
+	if is_high_yield and not is_vent and not is_depleted():
+		var g_pulse: float = 0.5 + 0.5 * sin(_gleam_anim_time * 3.4 + global_position.x * 0.02)
+		if resource_type == &"silica":
+			# Rich Silica: molten solar-gold / amber faceted crystal prism + shimmering warm gold halo + specular facets
+			var halo_r: float = collision_radius + 6.0 + g_pulse * 2.5
+			draw_circle(Vector2.ZERO, halo_r, Color(1.0, 0.78, 0.16, 0.10 + g_pulse * 0.08))
+			draw_arc(Vector2.ZERO, halo_r, 0.0, TAU, 32, Color(1.0, 0.84, 0.24, 0.56 + g_pulse * 0.30), 1.7, true)
+			var prism: PackedVector2Array = PackedVector2Array([
+				Vector2(0.0, -15.0),
+				Vector2(9.0, -4.0),
+				Vector2(5.5, 11.0),
+				Vector2(-5.5, 11.0),
+				Vector2(-9.0, -4.0),
+			])
+			draw_colored_polygon(prism, Color(1.0, 0.86, 0.34, 0.34 + g_pulse * 0.18))
+			draw_polyline(prism + PackedVector2Array([prism[0]]), Color(1.0, 0.96, 0.68, 0.88), 1.4, true)
+			# Specular highlight facets
+			draw_line(Vector2(-3.0, -9.0), Vector2(4.0, -2.0), Color(1.0, 0.99, 0.85, 0.90), 1.5, true)
+			draw_line(Vector2(0.0, -14.0), Vector2(0.0, 6.0), Color(1.0, 0.96, 0.74, 0.55), 1.1, true)
+		else:
+			# Dense Biomass: radiant mint-emerald crystal veins + pulsing golden-emerald aura ring + 3 crisp diamond glint ticks
+			var aura_r: float = collision_radius + 5.5 + g_pulse * 2.4
+			draw_circle(Vector2.ZERO, aura_r, Color(0.28, 1.0, 0.66, 0.09 + g_pulse * 0.07))
+			draw_arc(Vector2.ZERO, aura_r, 0.0, TAU, 32, Color(0.56, 1.0, 0.68, 0.52 + g_pulse * 0.28), 1.7, true)
+			draw_arc(Vector2.ZERO, aura_r + 3.2, 0.0, TAU, 32, Color(0.98, 0.88, 0.34, 0.26 + g_pulse * 0.20), 1.0, true)
+			# Radiant mint-emerald veins
+			var vein_col: Color = Color(0.68, 1.0, 0.86, 0.82)
+			draw_line(Vector2(0.0, -12.0), Vector2(0.0, 10.0), vein_col, 1.4, true)
+			draw_line(Vector2(0.0, -3.0), Vector2(-9.0, 5.0), vein_col, 1.3, true)
+			draw_line(Vector2(0.0, -1.0), Vector2(9.0, 4.0), vein_col, 1.3, true)
+			# 3 crisp diamond glint ticks spaced at 120° around perimeter
+			for gi: int in range(3):
+				var ga: float = _gleam_anim_time * 0.55 + float(gi) * (TAU / 3.0)
+				var gp: Vector2 = Vector2.from_angle(ga) * (aura_r + 2.0)
+				var gs: float = 3.2 + g_pulse * 1.1
+				var g_dia: PackedVector2Array = PackedVector2Array([
+					gp + Vector2(0.0, -gs),
+					gp + Vector2(gs * 0.75, 0.0),
+					gp + Vector2(0.0, gs),
+					gp + Vector2(-gs * 0.75, 0.0),
+				])
+				draw_colored_polygon(g_dia, Color(0.94, 1.0, 0.76, 0.88))
+
 	if is_hovered and not is_depleted():
 		var zoom_x: float = 1.0
 		if is_inside_tree():
@@ -503,17 +655,25 @@ func extract(amount: int) -> int:
 func get_inspection_data() -> Dictionary:
 	if is_vent:
 		var status_text: String = "CAPPED — Compute Node" if is_occupied() else "UNOCCUPIED — Ready"
+		var surging_now: bool = is_surging()
+		var yield_str: String = "+%d Compute / 3.0s / Eng (2x)" % int(round(5.0 * surge_multiplier)) if surging_now else "+5 Compute / 3.0s / Eng"
 		var vent_stats: Array[Dictionary] = [
 			{"label": "Status", "value": status_text},
-			{"label": "Yield Rate", "value": "+5 Compute / 3.0s / Eng"},
+			{"label": "Yield Rate", "value": yield_str},
 			{"label": "Capacity", "value": "Infinite Geothermal"},
 			{"label": "Structure", "value": "Compute Node [W]"},
 		]
+		if surging_now:
+			vent_stats.append({
+				"label": "Thermal State",
+				"value": "OVERPRESSURE SURGE (%dx) — %ds" % [int(round(surge_multiplier)), int(ceil(surge_remaining))],
+				"color": Color(0.28, 0.96, 1.0, 1.0),
+			})
 		return {
 			"title": "Thermal Data Vent",
-			"subtitle": "COMPUTE VENT",
+			"subtitle": "OVERPRESSURE COMPUTE VENT (2x)" if surging_now else "COMPUTE VENT",
 			"affiliation": &"neutral",
-			"accent_color": Color(0.32, 0.86, 1.0, 1.0),
+			"accent_color": Color(0.28, 0.98, 1.0, 1.0) if surging_now else Color(0.32, 0.86, 1.0, 1.0),
 			"ring_color": Color(0.28, 0.92, 1.0, 0.96),
 			"show_hp_bar": false,
 			"show_primary_bar": false,
@@ -524,6 +684,8 @@ func get_inspection_data() -> Dictionary:
 
 	var is_silica: bool = (resource_type == &"silica")
 	var accent: Color = Color(0.98, 0.78, 0.28, 1.0) if is_silica else Color(0.26, 0.94, 0.56, 1.0)
+	if is_high_yield:
+		accent = Color(1.0, 0.86, 0.26, 1.0) if is_silica else Color(0.40, 1.0, 0.74, 1.0)
 	var pct: int = int(round((float(remaining_amount) / float(maxi(1, max_amount))) * 100.0))
 	var fmt_rem: String = InspectionHelper.format_number(remaining_amount)
 	var fmt_max: String = InspectionHelper.format_number(max_amount)
@@ -532,14 +694,22 @@ func get_inspection_data() -> Dictionary:
 	var cap: int = get_effective_max_harvesters(viewer_t)
 	var sat_col: Color = get_saturation_color(active_gatherers, cap)
 	var deposit_stats: Array[Dictionary] = [
-		{"label": "Resource", "value": "Silica" if is_silica else "Biomass"},
+		{"label": "Resource", "value": "Rich Silica" if (is_silica and is_high_yield) else ("Dense Biomass" if is_high_yield else ("Silica" if is_silica else "Biomass"))},
 		{"label": "Remaining", "value": "%s / %s (%d%%)" % [fmt_rem, fmt_max, pct]},
 		{"label": "Harvest", "value": "Automated Harvester" if is_silica else "Direct Worker Gather"},
 		{"label": "Saturation", "value": "%d / %d Harvesters" % [active_gatherers, cap], "color": sat_col},
 	]
+	if is_high_yield:
+		var bonus_pct: int = int(round((high_yield_multiplier - 1.0) * 100.0))
+		deposit_stats.append({
+			"label": "Yield Rate",
+			"value": "+%d%% Load / Trip" % bonus_pct,
+			"color": accent,
+		})
+	var sub_text: String = "HIGH-YIELD RESOURCE (+%d%%)" % int(round((high_yield_multiplier - 1.0) * 100.0)) if is_high_yield else ("SILICA VEIN" if is_silica else "BIOMASS DEPOSIT")
 	return {
 		"title": display_name,
-		"subtitle": "SILICA VEIN" if is_silica else "BIOMASS DEPOSIT",
+		"subtitle": sub_text,
 		"affiliation": &"neutral",
 		"accent_color": accent,
 		"ring_color": Color(1.0, 0.84, 0.28, 0.96),

@@ -56,6 +56,7 @@ const FACTION_DIR_PATH: String = "res://resources/factions/"
 const FACTION_MANIFEST_PATHS: Array = [
 	"res://resources/factions/genesis_v2_faction.tres",
 ]
+const FACTION_AUDIT_VALIDATOR_SCRIPT: GDScript = preload("res://scripts/data/faction_audit_validator.gd")
 
 signal teams_reconfigured(mode: StringName)
 
@@ -111,6 +112,9 @@ func _validate_registered_factions() -> void:
 			var warnings: Array = res.call("validate") as Array
 			for w: Variant in warnings:
 				push_warning("FactionData.validate(): %s" % String(w))
+	var audit_warnings: Array[String] = FACTION_AUDIT_VALIDATOR_SCRIPT.audit_playable_factions(get_playable_factions())
+	for aw: String in audit_warnings:
+		push_warning("FactionAudit: %s" % aw)
 
 
 func get_faction_data(faction_id: StringName) -> Resource:

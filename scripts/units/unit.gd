@@ -48,6 +48,10 @@ const HEAL_AURA_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/heal_a
 const REPAIR_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/repair_component.gd")
 const MOVEMENT_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/movement_component.gd")
 const STATUS_EFFECT_COMPONENT_SCRIPT: GDScript = preload("res://scripts/units/status_effect_component.gd")
+const UNIT_COMMAND_QUEUE_SCRIPT: GDScript = preload("res://scripts/units/unit_command_queue.gd")
+const UNIT_DEPLOY_CONTROLLER_SCRIPT: GDScript = preload("res://scripts/units/unit_deploy_controller.gd")
+const UNIT_INSPECTION_BUILDER_SCRIPT: GDScript = preload("res://scripts/units/unit_inspection_builder.gd")
+const UNIT_WORLD_OVERLAY_SCRIPT: GDScript = preload("res://scripts/units/unit_world_overlay.gd")
 const ENTITY_VISUALS_SCRIPT: GDScript = preload("res://ui/overlays/entity_visuals.gd")
 const COMBAT_VFX_SCRIPT: GDScript = preload("res://ui/overlays/combat_vfx.gd")
 const SALVAGE_CORE_SCENE_PATH: String = "res://scenes/world/salvage_core.tscn"
@@ -532,167 +536,31 @@ func is_idle_worker() -> bool:
 
 
 func has_queued_commands() -> bool:
-	return not command_queue.is_empty()
+	return UNIT_COMMAND_QUEUE_SCRIPT.has_queued_commands(self)
 
 
 func clear_command_queue() -> void:
-	var had_items: bool = not command_queue.is_empty() or not active_command.is_empty()
-	command_queue.clear()
-	active_command.clear()
-	if had_items:
-		command_queue_changed.emit(self)
+	UNIT_COMMAND_QUEUE_SCRIPT.clear(self)
 
 
 func issue_command(cmd: Dictionary, append_to_queue: bool = false) -> bool:
-	if is_dead or is_staffed or cmd.is_empty():
-		return false
-	var cmd_type_check: StringName = cmd.get("type", &"")
-	# Anchored/deploying units ignore Move/Attack-Move/Patrol without accidentally undeploying or breaking focus-fire.
-	if is_movement_locked_by_deploy() and (cmd_type_check == &"move" or cmd_type_check == &"attack_move" or cmd_type_check == &"patrol"):
-		return false
-	if append_to_queue:
-		var is_idle_now: bool = (
-			(command_state == CommandState.IDLE or command_state == CommandState.HOLD_POSITION)
-			and active_command.is_empty()
-			and command_queue.is_empty()
-		)
-		if not is_idle_now:
-			if cmd_type_check == &"attack_target":
-				var new_atk_t: Variant = cmd.get("target", null)
-				if not command_queue.is_empty():
-					var last_cmd: Dictionary = command_queue[command_queue.size() - 1]
-					if last_cmd.get("type", &"") == &"attack_target" and last_cmd.get("target", null) == new_atk_t:
-						return true
-				elif command_state == CommandState.ATTACKING_TARGET and current_target == new_atk_t:
-					return true
-			command_queue.append(cmd.duplicate())
-			command_queue_changed.emit(self)
-			status_changed.emit(self)
-			return true
-	else:
-		clear_command_queue()
-		if gather_component != null:
-			var cmd_type: StringName = cmd.get("type", &"")
-			if (
-				cmd_type == &"move"
-				or cmd_type == &"attack_move"
-				or cmd_type == &"attack_target"
-				or cmd_type == &"patrol"
-				or cmd_type == &"build"
-				or cmd_type == &"repair"
-				or cmd_type == &"salvage"
-				or cmd_type == &"staff"
-			):
-				gather_component.cancel(self, true)
-	return _execute_command(cmd) != CMD_EXEC_FAILED
+	return UNIT_COMMAND_QUEUE_SCRIPT.issue_command(self, cmd, append_to_queue)
 
 
 func advance_command_queue() -> bool:
-	return _advance_command_queue()
+	return UNIT_COMMAND_QUEUE_SCRIPT.advance(self)
 
 
 func _advance_command_queue() -> bool:
-	active_command.clear()
-	while not command_queue.is_empty():
-		var next_cmd: Dictionary = command_queue.pop_front()
-		command_queue_changed.emit(self)
-		var result: int = _execute_command(next_cmd)
-		if result == CMD_EXEC_ACTIVE:
-			return true
-		if result == CMD_EXEC_IMMEDIATE_DONE:
-			continue
-	command_state = CommandState.HOLD_POSITION if stance == Stance.HOLD_POSITION else CommandState.IDLE
-	velocity = Vector2.ZERO
-	command_queue_changed.emit(self)
-	status_changed.emit(self)
-	return false
+	return UNIT_COMMAND_QUEUE_SCRIPT.advance(self)
 
 
 func _execute_command(cmd: Dictionary) -> int:
-	var cmd_type: StringName = cmd.get("type", &"")
-	var result: int = CMD_EXEC_FAILED
-	match cmd_type:
-		&"move":
-			result = CMD_EXEC_ACTIVE if _start_move(cmd.get("pos", global_position) as Vector2) else CMD_EXEC_FAILED
-		&"attack_move":
-			result = CMD_EXEC_ACTIVE if _start_attack_move(cmd.get("pos", global_position) as Vector2) else CMD_EXEC_FAILED
-		&"attack_target":
-			var atk_t: Variant = cmd.get("target", null)
-			if atk_t != null and is_instance_valid(atk_t) and atk_t is Node2D and not (atk_t as Node).is_queued_for_deletion():
-				result = CMD_EXEC_ACTIVE if _start_attack_target(atk_t as Node2D) else CMD_EXEC_FAILED
-		&"gather":
-			var rn: Variant = cmd.get("target", null)
-			if rn != null and is_instance_valid(rn) and rn is ResourceNode and not (rn as Node).is_queued_for_deletion() and not (rn as ResourceNode).is_depleted():
-				result = CMD_EXEC_ACTIVE if _start_gather(rn as ResourceNode) else CMD_EXEC_FAILED
-		&"return_cargo":
-			var drop_b: Variant = cmd.get("target", null)
-			var drop_building: Building = drop_b as Building if (drop_b != null and is_instance_valid(drop_b) and drop_b is Building and not (drop_b as Building).is_destroyed) else null
-			result = CMD_EXEC_ACTIVE if _start_return_cargo(drop_building) else CMD_EXEC_FAILED
-		&"build":
-			var build_t: Variant = cmd.get("target", null)
-			if build_t != null and is_instance_valid(build_t) and build_t is Building and not (build_t as Node).is_queued_for_deletion():
-				result = CMD_EXEC_ACTIVE if _start_construct_building(build_t as Building) else CMD_EXEC_FAILED
-		&"staff":
-			var staff_t: Variant = cmd.get("target", null)
-			if staff_t != null and is_instance_valid(staff_t) and staff_t is Building and not (staff_t as Node).is_queued_for_deletion():
-				result = CMD_EXEC_ACTIVE if _start_staff_building(staff_t as Building) else CMD_EXEC_FAILED
-		&"cast_ability":
-			var ab: AbilityData = cmd.get("ability", null) as AbilityData
-			var raw_t: Variant = cmd.get("target", null)
-			var t_unit: Unit = raw_t as Unit if (raw_t != null and is_instance_valid(raw_t) and raw_t is Unit) else null
-			result = _start_cast_ability(ab, cmd.get("pos", global_position) as Vector2, t_unit)
-		&"patrol":
-			result = CMD_EXEC_ACTIVE if _start_patrol(cmd.get("pos", global_position) as Vector2) else CMD_EXEC_FAILED
-		&"repair":
-			var rep_t: Variant = cmd.get("target", null)
-			if rep_t != null and is_instance_valid(rep_t) and rep_t is Node2D and not (rep_t as Node).is_queued_for_deletion():
-				result = CMD_EXEC_ACTIVE if _start_repair(rep_t as Node2D) else CMD_EXEC_FAILED
-		&"salvage":
-			var salv_t: Variant = cmd.get("target", null)
-			if salv_t != null and is_instance_valid(salv_t) and salv_t is Node2D and not (salv_t as Node).is_queued_for_deletion():
-				result = CMD_EXEC_ACTIVE if _start_salvage(salv_t as Node2D) else CMD_EXEC_FAILED
-	if result == CMD_EXEC_ACTIVE:
-		active_command = cmd.duplicate()
-		command_queue_changed.emit(self)
-	return result
+	return UNIT_COMMAND_QUEUE_SCRIPT.execute_command(self, cmd)
 
 
 func get_active_command_destination() -> Variant:
-	match command_state:
-		CommandState.MOVING:
-			return _move_destination
-		CommandState.ATTACK_MOVING:
-			return _attack_move_destination
-		CommandState.ATTACKING_TARGET:
-			if current_target != null and is_instance_valid(current_target):
-				return current_target.global_position
-		CommandState.CASTING_ABILITY:
-			if ability_component != null and ability_component.has_pending_cast():
-				return ability_component.get_pending_destination()
-		CommandState.CONSTRUCTING:
-			if _construction_target != null and is_instance_valid(_construction_target):
-				return _construction_target.global_position
-		CommandState.GATHERING:
-			if gather_component != null:
-				if gather_component.state == GatherComponent.GatherState.GATHER_RETURNING_TO_BASE and is_instance_valid(gather_component.dropoff_building):
-					return gather_component.dropoff_building.global_position
-				if is_instance_valid(gather_component.target_node):
-					return gather_component.target_node.global_position
-		CommandState.STAFFING_BUILDING:
-			if staff_component != null and is_instance_valid(staff_component.target_building):
-				return staff_component.target_building.global_position
-		CommandState.PATROLLING:
-			if not patrol_waypoints.is_empty():
-				return patrol_waypoints[clampi(patrol_index, 0, patrol_waypoints.size() - 1)]
-		CommandState.REPAIRING:
-			if repair_component != null:
-				var rep_node: Variant = repair_component.get("target_entity")
-				if rep_node is Node2D and is_instance_valid(rep_node):
-					return (rep_node as Node2D).global_position
-		CommandState.SALVAGING:
-			if _salvage_target != null and is_instance_valid(_salvage_target):
-				return _salvage_target.global_position
-	return null
+	return UNIT_COMMAND_QUEUE_SCRIPT.get_active_destination(self)
 
 
 func command_gather(resource_node: ResourceNode, append_to_queue: bool = false) -> bool:
@@ -919,7 +787,7 @@ func restore_shield(amount: float) -> float:
 
 
 func can_toggle_deploy() -> bool:
-	return data != null and data.can_deploy and not is_dead and not is_staffed
+	return UNIT_DEPLOY_CONTROLLER_SCRIPT.can_toggle_deploy(self)
 
 
 func is_deployed() -> bool:
@@ -935,67 +803,19 @@ func is_movement_locked_by_deploy() -> bool:
 
 
 func get_deploy_progress() -> float:
-	var dur: float = maxf(0.1, _deploy_duration_active)
-	if deploy_state == DeployState.DEPLOYING:
-		return 1.0 - clampf(_deploy_timer / dur, 0.0, 1.0)
-	if deploy_state == DeployState.UNDEPLOYING:
-		return clampf(_deploy_timer / dur, 0.0, 1.0)
-	if deploy_state == DeployState.DEPLOYED:
-		return 1.0
-	return 0.0
+	return UNIT_DEPLOY_CONTROLLER_SCRIPT.get_deploy_progress(self)
 
 
 func request_deploy() -> void:
-	if not can_toggle_deploy():
-		return
-	if deploy_state == DeployState.DEPLOYED or deploy_state == DeployState.DEPLOYING:
-		return
-	var total_dur: float = maxf(0.1, data.deploy_duration)
-	if deploy_state == DeployState.UNDEPLOYING:
-		_deploy_timer = maxf(0.05, _deploy_duration_active - _deploy_timer)
-	else:
-		_deploy_duration_active = total_dur
-		_deploy_timer = _deploy_duration_active
-	clear_command_queue()
-	_cancel_active_tasks(false)
-	command_state = CommandState.IDLE
-	current_target = null
-	stop_component_navigation()
-	velocity = Vector2.ZERO
-	deploy_state = DeployState.DEPLOYING
-	if AudioManager != null:
-		AudioManager.play_sfx(&"deploy_lock", -3.0, 0.03, global_position, true)
-	queue_redraw()
-	deploy_state_changed.emit(self, deploy_state)
-	status_changed.emit(self)
+	UNIT_DEPLOY_CONTROLLER_SCRIPT.request_deploy(self)
 
 
 func request_undeploy() -> void:
-	if not can_toggle_deploy():
-		return
-	if deploy_state == DeployState.MOBILE or deploy_state == DeployState.UNDEPLOYING:
-		return
-	var total_dur: float = maxf(0.1, data.deploy_duration)
-	if deploy_state == DeployState.DEPLOYING:
-		_deploy_timer = maxf(0.05, _deploy_duration_active - _deploy_timer)
-	else:
-		_deploy_duration_active = total_dur
-		_deploy_timer = _deploy_duration_active
-	if combat_component != null:
-		combat_component.cancel_attack_animation()
-	deploy_state = DeployState.UNDEPLOYING
-	if AudioManager != null:
-		AudioManager.play_sfx(&"deploy_release", -3.0, 0.03, global_position, true)
-	queue_redraw()
-	deploy_state_changed.emit(self, deploy_state)
-	status_changed.emit(self)
+	UNIT_DEPLOY_CONTROLLER_SCRIPT.request_undeploy(self)
 
 
 func toggle_deploy() -> void:
-	if deploy_state == DeployState.MOBILE or deploy_state == DeployState.UNDEPLOYING:
-		request_deploy()
-	else:
-		request_undeploy()
+	UNIT_DEPLOY_CONTROLLER_SCRIPT.toggle_deploy(self)
 
 
 func command_move(target_pos: Vector2, append_to_queue: bool = false) -> void:
@@ -1528,204 +1348,11 @@ func _get_economy_manager() -> EconomyManager:
 
 
 func _should_draw_attack_range() -> bool:
-	if not is_selected or not _can_attack() or data == null:
-		return false
-	var mode: int = SettingsManager.attack_range_mode if SettingsManager != null else 1
-	if mode == 2:
-		return false
-	if mode == 0:
-		return true
-	if is_inside_tree():
-		var sel: Node = get_tree().get_first_node_in_group("selection_controller")
-		if sel != null and sel.has_method("is_targeting_command_active"):
-			return bool(sel.call("is_targeting_command_active"))
-	return false
+	return UNIT_WORLD_OVERLAY_SCRIPT.should_draw_attack_range(self)
 
 
 func _draw() -> void:
-	var eff_atk_range: float = get_effective_attack_range()
-	var eff_min_range: float = get_effective_min_attack_range()
-	var eff_aoe: float = get_effective_aoe_radius()
-	# Selected unit attack-range & min-range tactical previews
-	if is_selected and is_deployed() and eff_atk_range > 0.0 and data != null:
-		var dep_r: float = eff_atk_range + data.collision_radius
-		var dep_col: Color = Color(1.0, 0.68, 0.18, 0.42) if team == Team.PLAYER else Color(1.0, 0.38, 0.28, 0.34)
-		_draw_dashed_ring(Vector2.ZERO, dep_r, dep_col, 1.6, 48 if dep_r > 260.0 else 36)
-		if eff_min_range > 0.0:
-			var dep_min_r: float = eff_min_range + data.collision_radius
-			draw_circle(Vector2.ZERO, dep_min_r, Color(1.0, 0.28, 0.24, 0.05))
-			_draw_dashed_ring(Vector2.ZERO, dep_min_r, Color(1.0, 0.36, 0.28, 0.44), 1.4, 20)
-	elif _should_draw_attack_range():
-		var atk_r: float = eff_atk_range + data.collision_radius
-		var is_siege: bool = eff_min_range > 0.0 or eff_aoe > 0.0
-		var range_col: Color = (Color(0.46, 1.0, 0.56, 0.34) if is_siege else Color(0.32, 0.94, 0.96, 0.24)) if team == Team.PLAYER else Color(1.0, 0.38, 0.28, 0.26)
-		_draw_dashed_ring(Vector2.ZERO, atk_r, range_col, 1.5 if is_siege else 1.2, 40 if atk_r > 220.0 else 28)
-		if eff_min_range > 0.0:
-			var min_r: float = eff_min_range + data.collision_radius
-			draw_circle(Vector2.ZERO, min_r, Color(1.0, 0.28, 0.24, 0.05))
-			_draw_dashed_ring(Vector2.ZERO, min_r, Color(1.0, 0.36, 0.28, 0.44), 1.4, 20)
-
-	# Deploy / Anchor 4 corner stabilizer clamps when anchored
-	if is_deployed():
-		var clamp_r: float = (data.collision_radius if data != null else 16.0) + 4.0
-		var amber_pin: Color = Color(1.0, 0.624, 0.110, 0.96)
-		var steel_pad: Color = Color(0.18, 0.24, 0.30, 0.95)
-		var trim_col: Color = Color(0.62, 0.72, 0.80, 0.92)
-		for ci: int in range(4):
-			var c_ang: float = PI * 0.25 + float(ci) * (PI * 0.5)
-			var c_dir: Vector2 = Vector2.RIGHT.rotated(c_ang)
-			var perp: Vector2 = Vector2(-c_dir.y, c_dir.x)
-			var p_in: Vector2 = c_dir * (clamp_r - 5.5)
-			var p_out: Vector2 = c_dir * (clamp_r + 3.5)
-			draw_line(p_in, p_out, trim_col, 3.0, true)
-			var pad_pts: PackedVector2Array = PackedVector2Array([
-				p_out + perp * -3.5 - c_dir * 2.0,
-				p_out + perp * 3.5 - c_dir * 2.0,
-				p_out + perp * 4.2 + c_dir * 2.2,
-				p_out + perp * -4.2 + c_dir * 2.2,
-			])
-			draw_colored_polygon(pad_pts, steel_pad)
-			draw_polyline(pad_pts + PackedVector2Array([pad_pts[0]]), amber_pin, 1.2, true)
-			draw_circle(p_out, 1.6, amber_pin)
-
-	# Shield-hit flash ripple ring
-	if _shield_hit_flash_timer > 0.0:
-		var sf: float = clampf(_shield_hit_flash_timer / SHIELD_HIT_FLASH_DURATION, 0.0, 1.0)
-		var sr: float = (data.collision_radius if data != null else 16.0) + 3.5 + (1.0 - sf) * 4.5
-		draw_circle(Vector2.ZERO, sr * 0.92, Color(0.220, 0.741, 0.973, sf * 0.18))
-		draw_arc(Vector2.ZERO, sr, 0.0, TAU, 24, Color(0.220, 0.741, 0.973, sf * 0.92), 2.2, true)
-
-	# PRISMA_DEI Radiant Mark golden amplification halo (+15% dmg taken) & Blinding Glare ring
-	if has_status_effect(&"radiant_mark"):
-		var rm_r: float = (data.collision_radius if data != null else 16.0) + 6.5
-		var gold_mark: Color = Color(0.98, 0.80, 0.14, 0.92)
-		draw_arc(Vector2.ZERO, rm_r, 0.0, TAU, 24, gold_mark, 1.8, true)
-		for ri: int in range(4):
-			var ra: float = float(ri) * (PI * 0.5)
-			var rd: Vector2 = Vector2.RIGHT.rotated(ra)
-			draw_line(rd * (rm_r - 3.5), rd * (rm_r + 4.5), Color(1.0, 0.96, 0.72, 0.96), 1.8, true)
-	if has_status_effect(&"blinding_glare"):
-		var bg_r: float = (data.collision_radius if data != null else 16.0) + 4.0
-		draw_arc(Vector2.ZERO, bg_r, 0.0, TAU, 20, Color(0.94, 0.36, 0.96, 0.72), 1.6, true)
-
-	# Rail-Lance targeting lock-line telegraph during attack windup
-	if combat_component != null and combat_component.is_in_windup() and get_effective_weapon_tracer_style() == &"rail_lance":
-		var lock_tgt: Node2D = combat_component.get_windup_target()
-		if lock_tgt != null and is_instance_valid(lock_tgt):
-			var lock_p: float = combat_component.get_windup_progress(self)
-			var muzzle_local: Vector2 = Vector2.RIGHT.rotated(body_visual.rotation) * ((data.collision_radius if data != null else 16.0) + 2.0)
-			var tgt_local: Vector2 = to_local(lock_tgt.global_position)
-			var lock_col: Color = Color(1.0, 0.624, 0.110, 0.35 + lock_p * 0.60)
-			draw_line(muzzle_local, tgt_local, lock_col, 1.0 + lock_p * 1.1, true)
-			draw_line(muzzle_local, tgt_local, Color(1.0, 0.96, 0.86, 0.25 + lock_p * 0.55), 0.7, true)
-			draw_arc(tgt_local, lerpf(16.0, 6.0, lock_p), 0.0, TAU, 16, lock_col, 1.3, true)
-
-	# Deploy / Undeploy transition progress bar
-	if is_deploy_transitioning():
-		var d_prog: float = get_deploy_progress()
-		var d_w: float = HEALTH_BAR_WIDTH
-		var d_h: float = 4.0
-		var base_bar_y: float = health_bar_root.position.y if health_bar_root != null else -((data.collision_radius if data != null else 16.0) + 14.0)
-		var d_y: float = base_bar_y - (12.0 if max_shield > 0.0 else 7.0)
-		var d_pos: Vector2 = Vector2(-d_w * 0.5, d_y)
-		draw_rect(Rect2(d_pos - Vector2(1.0, 1.0), Vector2(d_w + 2.0, d_h + 2.0)), Color(0.04, 0.06, 0.10, 0.92), true)
-		draw_rect(Rect2(d_pos, Vector2(d_w * d_prog, d_h)), Color(1.0, 0.624, 0.110, 0.96), true)
-
-	# Elevated ground shadow for Colossus Stride units
-	if data != null and data.ignore_friendly_unit_collision:
-		draw_circle(Vector2(5.0, 11.0), 17.5, Color(0.02, 0.04, 0.06, 0.42))
-		draw_arc(Vector2(5.0, 11.0), 17.5, 0.0, TAU, 24, Color(0.28, 0.92, 1.0, 0.22) if team == Team.PLAYER else Color(1.0, 0.36, 0.26, 0.22), 1.2, true)
-
-	# Speed-dart motion trail for fast flanker units
-	if data != null and data.has_tag(&"flanker") and _trail_points.size() >= 2:
-		var trail_base: Color = Color(0.98, 0.80, 0.24, 1.0) if team == Team.PLAYER else Color(1.0, 0.46, 0.24, 1.0)
-		for i: int in range(1, _trail_points.size()):
-			var t: float = float(i) / float(_trail_points.size())
-			var p0: Vector2 = to_local(_trail_points[i - 1])
-			var p1: Vector2 = to_local(_trail_points[i])
-			draw_line(p0, p1, Color(trail_base.r, trail_base.g, trail_base.b, t * 0.45), 1.4 + t * 2.2, true)
-
-	var r: float = (data.collision_radius + 6.0) if data != null else 22.0
-	if has_status_effect(&"adrenal_surge"):
-		# Pulsing emerald/gold rim + upward chevron pip
-		var pulse: float = 0.5 + 0.5 * sin(_vfx_anim_time * 10.0)
-		var rim_col: Color = Color(0.28, 1.0, 0.72, 0.88).lerp(Color(1.0, 0.88, 0.34, 0.96), pulse * 0.55)
-		draw_arc(Vector2.ZERO, r + pulse * 1.8, 0.0, TAU, 24, rim_col, 2.4, true)
-		draw_circle(Vector2.ZERO, r * 0.75, Color(0.24, 0.98, 0.78, 0.12 + pulse * 0.08))
-		var chev_y: float = -(r + 6.0 + pulse * 2.5)
-		var chev: PackedVector2Array = PackedVector2Array([
-			Vector2(-4.5, chev_y + 3.0),
-			Vector2(0.0, chev_y - 2.0),
-			Vector2(4.5, chev_y + 3.0),
-		])
-		draw_polyline(chev, Color(0.98, 0.94, 0.42, 0.95), 2.0, true)
-	if has_status_effect(&"static_slow"):
-		# Flickering violet/cyan static disruption interference arcs
-		var spin: float = _vfx_anim_time * 4.5
-		var flicker: float = 0.65 + 0.35 * sin(_vfx_anim_time * 24.0)
-		draw_circle(Vector2.ZERO, r * 0.82, Color(0.56, 0.34, 1.0, 0.14))
-		for k: int in range(3):
-			var a0: float = spin + float(k) * (TAU / 3.0)
-			var arc_col: Color = Color(0.72, 0.42, 1.0, 0.92 * flicker) if (k % 2 == 0) else Color(0.36, 0.92, 1.0, 0.86 * flicker)
-			draw_arc(Vector2.ZERO, r + 3.0, a0, a0 + 1.15, 10, arc_col, 2.3, true)
-			var crack_dir: Vector2 = Vector2.RIGHT.rotated(a0 + 0.55)
-			draw_line(crack_dir * (r - 1.0), crack_dir * (r + 6.5), arc_col, 1.4, true)
-	if has_status_effect(&"grav_pulse"):
-		# Heavy amber/violet gravity compression chevrons & ring
-		var g_spin: float = -_vfx_anim_time * 3.2
-		var g_pulse: float = 0.72 + 0.28 * sin(_vfx_anim_time * 12.0)
-		draw_circle(Vector2.ZERO, r * 0.86, Color(0.72, 0.36, 0.96, 0.14 * g_pulse))
-		draw_arc(Vector2.ZERO, r + 2.0, 0.0, TAU, 24, Color(1.0, 0.624, 0.110, 0.72 * g_pulse), 1.8, true)
-		for gi: int in range(4):
-			var ga: float = g_spin + float(gi) * (PI * 0.5)
-			var g_dir: Vector2 = Vector2.RIGHT.rotated(ga)
-			draw_line(g_dir * (r + 6.0), g_dir * (r + 1.0), Color(0.84, 0.52, 1.0, 0.90 * g_pulse), 2.0, true)
-
-	# Diegetic Defensive Stance anchor leash ring (when selected) + crisp shield/anchor pip
-	if stance == Stance.DEFENSIVE:
-		var def_col: Color = Color(0.24, 0.96, 0.78, 0.92)
-		if is_selected:
-			var local_anchor: Vector2 = to_local(defensive_anchor)
-			_draw_dashed_ring(local_anchor, DEFENSIVE_LEASH_RADIUS, Color(0.24, 0.96, 0.78, 0.24), 1.3, 36)
-			draw_arc(local_anchor, 7.0, 0.0, TAU, 16, Color(0.24, 0.96, 0.78, 0.56), 1.3, true)
-			draw_circle(local_anchor, 2.5, Color(0.24, 0.96, 0.78, 0.75))
-			if local_anchor.length_squared() > 144.0:
-				draw_line(Vector2.ZERO, local_anchor, Color(0.24, 0.96, 0.78, 0.22), 1.1, true)
-		var pip_y: float = health_bar_root.position.y + 1.0 if health_bar_root != null else -(r + 8.0)
-		var pip_x: float = (HEALTH_BAR_WIDTH * 0.5 + 8.0)
-		var shield_pts: PackedVector2Array = PackedVector2Array([
-			Vector2(pip_x - 3.6, pip_y - 3.8),
-			Vector2(pip_x + 3.6, pip_y - 3.8),
-			Vector2(pip_x + 3.6, pip_y + 0.4),
-			Vector2(pip_x, pip_y + 4.4),
-			Vector2(pip_x - 3.6, pip_y + 0.4),
-		])
-		draw_colored_polygon(shield_pts, Color(0.06, 0.20, 0.22, 0.88))
-		draw_polyline(shield_pts + PackedVector2Array([shield_pts[0]]), def_col, 1.4, true)
-
-	# Diegetic Veterancy rank chevron pips beside unit's health bar
-	if veterancy_rank > 0:
-		var base_y: float = health_bar_root.position.y + 1.0 if health_bar_root != null else -(r + 8.0)
-		var base_x: float = -(HEALTH_BAR_WIDTH * 0.5 + 8.0)
-		var pip_col: Color = Color(1.0, 0.86, 0.28, 1.0) if veterancy_rank >= 3 else Color(0.76, 0.96, 1.0, 0.96)
-		var badge_h: float = 4.0 + float(veterancy_rank) * 3.8
-		draw_rect(Rect2(base_x - 5.0, base_y - badge_h * 0.5 - 1.5, 10.0, badge_h + 3.0), Color(0.03, 0.06, 0.10, 0.80), true)
-		for i: int in range(veterancy_rank):
-			var cy: float = base_y + (float(veterancy_rank - 1) * 0.5 - float(i)) * 3.6
-			var chev_pts: PackedVector2Array = PackedVector2Array([
-				Vector2(base_x - 3.2, cy + 1.5),
-				Vector2(base_x, cy - 1.7),
-				Vector2(base_x + 3.2, cy + 1.5),
-			])
-			draw_polyline(chev_pts, pip_col, 1.6, true)
-
-
-func _draw_dashed_ring(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:
-	var step: float = TAU / float(maxi(8, dash_count))
-	for i: int in range(dash_count):
-		var a0: float = float(i) * step
-		var a1: float = a0 + step * 0.54
-		draw_arc(center, radius, a0, a1, 4, col, width, true)
+	UNIT_WORLD_OVERLAY_SCRIPT.draw_unit_overlays(self)
 
 
 func _die() -> void:
@@ -1923,45 +1550,7 @@ func _tick_shield_regen(delta: float) -> void:
 
 
 func _tick_deploy_transition(delta: float) -> void:
-	if not is_deploy_transitioning():
-		return
-	velocity = Vector2.ZERO
-	_deploy_timer = maxf(0.0, _deploy_timer - delta)
-	queue_redraw()
-	if _deploy_timer <= 0.0:
-		if deploy_state == DeployState.DEPLOYING:
-			deploy_state = DeployState.DEPLOYED
-			_trigger_deploy_anchor_impact()
-		elif deploy_state == DeployState.UNDEPLOYING:
-			deploy_state = DeployState.MOBILE
-		if _entity_visuals != null and is_instance_valid(_entity_visuals):
-			_entity_visuals.queue_redraw()
-		queue_redraw()
-		deploy_state_changed.emit(self, deploy_state)
-		status_changed.emit(self)
-
-
-func _trigger_deploy_anchor_impact() -> void:
-	if not is_inside_tree():
-		return
-	var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
-	var is_friendly_view: bool = viewer < 0 or (TeamManager.are_allies(viewer, int(team)) if TeamManager != null else (team == Team.PLAYER))
-	if not is_friendly_view and not visible:
-		return
-	var host: Node = get_parent()
-	if host != null:
-		var fx: CombatVFX = VFXPool.acquire_combat_vfx(52) if VFXPool != null else null
-		if fx == null:
-			fx = COMBAT_VFX_SCRIPT.new() as CombatVFX
-			fx.z_index = 52
-			host.add_child(fx)
-		var rad: float = (data.collision_radius if data != null else 22.0) * 1.45
-		fx.setup_anchor_thud(global_position, rad, Color(1.0, 0.624, 0.110, 1.0))
-	if AudioManager != null:
-		AudioManager.play_sfx(&"deploy_anchor_lock", -3.0, 0.04, global_position, true)
-	var cam: Node = get_tree().get_first_node_in_group("rts_camera")
-	if cam != null and cam.has_method("add_camera_shake"):
-		cam.call("add_camera_shake", 1.6, 0.10, global_position)
+	UNIT_DEPLOY_CONTROLLER_SCRIPT.tick(self, delta)
 
 
 func _maybe_retarget_higher_threat(delta: float, scan_range: float) -> void:
@@ -2593,207 +2182,15 @@ func _on_gather_state_changed(_new_state: GatherComponent.GatherState) -> void:
 
 
 func get_armor_class_label() -> String:
-	if data == null:
-		return "Light"
-	if data.is_heavy_unit() and data.has_tag(&"synthetic"):
-		return "Heavy Synthetic"
-	if data.is_armored:
-		return "Armored"
-	return "Light"
+	return UNIT_INSPECTION_BUILDER_SCRIPT.get_armor_class_label(self)
 
 
 func get_inspection_data() -> Dictionary:
-	var viewer_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Team.PLAYER)
-	var is_local_owned_unit: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Team.PLAYER)
-	var is_allied_ai: bool = (not is_local_owned_unit) and viewer_team >= 0 and TeamManager != null and TeamManager.are_allies(viewer_team, int(team))
-	var is_enemy: bool = (not is_local_owned_unit) and (not is_allied_ai)
-	var accent: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else (Color(1.0, 0.36, 0.26, 1.0) if is_enemy else Color(0.24, 0.92, 0.88, 1.0))
-	var class_tag: String = get_armor_class_label().to_upper()
-	var subtitle: String = ("HOSTILE %s" % class_tag) if is_enemy else (("ALLIED %s" % class_tag) if is_allied_ai else ("FRIENDLY %s" % class_tag))
-
-	if not is_enemy and data != null:
-		if not data.role_tags_display.is_empty():
-			subtitle = "%s  •  %s" % [class_tag, data.role_tags_display.to_upper()]
-			if data.has_tag(&"flanker") or data.has_tag(&"scout"):
-				accent = Color(0.98, 0.78, 0.24, 1.0)
-			elif data.has_tag(&"anti_armor"):
-				accent = Color(0.98, 0.68, 0.28, 1.0)
-			elif data.has_tag(&"disruptor"):
-				accent = Color(0.76, 0.56, 1.0, 1.0)
-			elif data.has_tag(&"support") or data.has_tag(&"artillery"):
-				accent = Color(0.38, 1.0, 0.60, 1.0)
-			elif data.is_heavy_unit():
-				accent = Color(0.40, 0.94, 1.0, 1.0)
-			elif data.can_staff_compute:
-				accent = Color(0.32, 0.82, 1.0, 1.0)
-			elif data.can_gather:
-				accent = Color(0.96, 0.68, 0.22, 1.0) if data.allowed_resource == &"silica" else Color(0.28, 0.94, 0.56, 1.0)
-			else:
-				accent = Color(0.24, 0.94, 0.82, 1.0)
-		elif data.can_staff_compute:
-			accent = Color(0.32, 0.82, 1.0, 1.0)
-			subtitle = "%s  •  COMPUTE SPECIALIST" % class_tag
-		elif data.can_gather:
-			accent = Color(0.28, 0.94, 0.56, 1.0)
-			subtitle = "%s  •  UTILITY WORKER" % class_tag
-
-	var max_hp_val: float = get_max_hp()
-	var stats: Array[Dictionary] = []
-	var show_primary: bool = false
-	var primary_label: String = ""
-	var primary_val: float = 0.0
-	var primary_max: float = 1.0
-
-	if data != null and data.can_gather:
-		var res_label: String = String(data.allowed_resource).capitalize() if data.allowed_resource != &"" else "Resource"
-		var carried: int = get_carried_amount()
-		show_primary = true
-		primary_label = "Cargo: %d / %d %s" % [carried, data.carry_capacity, res_label]
-		primary_val = float(carried)
-		primary_max = float(maxi(1, data.carry_capacity))
-		stats.append({"label": "Cargo", "value": "%d / %d %s" % [carried, data.carry_capacity, res_label]})
-		stats.append({"label": "Harvest", "value": "%.1fs Cycle" % data.gather_duration})
-		stats.append({"label": "Speed", "value": "%d px/s" % int(round(get_effective_move_speed()))})
-		stats.append({"label": "State", "value": _get_command_state_label()})
-	elif data != null and data.can_staff_compute:
-		stats.append({"label": "Role", "value": "Compute Staff"})
-		stats.append({"label": "Output", "value": "+5 Compute / 3.0s"})
-		stats.append({"label": "Speed", "value": "%d px/s" % int(round(get_effective_move_speed()))})
-		stats.append({"label": "Bandwidth", "value": "%d BW" % data.bandwidth_cost})
-	elif data != null:
-		var eff_dmg: float = get_effective_attack_damage()
-		var eff_rng: float = get_effective_attack_range()
-		var eff_min_rng: float = get_effective_min_attack_range()
-		var eff_aoe: float = get_effective_aoe_radius()
-		var dmg_str: String = "%d" % int(round(eff_dmg))
-		if data.bonus_vs_armored > 0.0:
-			dmg_str += " (+%d vs Armored)" % int(round(data.bonus_vs_armored))
-		elif eff_aoe > 0.0:
-			dmg_str += " (AoE %dpx)" % int(round(eff_aoe))
-		elif data.line_pierce_width > 0.0:
-			dmg_str += " (Line Pierce)"
-		stats.append({"label": "Damage", "value": dmg_str})
-
-		var range_str: String = "%d px" % int(round(eff_rng))
-		if eff_min_rng > 0.0:
-			range_str = "%d–%d px (Min)" % [int(round(eff_min_rng)), int(round(eff_rng))]
-		stats.append({"label": "Range", "value": range_str})
-
-		var spd_str: String = "ANCHORED" if is_deployed() else ("DEPLOYING..." if deploy_state == DeployState.DEPLOYING else ("UNDEPLOYING..." if deploy_state == DeployState.UNDEPLOYING else "%d px/s" % int(round(get_effective_move_speed()))))
-		if not is_movement_locked_by_deploy():
-			if has_status_effect(&"adrenal_surge"):
-				spd_str += " [SURGE]"
-			elif has_status_effect(&"static_slow"):
-				spd_str += " [SLOW]"
-		var spd_entry: Dictionary = {"label": "Speed", "value": spd_str}
-		if is_movement_locked_by_deploy():
-			spd_entry["color"] = Color(1.0, 0.624, 0.110, 1.0)
-		stats.append(spd_entry)
-
-		var dr: float = get_effective_damage_reduction()
-		if data.heal_aura_rate > 0.0:
-			stats.append({"label": "Aura", "value": "+%.0f HP/s (%dpx)" % [data.heal_aura_rate, int(round(data.heal_aura_radius))]})
-		elif data.ignore_friendly_unit_collision:
-			stats.append({"label": "Class", "value": "%s • Stride" % get_armor_class_label()})
-		elif dr > 0.001:
-			stats.append({"label": "Armor", "value": "%s (-%d%% Dmg)" % [get_armor_class_label(), int(round(dr * 100.0))]})
-		elif eff_dmg > 0.0 and get_effective_attack_cooldown() > 0.0:
-			stats.append({"label": "Class", "value": "%s • %.1f/s" % [get_armor_class_label(), 1.0 / get_effective_attack_cooldown()]})
-		else:
-			stats.append({"label": "Class", "value": get_armor_class_label()})
-
-		if eff_dmg > 0.0 or kill_count > 0:
-			if veterancy_rank > 0:
-				var rank_col: Color = Color(1.0, 0.86, 0.28, 1.0) if veterancy_rank >= 3 else Color(0.46, 0.98, 1.0, 1.0)
-				stats.append({
-					"label": "Rank",
-					"value": "%s (%d Kills)" % [get_veterancy_rank_name().to_upper(), kill_count],
-					"color": rank_col,
-				})
-			else:
-				stats.append({"label": "Kills", "value": "%d" % kill_count})
-
-		var tether_stacks: int = get_optical_tether_stacks()
-		if tether_stacks > 0:
-			stats.append({
-				"label": "Lattice Link",
-				"value": "x%d Active" % tether_stacks,
-				"color": Color(0.98, 0.80, 0.14, 1.0),
-			})
-		if data.tether_emit_radius > 0.0 and data.tether_max_links > 0:
-			stats.append({
-				"label": "Tether Anchor",
-				"value": "x%d Links (%dpx)" % [data.tether_max_links, int(round(data.tether_emit_radius))],
-				"color": Color(0.851, 0.275, 0.937, 1.0),
-			})
-		if data.is_continuous_beam and combat_component != null:
-			var ramp_pct: int = int(round(combat_component.get_beam_ramp_ratio(self) * 100.0))
-			if ramp_pct > 0:
-				stats.append({
-					"label": "Beam Charge",
-					"value": "%d%% (%.1fx)" % [ramp_pct, lerpf(1.0, maxf(1.0, data.beam_ramp_max_multiplier), float(ramp_pct) * 0.01)],
-					"color": Color(0.94, 0.22, 0.68, 1.0),
-				})
-
-	var is_local_controlled: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (not is_enemy)
-	return {
-		"title": data.display_name if data != null else name,
-		"subtitle": subtitle,
-		"affiliation": &"enemy" if is_enemy else &"player",
-		"accent_color": accent,
-		"ring_color": accent,
-		"show_hp_bar": true,
-		"hp_current": current_hp,
-		"hp_max": max_hp_val,
-		"show_shield_bar": max_shield > 0.0,
-		"shield_current": current_shield,
-		"shield_max": max_shield,
-		"show_primary_bar": show_primary,
-		"primary_bar_label": primary_label,
-		"primary_bar_value": primary_val,
-		"primary_bar_max": primary_max,
-		"primary_bar_color": accent,
-		"stats": stats,
-		"is_commandable": is_local_controlled,
-		"readonly_label": "SPECTATOR TELEMETRY" if (TeamManager != null and TeamManager.is_spectator_mode()) else "HOSTILE UNIT  —  READ-ONLY TELEMETRY",
-	}
+	return UNIT_INSPECTION_BUILDER_SCRIPT.build_inspection_data(self)
 
 
 func _get_command_state_label() -> String:
-	match command_state:
-		CommandState.IDLE:
-			return "Defending Post" if stance == Stance.DEFENSIVE else "Idle"
-		CommandState.MOVING:
-			return "Moving"
-		CommandState.ATTACK_MOVING:
-			return "Attack-Moving"
-		CommandState.ATTACKING_TARGET:
-			return "Engaging"
-		CommandState.HOLD_POSITION:
-			return "Holding"
-		CommandState.CASTING_ABILITY:
-			return "Casting"
-		CommandState.GATHERING:
-			if gather_component != null:
-				match gather_component.state:
-					GatherComponent.GatherState.GATHER_MOVING_TO_NODE:
-						return "To Resource"
-					GatherComponent.GatherState.GATHERING:
-						return "Harvesting"
-					GatherComponent.GatherState.GATHER_RETURNING_TO_BASE:
-						return "Returning Cargo"
-			return "Gathering"
-		CommandState.CONSTRUCTING:
-			return "Constructing"
-		CommandState.STAFFING_BUILDING:
-			return "Entering Node"
-		CommandState.PATROLLING:
-			return "Patrolling"
-		CommandState.REPAIRING:
-			return "Repairing"
-		CommandState.SALVAGING:
-			return "Extracting Salvage"
-	return "Active"
+	return UNIT_INSPECTION_BUILDER_SCRIPT.get_command_state_label(self)
 
 
 func _register_with_economy() -> void:

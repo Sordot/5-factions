@@ -60,6 +60,10 @@ static func _resolve_renderer(type_id: StringName, is_building: bool) -> Faction
 	return null
 
 
+static func has_renderer_for(type_id: StringName, is_building: bool) -> bool:
+	return _resolve_renderer(type_id, is_building) != null
+
+
 func _ready() -> void:
 	_upgrade_callable = Callable(self, "_has_team_upgrade")
 	call_deferred("_bind_economy_manager")

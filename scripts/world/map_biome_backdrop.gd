@@ -33,6 +33,8 @@ func _draw() -> void:
 			_draw_twin_causeway()
 		&"quad_nexus":
 			_draw_quad_nexus()
+		&"triad_sanctum":
+			_draw_triad_sanctum()
 		_:
 			_draw_vat_basin()
 
@@ -290,6 +292,120 @@ func _draw_quad_nexus() -> void:
 			var sector_rect: Rect2 = Rect2(sector_center - Vector2(210.0, 190.0), Vector2(420.0, 380.0))
 			draw_rect(sector_rect, neutral_frame, false, 1.2)
 			_draw_corner_brackets(sector_rect, 32.0, neutral_bracket, 2.4)
+
+
+# =============================================================================
+# BIOME 4 — TRIAD SANCTUM (skirmish_arena_04.tscn & 3P Procedural)
+# Deep obsidian-slate solar observatory floor (#101118), 60°/120° isometric-
+# triangular alabaster lattice hairlines, concentric liturgical-gold & slate
+# astrolabe rings around (0,0), and three crisp 120° radial meridian lines.
+# =============================================================================
+
+func _draw_triad_sanctum() -> void:
+	var b: Rect2 = arena_bounds
+	var min_x: float = b.position.x
+	var max_x: float = b.end.x
+	var min_y: float = b.position.y
+	var max_y: float = b.end.y
+
+	# 1. Deep obsidian-slate floor
+	draw_rect(b, Color(0.065, 0.068, 0.095, 1.0), true)
+
+	# 2. Subtle obsidian-violet radial floor wash centered on (0, 0)
+	draw_circle(Vector2.ZERO, 680.0, Color(0.11, 0.10, 0.16, 0.22))
+	draw_circle(Vector2.ZERO, 360.0, Color(0.14, 0.12, 0.20, 0.16))
+
+	# 3. 60° / 120° isometric-triangular alabaster lattice hairlines (low alpha 0.06-0.085)
+	var tri_minor: Color = Color(0.92, 0.90, 0.86, 0.062)
+	var tri_major: Color = Color(0.96, 0.94, 0.90, 0.085)
+	var row_step: float = 120.0
+	var ty: float = ceilf(min_y / row_step) * row_step
+	while ty <= max_y:
+		var is_maj: bool = is_zero_approx(fmod(absf(ty), row_step * 2.0))
+		draw_line(Vector2(min_x, ty), Vector2(max_x, ty), tri_major if is_maj else tri_minor, 1.0)
+		ty += row_step
+
+	var diag_step: float = 138.564 # 120 / sin(60°)
+	var span: float = maxf(b.size.x, b.size.y) * 1.65
+	var dir_60: Vector2 = Vector2.from_angle(deg_to_rad(60.0))
+	var dir_120: Vector2 = Vector2.from_angle(deg_to_rad(120.0))
+	var k_max: int = int(ceilf((b.size.x + b.size.y) / diag_step)) + 2
+	for k: int in range(-k_max, k_max + 1):
+		var col_d: Color = tri_major if (k % 2 == 0) else tri_minor
+		var ox: float = float(k) * diag_step
+		var a1: Vector2 = Vector2(ox, 0.0) - dir_60 * span
+		var b1: Vector2 = Vector2(ox, 0.0) + dir_60 * span
+		_draw_clipped_line(a1, b1, b, col_d, 1.0)
+		var a2: Vector2 = Vector2(ox, 0.0) - dir_120 * span
+		var b2: Vector2 = Vector2(ox, 0.0) + dir_120 * span
+		_draw_clipped_line(a2, b2, b, col_d, 1.0)
+
+	# 4. Concentric liturgical-gold & slate astrolabe rings around (0, 0)
+	var gold_ring: Color = Color(0.98, 0.80, 0.082, 0.13)
+	var gold_soft: Color = Color(0.98, 0.80, 0.082, 0.075)
+	var slate_ring: Color = Color(0.76, 0.78, 0.86, 0.085)
+	for rad: float in [165.0, 260.0, 410.0, 620.0, 900.0]:
+		var rc: Color = gold_ring if (rad <= 260.0 or is_equal_approx(rad, 900.0)) else slate_ring
+		draw_arc(Vector2.ZERO, rad, 0.0, TAU, 72, rc, 1.6 if rad <= 260.0 else 1.2, true)
+	# Subtle inscribed 6-point sacred triangle ring at 260 px
+	var tri_a: PackedVector2Array = PackedVector2Array()
+	var tri_b: PackedVector2Array = PackedVector2Array()
+	for ti: int in range(4):
+		var ang_a: float = deg_to_rad(-90.0 + float(ti % 3) * 120.0)
+		var ang_b: float = deg_to_rad(90.0 + float(ti % 3) * 120.0)
+		tri_a.append(Vector2.from_angle(ang_a) * 260.0)
+		tri_b.append(Vector2.from_angle(ang_b) * 260.0)
+	draw_polyline(tri_a, gold_soft, 1.3, true)
+	draw_polyline(tri_b, slate_ring, 1.1, true)
+
+	# 5. Three crisp 120° radial meridian lines pointing toward the 3 corner sanctum basins (150°, 30°, -90°)
+	var meridian_outer: Color = Color(0.98, 0.80, 0.082, 0.075)
+	var meridian_core: Color = Color(0.98, 0.80, 0.082, 0.15)
+	var spawn_angles: Array[float] = [deg_to_rad(150.0), deg_to_rad(30.0), deg_to_rad(-90.0)]
+	for ang_s: float in spawn_angles:
+		var dir_s: Vector2 = Vector2.from_angle(ang_s)
+		var basin_pt: Vector2 = dir_s * 900.0
+		draw_line(dir_s * 165.0, basin_pt, meridian_outer, 12.0, true)
+		draw_line(dir_s * 165.0, basin_pt, meridian_core, 1.8, true)
+		# Observatory sanctum pad rings around each corner spawn basin (neutral alabaster-gold)
+		draw_arc(basin_pt, 145.0, 0.0, TAU, 48, gold_ring, 1.5, true)
+		draw_arc(basin_pt, 235.0, 0.0, TAU, 56, slate_ring, 1.2, true)
+		# Mid-flank counterpoint meridian ticks at +60°
+		var mid_dir: Vector2 = Vector2.from_angle(ang_s + deg_to_rad(60.0))
+		draw_line(mid_dir * 260.0, mid_dir * 1020.0, Color(0.85, 0.35, 0.94, 0.075), 1.4, true)
+		draw_arc(mid_dir * 980.0, 125.0, 0.0, TAU, 36, gold_soft, 1.2, true)
+
+
+func _draw_clipped_line(p0: Vector2, p1: Vector2, bounds: Rect2, col: Color, width: float) -> void:
+	# Liang-Barsky clip so angled lattice lines never extend outside arena_bounds
+	var dx: float = p1.x - p0.x
+	var dy: float = p1.y - p0.y
+	var t0: float = 0.0
+	var t1: float = 1.0
+	var checks: Array[Array] = [
+		[-dx, p0.x - bounds.position.x],
+		[dx, bounds.end.x - p0.x],
+		[-dy, p0.y - bounds.position.y],
+		[dy, bounds.end.y - p0.y],
+	]
+	for pair: Array in checks:
+		var p_val: float = float(pair[0])
+		var q_val: float = float(pair[1])
+		if is_zero_approx(p_val):
+			if q_val < 0.0:
+				return
+		else:
+			var r_val: float = q_val / p_val
+			if p_val < 0.0:
+				if r_val > t1:
+					return
+				t0 = maxf(t0, r_val)
+			else:
+				if r_val < t0:
+					return
+				t1 = minf(t1, r_val)
+	if t1 > t0:
+		draw_line(p0 + Vector2(dx, dy) * t0, p0 + Vector2(dx, dy) * t1, col, width)
 
 
 # =============================================================================

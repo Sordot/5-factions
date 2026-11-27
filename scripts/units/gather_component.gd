@@ -80,7 +80,8 @@ func start_gather(owner_unit: Unit, resource_node: ResourceNode, is_auto_migrati
 	gather_timer = 0.0
 	_claimed_slot_pos = Vector2.INF
 
-	if carried_amount >= owner_unit.data.carry_capacity and carried_type == resource_node.resource_type:
+	var effective_cap: int = target_node.get_effective_carry_capacity(owner_unit.data.carry_capacity)
+	if carried_amount >= effective_cap and carried_type == resource_node.resource_type:
 		dropoff_building = _find_nearest_dropoff(owner_unit, carried_type)
 		target_node.release_harvest_slot(owner_unit)
 		_set_state(GatherState.GATHER_RETURNING_TO_BASE)
@@ -208,7 +209,8 @@ func _tick_gathering(owner_unit: Unit, delta: float) -> void:
 		_claimed_slot_pos = Vector2.INF
 
 		# If cargo is already full, deliver first; otherwise auto-migrate immediately preserving partial cargo.
-		if carried_amount >= owner_unit.data.carry_capacity:
+		var depleted_cap: int = depleted_ref.get_effective_carry_capacity(owner_unit.data.carry_capacity) if depleted_ref != null else owner_unit.data.carry_capacity
+		if carried_amount >= depleted_cap:
 			dropoff_building = _find_nearest_dropoff(owner_unit, carried_type)
 			if dropoff_building != null:
 				_set_state(GatherState.GATHER_RETURNING_TO_BASE)
@@ -242,7 +244,7 @@ func _tick_gathering(owner_unit: Unit, delta: float) -> void:
 	gather_timer = 0.0
 	gather_progress_changed.emit(0.0, false)
 
-	var capacity: int = maxi(1, owner_unit.data.carry_capacity)
+	var capacity: int = maxi(1, target_node.get_effective_carry_capacity(owner_unit.data.carry_capacity))
 	if carried_type != &"" and carried_type != target_node.resource_type:
 		carried_amount = 0
 	var room: int = maxi(0, capacity - carried_amount)

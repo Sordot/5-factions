@@ -311,30 +311,38 @@ position = Vector2(640, -740)
 
 [node name="FlankNWBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
 position = Vector2(-1030, -700)
+is_high_yield = true
 
 [node name="FlankNWBiomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
 position = Vector2(-950, -785)
+is_high_yield = true
 
 [node name="FlankNWSilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(-690, -760)
+is_high_yield = true
 
 [node name="FlankNWSilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(-595, -695)
+is_high_yield = true
 
 [node name="FlankNWVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
 position = Vector2(-1030, -520)
 
 [node name="FlankSEBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
 position = Vector2(1030, 700)
+is_high_yield = true
 
 [node name="FlankSEBiomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
 position = Vector2(950, 785)
+is_high_yield = true
 
 [node name="FlankSESilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(690, 760)
+is_high_yield = true
 
 [node name="FlankSESilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
 position = Vector2(595, 695)
+is_high_yield = true
 
 [node name="FlankSEVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
 position = Vector2(1030, 520)

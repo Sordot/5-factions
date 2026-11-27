@@ -6,6 +6,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"lance_rig"
 display_name = "Lance-Rig"
+short_display_name = "Lance-Rig"
 max_hp = 160.0
 move_speed = 195.0
 acceleration = 1450.0

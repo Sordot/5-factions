@@ -6,6 +6,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"grid_tech"
 display_name = "Grid-Tech"
+short_display_name = "Grid-Tech"
 max_hp = 85.0
 max_shield = 25.0
 shield_regen_rate = 6.0

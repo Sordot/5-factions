@@ -1,0 +1,591 @@
+[gd_scene load_steps=39 format=3]
+
+[ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
+[ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
+[ext_resource type="Script" path="res://scripts/controllers/selection_controller.gd" id="3_sel_ctrl"]
+[ext_resource type="Script" path="res://ui/overlays/selection_box.gd" id="4_sel_box"]
+[ext_resource type="PackedScene" path="res://scenes/units/stinger.tscn" id="5_stinger"]
+[ext_resource type="Script" path="res://scripts/controllers/sandbox_spawner.gd" id="6_spawner"]
+[ext_resource type="PackedScene" path="res://ui/hud/sandbox_debug_panel.tscn" id="7_debug_panel"]
+[ext_resource type="Script" path="res://ui/overlays/ability_targeting_reticle.gd" id="8_ability_reticle"]
+[ext_resource type="PackedScene" path="res://ui/hud/selection_hud.tscn" id="9_selection_hud"]
+[ext_resource type="Script" path="res://scripts/systems/economy_manager.gd" id="10_econ_mgr"]
+[ext_resource type="PackedScene" path="res://scenes/world/biomass_node.tscn" id="11_biomass_node"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/nexus_vat.tscn" id="12_nexus_vat"]
+[ext_resource type="PackedScene" path="res://scenes/units/worker_unit.tscn" id="13_worker_unit"]
+[ext_resource type="PackedScene" path="res://ui/hud/resource_hud.tscn" id="14_resource_hud"]
+[ext_resource type="PackedScene" path="res://scenes/world/silica_vein.tscn" id="15_silica_vein"]
+[ext_resource type="PackedScene" path="res://scenes/world/compute_vent.tscn" id="16_compute_vent"]
+[ext_resource type="Script" path="res://ui/overlays/build_ghost_preview.gd" id="17_build_ghost"]
+[ext_resource type="Script" path="res://scripts/controllers/command_router.gd" id="18_cmd_router"]
+[ext_resource type="PackedScene" path="res://scenes/world/hyper_uplink.tscn" id="19_hyper_uplink"]
+[ext_resource type="PackedScene" path="res://scenes/world/map_landmark.tscn" id="20_map_landmark"]
+[ext_resource type="Script" path="res://scripts/world/arena_nav_region.gd" id="22_arena_nav"]
+[ext_resource type="Script" path="res://scripts/world/terrain_obstacle.gd" id="23_terrain_obstacle"]
+[ext_resource type="Script" path="res://scripts/systems/fog_of_war.gd" id="24_fog_of_war"]
+[ext_resource type="Script" path="res://ui/overlays/fog_overlay.gd" id="25_fog_overlay"]
+[ext_resource type="Script" path="res://scripts/systems/skirmish_ai.gd" id="26_skirmish_ai"]
+[ext_resource type="Script" path="res://scripts/systems/match_manager.gd" id="27_match_manager"]
+[ext_resource type="PackedScene" path="res://ui/hud/minimap.tscn" id="28_minimap"]
+[ext_resource type="PackedScene" path="res://ui/hud/match_end_overlay.tscn" id="29_match_end_overlay"]
+[ext_resource type="Script" path="res://ui/overlays/rally_point_overlay.gd" id="30_rally_overlay"]
+[ext_resource type="Script" path="res://ui/overlays/command_queue_overlay.gd" id="31_cmd_queue_overlay"]
+[ext_resource type="PackedScene" path="res://ui/hud/production_ticker.tscn" id="32_prod_ticker"]
+[ext_resource type="PackedScene" path="res://scenes/world/destructible_barricade.tscn" id="33_barricade"]
+[ext_resource type="Script" path="res://ui/overlays/battle_scars_overlay.gd" id="34_battle_scars"]
+[ext_resource type="PackedScene" path="res://ui/hud/tactical_event_feed.tscn" id="35_event_feed"]
+[ext_resource type="PackedScene" path="res://scenes/world/sensor_relay.tscn" id="36_sensor_relay"]
+[ext_resource type="Script" path="res://scripts/world/map_biome_backdrop.gd" id="37_biome_backdrop"]
+[ext_resource type="PackedScene" path="res://scenes/world/high_ground_plateau.tscn" id="38_high_ground"]
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_triad_sanctum"]
+vertices = PackedVector2Array(-1450, -1250, 1450, -1250, 1450, 1250, -1450, 1250)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-1450, -1250, 1450, -1250, 1450, 1250, -1450, 1250)])
+parsed_geometry_type = 1
+agent_radius = 24.0
+
+[node name="SkirmishArena04" type="Node2D"]
+
+[node name="EconomyManager" type="Node" parent="."]
+script = ExtResource("10_econ_mgr")
+starting_biomass = 200
+starting_silica = 50
+enemy_matches_starting_resources = true
+
+[node name="RTSCamera" type="Camera2D" parent="."]
+position = Vector2(-779, 450)
+script = ExtResource("1_rts_camera")
+pan_bounds = Rect2(-1640, -1440, 3280, 2880)
+
+[node name="NavigationRegion2D" type="NavigationRegion2D" parent="."]
+navigation_polygon = SubResource("NavigationPolygon_triad_sanctum")
+script = ExtResource("22_arena_nav")
+arena_bounds = Rect2(-1450, -1250, 2900, 2500)
+agent_radius = 24.0
+
+[node name="FloorVisual" type="Polygon2D" parent="NavigationRegion2D"]
+z_index = -105
+color = Color(0.065, 0.068, 0.095, 1)
+polygon = PackedVector2Array(-1450, -1250, 1450, -1250, 1450, 1250, -1450, 1250)
+
+[node name="FloorBorder" type="Line2D" parent="NavigationRegion2D"]
+z_index = -80
+points = PackedVector2Array(-1450, -1250, 1450, -1250, 1450, 1250, -1450, 1250)
+closed = true
+width = 4.0
+default_color = Color(0.98, 0.8, 0.082, 0.72)
+
+[node name="MapBiomeBackdrop" type="Node2D" parent="."]
+z_index = -100
+script = ExtResource("37_biome_backdrop")
+biome_id = &"triad_sanctum"
+arena_bounds = Rect2(-1450, -1250, 2900, 2500)
+
+[node name="HighGroundPlateaus" type="Node2D" parent="."]
+
+[node name="PlateauSouth" parent="HighGroundPlateaus" instance=ExtResource("38_high_ground")]
+position = Vector2(-32.4, 463.9)
+plateau_polygon = PackedVector2Array(-100, -140, 100, -140, 190, -98, 190, 98, 100, 140, -100, 140, -190, 98, -190, -98)
+ramp_edge_indices = PackedInt32Array(0, 6)
+biome_tint = Color(0.16, 0.155, 0.19, 1)
+rim_highlight_override = Color(0.95, 0.86, 0.56, 0.88)
+
+[node name="PlateauEast" parent="HighGroundPlateaus" instance=ExtResource("38_high_ground")]
+position = Vector2(417.9, -203.9)
+plateau_polygon = PackedVector2Array(-71.2, 156.6, -171.2, -16.6, -179.9, -115.5, -10.1, -213.5, 71.2, -156.6, 171.2, 16.6, 179.9, 115.5, 10.1, 213.5)
+ramp_edge_indices = PackedInt32Array(0, 6)
+biome_tint = Color(0.16, 0.155, 0.19, 1)
+rim_highlight_override = Color(0.95, 0.86, 0.56, 0.88)
+
+[node name="PlateauWest" parent="HighGroundPlateaus" instance=ExtResource("38_high_ground")]
+position = Vector2(-385.5, -260)
+plateau_polygon = PackedVector2Array(171.2, -16.6, 71.2, 156.6, -10.1, 213.5, -179.9, 115.5, -171.2, 16.6, -71.2, -156.6, 10.1, -213.5, 179.9, -115.5)
+ramp_edge_indices = PackedInt32Array(0, 6)
+biome_tint = Color(0.16, 0.155, 0.19, 1)
+rim_highlight_override = Color(0.95, 0.86, 0.56, 0.88)
+
+[node name="BattleScarsOverlay" type="Node2D" parent="."]
+z_index = -6
+script = ExtResource("34_battle_scars")
+
+[node name="TerrainObstacles" type="Node2D" parent="."]
+
+[node name="MonolithWest" type="StaticBody2D" parent="TerrainObstacles"]
+position = Vector2(-556.4, 98.1)
+rotation = -0.174533
+script = ExtResource("23_terrain_obstacle")
+obstacle_size = Vector2(64, 196)
+
+[node name="MonolithSE" type="StaticBody2D" parent="TerrainObstacles"]
+position = Vector2(363.2, 432.8)
+rotation = -2.26893
+script = ExtResource("23_terrain_obstacle")
+obstacle_size = Vector2(64, 196)
+
+[node name="MonolithNE" type="StaticBody2D" parent="TerrainObstacles"]
+position = Vector2(193.2, -530.9)
+rotation = 1.91986
+script = ExtResource("23_terrain_obstacle")
+obstacle_size = Vector2(64, 196)
+
+[node name="Barricades" type="Node2D" parent="."]
+
+[node name="BarricadeSouthFlank" parent="Barricades" instance=ExtResource("33_barricade")]
+position = Vector2(-436.6, 821.1)
+rotation = 2.05949
+barricade_name = "South Meridian Seal"
+max_hp = 650.0
+footprint_size = Vector2(160, 44)
+
+[node name="BarricadeEastFlank" parent="Barricades" instance=ExtResource("33_barricade")]
+position = Vector2(929.4, -32.4)
+rotation = -0.0349066
+barricade_name = "East Meridian Seal"
+max_hp = 650.0
+footprint_size = Vector2(160, 44)
+
+[node name="BarricadeNorthWestFlank" parent="Barricades" instance=ExtResource("33_barricade")]
+position = Vector2(-492.8, -788.7)
+rotation = -2.1293
+barricade_name = "North-West Meridian Seal"
+max_hp = 650.0
+footprint_size = Vector2(160, 44)
+
+[node name="Landmarks" type="Node2D" parent="."]
+
+[node name="AlphaSanctumBasin" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(-779, 450)
+landmark_name = "Alpha Sanctum (SW)"
+visual_style = 3
+accent_color = Color(0.2, 0.96, 0.86, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, 104)
+
+[node name="OmegaSanctumBasin" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(779, 450)
+landmark_name = "Omega Sanctum (SE)"
+visual_style = 3
+accent_color = Color(1, 0.34, 0.26, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, 104)
+
+[node name="SigmaSanctumBasin" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(0, -900)
+landmark_name = "Sigma Sanctum (N)"
+visual_style = 3
+accent_color = Color(0.76, 0.44, 1, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, -104)
+
+[node name="TriadSanctumPlaza" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(0, 0)
+landmark_name = "Triad Astrolabe Core"
+visual_style = 3
+accent_color = Color(0.98, 0.8, 0.16, 1)
+has_collision = false
+show_on_minimap = false
+label_offset = Vector2(0, 136)
+
+[node name="SouthVaultArch" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(0, 945)
+landmark_name = "South Rich Pocket"
+visual_style = 1
+accent_color = Color(0.98, 0.8, 0.24, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, -48)
+
+[node name="NorthWestVaultArch" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(-818.4, -472.5)
+landmark_name = "NW Rich Pocket"
+visual_style = 1
+accent_color = Color(0.98, 0.8, 0.24, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, 48)
+
+[node name="NorthEastVaultArch" parent="Landmarks" instance=ExtResource("20_map_landmark")]
+position = Vector2(818.4, -472.5)
+landmark_name = "NE Rich Pocket"
+visual_style = 1
+accent_color = Color(0.98, 0.8, 0.24, 1)
+has_collision = false
+show_on_minimap = true
+label_offset = Vector2(0, 48)
+
+[node name="Objectives" type="Node2D" parent="."]
+
+[node name="HyperUplink" parent="Objectives" instance=ExtResource("19_hyper_uplink")]
+position = Vector2(0, 0)
+
+[node name="SensorRelayNW" parent="Objectives" instance=ExtResource("36_sensor_relay")]
+position = Vector2(-658.2, -380)
+relay_name = "NW Flank Sensor Relay"
+
+[node name="SensorRelaySouth" parent="Objectives" instance=ExtResource("36_sensor_relay")]
+position = Vector2(0, 760)
+relay_name = "South Flank Sensor Relay"
+
+[node name="SensorRelayNE" parent="Objectives" instance=ExtResource("36_sensor_relay")]
+position = Vector2(658.2, -380)
+relay_name = "NE Flank Sensor Relay"
+
+[node name="SpawnAnchors" type="Node2D" parent="."]
+
+[node name="SpawnAnchor_Team0" type="Marker2D" parent="SpawnAnchors" groups=["spawn_anchors"]]
+position = Vector2(-779, 450)
+metadata/team_id = 0
+
+[node name="SpawnAnchor_Team1" type="Marker2D" parent="SpawnAnchors" groups=["spawn_anchors"]]
+position = Vector2(779, 450)
+metadata/team_id = 1
+
+[node name="SpawnAnchor_Team2" type="Marker2D" parent="SpawnAnchors" groups=["spawn_anchors"]]
+position = Vector2(0, -900)
+metadata/team_id = 2
+
+[node name="ResourceNodes" type="Node2D" parent="."]
+
+[node name="Slot0Biomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-866.4, 646.4)
+
+[node name="Slot0Biomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-973.9, 562.5)
+
+[node name="Slot0Biomass3" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-992.8, 427.5)
+
+[node name="Slot0Silica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-717, 666.3)
+
+[node name="Slot0Silica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-636.8, 645.8)
+
+[node name="Slot0Vent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(-931.7, 254.6)
+
+[node name="Slot1Biomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(993, 427.1)
+
+[node name="Slot1Biomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(974.1, 562.2)
+
+[node name="Slot1Biomass3" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(866.6, 646)
+
+[node name="Slot1Silica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(935.5, 287.8)
+
+[node name="Slot1Silica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(877.7, 228.6)
+
+[node name="Slot1Vent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(686.3, 679.6)
+
+[node name="Slot2Biomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-126.6, -1073.5)
+
+[node name="Slot2Biomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-0.2, -1124.7)
+
+[node name="Slot2Biomass3" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(126.2, -1073.5)
+
+[node name="Slot2Silica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-218.5, -954.1)
+
+[node name="Slot2Silica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-240.9, -874.4)
+
+[node name="Slot2Vent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(245.4, -934.2)
+
+[node name="Nat0Biomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-911.7, -33)
+
+[node name="Nat0Biomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-932.9, -98.1)
+
+[node name="Nat0Biomass3" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-898.6, -157.3)
+
+[node name="Nat0Silica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-870.4, 37.1)
+
+[node name="Nat0Silica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-816.1, 64.9)
+
+[node name="Nat0Vent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(-841.9, -230.2)
+
+[node name="Nat1Biomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(427.3, 806.1)
+
+[node name="Nat1Biomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(381.5, 857)
+
+[node name="Nat1Biomass3" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(313.1, 856.9)
+
+[node name="Nat1Silica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(467.3, 735.2)
+
+[node name="Nat1Silica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(464.3, 674.3)
+
+[node name="Nat1Vent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(221.6, 844.2)
+
+[node name="Nat2Biomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(484.4, -773.1)
+
+[node name="Nat2Biomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(551.4, -758.9)
+
+[node name="Nat2Biomass3" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(585.5, -699.6)
+
+[node name="Nat2Silica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(403.1, -772.3)
+
+[node name="Nat2Silica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(351.8, -739.2)
+
+[node name="Nat2Vent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(620.3, -614)
+
+[node name="PocketSouthBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-56, 905)
+is_high_yield = true
+
+[node name="PocketSouthBiomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(56, 905)
+is_high_yield = true
+
+[node name="PocketSouthSilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-116, 960)
+is_high_yield = true
+
+[node name="PocketSouthSilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(116, 960)
+is_high_yield = true
+
+[node name="PocketSouthVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(0, 1020)
+
+[node name="PocketNWBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-755.8, -501)
+is_high_yield = true
+
+[node name="PocketNWBiomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(-811.8, -404)
+is_high_yield = true
+
+[node name="PocketNWSilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-773.4, -580.5)
+is_high_yield = true
+
+[node name="PocketNWSilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(-889.4, -379.5)
+is_high_yield = true
+
+[node name="PocketNWVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(-883.3, -510)
+
+[node name="PocketNEBiomass1" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(811.8, -404)
+is_high_yield = true
+
+[node name="PocketNEBiomass2" parent="ResourceNodes" instance=ExtResource("11_biomass_node")]
+position = Vector2(755.8, -501)
+is_high_yield = true
+
+[node name="PocketNESilica1" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(889.4, -379.5)
+is_high_yield = true
+
+[node name="PocketNESilica2" parent="ResourceNodes" instance=ExtResource("15_silica_vein")]
+position = Vector2(773.4, -580.5)
+is_high_yield = true
+
+[node name="PocketNEVent" parent="ResourceNodes" instance=ExtResource("16_compute_vent")]
+position = Vector2(883.3, -510)
+
+[node name="Buildings" type="Node2D" parent="."]
+
+[node name="Slot0NexusVat" parent="Buildings" instance=ExtResource("12_nexus_vat")]
+position = Vector2(-779, 450)
+team = 0
+
+[node name="Slot1NexusVat" parent="Buildings" instance=ExtResource("12_nexus_vat")]
+position = Vector2(779, 450)
+team = 1
+display_name = "Omega Nexus Vat"
+
+[node name="Slot2NexusVat" parent="Buildings" instance=ExtResource("12_nexus_vat")]
+position = Vector2(0, -900)
+team = 2
+display_name = "Sigma Nexus Vat"
+
+[node name="Units" type="Node2D" parent="."]
+
+[node name="Slot0Worker1" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(-870, 445)
+team = 0
+
+[node name="Slot0Worker2" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(-860, 520)
+team = 0
+
+[node name="Slot0Worker3" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(-805, 560)
+team = 0
+
+[node name="Slot0Trooper1" parent="Units" instance=ExtResource("2_clone_trooper")]
+position = Vector2(-640, 345)
+team = 0
+
+[node name="Slot0Trooper2" parent="Units" instance=ExtResource("2_clone_trooper")]
+position = Vector2(-615, 410)
+team = 0
+
+[node name="Slot0Stinger1" parent="Units" instance=ExtResource("5_stinger")]
+position = Vector2(-580, 325)
+team = 0
+
+[node name="Slot1Worker1" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(870, 445)
+team = 1
+
+[node name="Slot1Worker2" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(860, 520)
+team = 1
+
+[node name="Slot1Worker3" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(805, 560)
+team = 1
+
+[node name="Slot1Trooper1" parent="Units" instance=ExtResource("2_clone_trooper")]
+position = Vector2(640, 345)
+team = 1
+
+[node name="Slot1Trooper2" parent="Units" instance=ExtResource("2_clone_trooper")]
+position = Vector2(615, 410)
+team = 1
+
+[node name="Slot1Stinger1" parent="Units" instance=ExtResource("5_stinger")]
+position = Vector2(580, 325)
+team = 1
+
+[node name="Slot2Worker1" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(-52, -985)
+team = 2
+
+[node name="Slot2Worker2" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(0, -1005)
+team = 2
+
+[node name="Slot2Worker3" parent="Units" instance=ExtResource("13_worker_unit")]
+position = Vector2(52, -985)
+team = 2
+
+[node name="Slot2Trooper1" parent="Units" instance=ExtResource("2_clone_trooper")]
+position = Vector2(-42, -730)
+team = 2
+
+[node name="Slot2Trooper2" parent="Units" instance=ExtResource("2_clone_trooper")]
+position = Vector2(42, -730)
+team = 2
+
+[node name="Slot2Stinger1" parent="Units" instance=ExtResource("5_stinger")]
+position = Vector2(0, -685)
+team = 2
+
+[node name="FogOfWarSystem" type="Node" parent="."]
+script = ExtResource("24_fog_of_war")
+arena_bounds = Rect2(-1450, -1250, 2900, 2500)
+cell_size = 64.0
+update_interval = 0.15
+
+[node name="FogOverlay" type="Node2D" parent="."]
+z_index = 35
+script = ExtResource("25_fog_overlay")
+fog_system_path = NodePath("../FogOfWarSystem")
+
+[node name="SkirmishAICommander" type="Node" parent="."]
+script = ExtResource("26_skirmish_ai")
+arena_bounds = Rect2(-1450, -1250, 2900, 2500)
+
+[node name="MatchManager" type="Node" parent="."]
+script = ExtResource("27_match_manager")
+match_end_overlay_path = NodePath("../MatchEndOverlay")
+
+[node name="SelectionController" type="Node2D" parent="."]
+z_index = 90
+script = ExtResource("3_sel_ctrl")
+camera_path = NodePath("../RTSCamera")
+buildable_bounds = Rect2(-1450, -1250, 2900, 2500)
+
+[node name="CommandRouter" type="Node" parent="SelectionController"]
+script = ExtResource("18_cmd_router")
+buildable_bounds = Rect2(-1450, -1250, 2900, 2500)
+
+[node name="SelectionBox" type="Node2D" parent="SelectionController"]
+z_index = 100
+script = ExtResource("4_sel_box")
+
+[node name="AbilityTargetingReticle" type="Node2D" parent="SelectionController"]
+z_index = 95
+script = ExtResource("8_ability_reticle")
+
+[node name="BuildGhostPreview" type="Node2D" parent="SelectionController"]
+z_index = 96
+script = ExtResource("17_build_ghost")
+
+[node name="RallyPointOverlay" type="Node2D" parent="SelectionController"]
+z_index = 85
+script = ExtResource("30_rally_overlay")
+
+[node name="CommandQueueOverlay" type="Node2D" parent="SelectionController"]
+z_index = 84
+script = ExtResource("31_cmd_queue_overlay")
+
+[node name="SandboxSpawner" type="Node2D" parent="."]
+script = ExtResource("6_spawner")
+arena_safe_bounds = Rect2(-1390, -1190, 2780, 2380)
+reload_scene_on_reset = true
+units_container_path = NodePath("../Units")
+selection_controller_path = NodePath("../SelectionController")
+player_spawn_origin = Vector2(-630, 380)
+worker_spawn_origin = Vector2(-845, 510)
+harvester_spawn_origin = Vector2(-720, 585)
+engineer_spawn_origin = Vector2(-840, 330)
+enemy_spawn_origin = Vector2(630, 380)
+
+[node name="ResourceHUD" parent="." instance=ExtResource("14_resource_hud")]
+economy_manager_path = NodePath("../EconomyManager")
+
+[node name="DebugHUD" type="CanvasLayer" parent="."]
+
+[node name="SandboxDebugPanel" parent="DebugHUD" instance=ExtResource("7_debug_panel")]
+spawner_path = NodePath("../../SandboxSpawner")
+selection_controller_path = NodePath("../../SelectionController")
+
+[node name="ProductionTicker" parent="DebugHUD" instance=ExtResource("32_prod_ticker")]
+
+[node name="SelectionHUD" parent="DebugHUD" instance=ExtResource("9_selection_hud")]
+selection_controller_path = NodePath("../../SelectionController")
+
+[node name="TacticalEventFeed" parent="DebugHUD" instance=ExtResource("35_event_feed")]
+
+[node name="TacticalMinimap" parent="DebugHUD" instance=ExtResource("28_minimap")]
+arena_bounds = Rect2(-1450, -1250, 2900, 2500)
+camera_path = NodePath("../../RTSCamera")
+selection_controller_path = NodePath("../../SelectionController")
+fog_system_path = NodePath("../../FogOfWarSystem")
+
+[node name="MatchEndOverlay" parent="." instance=ExtResource("29_match_end_overlay")]

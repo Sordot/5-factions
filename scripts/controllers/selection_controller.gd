@@ -2,6 +2,9 @@ class_name SelectionController
 extends Node2D
 
 const COMMAND_ROUTER_SCRIPT: GDScript = preload("res://scripts/controllers/command_router.gd")
+const CONTROL_GROUP_MANAGER_SCRIPT: GDScript = preload("res://scripts/controllers/control_group_manager.gd")
+const COMMAND_CURSOR_MANAGER_SCRIPT: GDScript = preload("res://scripts/controllers/command_cursor_manager.gd")
+const BOX_SELECTION_RESOLVER_SCRIPT: GDScript = preload("res://scripts/controllers/box_selection_resolver.gd")
 const RALLY_POINT_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/rally_point_overlay.gd")
 const COMMAND_QUEUE_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/command_queue_overlay.gd")
 const TACTICAL_GLANCE_OVERLAY_SCRIPT: GDScript = preload("res://ui/overlays/tactical_glance_overlay.gd")
@@ -45,7 +48,16 @@ var active_subgroup_index: int = 0
 var building_subgroups: Array[Dictionary] = []
 var active_building_subgroup_index: int = 0
 var inspected_enemy: Unit = null
-var control_groups: Dictionary = {}
+var _control_group_mgr: ControlGroupManager = CONTROL_GROUP_MANAGER_SCRIPT.new()
+var _cursor_mgr: CommandCursorManager = COMMAND_CURSOR_MANAGER_SCRIPT.new()
+
+var control_groups: Dictionary:
+	get:
+		return _control_group_mgr.control_groups if _control_group_mgr != null else {}
+	set(value):
+		if _control_group_mgr != null:
+			_control_group_mgr.control_groups = value
+
 var active_targeting_ability: AbilityData = null
 var is_patrol_targeting: bool = false
 var is_attack_move_targeting: bool = false
@@ -60,8 +72,6 @@ var _drag_start_world: Vector2 = Vector2.ZERO
 var _drag_start_screen: Vector2 = Vector2.ZERO
 var _marquee_preview_entities: Array[Node] = []
 var _hovered_entity: Node = null
-var _last_recall_group: int = -1
-var _last_recall_time_ms: int = 0
 var _last_army_select_ms: int = 0
 var _last_click_unit: Unit = null
 var _last_click_building: Building = null
@@ -79,13 +89,11 @@ var _idle_refresh_timer: float = 0.0
 var _last_idle_ids: PackedInt64Array = PackedInt64Array()
 var _amove_preview_timer: float = 0.0
 var _last_targeting_active: bool = false
-var _command_cursors: Dictionary = {}
-var _active_cursor_state: StringName = &""
 
 
 func _ready() -> void:
 	add_to_group("selection_controller")
-	_build_command_cursors()
+	_cursor_mgr.build_cursors()
 	command_router = get_node_or_null("CommandRouter") as CommandRouter
 	if command_router == null:
 		command_router = COMMAND_ROUTER_SCRIPT.new()
@@ -130,6 +138,7 @@ func _exit_tree() -> void:
 	_set_hovered_entity(null)
 	if SettingsManager != null and SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.disconnect(_on_settings_changed)
+	_control_group_mgr.cleanup()
 	_clear_custom_cursor()
 
 
@@ -660,62 +669,10 @@ func set_active_subgroup(index: int) -> void:
 	selection_changed.emit(selected_units, subgroups, active_subgroup_index)
 
 
-func _get_building_subgroup_sort_rank(b: Building) -> int:
-	if b.is_command_hub():
-		return 0
-	if b.is_military_production_building():
-		return 1
-	if not b.researchable_upgrades.is_empty() or b.max_staff_slots > 0:
-		return 2
-	return 3
-
-
 func _rebuild_building_subgroups(preserve_type_id: StringName = &"") -> void:
-	building_subgroups.clear()
-	if selected_buildings.is_empty():
-		active_building_subgroup_index = 0
-		return
-
-	var grouped: Dictionary = {}
-	for b: Building in selected_buildings:
-		if not is_instance_valid(b) or b.is_destroyed or b.is_queued_for_deletion():
-			continue
-		var tid: StringName = b.building_type_id
-		if not grouped.has(tid):
-			var b_arr: Array[Building] = []
-			grouped[tid] = {
-				"type_id": tid,
-				"display_name": b.display_name,
-				"tech_tier": b.get_tech_tier(),
-				"is_hub": b.is_command_hub(),
-				"sort_rank": _get_building_subgroup_sort_rank(b),
-				"buildings": b_arr,
-			}
-		var list_ref: Array[Building] = grouped[tid]["buildings"] as Array[Building]
-		list_ref.append(b)
-
-	for entry: Variant in grouped.values():
-		building_subgroups.append(entry as Dictionary)
-
-	building_subgroups.sort_custom(func(a: Dictionary, b_dict: Dictionary) -> bool:
-		var ra: int = int(a["sort_rank"])
-		var rb: int = int(b_dict["sort_rank"])
-		if ra != rb:
-			return ra < rb
-		var ta: int = int(a["tech_tier"])
-		var tb: int = int(b_dict["tech_tier"])
-		if ta != tb:
-			return ta < tb
-		return String(a["type_id"]) < String(b_dict["type_id"])
-	)
-
-	var next_idx: int = 0
-	if preserve_type_id != &"":
-		for i: int in range(building_subgroups.size()):
-			if (building_subgroups[i]["type_id"] as StringName) == preserve_type_id:
-				next_idx = i
-				break
-	active_building_subgroup_index = clampi(next_idx, 0, maxi(0, building_subgroups.size() - 1))
+	var res: Dictionary = BOX_SELECTION_RESOLVER_SCRIPT.rebuild_building_subgroups(selected_buildings, preserve_type_id)
+	building_subgroups = res["subgroups"] as Array[Dictionary]
+	active_building_subgroup_index = int(res["active_index"])
 
 
 func get_active_building_subgroup() -> Dictionary:
@@ -1405,343 +1362,57 @@ func issue_defensive_command() -> void:
 
 
 func assign_control_group(group_num: int) -> void:
-	if group_num < 1 or group_num > 9:
-		return
-	_prune_invalid_units()
-	if not selected_units.is_empty():
-		control_groups[group_num] = selected_units.duplicate()
-		_watch_control_group_units(selected_units)
-		_emit_control_groups_changed()
-		return
-	if not selected_buildings.is_empty():
-		control_groups[group_num] = selected_buildings.duplicate()
-		_watch_control_group_buildings(selected_buildings)
-		_emit_control_groups_changed()
+	_control_group_mgr.assign(self, group_num)
 
 
 func append_control_group(group_num: int) -> void:
-	if group_num < 1 or group_num > 9:
-		return
-	_prune_invalid_units()
-	if not selected_units.is_empty():
-		var group_units: Array[Unit] = _get_pruned_group(group_num)
-		for unit: Unit in selected_units:
-			if not group_units.has(unit):
-				group_units.append(unit)
-		if not group_units.is_empty():
-			control_groups[group_num] = group_units
-			_watch_control_group_units(group_units)
-		_emit_control_groups_changed()
-		return
-	if not selected_buildings.is_empty():
-		var group_buildings: Array[Building] = _get_pruned_building_group(group_num)
-		for b: Building in selected_buildings:
-			if not group_buildings.has(b):
-				group_buildings.append(b)
-		if not group_buildings.is_empty():
-			control_groups[group_num] = group_buildings
-			_watch_control_group_buildings(group_buildings)
-		_emit_control_groups_changed()
-
-
-func _watch_control_group_units(units: Array[Unit]) -> void:
-	for u: Unit in units:
-		if is_instance_valid(u) and not u.is_dead:
-			if not u.died.is_connected(_on_control_group_unit_removed):
-				u.died.connect(_on_control_group_unit_removed)
-
-
-func _watch_control_group_buildings(buildings: Array[Building]) -> void:
-	for b: Building in buildings:
-		if is_instance_valid(b) and not b.is_destroyed:
-			if not b.destroyed.is_connected(_on_control_group_building_removed):
-				b.destroyed.connect(_on_control_group_building_removed)
-
-
-func _on_control_group_unit_removed(_unit: Unit) -> void:
-	_emit_control_groups_changed()
-
-
-func _on_control_group_building_removed(_building: Building) -> void:
-	_emit_control_groups_changed()
+	_control_group_mgr.append(self, group_num)
 
 
 func remove_from_control_group(group_num: int) -> void:
-	if group_num < 1 or group_num > 9 or not control_groups.has(group_num):
-		return
-	_prune_invalid_units()
-	var group_units: Array[Unit] = _get_pruned_group(group_num)
-	if not group_units.is_empty():
-		var remaining: Array[Unit] = []
-		for unit: Unit in group_units:
-			if not selected_units.has(unit):
-				remaining.append(unit)
-		if remaining.is_empty():
-			control_groups.erase(group_num)
-		else:
-			control_groups[group_num] = remaining
-		_emit_control_groups_changed()
-		return
-	var group_buildings: Array[Building] = _get_pruned_building_group(group_num)
-	if not group_buildings.is_empty():
-		var rem_b: Array[Building] = []
-		for b: Building in group_buildings:
-			if not selected_buildings.has(b):
-				rem_b.append(b)
-		if rem_b.is_empty():
-			control_groups.erase(group_num)
-		else:
-			control_groups[group_num] = rem_b
-		_emit_control_groups_changed()
+	_control_group_mgr.remove(self, group_num)
 
 
 func steal_assign_control_group(group_num: int) -> void:
-	if group_num < 1 or group_num > 9:
-		return
-	_prune_invalid_units()
-	if not selected_units.is_empty():
-		_strip_from_other_control_groups(group_num, selected_units, [])
-		control_groups[group_num] = selected_units.duplicate()
-		_watch_control_group_units(selected_units)
-		_emit_control_groups_changed()
-		return
-	if not selected_buildings.is_empty():
-		_strip_from_other_control_groups(group_num, [], selected_buildings)
-		control_groups[group_num] = selected_buildings.duplicate()
-		_watch_control_group_buildings(selected_buildings)
-		_emit_control_groups_changed()
+	_control_group_mgr.steal_assign(self, group_num)
 
 
 func steal_append_control_group(group_num: int) -> void:
-	if group_num < 1 or group_num > 9:
-		return
-	_prune_invalid_units()
-	if not selected_units.is_empty():
-		_strip_from_other_control_groups(group_num, selected_units, [])
-		var group_units: Array[Unit] = _get_pruned_group(group_num)
-		for unit: Unit in selected_units:
-			if not group_units.has(unit):
-				group_units.append(unit)
-		if not group_units.is_empty():
-			control_groups[group_num] = group_units
-			_watch_control_group_units(group_units)
-		_emit_control_groups_changed()
-		return
-	if not selected_buildings.is_empty():
-		_strip_from_other_control_groups(group_num, [], selected_buildings)
-		var group_buildings: Array[Building] = _get_pruned_building_group(group_num)
-		for b: Building in selected_buildings:
-			if not group_buildings.has(b):
-				group_buildings.append(b)
-		if not group_buildings.is_empty():
-			control_groups[group_num] = group_buildings
-			_watch_control_group_buildings(group_buildings)
-		_emit_control_groups_changed()
-
-
-func _strip_from_other_control_groups(exclude_group: int, units_to_strip: Array[Unit], buildings_to_strip: Array[Building]) -> void:
-	for num: int in range(1, 10):
-		if num == exclude_group or not control_groups.has(num):
-			continue
-		if not units_to_strip.is_empty():
-			var group_units: Array[Unit] = _get_pruned_group(num)
-			if not group_units.is_empty():
-				var remaining: Array[Unit] = []
-				for u: Unit in group_units:
-					if not units_to_strip.has(u):
-						remaining.append(u)
-				if remaining.is_empty():
-					control_groups.erase(num)
-				else:
-					control_groups[num] = remaining
-		if not buildings_to_strip.is_empty():
-			var group_buildings: Array[Building] = _get_pruned_building_group(num)
-			if not group_buildings.is_empty():
-				var rem_b: Array[Building] = []
-				for b: Building in group_buildings:
-					if not buildings_to_strip.has(b):
-						rem_b.append(b)
-				if rem_b.is_empty():
-					control_groups.erase(num)
-				else:
-					control_groups[num] = rem_b
+	_control_group_mgr.steal_append(self, group_num)
 
 
 func recall_control_group(group_num: int, allow_double_tap_center: bool = true) -> void:
-	if group_num < 1 or group_num > 9:
-		return
-	var group_units: Array[Unit] = _get_pruned_group(group_num)
-	if not group_units.is_empty():
-		control_groups[group_num] = group_units
-		cancel_ability_targeting()
-		cancel_attack_move_targeting()
-		cancel_patrol_targeting()
-		_set_selected_buildings([])
-		_set_inspected_entity(null)
-		_set_selected_units(group_units)
-		_emit_control_groups_changed()
-		if allow_double_tap_center:
-			var now_ms: int = Time.get_ticks_msec()
-			if _last_recall_group == group_num and (now_ms - _last_recall_time_ms) <= DOUBLE_TAP_WINDOW_MS:
-				_center_camera_on_units(group_units)
-				_last_recall_group = -1
-				_last_recall_time_ms = 0
-			else:
-				_last_recall_group = group_num
-				_last_recall_time_ms = now_ms
-		return
-
-	var group_buildings: Array[Building] = _get_pruned_building_group(group_num)
-	if not group_buildings.is_empty():
-		control_groups[group_num] = group_buildings
-		cancel_ability_targeting()
-		cancel_overclock_targeting()
-		cancel_attack_move_targeting()
-		cancel_patrol_targeting()
-		_set_selected_units([])
-		_set_selected_buildings(group_buildings)
-		_emit_control_groups_changed()
-		if allow_double_tap_center:
-			var now_b_ms: int = Time.get_ticks_msec()
-			if _last_recall_group == group_num and (now_b_ms - _last_recall_time_ms) <= DOUBLE_TAP_WINDOW_MS:
-				_center_camera_on_nodes(group_buildings)
-				_last_recall_group = -1
-				_last_recall_time_ms = 0
-			else:
-				_last_recall_group = group_num
-				_last_recall_time_ms = now_b_ms
-		return
-
-	control_groups.erase(group_num)
-	_emit_control_groups_changed()
+	_control_group_mgr.recall(self, group_num, allow_double_tap_center)
 
 
 func get_control_group_units(group_num: int) -> Array[Unit]:
-	return _get_pruned_group(group_num)
+	return _control_group_mgr.get_pruned_units(self, group_num)
 
 
 func get_control_groups_summary() -> Dictionary:
-	var summary: Dictionary = {}
-	for num: int in range(1, 10):
-		if not control_groups.has(num):
-			continue
-		var group_units: Array[Unit] = _get_pruned_group(num)
-		if not group_units.is_empty():
-			control_groups[num] = group_units
-			summary[num] = group_units.size()
-			continue
-		var group_buildings: Array[Building] = _get_pruned_building_group(num)
-		if not group_buildings.is_empty():
-			control_groups[num] = group_buildings
-			summary[num] = group_buildings.size()
-		else:
-			control_groups.erase(num)
-	return summary
+	return _control_group_mgr.get_summary(self)
 
 
 func get_control_group_summaries() -> Dictionary:
-	var out: Dictionary = {}
-	for num: int in range(1, 10):
-		if not control_groups.has(num):
-			continue
-		var group_units: Array[Unit] = _get_pruned_group(num)
-		if not group_units.is_empty():
-			control_groups[num] = group_units
-			var lead_name: String = group_units[0].data.display_name if group_units[0].data != null else "Units"
-			var active_u: bool = (selected_units.size() == group_units.size() and not selected_units.is_empty())
-			if active_u:
-				for gu: Unit in group_units:
-					if not selected_units.has(gu):
-						active_u = false
-						break
-			out[num] = {
-				"count": group_units.size(),
-				"label": lead_name,
-				"is_active": active_u,
-				"is_building": false,
-			}
-			continue
-		var group_buildings: Array[Building] = _get_pruned_building_group(num)
-		if not group_buildings.is_empty():
-			control_groups[num] = group_buildings
-			var active_b: bool = (selected_buildings.size() == group_buildings.size() and not selected_buildings.is_empty())
-			if active_b:
-				for gb: Building in group_buildings:
-					if not selected_buildings.has(gb):
-						active_b = false
-						break
-			out[num] = {
-				"count": group_buildings.size(),
-				"label": group_buildings[0].display_name,
-				"is_active": active_b,
-				"is_building": true,
-			}
-		else:
-			control_groups.erase(num)
-	return out
+	return _control_group_mgr.get_rich_summaries(self)
 
 
 func clear_control_groups() -> void:
-	control_groups.clear()
-	_emit_control_groups_changed()
+	_control_group_mgr.clear(self)
 
 
 func _handle_control_group_key(group_num: int, key_event: InputEventKey) -> void:
-	if key_event.alt_pressed and key_event.shift_pressed:
-		steal_append_control_group(group_num)
-	elif key_event.alt_pressed:
-		steal_assign_control_group(group_num)
-	elif key_event.ctrl_pressed:
-		assign_control_group(group_num)
-	elif key_event.shift_pressed:
-		append_control_group(group_num)
-	else:
-		recall_control_group(group_num, true)
+	_control_group_mgr.handle_key(self, group_num, key_event)
 
 
 func _get_control_group_key(key_event: InputEventKey) -> int:
-	var code: Key = key_event.physical_keycode
-	if code < KEY_1 or code > KEY_9:
-		code = key_event.keycode
-	if code >= KEY_1 and code <= KEY_9:
-		return int(code - KEY_1) + 1
-	return 0
+	return _control_group_mgr.get_key_group_num(key_event)
 
 
 func _get_local_human_team_enum() -> Unit.Team:
 	if TeamManager != null and TeamManager.get_local_human_team() >= 0:
 		return TeamManager.get_local_human_team() as Unit.Team
 	return Unit.Team.PLAYER
-
-
-func _get_pruned_group(group_num: int) -> Array[Unit]:
-	var valid: Array[Unit] = []
-	if not control_groups.has(group_num):
-		return valid
-	var local_t: Unit.Team = _get_local_human_team_enum()
-	var raw: Variant = control_groups[group_num]
-	if raw is Array:
-		for item: Variant in raw:
-			if is_instance_valid(item) and item is Unit:
-				var unit: Unit = item
-				if not unit.is_dead and not unit.is_staffed and unit.team == local_t:
-					valid.append(unit)
-	return valid
-
-
-func _get_pruned_building_group(group_num: int) -> Array[Building]:
-	var valid: Array[Building] = []
-	if not control_groups.has(group_num):
-		return valid
-	var local_t: Unit.Team = _get_local_human_team_enum()
-	var raw: Variant = control_groups[group_num]
-	if raw is Array:
-		for item: Variant in raw:
-			if is_instance_valid(item) and item is Building:
-				var b: Building = item
-				if not b.is_destroyed and not b.is_queued_for_deletion() and b.team == local_t:
-					valid.append(b)
-	return valid
 
 
 func _emit_control_groups_changed() -> void:
@@ -1804,54 +1475,8 @@ func _cancel_drag_box() -> void:
 	_clear_marquee_preview()
 
 
-func _circle_intersects_rect(center: Vector2, radius: float, rect: Rect2) -> bool:
-	var clamped: Vector2 = Vector2(
-		clampf(center.x, rect.position.x, rect.end.x),
-		clampf(center.y, rect.position.y, rect.end.y)
-	)
-	return center.distance_squared_to(clamped) <= radius * radius
-
-
 func _collect_box_selection_candidates(world_rect: Rect2) -> Dictionary:
-	var local_t: Unit.Team = _get_local_human_team_enum()
-	var all_unit_hits: Array[Unit] = []
-	var combat_hits: Array[Unit] = []
-	var utility_hits: Array[Unit] = []
-	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
-		if not (node is Unit):
-			continue
-		var unit: Unit = node
-		if not is_instance_valid(unit) or unit.is_dead or unit.is_staffed or unit.team != local_t:
-			continue
-		if _circle_intersects_rect(unit.global_position, unit.get_selection_radius(), world_rect):
-			all_unit_hits.append(unit)
-			if _is_utility_unit(unit):
-				utility_hits.append(unit)
-			else:
-				combat_hits.append(unit)
-
-	var smart_box_enabled: bool = SettingsManager != null and SettingsManager.smart_box_select_enabled
-	var unit_hits: Array[Unit] = all_unit_hits
-	if smart_box_enabled:
-		unit_hits = combat_hits if not combat_hits.is_empty() else utility_hits
-
-	var b_hits: Array[Building] = []
-	if unit_hits.is_empty():
-		for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
-			if not (node is Building) or not is_instance_valid(node):
-				continue
-			var b: Building = node
-			if b.is_destroyed or b.team != local_t:
-				continue
-			if _circle_intersects_rect(b.global_position, b.footprint_radius * 0.75, world_rect):
-				b_hits.append(b)
-
-	return {
-		"units": unit_hits,
-		"combat_units": combat_hits,
-		"buildings": b_hits,
-		"smart_box_enabled": smart_box_enabled,
-	}
+	return BOX_SELECTION_RESOLVER_SCRIPT.collect_box_candidates(self, world_rect)
 
 
 func _update_marquee_preview(world_rect: Rect2) -> void:
@@ -2120,23 +1745,7 @@ func _select_in_rect(world_rect: Rect2, shift_pressed: bool = false) -> void:
 
 
 func _find_visible_buildings_of_type(type_id: StringName, target_team: Unit.Team) -> Array[Building]:
-	var matches: Array[Building] = []
-	var cam: RTSCamera = _get_rts_camera()
-	var view_rect: Rect2 = Rect2()
-	var use_view_rect: bool = false
-	if cam != null:
-		var vp_size: Vector2 = get_viewport_rect().size / cam.zoom
-		view_rect = Rect2(cam.global_position - vp_size * 0.5, vp_size)
-		use_view_rect = true
-	for node: Node in get_tree().get_nodes_in_group("selectable_buildings"):
-		if not (node is Building) or not is_instance_valid(node):
-			continue
-		var b: Building = node
-		if b.is_destroyed or b.team != target_team or b.building_type_id != type_id:
-			continue
-		if not use_view_rect or view_rect.has_point(b.global_position):
-			matches.append(b)
-	return matches
+	return BOX_SELECTION_RESOLVER_SCRIPT.find_visible_buildings_of_type(self, type_id, target_team)
 
 
 func _set_selected_buildings(buildings: Array[Building], preserve_subgroup: bool = false, play_audio: bool = true) -> void:
@@ -2416,23 +2025,7 @@ func eject_engineers_from_selected_buildings() -> void:
 
 
 func _find_visible_units_of_type(type_id: StringName, target_team: Unit.Team) -> Array[Unit]:
-	var matches: Array[Unit] = []
-	var cam: RTSCamera = _get_rts_camera()
-	var view_rect: Rect2 = Rect2()
-	var use_view_rect: bool = false
-	if cam != null:
-		var vp_size: Vector2 = get_viewport_rect().size / cam.zoom
-		view_rect = Rect2(cam.global_position - vp_size * 0.5, vp_size)
-		use_view_rect = true
-	for node: Node in get_tree().get_nodes_in_group("selectable_units"):
-		if not (node is Unit) or not is_instance_valid(node):
-			continue
-		var unit: Unit = node
-		if unit.is_dead or unit.is_staffed or unit.team != target_team or unit.get_unit_type_id() != type_id:
-			continue
-		if not use_view_rect or view_rect.has_point(unit.global_position):
-			matches.append(unit)
-	return matches
+	return BOX_SELECTION_RESOLVER_SCRIPT.find_visible_units_of_type(self, type_id, target_team)
 
 
 func _set_selected_units(new_selection: Array[Unit], reset_subgroup_index: bool = true, play_audio: bool = true) -> void:
@@ -2741,210 +2334,18 @@ func _build_world_rect(a: Vector2, b: Vector2) -> Rect2:
 	return Rect2(Vector2(minf(a.x, b.x), minf(a.y, b.y)), Vector2(absf(a.x - b.x), absf(a.y - b.y)))
 
 
-# =============================================================================
-# PROCEDURAL TECHNOZEN COMMAND CURSORS (32x32, HOTSPOT 16,16)
-# =============================================================================
-
-func _build_command_cursors() -> void:
-	_command_cursors.clear()
-	_command_cursors[&"attack_move"] = _make_reticle_cursor(&"attack_move")
-	_command_cursors[&"patrol"] = _make_reticle_cursor(&"patrol")
-	_command_cursors[&"repair"] = _make_reticle_cursor(&"repair")
-	_command_cursors[&"ability_target"] = _make_reticle_cursor(&"ability_target")
-	_command_cursors[&"overclock_valid"] = _make_reticle_cursor(&"overclock_valid")
-	_command_cursors[&"overclock_invalid"] = _make_reticle_cursor(&"overclock_invalid")
-
-
-func _make_reticle_cursor(style: StringName) -> ImageTexture:
-	var img: Image = Image.create(32, 32, false, Image.FORMAT_RGBA8)
-	img.fill(Color(0.0, 0.0, 0.0, 0.0))
-
-	var primary: Color = Color(1.0, 0.30, 0.43, 1.0) # Crimson #FF4D6D
-	var secondary: Color = Color(1.0, 0.78, 0.84, 0.95)
-	var shadow: Color = Color(0.02, 0.04, 0.07, 0.85)
-	match style:
-		&"patrol":
-			primary = Color(0.22, 0.74, 0.97, 1.0) # Cyan/Azure #38BDF8
-			secondary = Color(0.86, 0.97, 1.0, 0.96)
-		&"repair":
-			primary = Color(0.20, 0.83, 0.60, 1.0) # Emerald #34D399
-			secondary = Color(0.84, 1.0, 0.92, 0.96)
-		&"ability_target":
-			primary = Color(0.96, 0.62, 0.04, 1.0) # Amber #F59E0B
-			secondary = Color(0.76, 0.48, 1.0, 0.96) # Violet accent
-		&"overclock_valid":
-			primary = Color(1.0, 0.624, 0.110, 1.0) # Hazard Amber #FF9F1C
-			secondary = Color(1.0, 0.92, 0.68, 0.98)
-		&"overclock_invalid":
-			primary = Color(0.82, 0.32, 0.30, 0.92) # Muted Red
-			secondary = Color(0.92, 0.56, 0.54, 0.85)
-
-	var put_px: Callable = func(px: int, py: int, col: Color) -> void:
-		if px >= 0 and px < 32 and py >= 0 and py < 32:
-			img.set_pixel(px, py, col)
-
-	var draw_dot_outlined: Callable = func(px: int, py: int, col: Color) -> void:
-		for oy: int in [-1, 0, 1]:
-			for ox: int in [-1, 0, 1]:
-				if ox == 0 and oy == 0:
-					continue
-				var nx: int = px + ox
-				var ny: int = py + oy
-				if nx >= 0 and nx < 32 and ny >= 0 and ny < 32 and img.get_pixel(nx, ny).a < 0.05:
-					img.set_pixel(nx, ny, shadow)
-		put_px.call(px, py, col)
-
-	var draw_seg: Callable = func(x0: int, y0: int, x1: int, y1: int, col: Color) -> void:
-		var steps: int = maxi(absi(x1 - x0), absi(y1 - y0))
-		if steps <= 0:
-			draw_dot_outlined.call(x0, y0, col)
-			return
-		for i: int in range(steps + 1):
-			var t: float = float(i) / float(steps)
-			var rx: int = int(round(lerpf(float(x0), float(x1), t)))
-			var ry: int = int(round(lerpf(float(y0), float(y1), t)))
-			draw_dot_outlined.call(rx, ry, col)
-
-	var draw_ring: Callable = func(radius: float, col: Color) -> void:
-		for a_i: int in range(64):
-			var ang: float = TAU * float(a_i) / 64.0
-			var rx: int = int(round(16.0 + cos(ang) * radius))
-			var ry: int = int(round(16.0 + sin(ang) * radius))
-			draw_dot_outlined.call(rx, ry, col)
-
-	match style:
-		&"attack_move":
-			# Sharp crimson reticle with 4 corner brackets + cardinal ticks + hot center pip
-			draw_seg.call(5, 5, 10, 5, primary)
-			draw_seg.call(5, 5, 5, 10, primary)
-			draw_seg.call(26, 5, 21, 5, primary)
-			draw_seg.call(26, 5, 26, 10, primary)
-			draw_seg.call(5, 26, 10, 26, primary)
-			draw_seg.call(5, 26, 5, 21, primary)
-			draw_seg.call(26, 26, 21, 26, primary)
-			draw_seg.call(26, 26, 26, 21, primary)
-			draw_seg.call(16, 4, 16, 11, primary)
-			draw_seg.call(16, 21, 16, 28, primary)
-			draw_seg.call(4, 16, 11, 16, primary)
-			draw_seg.call(21, 16, 28, 16, primary)
-			draw_seg.call(15, 16, 17, 16, secondary)
-			draw_seg.call(16, 15, 16, 17, secondary)
-
-		&"patrol":
-			# Crisp cyan/azure reticle with ring + directional ticks + chevron accents
-			draw_ring.call(10.0, primary)
-			draw_seg.call(16, 2, 16, 8, secondary)
-			draw_seg.call(16, 24, 16, 30, secondary)
-			draw_seg.call(2, 16, 8, 16, secondary)
-			draw_seg.call(24, 16, 30, 16, secondary)
-			# Small directional diamond center
-			draw_seg.call(16, 13, 19, 16, primary)
-			draw_seg.call(19, 16, 16, 19, primary)
-			draw_seg.call(16, 19, 13, 16, primary)
-			draw_seg.call(13, 16, 16, 13, primary)
-
-		&"repair":
-			# Bioluminescent emerald reticle with bold inner repair cross + corner brackets
-			draw_ring.call(11.0, primary)
-			draw_seg.call(16, 10, 16, 22, secondary)
-			draw_seg.call(15, 11, 15, 21, primary)
-			draw_seg.call(17, 11, 17, 21, primary)
-			draw_seg.call(10, 16, 22, 16, secondary)
-			draw_seg.call(11, 15, 21, 15, primary)
-			draw_seg.call(11, 17, 21, 17, primary)
-
-		&"ability_target", &"overclock_valid", &"overclock_invalid":
-			# Luminous concentric reticle + ticks
-			draw_ring.call(11.5, primary)
-			draw_ring.call(5.5, secondary)
-			draw_seg.call(16, 2, 16, 6, primary)
-			draw_seg.call(16, 26, 16, 30, primary)
-			draw_seg.call(2, 16, 6, 16, primary)
-			draw_seg.call(26, 16, 30, 16, primary)
-			draw_dot_outlined.call(16, 16, secondary)
-
-	return ImageTexture.create_from_image(img)
-
-
 func _clear_custom_cursor() -> void:
-	if _active_cursor_state != &"":
-		_active_cursor_state = &""
-		Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
-		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	_cursor_mgr.clear_cursor()
 
 
-func _apply_command_cursor(state: StringName) -> void:
-	if _active_cursor_state == state:
-		return
-	if state == &"" or not _command_cursors.has(state):
-		_clear_custom_cursor()
-		return
-	_active_cursor_state = state
-	Input.set_custom_mouse_cursor(_command_cursors[state] as Texture2D, Input.CURSOR_ARROW, Vector2(16, 16))
-	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
-
-
-func _is_any_modal_open() -> bool:
-	if not is_inside_tree():
-		return true
-	if get_tree().paused and not _is_post_match_inspection():
-		return true
-	var pause_node: Node = get_tree().get_first_node_in_group("pause_menu")
-	if pause_node != null and is_instance_valid(pause_node):
-		if pause_node.has_method("is_pause_open") and bool(pause_node.call("is_pause_open")):
-			return true
-		if pause_node.has_method("is_settings_open") and bool(pause_node.call("is_settings_open")):
-			return true
-		if pause_node.has_method("is_tech_tree_open") and bool(pause_node.call("is_tech_tree_open")):
-			return true
-		if pause_node.has_method("is_controls_help_open") and bool(pause_node.call("is_controls_help_open")):
-			return true
-	var settings_node: Node = get_tree().get_first_node_in_group("settings_menu")
-	if settings_node != null and is_instance_valid(settings_node) and not settings_node.is_queued_for_deletion():
-		return true
-	var tech_node: Node = get_tree().get_first_node_in_group("tech_tree_overlay")
-	if tech_node != null and is_instance_valid(tech_node) and not tech_node.is_queued_for_deletion():
-		return true
-	var help_node: Node = get_tree().get_first_node_in_group("controls_reference_overlay")
-	if help_node != null and is_instance_valid(help_node) and not help_node.is_queued_for_deletion():
-		return true
-	var end_node: Node = get_tree().get_first_node_in_group("match_end_overlay")
-	if end_node != null and is_instance_valid(end_node) and end_node.has_method("is_summary_visible"):
-		if bool(end_node.call("is_summary_visible")):
-			return true
-	return false
-
-
-func _is_hovering_repairable_target() -> bool:
-	if command_router == null or selected_units.is_empty() or _is_dragging:
-		return false
-	var has_repairer: bool = false
-	for u: Unit in selected_units:
-		if is_instance_valid(u) and not u.is_dead and not u.is_staffed:
-			if u.can_repair():
-				has_repairer = true
-				break
-	if not has_repairer:
-		return false
-	var world_pt: Vector2 = get_global_mouse_position()
-	var local_team: Unit.Team = (TeamManager.get_local_human_team() as Unit.Team) if (TeamManager != null and TeamManager.get_local_human_team() >= 0) else Unit.Team.PLAYER
-	var hovered_u: Unit = command_router.find_unit_at_point(world_pt, local_team)
-	if hovered_u != null:
-		for u: Unit in selected_units:
-			if is_instance_valid(u) and u.can_repair_target(hovered_u):
-				return true
-	var hovered_b: Building = command_router.find_building_at_point(world_pt, local_team)
-	if hovered_b != null and hovered_b.is_constructed and hovered_b.current_hp < hovered_b.max_hp - 0.5:
-		for u: Unit in selected_units:
-			if is_instance_valid(u) and u.can_repair_target(hovered_b):
-				return true
-	return false
+func _update_command_cursor() -> void:
+	_cursor_mgr.update_cursor(self)
 
 
 func _update_hover_target() -> void:
 	if _hovered_entity != null and not is_instance_valid(_hovered_entity):
 		_hovered_entity = null
-	if command_router == null or _is_dragging or _is_any_modal_open():
+	if command_router == null or _is_dragging or _cursor_mgr.is_any_modal_open(self):
 		_set_hovered_entity(null)
 		return
 	var vp: Viewport = get_viewport()
@@ -2954,7 +2355,7 @@ func _update_hover_target() -> void:
 			_set_hovered_entity(null)
 			return
 	var world_pt: Vector2 = get_global_mouse_position()
-	_set_hovered_entity(_find_top_hover_entity(world_pt))
+	_set_hovered_entity(BOX_SELECTION_RESOLVER_SCRIPT.find_top_hover_entity(self, world_pt))
 
 
 func _set_hovered_entity(next_entity: Node) -> void:
@@ -2965,75 +2366,3 @@ func _set_hovered_entity(next_entity: Node) -> void:
 	_hovered_entity = next_entity
 	if _hovered_entity != null and is_instance_valid(_hovered_entity) and _hovered_entity.has_method("set_hovered"):
 		_hovered_entity.call("set_hovered", true)
-
-
-func _find_top_hover_entity(world_point: Vector2) -> Node:
-	if command_router == null:
-		return null
-	var is_spec: bool = (TeamManager != null and TeamManager.is_spectator_mode()) or _is_post_match_inspection()
-	if is_spec:
-		var su: Unit = command_router.find_any_unit_at_point(world_point)
-		if su != null:
-			return su
-		var sb: Building = command_router.find_any_building_at_point(world_point)
-		if sb != null:
-			return sb
-	else:
-		var local_t: Unit.Team = _get_local_human_team_enum()
-		var local_int: int = int(local_t)
-		var fu: Unit = command_router.find_unit_at_point(world_point, local_t)
-		if fu != null:
-			return fu
-		var eu: Unit = command_router.find_hostile_unit_at_point(world_point, local_int)
-		if eu != null:
-			return eu
-		var fb: Building = command_router.find_building_at_point(world_point, local_t)
-		if fb != null:
-			return fb
-		var eb: Building = command_router.find_hostile_building_at_point(world_point, local_int)
-		if eb != null:
-			return eb
-
-	var bar: Node2D = command_router.find_barricade_at_point(world_point)
-	if bar != null:
-		return bar
-	var relay_h: Node2D = command_router.find_sensor_relay_at_point(world_point)
-	if relay_h != null:
-		return relay_h
-	var uplink_h: Node2D = command_router.find_hyper_uplink_at_point(world_point)
-	if uplink_h != null:
-		return uplink_h
-	var salv: Node2D = command_router.find_salvage_core_at_point(world_point)
-	if salv != null:
-		return salv
-	var res: ResourceNode = command_router.find_resource_node_at_point(world_point)
-	if res != null:
-		return res
-	return null
-
-
-func _update_command_cursor() -> void:
-	if _is_any_modal_open() or _is_post_match_inspection():
-		_clear_custom_cursor()
-		return
-	if active_targeting_ability != null:
-		_apply_command_cursor(&"ability_target")
-		return
-	if is_overclock_targeting:
-		var oc_hub: Building = find_ready_overclock_hub()
-		var oc_valid: bool = false
-		if oc_hub != null and command_router != null:
-			var oc_b: Building = command_router.find_building_at_point(get_global_mouse_position(), _get_local_human_team_enum())
-			oc_valid = oc_b != null and oc_b.is_valid_overclock_target(int(oc_hub.team))
-		_apply_command_cursor(&"overclock_valid" if oc_valid else &"overclock_invalid")
-		return
-	if is_attack_move_targeting:
-		_apply_command_cursor(&"attack_move")
-		return
-	if is_patrol_targeting:
-		_apply_command_cursor(&"patrol")
-		return
-	if _is_hovering_repairable_target():
-		_apply_command_cursor(&"repair")
-		return
-	_clear_custom_cursor()

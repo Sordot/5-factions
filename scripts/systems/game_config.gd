@@ -26,6 +26,7 @@ enum GameMode {
 const MAP_SKIRMISH_01: String = "res://scenes/maps/skirmish_arena_01.tscn"
 const MAP_SKIRMISH_02: String = "res://scenes/maps/skirmish_arena_02.tscn"
 const MAP_SKIRMISH_03: String = "res://scenes/maps/skirmish_arena_03.tscn"
+const MAP_SKIRMISH_04: String = "res://scenes/maps/skirmish_arena_04.tscn"
 const MAP_SKIRMISH_PROCEDURAL: String = "res://scenes/maps/skirmish_arena_procedural.tscn"
 const MAP_SANDBOX_TESTBED: String = "res://scenes/test/milestone_0_test.tscn"
 const MAIN_MENU_SCENE: String = "res://scenes/ui/main_menu.tscn"
@@ -34,6 +35,7 @@ const MAP_CATALOG: Array = [
 	{"path": MAP_SKIRMISH_01, "label": "Skirmish Arena 01 (1v1 Symmetric)", "max_players": 2},
 	{"path": MAP_SKIRMISH_02, "label": "Twin Causeway (Skirmish Arena 02)", "max_players": 2},
 	{"path": MAP_SKIRMISH_03, "label": "Quad Nexus (2–4P FFA / 2v2)", "max_players": 4},
+	{"path": MAP_SKIRMISH_04, "label": "Triad Sanctum (3P FFA)", "max_players": 3},
 	{"path": MAP_SKIRMISH_PROCEDURAL, "label": "Procedural Arena (Seeded 2–4P)", "max_players": 4},
 	{"path": MAP_SANDBOX_TESTBED, "label": "Sandbox Testbed (Milestone 0)", "max_players": 2},
 ]

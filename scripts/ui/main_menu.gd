@@ -107,7 +107,7 @@ var _proc_chokes: int = 1
 var _proc_high_ground: int = 1
 var _proc_richness: int = 1
 var _proc_biome: StringName = &"auto"
-const PROC_BIOME_IDS: Array = [&"auto", &"vat_basin", &"twin_causeway", &"quad_nexus"]
+const PROC_BIOME_IDS: Array = [&"auto", &"vat_basin", &"twin_causeway", &"quad_nexus", &"triad_sanctum"]
 
 var _selected_map_path: String = GameConfig.MAP_SKIRMISH_01
 var _player_count: int = 2
@@ -944,6 +944,7 @@ func _init_procedural_map_controls() -> void:
 		opt_proc_biome.add_item("Vat Basin", 1)
 		opt_proc_biome.add_item("Causeway", 2)
 		opt_proc_biome.add_item("Quad Nexus", 3)
+		opt_proc_biome.add_item("Triad Sanctum", 4)
 		var b_idx: int = maxi(0, PROC_BIOME_IDS.find(_proc_biome))
 		opt_proc_biome.select(b_idx)
 		opt_proc_biome.item_selected.connect(func(idx: int) -> void:
@@ -1202,7 +1203,7 @@ func _refresh_ui() -> void:
 		btn_players_2.modulate = Color(0.36, 1.0, 0.88, 1.0) if _player_count == 2 else Color(0.66, 0.74, 0.80, 0.78)
 	if btn_players_3 != null:
 		btn_players_3.disabled = (max_p < 3)
-		btn_players_3.tooltip_text = "Requires a 4-player map (Quad Nexus)" if max_p < 3 else "3-Player Skirmish"
+		btn_players_3.tooltip_text = "Requires a 3+ player map (Triad Sanctum, Quad Nexus, or Procedural)" if max_p < 3 else "3-Player Skirmish"
 		btn_players_3.modulate = Color(0.36, 1.0, 0.88, 1.0) if _player_count == 3 else (Color(0.42, 0.48, 0.54, 0.50) if max_p < 3 else Color(0.66, 0.74, 0.80, 0.78))
 	if btn_players_4 != null:
 		btn_players_4.disabled = (max_p < 4)

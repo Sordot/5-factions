@@ -3,6 +3,10 @@ extends StaticBody2D
 
 const PRODUCTION_COMPONENT_SCRIPT: GDScript = preload("res://scripts/buildings/production_component.gd")
 const TURRET_COMPONENT_SCRIPT: GDScript = preload("res://scripts/buildings/turret_component.gd")
+const BUILDING_POWER_LATTICE_SCRIPT: GDScript = preload("res://scripts/buildings/building_power_lattice.gd")
+const BUILDING_WORLD_OVERLAY_SCRIPT: GDScript = preload("res://scripts/buildings/building_world_overlay.gd")
+const BUILDING_INSPECTION_BUILDER_SCRIPT: GDScript = preload("res://scripts/buildings/building_inspection_builder.gd")
+const BUILDING_RALLY_CONTROLLER_SCRIPT: GDScript = preload("res://scripts/buildings/building_rally_controller.gd")
 const ENTITY_VISUALS_SCRIPT: GDScript = preload("res://ui/overlays/entity_visuals.gd")
 const COMBAT_VFX_SCRIPT: GDScript = preload("res://ui/overlays/combat_vfx.gd")
 const HEALTH_BAR_WIDTH: float = 76.0
@@ -104,16 +108,18 @@ var assigned_engineers: Array[Unit] = []
 var production_component: ProductionComponent = null
 var turret_component: TurretComponent = null
 
-var _has_rally: bool = false
-var _rally_position: Vector2 = Vector2.ZERO
-var _rally_target: Node2D = null
-var _rally_resource_type: StringName = &""
-var rally_target_unit: Unit = null
+var _rally_controller: BuildingRallyController = BUILDING_RALLY_CONTROLLER_SCRIPT.new()
+var rally_target_unit: Unit:
+	get:
+		return _rally_controller.rally_target_unit
+	set(value):
+		_rally_controller.rally_target_unit = value
 var construction_costs: Dictionary = {}
 var is_salvaging: bool = false
 var salvage_elapsed: float = 0.0
 var _construction_elapsed: float = 0.0
 var _deposit_pulse_timer: float = 0.0
+var _deposit_pulse_color: Color = Color(0.55, 1.0, 0.78, 1.0)
 var _hit_flash_timer: float = 0.0
 var _shield_hit_flash_timer: float = 0.0
 var _shield_regen_timer: float = 0.0
@@ -223,7 +229,7 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if SpatialGrid != null:
 		SpatialGrid.unregister_building(self)
-	_disconnect_rally_unit_signal()
+	_rally_controller.disconnect_unit_signal(true)
 	if SettingsManager != null and SettingsManager.settings_changed.is_connected(_on_settings_changed):
 		SettingsManager.settings_changed.disconnect(_on_settings_changed)
 	if is_in_group("nav_bake_obstacles"):
@@ -266,7 +272,7 @@ func _process(delta: float) -> void:
 		_deposit_pulse_timer = maxf(0.0, _deposit_pulse_timer - delta)
 		var t: float = _deposit_pulse_timer / DEPOSIT_PULSE_DURATION
 		if core_glow != null:
-			core_glow.color = _base_core_color.lerp(Color(0.55, 1.0, 0.78, 1.0), t)
+			core_glow.color = _base_core_color.lerp(_deposit_pulse_color, t)
 		if _deposit_pulse_timer <= 0.0 and core_glow != null:
 			core_glow.color = _base_core_color
 
@@ -320,150 +326,8 @@ func _should_draw_turret_range_ring() -> bool:
 	return false
 
 
-func _draw_dashed_ring(center: Vector2, radius: float, col: Color, width: float, dash_count: int) -> void:
-	var step: float = TAU / float(maxi(8, dash_count))
-	for i: int in range(dash_count):
-		var a0: float = float(i) * step
-		var a1: float = a0 + step * 0.54
-		draw_arc(center, radius, a0, a1, 4, col, width, true)
-
-
 func _draw() -> void:
-	if is_selected and is_constructed and not is_destroyed and provides_power_grid and power_radius > 0.0:
-		var lat_r: float = power_radius
-		var gold_col: Color = Color(0.98, 0.80, 0.14, 0.56)
-		var mag_col: Color = Color(0.94, 0.22, 0.68, 0.62)
-		draw_circle(Vector2.ZERO, lat_r, Color(0.98, 0.80, 0.14, 0.04))
-		_draw_dashed_ring(Vector2.ZERO, lat_r, gold_col, 1.8, 44)
-		for li: int in range(12):
-			var la: float = float(li) * (TAU / 12.0)
-			var ldir: Vector2 = Vector2.RIGHT.rotated(la)
-			var lp: Vector2 = ldir * lat_r
-			if li % 3 == 0:
-				var dia_p: PackedVector2Array = PackedVector2Array([
-					lp + ldir * 4.5,
-					lp + ldir.orthogonal() * 3.5,
-					lp - ldir * 4.5,
-					lp - ldir.orthogonal() * 3.5,
-				])
-				draw_colored_polygon(dia_p, mag_col)
-			else:
-				draw_line(ldir * (lat_r - 5.0), ldir * (lat_r + 2.0), gold_col, 1.4, true)
-
-	if is_constructed and not is_destroyed and requires_power_grid and not is_powered:
-		var up_pulse: float = 0.55 + 0.45 * sin(_unpowered_pulse_time * 5.2)
-		var warn_amber: Color = Color(0.98, 0.72, 0.18, 0.75 + up_pulse * 0.23)
-		var warn_mag: Color = Color(0.94, 0.22, 0.58, 0.72 + up_pulse * 0.25)
-		var badge_y: float = (health_bar_root.position.y if health_bar_root != null else -(footprint_radius + 14.0)) - (18.0 if max_shield > 0.0 else 12.0)
-		var dia_c: Vector2 = Vector2(0.0, badge_y - 10.0)
-		var dia_pts: PackedVector2Array = PackedVector2Array([
-			dia_c + Vector2(0.0, -7.5),
-			dia_c + Vector2(7.5, 0.0),
-			dia_c + Vector2(0.0, 7.5),
-			dia_c + Vector2(-7.5, 0.0),
-		])
-		draw_colored_polygon(dia_pts, Color(0.05, 0.06, 0.10, 0.88))
-		draw_polyline(dia_pts + PackedVector2Array([dia_pts[0]]), warn_amber, 1.7, true)
-		draw_line(dia_c + Vector2(-5.5, 5.5), dia_c + Vector2(5.5, -5.5), warn_mag, 2.0, true)
-		var font_up: Font = ThemeDB.fallback_font
-		if font_up != null:
-			var up_lbl: String = "UNPOWERED"
-			var up_sz: Vector2 = font_up.get_string_size(up_lbl, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
-			var up_pos: Vector2 = Vector2(-up_sz.x * 0.5, badge_y + 2.0)
-			draw_rect(Rect2(up_pos + Vector2(-4.0, -up_sz.y), up_sz + Vector2(8.0, 4.0)), Color(0.05, 0.06, 0.10, 0.84), true)
-			draw_string(font_up, up_pos, up_lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, warn_amber)
-
-	if is_selected and is_constructed and not is_destroyed and shield_regen_aura_radius > 0.0:
-		var aura_r: float = shield_regen_aura_radius
-		var aura_col: Color = Color(0.220, 0.741, 0.973, 0.42)
-		var amber_dot: Color = Color(1.0, 0.624, 0.110, 0.50)
-		draw_circle(Vector2.ZERO, aura_r, Color(0.220, 0.741, 0.973, 0.035))
-		_draw_dashed_ring(Vector2.ZERO, aura_r, aura_col, 1.6, 36)
-		# Subtle halftone tick dots along the aura perimeter
-		for hi: int in range(18):
-			var ha: float = float(hi) * (TAU / 18.0)
-			draw_circle(Vector2.RIGHT.rotated(ha) * (aura_r - 5.0), 1.8, amber_dot if (hi % 3 == 0) else aura_col)
-
-	if _should_draw_turret_range_ring():
-		var atk_r: float = get_effective_turret_attack_range() + footprint_radius
-		var tc: Color = TeamManager.get_team_color(int(team)) if TeamManager != null else (Color(0.28, 0.94, 0.96, 1.0) if team == Unit.Team.PLAYER else Color(1.0, 0.38, 0.28, 1.0))
-		var ring_col: Color = Color(tc.r, tc.g, tc.b, 0.34)
-		draw_circle(Vector2.ZERO, atk_r, Color(tc.r, tc.g, tc.b, 0.03))
-		_draw_dashed_ring(Vector2.ZERO, atk_r, ring_col, 1.6, 44 if atk_r > 240.0 else 32)
-		if turret_min_range > 0.0:
-			var min_r: float = turret_min_range + footprint_radius
-			draw_circle(Vector2.ZERO, min_r, Color(1.0, 0.28, 0.24, 0.05))
-			_draw_dashed_ring(Vector2.ZERO, min_r, Color(1.0, 0.36, 0.28, 0.44), 1.4, 20)
-
-	if is_selected and turret_component != null and turret_component.explicit_target != null and is_instance_valid(turret_component.explicit_target):
-		var tgt_local: Vector2 = to_local(turret_component.explicit_target.global_position)
-		draw_line(Vector2.ZERO, tgt_local, Color(1.0, 0.34, 0.32, 0.55), 1.4, true)
-		draw_arc(tgt_local, 14.0, 0.0, TAU, 18, Color(1.0, 0.38, 0.32, 0.85), 1.6, true)
-
-	if is_salvaging and is_constructed and not is_destroyed:
-		var prog: float = clampf(salvage_elapsed / SALVAGE_DURATION, 0.0, 1.0)
-		var bar_w: float = 72.0
-		var bar_h: float = 6.0
-		var bar_pos: Vector2 = Vector2(-bar_w * 0.5, footprint_radius + 10.0)
-		var pulse: float = 0.72 + 0.28 * sin(salvage_elapsed * 9.0)
-		draw_rect(Rect2(bar_pos - Vector2(1.0, 1.0), Vector2(bar_w + 2.0, bar_h + 2.0)), Color(0.04, 0.06, 0.09, 0.92), true)
-		draw_rect(Rect2(bar_pos, Vector2(bar_w * prog, bar_h)), Color(1.0, 0.70, 0.20, pulse), true)
-		draw_arc(Vector2.ZERO, footprint_radius + 6.0, -PI * 0.5, -PI * 0.5 + TAU * prog, 32, Color(1.0, 0.72, 0.22, pulse), 2.4, true)
-
-	# Shield-hit ripple ring
-	if _shield_hit_flash_timer > 0.0 and not is_destroyed:
-		var sf: float = clampf(_shield_hit_flash_timer / SHIELD_HIT_FLASH_DURATION, 0.0, 1.0)
-		var sr: float = footprint_radius + 5.0 + (1.0 - sf) * 6.0
-		draw_circle(Vector2.ZERO, sr * 0.95, Color(0.220, 0.741, 0.973, sf * 0.14))
-		draw_arc(Vector2.ZERO, sr, 0.0, TAU, 36, Color(0.220, 0.741, 0.973, sf * 0.92), 2.5, true)
-
-	# World-space Core Overclock VFX: pulsing Hazard Amber perimeter frame/chevrons + compact progress bar & 2x tag
-	if is_overclocked() and is_constructed and not is_destroyed:
-		var oc_pulse: float = 0.5 + 0.5 * sin(_overclock_anim_time * 7.5)
-		var amber: Color = Color(1.0, 0.624, 0.110, 0.72 + oc_pulse * 0.26) # #FF9F1C
-		var amber_soft: Color = Color(1.0, 0.624, 0.110, 0.10 + oc_pulse * 0.08)
-		var frame_r: float = footprint_radius + 7.5 + oc_pulse * 2.0
-		draw_arc(Vector2.ZERO, frame_r, 0.0, TAU, 36, amber, 2.2, true)
-		draw_circle(Vector2.ZERO, frame_r * 0.94, amber_soft)
-		# 4 pulsing corner chevrons
-		for ci: int in range(4):
-			var c_ang: float = PI * 0.25 + float(ci) * (PI * 0.5)
-			var c_dir: Vector2 = Vector2.RIGHT.rotated(c_ang)
-			var perp: Vector2 = Vector2(-c_dir.y, c_dir.x)
-			var tip: Vector2 = c_dir * (frame_r + 7.0 + oc_pulse * 2.5)
-			var wing_a: Vector2 = tip - c_dir * 6.0 + perp * 6.0
-			var wing_b: Vector2 = tip - c_dir * 6.0 - perp * 6.0
-			draw_polyline(PackedVector2Array([wing_a, tip, wing_b]), amber, 2.2, true)
-		# Compact amber timer bar + 2x tag cleanly above building bars
-		var oc_ratio: float = clampf(overclock_remaining / maxf(0.1, overclock_duration_total), 0.0, 1.0)
-		var oc_bar_w: float = 54.0
-		var oc_bar_h: float = 4.0
-		var base_top_y: float = (health_bar_root.position.y if health_bar_root != null else -(footprint_radius + 14.0)) - (15.0 if max_shield > 0.0 else 10.0)
-		var oc_bar_pos: Vector2 = Vector2(-oc_bar_w * 0.5, base_top_y)
-		draw_rect(Rect2(oc_bar_pos - Vector2(1.0, 1.0), Vector2(oc_bar_w + 2.0, oc_bar_h + 2.0)), Color(0.04, 0.06, 0.10, 0.92), true)
-		draw_rect(Rect2(oc_bar_pos, Vector2(oc_bar_w * oc_ratio, oc_bar_h)), amber, true)
-		var mult_txt: String = ("%dx" % int(round(overclock_speed_mult))) if is_equal_approx(overclock_speed_mult, round(overclock_speed_mult)) else ("%.1fx" % overclock_speed_mult)
-		var font: Font = ThemeDB.fallback_font
-		var txt_sz: Vector2 = font.get_string_size(mult_txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
-		var tag_pos: Vector2 = Vector2(-txt_sz.x * 0.5, base_top_y - 3.0)
-		draw_string(font, tag_pos, mult_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.78, 0.30, 0.98))
-
-	if not is_selected or not has_rally() or _has_rally_overlay():
-		return
-	var target_world: Vector2 = get_rally_world_position()
-	var target_local: Vector2 = to_local(target_world)
-	var is_smart: bool = (_rally_target != null and is_instance_valid(_rally_target))
-	var rally_col: Color = Color(0.28, 1.0, 0.62, 0.88) if is_smart else Color(0.24, 0.92, 0.96, 0.85)
-	draw_line(Vector2.ZERO, target_local, rally_col, 1.8, true)
-	draw_arc(target_local, 10.0, 0.0, TAU, 20, rally_col, 2.0, true)
-	# Crisp rally flag triangle
-	var flag_pts: PackedVector2Array = PackedVector2Array([
-		target_local + Vector2(0.0, -2.0),
-		target_local + Vector2(0.0, -22.0),
-		target_local + Vector2(14.0, -15.0),
-		target_local + Vector2(0.0, -9.0),
-	])
-	draw_colored_polygon(flag_pts, rally_col)
+	BUILDING_WORLD_OVERLAY_SCRIPT.draw_building_overlays(self)
 
 
 func begin_construction(data: BuildingData, target_team: Unit.Team, vent: ResourceNode = null) -> void:
@@ -578,65 +442,15 @@ func _sync_lattice_and_tether_from_data(data: BuildingData, force_overwrite: boo
 
 
 static func is_position_powered_for_team(tree: SceneTree, world_pos: Vector2, target_team: int, exclude_building: Building = null) -> bool:
-	if tree == null:
-		return false
-	var candidates: Array = SpatialGrid.query_buildings_in_radius(world_pos, 480.0) if SpatialGrid != null else tree.get_nodes_in_group("buildings")
-	for node: Variant in candidates:
-		if not is_instance_valid(node) or not (node is Building):
-			continue
-		var b: Building = node as Building
-		if b == exclude_building or b.is_destroyed or b.is_queued_for_deletion():
-			continue
-		if not b.is_constructed or b.is_salvaging:
-			continue
-		if int(b.team) != target_team:
-			continue
-		if not b.provides_power_grid or b.power_radius <= 0.0:
-			continue
-		if world_pos.distance_squared_to(b.global_position) <= b.power_radius * b.power_radius:
-			return true
-	return false
+	return BUILDING_POWER_LATTICE_SCRIPT.is_position_powered_for_team(tree, world_pos, target_team, exclude_building)
 
 
 static func refresh_team_power_grid(tree: SceneTree, target_team: int, exclude_building: Building = null) -> void:
-	if tree == null:
-		return
-	for node: Node in tree.get_nodes_in_group("buildings"):
-		if not is_instance_valid(node) or not (node is Building):
-			continue
-		var b: Building = node as Building
-		if b == exclude_building or b.is_destroyed or b.is_queued_for_deletion():
-			continue
-		if int(b.team) != target_team:
-			continue
-		var next_powered: bool = true
-		if b.is_constructed and b.requires_power_grid:
-			next_powered = Building.is_position_powered_for_team(tree, b.global_position, target_team, exclude_building)
-		if next_powered != b.is_powered:
-			b.set_powered_state(next_powered)
+	BUILDING_POWER_LATTICE_SCRIPT.refresh_team_power_grid(tree, target_team, exclude_building)
 
 
 func set_powered_state(powered: bool) -> void:
-	if is_powered == powered:
-		return
-	is_powered = powered
-	if is_powered:
-		_unpowered_pulse_time = 0.0
-	else:
-		if turret_component != null:
-			turret_component.current_target = null
-			turret_component.explicit_target = null
-		var is_local_owned: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Unit.Team.PLAYER)
-		if is_local_owned and is_inside_tree():
-			var now_ms: int = Time.get_ticks_msec()
-			if now_ms - _last_unpowered_alert_ms >= 6000:
-				_last_unpowered_alert_ms = now_ms
-				var mm: MatchManager = get_tree().get_first_node_in_group("match_manager") as MatchManager
-				if mm != null:
-					mm.push_tactical_alert(global_position, &"under_attack", "%s Unpowered!" % display_name)
-	_update_construction_visuals()
-	queue_redraw()
-	status_changed.emit(self)
+	BUILDING_POWER_LATTICE_SCRIPT.apply_powered_state(self, powered)
 
 
 func _ensure_turret_component() -> void:
@@ -800,146 +614,31 @@ func is_actively_producing() -> bool:
 
 
 func set_rally_position(world_pos: Vector2) -> void:
-	if not can_set_rally:
-		return
-	_disconnect_rally_unit_signal()
-	_has_rally = true
-	_rally_position = world_pos
-	_rally_target = null
-	_rally_resource_type = &""
-	rally_target_unit = null
-	queue_redraw()
-	rally_changed.emit(self)
-	status_changed.emit(self)
+	_rally_controller.set_rally_position(self, world_pos)
 
 
 func set_rally_target(target: Node2D) -> void:
-	if not can_set_rally or target == null or not is_instance_valid(target):
-		return
-	if target is Unit:
-		set_rally_target_unit(target as Unit)
-		return
-	_disconnect_rally_unit_signal()
-	_has_rally = true
-	_rally_target = target
-	_rally_resource_type = (target as ResourceNode).resource_type if (target is ResourceNode and not (target as ResourceNode).is_vent) else &""
-	rally_target_unit = null
-	_rally_position = target.global_position
-	queue_redraw()
-	rally_changed.emit(self)
-	status_changed.emit(self)
+	_rally_controller.set_rally_target(self, target)
 
 
 func set_rally_target_unit(target_unit: Unit) -> void:
-	if not can_set_rally or target_unit == null or not is_instance_valid(target_unit):
-		return
-	if target_unit.is_dead or target_unit.is_staffed or target_unit.team != team:
-		return
-	_disconnect_rally_unit_signal()
-	_has_rally = true
-	rally_target_unit = target_unit
-	_rally_target = target_unit
-	_rally_resource_type = &""
-	_rally_position = target_unit.global_position
-	if not target_unit.died.is_connected(_on_rally_target_unit_died):
-		target_unit.died.connect(_on_rally_target_unit_died)
-	queue_redraw()
-	rally_changed.emit(self)
-	status_changed.emit(self)
-
-
-func _disconnect_rally_unit_signal() -> void:
-	if rally_target_unit != null and is_instance_valid(rally_target_unit):
-		if rally_target_unit.died.is_connected(_on_rally_target_unit_died):
-			rally_target_unit.died.disconnect(_on_rally_target_unit_died)
-
-
-func _on_rally_target_unit_died(unit: Unit) -> void:
-	if unit != rally_target_unit:
-		return
-	if is_instance_valid(unit):
-		_rally_position = unit.global_position
-	rally_target_unit = null
-	_rally_target = null
-	queue_redraw()
-	rally_changed.emit(self)
-	status_changed.emit(self)
+	_rally_controller.set_rally_target_unit(self, target_unit)
 
 
 func has_rally() -> bool:
-	if rally_target_unit != null:
-		if not is_instance_valid(rally_target_unit) or rally_target_unit.is_dead or rally_target_unit.is_staffed:
-			if is_instance_valid(rally_target_unit):
-				_rally_position = rally_target_unit.global_position
-			rally_target_unit = null
-			_rally_target = null
-		else:
-			_rally_position = rally_target_unit.global_position
-	elif _rally_target != null and not is_instance_valid(_rally_target):
-		_rally_target = null
-	return _has_rally
+	return _rally_controller.has_rally()
 
 
 func get_rally_world_position() -> Vector2:
-	if rally_target_unit != null:
-		if is_instance_valid(rally_target_unit) and not rally_target_unit.is_dead and not rally_target_unit.is_staffed:
-			_rally_position = rally_target_unit.global_position
-			return _rally_position
-		if is_instance_valid(rally_target_unit):
-			_rally_position = rally_target_unit.global_position
-		rally_target_unit = null
-		_rally_target = null
-	if _rally_target != null and is_instance_valid(_rally_target):
-		return _rally_target.global_position
-	return _rally_position
+	return _rally_controller.get_rally_world_position()
 
 
 func get_rally_target() -> Node2D:
-	if rally_target_unit != null:
-		if is_instance_valid(rally_target_unit) and not rally_target_unit.is_dead and not rally_target_unit.is_staffed:
-			return rally_target_unit
-		rally_target_unit = null
-		_rally_target = null
-	if _rally_target != null and is_instance_valid(_rally_target):
-		return _rally_target
-	return null
+	return _rally_controller.get_rally_target()
 
 
 func get_cluster_saturation() -> Dictionary:
-	if not is_inside_tree() or not is_constructed or is_destroyed:
-		return {"assigned": 0, "capacity": 0, "has_nodes": false}
-	var res_type: StringName = &""
-	var search_radius: float = 0.0
-	if is_core_hub or building_type_id == &"nexus_vat":
-		res_type = &"biomass"
-		search_radius = 520.0
-	elif building_type_id == &"silica_condenser" or (is_resource_dropoff and accepts_resource(&"silica")):
-		res_type = &"silica"
-		search_radius = 420.0
-	else:
-		return {"assigned": 0, "capacity": 0, "has_nodes": false}
-
-	var r_sq: float = search_radius * search_radius
-	var total_assigned: int = 0
-	var total_cap: int = 0
-	var node_count: int = 0
-	var tid: int = int(team)
-	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
-		if not (node is ResourceNode) or not is_instance_valid(node):
-			continue
-		var rn: ResourceNode = node as ResourceNode
-		if rn.is_depleted() or rn.is_vent or rn.resource_type != res_type:
-			continue
-		if global_position.distance_squared_to(rn.global_position) <= r_sq:
-			total_assigned += rn.get_assigned_count(tid)
-			total_cap += rn.get_effective_max_harvesters(tid)
-			node_count += 1
-	return {
-		"assigned": total_assigned,
-		"capacity": total_cap,
-		"has_nodes": node_count > 0,
-		"resource_type": res_type,
-	}
+	return BUILDING_INSPECTION_BUILDER_SCRIPT.get_cluster_saturation(self)
 
 
 func _has_rally_overlay() -> bool:
@@ -947,52 +646,7 @@ func _has_rally_overlay() -> bool:
 
 
 func apply_rally_to_unit(unit: Unit) -> void:
-	if unit == null or not is_instance_valid(unit) or unit.is_dead:
-		return
-	if not has_rally():
-		return
-
-	if rally_target_unit != null and is_instance_valid(rally_target_unit) and not rally_target_unit.is_dead and not rally_target_unit.is_staffed:
-		_rally_position = rally_target_unit.global_position
-		if unit.data != null and unit.data.attack_damage > 0.0 and not unit.data.can_gather:
-			unit.command_attack_move(_rally_position)
-		else:
-			unit.command_move(_rally_position)
-		return
-
-	if _rally_target != null and is_instance_valid(_rally_target):
-		if _rally_target is ResourceNode:
-			var res_node: ResourceNode = _rally_target
-			if not res_node.is_depleted() and unit.can_gather_resource(res_node.resource_type):
-				var chosen: ResourceNode = ResourceNode.pick_best_cluster_node(res_node, unit, int(team))
-				if chosen == null:
-					chosen = res_node
-				chosen.assign_worker(unit)
-				unit.command_gather(chosen, false)
-				return
-		elif _rally_target is Building:
-			var target_b: Building = _rally_target
-			if not target_b.is_destroyed and target_b.max_staff_slots > 0 and unit.can_staff_compute():
-				if unit.command_staff_building(target_b):
-					return
-	elif _rally_resource_type != &"" and unit.can_gather_resource(_rally_resource_type):
-		# Original rallied resource node depleted; spill cleanly into surviving cluster near rally point
-		var search_pos: Vector2 = _rally_position if _rally_position != Vector2.ZERO else global_position
-		var fallback_rn: ResourceNode = ResourceNode.pick_best_cluster_node_from_pos(
-			get_tree(),
-			search_pos,
-			_rally_resource_type,
-			unit,
-			int(team),
-			480.0,
-			1100.0
-		)
-		if fallback_rn != null:
-			fallback_rn.assign_worker(unit)
-			unit.command_gather(fallback_rn, false)
-			return
-
-	unit.command_move(get_rally_world_position())
+	_rally_controller.apply_rally_to_unit(self, unit)
 
 
 func contains_point(world_point: Vector2) -> bool:
@@ -1171,7 +825,8 @@ func get_active_training_status() -> Dictionary:
 	return production_component.get_active_training_status() if production_component != null else {}
 
 
-func pulse_deposit_feedback() -> void:
+func pulse_deposit_feedback(pulse_color: Color = Color(0.55, 1.0, 0.78, 1.0)) -> void:
+	_deposit_pulse_color = pulse_color
 	_deposit_pulse_timer = DEPOSIT_PULSE_DURATION
 
 
@@ -1308,22 +963,7 @@ func get_effective_damage_reduction() -> float:
 
 
 static func get_shield_regen_delay_speedup_at(tree: SceneTree, world_pos: Vector2, target_team: int) -> float:
-	if tree == null:
-		return 0.0
-	var best_speedup: float = 0.0
-	var candidates: Array = SpatialGrid.query_buildings_in_radius(world_pos, 320.0) if SpatialGrid != null else tree.get_nodes_in_group("buildings")
-	for node: Variant in candidates:
-		if not is_instance_valid(node) or not (node is Building):
-			continue
-		var b: Building = node as Building
-		if b.is_destroyed or not b.is_constructed or b.is_salvaging or b.shield_regen_aura_radius <= 0.0 or b.shield_regen_delay_speedup <= 0.0:
-			continue
-		var is_ally: bool = (int(b.team) == target_team) or (TeamManager != null and TeamManager.are_allies(target_team, int(b.team)))
-		if not is_ally:
-			continue
-		if world_pos.distance_squared_to(b.global_position) <= b.shield_regen_aura_radius * b.shield_regen_aura_radius:
-			best_speedup = maxf(best_speedup, b.shield_regen_delay_speedup)
-	return best_speedup
+	return BUILDING_POWER_LATTICE_SCRIPT.get_shield_regen_delay_speedup_at(tree, world_pos, target_team)
 
 
 func _tick_shield_regen(delta: float) -> void:
@@ -1598,241 +1238,11 @@ func _trigger_shield_shatter_feedback(impact_dir: Vector2 = Vector2.ZERO) -> voi
 
 
 func get_inspection_data() -> Dictionary:
-	var accent: Color = Color(0.22, 0.88, 0.94, 1.0)
-	var bdata: BuildingData = building_data
-	if bdata == null and building_type_id != &"" and TeamManager != null and TeamManager.has_method("get_team_faction_data"):
-		var fdata_b: FactionData = TeamManager.get_team_faction_data(int(team))
-		if fdata_b != null:
-			bdata = fdata_b.get_building_by_id(building_type_id)
-	if bdata != null and bdata.hud_accent_color.a > 0.01:
-		accent = bdata.hud_accent_color
-	elif team == Unit.Team.ENEMY:
-		accent = Color(1.0, 0.36, 0.26, 1.0)
-	elif TeamManager != null and TeamManager.has_method("get_team_faction_data"):
-		var fdata_c: FactionData = TeamManager.get_team_faction_data(int(team))
-		if fdata_c != null:
-			accent = fdata_c.hud_accent_color
-
-	var affil: StringName = &"player" if team == Unit.Team.PLAYER else &"enemy"
-	var stats: Array[Dictionary] = []
-
-	var is_local_owned: bool = TeamManager.is_team_controlled_by_local_human(int(team)) if TeamManager != null else (team == Unit.Team.PLAYER)
-
-	if not is_constructed:
-		var pct: int = int(round(construction_progress * 100.0))
-		stats.append({"label": "Construction", "value": "%d%% Complete" % pct})
-		stats.append({"label": "Builder", "value": "Worker Active" if _has_active_builder() else "Awaiting Worker"})
-		stats.append({"label": "Build Time", "value": "%.1fs Total" % build_time})
-		stats.append({"label": "Hull", "value": "%d / %d" % [int(round(current_hp)), int(round(max_hp))]})
-		return {
-			"title": display_name,
-			"subtitle": "UNDER CONSTRUCTION",
-			"affiliation": affil,
-			"accent_color": accent,
-			"ring_color": accent,
-			"show_hp_bar": true,
-			"hp_current": current_hp,
-			"hp_max": max_hp,
-			"show_shield_bar": false,
-			"shield_current": 0.0,
-			"shield_max": max_shield,
-			"show_primary_bar": true,
-			"primary_bar_label": "Building: %d%% — Under Construction" % pct,
-			"primary_bar_value": construction_progress * 100.0,
-			"primary_bar_max": 100.0,
-			"primary_bar_color": Color(0.32, 0.96, 1.0, 1.0),
-			"stats": stats,
-			"is_commandable": is_local_owned,
-			"readonly_label": "CONSTRUCTION IN PROGRESS",
-		}
-
-	var econ: EconomyManager = _get_economy_manager()
-	var show_primary: bool = false
-	var primary_label: String = ""
-	var primary_val: float = 0.0
-	var primary_max: float = 1.0
-	var primary_col: Color = accent
-	var subtitle: String = "FRIENDLY STRUCTURE" if is_local_owned else "HOSTILE STRUCTURE"
-	var has_commands: bool = is_local_owned
-
-	if max_staff_slots > 0:
-		subtitle = "COMPUTE FACILITY"
-		var staffed: int = get_assigned_engineer_count()
-		var yield_mult: float = GameConfig.get_yield_multiplier() if (GameConfig != null and GameConfig.has_method("get_yield_multiplier")) else 1.0
-		var rate: int = int(round(float(staffed * compute_per_engineer) * yield_mult))
-		show_primary = true
-		primary_label = "Engineers: %d / %d Staffed" % [staffed, max_staff_slots]
-		primary_val = float(staffed)
-		primary_max = float(maxi(1, max_staff_slots))
-		primary_col = Color(0.32, 0.88, 1.0, 1.0)
-		var rate_str: String = "+%d / %.1fs" % [rate, compute_tick_interval] if staffed > 0 else "0 / %.1fs (Assign Eng)" % compute_tick_interval
-		stats.append({"label": "Compute Rate", "value": rate_str})
-		stats.append({"label": "Vent Status", "value": "Active Thermal Vent"})
-		stats.append({"label": "Staff Slots", "value": "%d / %d Engineers" % [staffed, max_staff_slots]})
-		stats.append({"label": "Construction", "value": "Operational"})
-	elif has_turret:
-		subtitle = "STATIC DEFENSE TURRET" if is_local_owned else "HOSTILE DEFENSE TURRET"
-		var eff_t_dmg: float = get_effective_turret_damage()
-		var eff_t_rng: float = get_effective_turret_attack_range()
-		var dmg_str: String = "%d (%.2fx Arm)" % [int(round(eff_t_dmg)), turret_bonus_vs_armored] if turret_bonus_vs_armored > 1.0 else "%d" % int(round(eff_t_dmg))
-		stats.append({"label": "Damage", "value": dmg_str})
-		stats.append({"label": "Range / Rate", "value": "%dpx / %.2fs" % [int(round(eff_t_rng)), turret_attack_interval]})
-		if turret_splash_radius > 0.0:
-			stats.append({"label": "Splash", "value": "%dpx Radius" % int(round(turret_splash_radius))})
-		else:
-			stats.append({"label": "Armor Class", "value": "Armored Structure"})
-		var tgt_txt: String = "Locked Target" if (turret_component != null and turret_component.explicit_target != null and is_instance_valid(turret_component.explicit_target)) else ("Auto (RMB Focus)" if is_local_owned else "Automated")
-		stats.append({"label": "Targeting", "value": tgt_txt})
-	elif is_command_hub():
-		var fac_hub: FactionData = TeamManager.get_team_faction_data(int(team)) if (TeamManager != null and TeamManager.has_method("get_team_faction_data")) else null
-		var fac_code: String = fac_hub.short_code if (fac_hub != null and not fac_hub.short_code.is_empty()) else "FACTION"
-		subtitle = ("%s PRIMARY HUB" % fac_code) if is_local_owned else "HOSTILE COMMAND HUB"
-		var bw_str: String = "%d / %d" % [econ.get_bandwidth_used(team), econ.get_bandwidth_cap(team)] if econ != null else "--"
-		var drop_res: Array[StringName] = building_data.get_dropoff_resources() if building_data != null else accepted_resources
-		var drop_parts: PackedStringArray = PackedStringArray()
-		for r_id: StringName in drop_res:
-			drop_parts.append(String(r_id).capitalize())
-		var drop_str: String = " / ".join(drop_parts) if not drop_parts.is_empty() else "Biomass"
-		stats.append({"label": "Drop-Off", "value": drop_str})
-		stats.append({"label": "Bandwidth", "value": "+%d Capacity" % bandwidth_provided})
-		stats.append({"label": "Network", "value": bw_str})
-		stats.append({"label": "Rally", "value": _get_rally_summary()})
-	elif building_type_id == &"cloning_vat":
-		subtitle = "TIER-1 BATCH CLONING" if team == Unit.Team.PLAYER else "HOSTILE CLONING VAT"
-		var mult: float = econ.get_batch_cost_multiplier(team, base_batch_cost_multiplier) if econ != null else base_batch_cost_multiplier
-		var spd: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * get_local_production_speed_multiplier() * 100.0))
-		stats.append({"label": "Batch Output", "value": "x%d Units (%.2fx Cost)" % [batch_production_count, mult]})
-		stats.append({"label": "Prod Speed", "value": "%d%%" % spd})
-		stats.append({"label": "Rally", "value": _get_rally_summary()})
-		stats.append({"label": "Tech", "value": "Unlocks Fabricator"})
-	elif building_type_id == &"calibration_foundry":
-		subtitle = "TIER-1.5 MECH COUNTER" if team == Unit.Team.PLAYER else "HOSTILE FOUNDRY"
-		var spd_f: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * get_local_production_speed_multiplier() * 100.0))
-		stats.append({"label": "Roster", "value": "Lance-Rig / Jammer"})
-		stats.append({"label": "Prod Speed", "value": "%d%%" % spd_f})
-		stats.append({"label": "Rally", "value": _get_rally_summary()})
-		stats.append({"label": "Role", "value": "Anti-Armor & Utility"})
-	elif building_type_id == &"synthetics_fabricator":
-		subtitle = "TIER-2 HEAVY SYNTHETICS" if team == Unit.Team.PLAYER else "HOSTILE FABRICATOR"
-		var spd_s: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * get_local_production_speed_multiplier() * 100.0))
-		stats.append({"label": "Roster", "value": "Goliath / Arc / Mortar"})
-		stats.append({"label": "Prod Speed", "value": "%d%%" % spd_s})
-		stats.append({"label": "Rally", "value": _get_rally_summary()})
-		stats.append({"label": "Role", "value": "Heavy Compute Pivot"})
-	elif building_type_id == &"assembly_bay" or building_type_id == &"ballistics_lab" or is_military_production_building():
-		var tier_label: String = "TIER-%d PRODUCTION" % maxi(1, get_tech_tier())
-		subtitle = tier_label if is_local_owned else "HOSTILE PRODUCTION"
-		var spd_m: int = int(round((econ.get_production_speed_multiplier(team) if econ != null else 1.0) * get_local_production_speed_multiplier() * 100.0))
-		var roster_names: PackedStringArray = PackedStringArray()
-		for u_d: UnitData in trainable_unit_data:
-			if u_d != null:
-				roster_names.append(u_d.display_name)
-		stats.append({"label": "Roster", "value": " / ".join(roster_names) if not roster_names.is_empty() else "Military Units"})
-		stats.append({"label": "Prod Speed", "value": "%d%%" % spd_m})
-		stats.append({"label": "Rally", "value": _get_rally_summary()})
-		if building_type_id == &"assembly_bay":
-			stats.append({"label": "Tech", "value": "Unlocks Ballistics Lab"})
-		elif building_type_id == &"ballistics_lab":
-			stats.append({"label": "Tech", "value": "Unlocks Siege Gantry"})
-		elif building_type_id == &"siege_gantry":
-			stats.append({"label": "Role", "value": "Siege & Heavy Chassis"})
-		else:
-			stats.append({"label": "Role", "value": "Precision & Support"})
-	elif building_type_id == &"silica_condenser" or building_type_id == &"silica_smelter" or (is_resource_dropoff and accepts_resource(&"silica") and not is_command_hub()):
-		subtitle = "SILICA REFINING FACILITY"
-		stats.append({"label": "Drop-Off", "value": "Silica"})
-		stats.append({"label": "Harvesters", "value": "%d Active" % _count_friendly_harvesters()})
-		stats.append({"label": "Rally", "value": _get_rally_summary()})
-		stats.append({"label": "Throughput", "value": "25 Silica / Trip"})
-	elif building_type_id == &"synapse_pylon" or building_type_id == &"capacitor_pylon" or bandwidth_provided > 0:
-		subtitle = "INFRASTRUCTURE NODE"
-		var bw_net: String = "%d / %d" % [econ.get_bandwidth_used(team), econ.get_bandwidth_cap(team)] if econ != null else "--"
-		stats.append({"label": "Bandwidth", "value": "+%d Capacity" % bandwidth_provided})
-		stats.append({"label": "Network", "value": bw_net})
-		if shield_regen_aura_radius > 0.0 and shield_regen_delay_speedup > 0.0:
-			stats.append({
-				"label": "Shield Aura",
-				"value": "+%d%% Recovery (%dpx)" % [int(round(shield_regen_delay_speedup * 100.0)), int(round(shield_regen_aura_radius))],
-				"color": Color(0.220, 0.741, 0.973, 1.0),
-			})
-			stats.append({"label": "Role", "value": "Supply & Capacitor Relay"})
-		else:
-			stats.append({"label": "Status", "value": "Online"})
-			stats.append({"label": "Role", "value": "Population Relay"})
-	else:
-		stats.append({"label": "Status", "value": "Operational"})
-
-	if provides_power_grid and power_radius > 0.0:
-		stats.append({
-			"label": "Power Lattice",
-			"value": "%dpx Radius" % int(round(power_radius)),
-			"color": Color(0.98, 0.80, 0.14, 1.0),
-		})
-	if tether_emit_radius > 0.0 and tether_max_links > 0:
-		stats.append({
-			"label": "Optical Tether",
-			"value": "x%d Links (+%d%% RoF, %dpx)" % [tether_max_links, int(round(tether_fire_rate_bonus * 100.0)), int(round(tether_emit_radius))],
-			"color": Color(0.851, 0.275, 0.937, 1.0),
-		})
-
-	if requires_power_grid and not is_powered:
-		subtitle = "UNPOWERED STRUCTURE"
-		stats.append({
-			"label": "Lattice",
-			"value": "UNPOWERED — Build Power Spire",
-			"color": Color(1.0, 0.42, 0.36, 1.0),
-		})
-
-	if is_overclocked():
-		stats.append({
-			"label": "Status",
-			"value": "OVERCLOCKED %.1fx — %.1fs" % [overclock_speed_mult, overclock_remaining],
-			"color": Color(1.0, 0.624, 0.110, 1.0),
-		})
-
-	if is_salvaging:
-		var rem_s: float = maxf(0.0, SALVAGE_DURATION - salvage_elapsed)
-		show_primary = true
-		primary_label = "SALVAGING (50%% REFUND) — %.1fs" % rem_s
-		primary_val = salvage_elapsed
-		primary_max = SALVAGE_DURATION
-		primary_col = Color(1.0, 0.72, 0.22, 1.0)
-
-	return {
-		"title": display_name,
-		"subtitle": subtitle,
-		"affiliation": affil,
-		"accent_color": accent,
-		"ring_color": accent,
-		"show_hp_bar": true,
-		"hp_current": current_hp,
-		"hp_max": max_hp,
-		"show_shield_bar": max_shield > 0.0,
-		"shield_current": current_shield,
-		"shield_max": max_shield,
-		"show_primary_bar": show_primary,
-		"primary_bar_label": primary_label,
-		"primary_bar_value": primary_val,
-		"primary_bar_max": primary_max,
-		"primary_bar_color": primary_col,
-		"stats": stats,
-		"is_commandable": has_commands,
-		"readonly_label": "PASSIVE INFRASTRUCTURE" if team == Unit.Team.PLAYER else "READ-ONLY TELEMETRY",
-	}
+	return BUILDING_INSPECTION_BUILDER_SCRIPT.build_inspection_data(self)
 
 
 func _get_rally_summary() -> String:
-	if not has_rally():
-		return "Default (RMB to Set)"
-	if rally_target_unit != null and is_instance_valid(rally_target_unit) and not rally_target_unit.is_dead:
-		var u_name: String = rally_target_unit.data.display_name if rally_target_unit.data != null else "Unit"
-		return "Follow (%s)" % u_name
-	if _rally_target != null and is_instance_valid(_rally_target):
-		if _rally_target is ResourceNode:
-			return "Auto-Gather (%s)" % (_rally_target as ResourceNode).display_name
-		if _rally_target is Building:
-			return "Auto-Staff (%s)" % (_rally_target as Building).display_name
-	return "Ground Point"
+	return BUILDING_INSPECTION_BUILDER_SCRIPT.get_rally_summary(self)
 
 
 func _destroy() -> void:
@@ -1906,12 +1316,17 @@ func _tick_compute_generation(delta: float) -> void:
 		return
 	_compute_tick_timer -= compute_tick_interval
 
+	var surge_active: bool = claimed_vent != null and is_instance_valid(claimed_vent) and claimed_vent.is_surging()
+	var surge_mult: float = claimed_vent.get_compute_surge_multiplier() if surge_active else 1.0
 	var econ: EconomyManager = _get_economy_manager()
 	if econ != null:
 		var yield_mult: float = GameConfig.get_yield_multiplier() if (GameConfig != null and GameConfig.has_method("get_yield_multiplier")) else 1.0
-		var yield_amount: int = maxi(1, int(round(float(assigned_engineers.size() * compute_per_engineer) * yield_mult)))
+		var yield_amount: int = maxi(1, int(round(float(assigned_engineers.size() * compute_per_engineer) * yield_mult * surge_mult)))
 		econ.add_resource(team, EconomyManager.RESOURCE_COMPUTE, yield_amount)
-	pulse_deposit_feedback()
+	if surge_active:
+		pulse_deposit_feedback(Color(0.28, 0.98, 1.0, 1.0))
+	else:
+		pulse_deposit_feedback()
 
 
 func _has_active_builder() -> bool:

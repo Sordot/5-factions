@@ -16,7 +16,7 @@ const BASE_PLATEAU_EXCLUSION_MIN: float = 520.0
 const RESOURCE_PLATEAU_MIN_CLEARANCE: float = 115.0
 const RAMP_APPROACH_CLEAR_DEPTH: float = 135.0
 
-const BIOME_POOL: Array = [&"vat_basin", &"twin_causeway", &"quad_nexus"]
+const BIOME_POOL: Array = [&"vat_basin", &"twin_causeway", &"quad_nexus", &"triad_sanctum"]
 const BIOME_PALETTES: Dictionary = {
 	&"vat_basin": {
 		"floor": Color(0.031, 0.063, 0.094, 1.0),
@@ -33,6 +33,12 @@ const BIOME_PALETTES: Dictionary = {
 		"border": Color(0.32, 0.60, 0.92, 0.80),
 		"plateau_tint": Color(0.115, 0.145, 0.22, 1.0),
 	},
+	&"triad_sanctum": {
+		"floor": Color(0.065, 0.068, 0.095, 1.0),
+		"border": Color(0.98, 0.80, 0.082, 0.72),
+		"plateau_tint": Color(0.16, 0.155, 0.19, 1.0),
+		"rim_highlight": Color(0.95, 0.86, 0.56, 0.88),
+	},
 }
 
 const BASIN_NAMES: Array = ["Alpha Sector", "Omega Sector", "Sigma Sector", "Delta Sector"]
@@ -43,6 +49,7 @@ var generated_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 var _has_generated: bool = false
 
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var _symmetry_count: int = 2 # 2 = 180° 2-way, 3 = 120° 3-way rotational, 4 = 4-way quadrant
 var _is_four_way: bool = false
 var _reserved_circles: Array[Dictionary] = [] # {"pos": Vector2, "r": float}
 var _reserved_corridors: Array[Dictionary] = [] # {"a": Vector2, "b": Vector2, "half_w": float}
@@ -88,11 +95,17 @@ func generate_arena() -> void:
 
 	_rng = RandomNumberGenerator.new()
 	_rng.seed = int(generated_seed)
-	_is_four_way = (p_count >= 3)
-
-	if _is_four_way:
+	if p_count == 3:
+		_symmetry_count = 3
+		_is_four_way = false
+		generated_bounds = Rect2(-1450.0, -1250.0, 2900.0, 2500.0)
+	elif p_count >= 4:
+		_symmetry_count = 4
+		_is_four_way = true
 		generated_bounds = Rect2(-1500.0, -1120.0, 3000.0, 2240.0)
 	else:
+		_symmetry_count = 2
+		_is_four_way = false
 		generated_bounds = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 
 	if biome_pref != &"auto" and BIOME_PALETTES.has(biome_pref):
@@ -212,6 +225,12 @@ func _sync_scene_bounds_and_biome(scene_root: Node) -> void:
 
 
 func _mirror_points(base_pt: Vector2) -> Array[Vector2]:
+	if _symmetry_count == 3:
+		return [
+			base_pt,
+			base_pt.rotated(-TAU / 3.0),
+			base_pt.rotated(TAU / 3.0),
+		]
 	if _is_four_way:
 		return [
 			base_pt,
@@ -227,6 +246,11 @@ func _mirror_points(base_pt: Vector2) -> Array[Vector2]:
 
 func _mirror_polygon(poly: PackedVector2Array, sym_idx: int) -> PackedVector2Array:
 	var out: PackedVector2Array = PackedVector2Array()
+	if _symmetry_count == 3:
+		var ang: float = 0.0 if sym_idx == 0 else (-TAU / 3.0 if sym_idx == 1 else TAU / 3.0)
+		for v: Vector2 in poly:
+			out.append(v.rotated(ang))
+		return out
 	for v: Vector2 in poly:
 		match sym_idx:
 			1:
@@ -264,37 +288,46 @@ func _spawn_hyper_uplink(obj_parent: Node, lm_parent: Node) -> void:
 
 func _spawn_corner_anchors_and_corridors(anchor_parent: Node, lm_parent: Node) -> Vector2:
 	# Corner anchor inset safely from arena borders with slight deterministic seed jitter
-	var base_spawn: Vector2 = Vector2(
-		-_rng.randf_range(1080.0, 1145.0) if _is_four_way else -_rng.randf_range(920.0, 985.0),
-		_rng.randf_range(735.0, 795.0) if _is_four_way else _rng.randf_range(585.0, 650.0)
-	)
-	_spawn_positions = _mirror_points(base_spawn)
-
-	# Natural expansion location: either along X perimeter or Y perimeter (deterministically chosen)
-	var nat_along_x: bool = (_rng.randi() % 2 == 0)
+	var base_spawn: Vector2 = Vector2.ZERO
 	var nat_base: Vector2 = Vector2.ZERO
-	if _is_four_way:
-		if nat_along_x:
-			nat_base = Vector2(-_rng.randf_range(400.0, 490.0), _rng.randf_range(830.0, 910.0))
-		else:
-			nat_base = Vector2(-_rng.randf_range(1130.0, 1215.0), _rng.randf_range(260.0, 350.0))
+	var flank_wp_base: Vector2 = Vector2.ZERO
+
+	if _symmetry_count == 3:
+		# Exact 120° equilateral anchors at radius ~900 px (Team 0 = 150°, Team 1 = 30°, Team 2 = -90°)
+		base_spawn = Vector2.from_angle(deg_to_rad(150.0)) * _rng.randf_range(885.0, 915.0)
+		var nat_ang_offset: float = deg_to_rad(_rng.randf_range(28.0, 34.0))
+		nat_base = Vector2.from_angle(deg_to_rad(150.0) + nat_ang_offset) * _rng.randf_range(740.0, 780.0)
+		flank_wp_base = Vector2.from_angle(deg_to_rad(150.0) + deg_to_rad(60.0)) * _rng.randf_range(920.0, 980.0)
 	else:
-		if nat_along_x:
-			nat_base = Vector2(-_rng.randf_range(240.0, 360.0), _rng.randf_range(700.0, 775.0))
-		else:
-			nat_base = Vector2(-_rng.randf_range(940.0, 1025.0), -_rng.randf_range(60.0, 180.0))
-
-	var nat_positions: Array[Vector2] = _mirror_points(nat_base)
-
-	var flank_wp_base: Vector2 = Vector2(
-		-_rng.randf_range(1230.0, 1300.0) if _is_four_way else -_rng.randf_range(1040.0, 1110.0),
-		0.0
-	)
-	if not nat_along_x:
-		flank_wp_base = Vector2(
-			0.0,
-			_rng.randf_range(880.0, 950.0) if _is_four_way else _rng.randf_range(740.0, 800.0)
+		base_spawn = Vector2(
+			-_rng.randf_range(1080.0, 1145.0) if _is_four_way else -_rng.randf_range(920.0, 985.0),
+			_rng.randf_range(735.0, 795.0) if _is_four_way else _rng.randf_range(585.0, 650.0)
 		)
+		# Natural expansion location: either along X perimeter or Y perimeter (deterministically chosen)
+		var nat_along_x: bool = (_rng.randi() % 2 == 0)
+		if _is_four_way:
+			if nat_along_x:
+				nat_base = Vector2(-_rng.randf_range(400.0, 490.0), _rng.randf_range(830.0, 910.0))
+			else:
+				nat_base = Vector2(-_rng.randf_range(1130.0, 1215.0), _rng.randf_range(260.0, 350.0))
+		else:
+			if nat_along_x:
+				nat_base = Vector2(-_rng.randf_range(240.0, 360.0), _rng.randf_range(700.0, 775.0))
+			else:
+				nat_base = Vector2(-_rng.randf_range(940.0, 1025.0), -_rng.randf_range(60.0, 180.0))
+
+		flank_wp_base = Vector2(
+			-_rng.randf_range(1230.0, 1300.0) if _is_four_way else -_rng.randf_range(1040.0, 1110.0),
+			0.0
+		)
+		if not nat_along_x:
+			flank_wp_base = Vector2(
+				0.0,
+				_rng.randf_range(880.0, 950.0) if _is_four_way else _rng.randf_range(740.0, 800.0)
+			)
+
+	_spawn_positions = _mirror_points(base_spawn)
+	var nat_positions: Array[Vector2] = _mirror_points(nat_base)
 	var flank_wps: Array[Vector2] = _mirror_points(flank_wp_base)
 
 	for i: int in range(_spawn_positions.size()):
@@ -381,43 +414,59 @@ func _spawn_expansions(res_parent: Node, nat_base: Vector2, richness: int, yield
 	var nat_vent: Vector2 = _clamp_inside_arena(nat_base + Vector2(cos(away_ang + 1.35), sin(away_ang + 1.35)) * 150.0, 96.0)
 	_place_mirrored_resource(res_parent, COMPUTE_VENT_SCENE, nat_vent, yield_mult)
 
-	# Contested side-pocket expansion on Rich / Abundant
+	# Contested side-pocket expansion on Rich / Abundant (High-Yield contested flashpoints!)
 	if richness >= 1:
-		var pocket_base: Vector2 = Vector2(-_rng.randf_range(880.0, 975.0), -_rng.randf_range(540.0, 640.0))
-		if _is_four_way:
+		if _symmetry_count == 3:
+			var mid_ang: float = deg_to_rad(210.0) # -150°, rotating to 90° and -30°
+			var mid_base: Vector2 = Vector2.from_angle(mid_ang) * _rng.randf_range(935.0, 985.0)
+			var dir_o: Vector2 = mid_base.normalized()
+			var perp_o: Vector2 = dir_o.orthogonal()
+			_place_mirrored_resource(res_parent, BIOMASS_SCENE, _clamp_inside_arena(mid_base - dir_o * 42.0 + perp_o * 54.0, 82.0), yield_mult, true)
+			_place_mirrored_resource(res_parent, BIOMASS_SCENE, _clamp_inside_arena(mid_base - dir_o * 42.0 - perp_o * 54.0, 82.0), yield_mult, true)
+			_place_mirrored_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(mid_base + perp_o * 112.0, 82.0), yield_mult, true)
+			_place_mirrored_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(mid_base - perp_o * 112.0, 82.0), yield_mult, true)
+			_place_mirrored_resource(res_parent, COMPUTE_VENT_SCENE, _clamp_inside_arena(mid_base + dir_o * 64.0, 92.0), yield_mult, false)
+			for mp3: Vector2 in _mirror_points(mid_base):
+				_reserved_circles.append({"pos": mp3, "r": 180.0})
+		elif _is_four_way:
 			var w_mid: Vector2 = Vector2(generated_bounds.position.x + 175.0, 0.0)
 			var n_mid: Vector2 = Vector2(0.0, generated_bounds.position.y + 165.0)
 			for mid_pt: Vector2 in [w_mid, -w_mid, n_mid, -n_mid]:
 				var dir_out: Vector2 = mid_pt.normalized()
 				var perp: Vector2 = dir_out.orthogonal()
-				_spawn_single_resource(res_parent, BIOMASS_SCENE, _clamp_inside_arena(mid_pt - dir_out * 52.0, 76.0), yield_mult)
-				_spawn_single_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(mid_pt + perp * 88.0, 76.0), yield_mult)
-				_spawn_single_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(mid_pt - perp * 88.0, 76.0), yield_mult)
-				_spawn_single_resource(res_parent, COMPUTE_VENT_SCENE, _clamp_inside_arena(mid_pt + dir_out * 45.0, 86.0), yield_mult)
+				_spawn_single_resource(res_parent, BIOMASS_SCENE, _clamp_inside_arena(mid_pt - dir_out * 52.0, 76.0), yield_mult, true)
+				_spawn_single_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(mid_pt + perp * 88.0, 76.0), yield_mult, true)
+				_spawn_single_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(mid_pt - perp * 88.0, 76.0), yield_mult, true)
+				_spawn_single_resource(res_parent, COMPUTE_VENT_SCENE, _clamp_inside_arena(mid_pt + dir_out * 45.0, 86.0), yield_mult, false)
 				_reserved_circles.append({"pos": mid_pt, "r": 160.0})
 		else:
+			var pocket_base: Vector2 = Vector2(-_rng.randf_range(880.0, 975.0), -_rng.randf_range(540.0, 640.0))
 			var p_ang: float = pocket_base.normalized().angle()
-			_place_mirrored_resource(res_parent, BIOMASS_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang - 0.35), sin(p_ang - 0.35)) * 96.0, 80.0), yield_mult)
-			_place_mirrored_resource(res_parent, BIOMASS_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang + 0.35), sin(p_ang + 0.35)) * 96.0, 80.0), yield_mult)
-			_place_mirrored_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang + 1.25), sin(p_ang + 1.25)) * 112.0, 80.0), yield_mult)
-			_place_mirrored_resource(res_parent, COMPUTE_VENT_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang - 1.25), sin(p_ang - 1.25)) * 124.0, 92.0), yield_mult)
+			_place_mirrored_resource(res_parent, BIOMASS_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang - 0.35), sin(p_ang - 0.35)) * 96.0, 80.0), yield_mult, true)
+			_place_mirrored_resource(res_parent, BIOMASS_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang + 0.35), sin(p_ang + 0.35)) * 96.0, 80.0), yield_mult, true)
+			_place_mirrored_resource(res_parent, SILICA_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang + 1.25), sin(p_ang + 1.25)) * 112.0, 80.0), yield_mult, true)
+			_place_mirrored_resource(res_parent, COMPUTE_VENT_SCENE, _clamp_inside_arena(pocket_base + Vector2(cos(p_ang - 1.25), sin(p_ang - 1.25)) * 124.0, 92.0), yield_mult, false)
 			for mp: Vector2 in _mirror_points(pocket_base):
 				_reserved_circles.append({"pos": mp, "r": 175.0})
 
 
-func _place_mirrored_resource(parent: Node, scene: PackedScene, base_pos: Vector2, yield_mult: float) -> void:
+func _place_mirrored_resource(parent: Node, scene: PackedScene, base_pos: Vector2, yield_mult: float, high_yield: bool = false) -> void:
 	var pts: Array[Vector2] = _mirror_points(base_pos)
 	for pt: Vector2 in pts:
-		_spawn_single_resource(parent, scene, pt, yield_mult)
+		_spawn_single_resource(parent, scene, pt, yield_mult, high_yield)
 
 
-func _spawn_single_resource(parent: Node, scene: PackedScene, pos: Vector2, yield_mult: float) -> void:
+func _spawn_single_resource(parent: Node, scene: PackedScene, pos: Vector2, yield_mult: float, high_yield: bool = false) -> void:
 	var rn: ResourceNode = scene.instantiate() as ResourceNode
 	if rn == null:
 		return
 	rn.position = pos
-	if absf(yield_mult - 1.0) > 0.01 and not rn.is_vent:
-		var scaled: int = maxi(100, int(round(float(rn.max_amount) * yield_mult)))
+	var eff_mult: float = yield_mult
+	if high_yield and not rn.is_vent:
+		rn.is_high_yield = true
+		eff_mult *= 1.25
+	if absf(eff_mult - 1.0) > 0.01 and not rn.is_vent:
+		var scaled: int = maxi(100, int(round(float(rn.max_amount) * eff_mult)))
 		rn.max_amount = scaled
 		rn.remaining_amount = scaled
 	parent.add_child(rn)
@@ -451,7 +500,7 @@ func _spawn_high_ground_plateaus(hg_parent: Node, hg_level: int) -> void:
 	var pal: Dictionary = BIOME_PALETTES.get(generated_biome, BIOME_PALETTES[&"vat_basin"]) as Dictionary
 	var tint: Color = pal["plateau_tint"] as Color
 
-	var target_sets: int = 2 if (hg_level >= 2 and not _is_four_way) else 1
+	var target_sets: int = 2 if (hg_level >= 2 and _symmetry_count == 2) else 1
 
 	for set_i: int in range(target_sets):
 		var base_poly: PackedVector2Array
@@ -460,10 +509,10 @@ func _spawn_high_ground_plateaus(hg_parent: Node, hg_level: int) -> void:
 			# Major Contested Mid-Field Ridge:
 			# - Mid Plateaus: 380x280 px (ramps: 200 px & 192 px)
 			# - High Ground+: 430x305 px (ramps: 212 px & 200 px) in 2P, or 390x280 px (202 px & 194 px) in 4P
-			var maj_w: float = 380.0 if hg_level == 1 else (390.0 if _is_four_way else 430.0)
-			var maj_h: float = 280.0 if hg_level == 1 else (280.0 if _is_four_way else 305.0)
-			var rh_len: float = 200.0 if hg_level == 1 else (202.0 if _is_four_way else 212.0)
-			var rv_len: float = 192.0 if hg_level == 1 else (194.0 if _is_four_way else 200.0)
+			var maj_w: float = 380.0 if hg_level == 1 else (390.0 if _is_four_way else (400.0 if _symmetry_count == 3 else 430.0))
+			var maj_h: float = 280.0 if hg_level == 1 else (280.0 if _is_four_way else (285.0 if _symmetry_count == 3 else 305.0))
+			var rh_len: float = 200.0 if hg_level == 1 else (202.0 if _is_four_way else (204.0 if _symmetry_count == 3 else 212.0))
+			var rv_len: float = 192.0 if hg_level == 1 else (194.0 if _is_four_way else (194.0 if _symmetry_count == 3 else 200.0))
 			base_poly = _build_wide_ramp_octagon(maj_w, maj_h, rh_len, rv_len)
 			# Always 2 wide ramps (one center/flank-facing, one base/natural-facing)
 			ramp_options = [
@@ -498,6 +547,11 @@ func _spawn_high_ground_plateaus(hg_parent: Node, hg_level: int) -> void:
 
 
 func _sample_plateau_candidate(set_i: int) -> Vector2:
+	if _symmetry_count == 3:
+		# Sample mid-field overlook around 84°-104° (guarantees >= 560 px clearance from all 3 hubs while overlooking center & flank)
+		var ang_3: float = deg_to_rad(_rng.randf_range(84.0, 104.0))
+		var rad_3: float = _rng.randf_range(445.0, 535.0)
+		return Vector2.from_angle(ang_3) * rad_3
 	if _is_four_way:
 		return Vector2(
 			-_rng.randf_range(340.0, 620.0),
@@ -555,6 +609,9 @@ func _commit_mirrored_plateau(
 			pl.plateau_polygon = local_poly
 			pl.ramp_edge_indices = ramp_indices
 			pl.biome_tint = tint
+			var pal_r: Dictionary = BIOME_PALETTES.get(generated_biome, {}) as Dictionary
+			if pal_r.has("rim_highlight"):
+				pl.rim_highlight_override = pal_r["rim_highlight"] as Color
 			hg_parent.add_child(pl)
 		_placed_plateaus.append({"pos": pts[sym_i], "poly": world_poly})
 		_placed_solids.append({"pos": pts[sym_i], "r": bound_r + 12.0})
@@ -761,10 +818,16 @@ func _spawn_cover_monoliths(obs_parent: Node, chokes: int) -> void:
 		var foot_r: float = maxf(w, h) * 0.5 + 14.0
 
 		for _attempt: int in range(44):
-			var cand: Vector2 = Vector2(
-				_rng.randf_range(generated_bounds.position.x + 210.0, -140.0),
-				_rng.randf_range(140.0, generated_bounds.end.y - 210.0) if _is_four_way else _rng.randf_range(generated_bounds.position.y + 210.0, generated_bounds.end.y - 210.0)
-			)
+			var cand: Vector2
+			if _symmetry_count == 3:
+				var ang_o: float = deg_to_rad(_rng.randf_range(95.0, 208.0))
+				var rad_o: float = _rng.randf_range(340.0, 1020.0)
+				cand = _clamp_inside_arena(Vector2.from_angle(ang_o) * rad_o, foot_r + 96.0)
+			else:
+				cand = Vector2(
+					_rng.randf_range(generated_bounds.position.x + 210.0, -140.0),
+					_rng.randf_range(140.0, generated_bounds.end.y - 210.0) if _is_four_way else _rng.randf_range(generated_bounds.position.y + 210.0, generated_bounds.end.y - 210.0)
+				)
 			if not _is_mirrored_spot_clear(cand, foot_r, min_clearance):
 				continue
 			var pts: Array[Vector2] = _mirror_points(cand)
@@ -773,6 +836,8 @@ func _spawn_cover_monoliths(obs_parent: Node, chokes: int) -> void:
 				if obs != null:
 					obs.name = "ProcObstacle_%d_%d" % [c_idx, sym_i]
 					obs.position = pts[sym_i]
+					if _symmetry_count == 3:
+						obs.rotation = 0.0 if sym_i == 0 else (-TAU / 3.0 if sym_i == 1 else TAU / 3.0)
 					obs.set("obstacle_size", obs_size)
 					obs_parent.add_child(obs)
 					_placed_solids.append({"pos": pts[sym_i], "r": foot_r})
@@ -780,11 +845,15 @@ func _spawn_cover_monoliths(obs_parent: Node, chokes: int) -> void:
 
 
 func _spawn_flank_barricades(bar_parent: Node) -> void:
-	# Place 2 (2P) or 4 (4P) symmetric destructible barricades on outer flank shortcuts (never main center lane or ramps)
-	var cand_base: Vector2 = Vector2(
-		-_rng.randf_range(120.0, 220.0),
-		_rng.randf_range(800.0, 920.0) if _is_four_way else _rng.randf_range(640.0, 740.0)
-	)
+	# Place 2 (2P), 3 (3P), or 4 (4P) symmetric destructible barricades on outer flank shortcuts (never main center lane or ramps)
+	var cand_base: Vector2
+	if _symmetry_count == 3:
+		cand_base = Vector2.from_angle(deg_to_rad(196.0)) * _rng.randf_range(930.0, 1010.0)
+	else:
+		cand_base = Vector2(
+			-_rng.randf_range(120.0, 220.0),
+			_rng.randf_range(800.0, 920.0) if _is_four_way else _rng.randf_range(640.0, 740.0)
+		)
 	for _attempt: int in range(32):
 		if _is_mirrored_spot_clear(cand_base, 72.0, 96.0, true):
 			var pts: Array[Vector2] = _mirror_points(cand_base)
@@ -793,23 +862,35 @@ func _spawn_flank_barricades(bar_parent: Node) -> void:
 				if bar != null:
 					bar.name = "ProcBarricade_%d" % sym_i
 					bar.position = pts[sym_i]
-					bar.rotation = PI * 0.5
+					if _symmetry_count == 3:
+						var rot_b: float = 0.0 if sym_i == 0 else (-TAU / 3.0 if sym_i == 1 else TAU / 3.0)
+						bar.rotation = cand_base.angle() + rot_b
+					else:
+						bar.rotation = PI * 0.5
 					bar_parent.add_child(bar)
 					_placed_solids.append({"pos": pts[sym_i], "r": 64.0})
 			return
-		cand_base = Vector2(
-			-_rng.randf_range(160.0, 440.0),
-			_rng.randf_range(620.0, generated_bounds.end.y - 160.0)
-		)
+		if _symmetry_count == 3:
+			cand_base = Vector2.from_angle(deg_to_rad(_rng.randf_range(188.0, 206.0))) * _rng.randf_range(880.0, 1050.0)
+		else:
+			cand_base = Vector2(
+				-_rng.randf_range(160.0, 440.0),
+				_rng.randf_range(620.0, generated_bounds.end.y - 160.0)
+			)
 
 
 func _spawn_sensor_relays(obj_parent: Node) -> void:
-	var names: Array = ["West Flank Sensor Relay", "East Flank Sensor Relay", "NW Flank Sensor Relay", "SE Flank Sensor Relay"]
+	var names: Array = ["West Flank Sensor Relay", "East Flank Sensor Relay", "North Flank Sensor Relay", "SE Flank Sensor Relay"]
 	for _attempt: int in range(40):
-		var cand: Vector2 = Vector2(
-			-_rng.randf_range(640.0, 880.0),
-			-_rng.randf_range(120.0, 320.0) if not _is_four_way else _rng.randf_range(180.0, 440.0)
-		)
+		var cand: Vector2
+		if _symmetry_count == 3:
+			var r_ang: float = deg_to_rad(_rng.randf_range(202.0, 218.0))
+			cand = Vector2.from_angle(r_ang) * _rng.randf_range(660.0, 760.0)
+		else:
+			cand = Vector2(
+				-_rng.randf_range(640.0, 880.0),
+				-_rng.randf_range(120.0, 320.0) if not _is_four_way else _rng.randf_range(180.0, 440.0)
+			)
 		if not _is_mirrored_spot_clear(cand, 62.0, 88.0, true):
 			continue
 		var pts: Array[Vector2] = _mirror_points(cand)

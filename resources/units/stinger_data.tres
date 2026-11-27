@@ -6,6 +6,7 @@
 script = ExtResource("1_unit_data")
 unit_type_id = &"stinger"
 display_name = "Stinger"
+short_display_name = "Stinger"
 max_hp = 45.0
 move_speed = 355.0
 acceleration = 2400.0
