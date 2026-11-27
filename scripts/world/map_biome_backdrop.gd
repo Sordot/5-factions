@@ -5,13 +5,37 @@ extends Node2D
 ## Renders distinct, dark, low-contrast tactical floor treatments strictly below
 ## BattleScarsOverlay, landmarks, terrain obstacles, units, and Fog of War.
 
-@export var biome_id: StringName = &"vat_basin"
-@export var arena_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0)
+const VAT_BASIN_DEFAULT_TEXTURE_PATH: String = "res://assets/textures/biomes/vat_basin_ground.png"
+const VAT_BASIN_FLOOR_SHADER: Shader = preload("res://assets/shaders/vat_basin_floor.gdshader")
+
+@export var biome_id: StringName = &"vat_basin":
+	set(value):
+		biome_id = value
+		if is_inside_tree():
+			_sync_textured_floor_layer()
+			queue_redraw()
+@export var arena_bounds: Rect2 = Rect2(-1300.0, -950.0, 2600.0, 1900.0):
+	set(value):
+		arena_bounds = value
+		if is_inside_tree():
+			_sync_textured_floor_layer()
+			queue_redraw()
+@export var vat_basin_texture: Texture2D = null:
+	set(value):
+		vat_basin_texture = value
+		_vat_texture_loaded = true
+		if is_inside_tree():
+			_sync_textured_floor_layer()
+			queue_redraw()
+@export var vat_basin_tile_world_size: float = 512.0
 
 var _spawn_pts: Array[Vector2] = []
 var _uplink_pt: Vector2 = Vector2.ZERO
 var _barricade_pts: Array[Dictionary] = [] # {"pos": Vector2, "rot": float}
 var _anchors_collected: bool = false
+var _vat_texture_loaded: bool = false
+var _textured_floor_rect: ColorRect = null
+var _textured_floor_mat: ShaderMaterial = null
 
 
 func _ready() -> void:
@@ -20,13 +44,61 @@ func _ready() -> void:
 	set_physics_process(false)
 	_sync_bounds_from_nav_region()
 	_collect_dynamic_anchors()
+	_sync_textured_floor_layer()
 	queue_redraw()
 
 
 func refresh_anchors() -> void:
 	_sync_bounds_from_nav_region()
 	_collect_dynamic_anchors()
+	_sync_textured_floor_layer()
 	queue_redraw()
+
+
+func _resolve_vat_basin_texture() -> Texture2D:
+	if vat_basin_texture != null:
+		return vat_basin_texture
+	if _vat_texture_loaded:
+		return null
+	_vat_texture_loaded = true
+	if ResourceLoader.exists(VAT_BASIN_DEFAULT_TEXTURE_PATH):
+		vat_basin_texture = ResourceLoader.load(VAT_BASIN_DEFAULT_TEXTURE_PATH) as Texture2D
+	return vat_basin_texture
+
+
+func _has_active_vat_basin_texture() -> bool:
+	return biome_id == &"vat_basin" and _resolve_vat_basin_texture() != null and VAT_BASIN_FLOOR_SHADER != null
+
+
+func _sync_textured_floor_layer() -> void:
+	var use_tex: bool = _has_active_vat_basin_texture()
+	if not use_tex:
+		if _textured_floor_rect != null and is_instance_valid(_textured_floor_rect):
+			_textured_floor_rect.visible = false
+		return
+
+	if _textured_floor_rect == null or not is_instance_valid(_textured_floor_rect):
+		_textured_floor_rect = ColorRect.new()
+		_textured_floor_rect.name = "VatBasinTexturedFloor"
+		_textured_floor_rect.z_as_relative = true
+		_textured_floor_rect.z_index = -1
+		_textured_floor_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_textured_floor_rect.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		_textured_floor_rect.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
+		_textured_floor_rect.color = Color.WHITE
+		_textured_floor_mat = ShaderMaterial.new()
+		_textured_floor_mat.shader = VAT_BASIN_FLOOR_SHADER
+		_textured_floor_rect.material = _textured_floor_mat
+		add_child(_textured_floor_rect)
+
+	_textured_floor_rect.visible = true
+	_textured_floor_rect.position = arena_bounds.position
+	_textured_floor_rect.size = arena_bounds.size
+	if _textured_floor_mat != null:
+		_textured_floor_mat.set_shader_parameter("floor_tex", _resolve_vat_basin_texture())
+		_textured_floor_mat.set_shader_parameter("arena_origin", arena_bounds.position)
+		_textured_floor_mat.set_shader_parameter("arena_size", arena_bounds.size)
+		_textured_floor_mat.set_shader_parameter("tile_world_size", maxf(128.0, vat_basin_tile_world_size))
 
 
 func _collect_dynamic_anchors() -> void:
@@ -97,19 +169,32 @@ func _draw_vat_basin() -> void:
 	var min_y: float = b.position.y
 	var max_y: float = b.end.y
 
-	# 1. Base bio-basin deck fill
-	draw_rect(b, Color.html("#081018"), true)
+	var has_textured_floor: bool = _has_active_vat_basin_texture()
+
+	# 1. Base bio-basin deck fill (skipped when seamless vat_basin_ground.png shader layer is active)
+	if not has_textured_floor:
+		draw_rect(b, Color.html("#081018"), true)
 
 	var bases: Array[Vector2] = _get_spawn_points_or_fallback([Vector2(-900.0, 560.0), Vector2(900.0, -560.0)])
 	var center_pt: Vector2 = _uplink_pt
 
-	# 2. Soft recessed basin gradient rings (very low alpha so units pop)
-	draw_circle(center_pt, 620.0, Color(0.06, 0.17, 0.22, 0.14))
-	draw_circle(center_pt, 390.0, Color(0.08, 0.24, 0.28, 0.11))
+	# 2. Soft recessed basin gradient washes (gentle atmospheric anchor over textured floor)
+	var wash_scale: float = 0.45 if has_textured_floor else 1.0
+	draw_circle(center_pt, 560.0 if has_textured_floor else 620.0, Color(0.04, 0.14, 0.18, 0.14 * wash_scale))
+	draw_circle(center_pt, 320.0 if has_textured_floor else 390.0, Color(0.06, 0.20, 0.25, 0.11 * wash_scale))
 	for base_pt: Vector2 in bases:
-		draw_circle(base_pt, 340.0, Color(0.06, 0.20, 0.24, 0.12))
+		draw_circle(base_pt, 290.0 if has_textured_floor else 340.0, Color(0.04, 0.16, 0.20, 0.12 * wash_scale))
 
-	# 3. Orthogonal laboratory grid: 64px faint minor / 128px subtle major
+	if has_textured_floor:
+		# Keep textured Vat Basin floor clean: skip clashing vector grid lines & diagonal conduit lines,
+		# retaining only a subtle tactical ring around the central Hyper-Uplink and each spawn pad.
+		var soft_ring: Color = Color(0.26, 0.84, 0.80, 0.095)
+		draw_arc(center_pt, 165.0, 0.0, TAU, 64, soft_ring, 1.3, true)
+		for base_center: Vector2 in bases:
+			draw_arc(base_center, 175.0, 0.0, TAU, 48, soft_ring, 1.3, true)
+		return
+
+	# 3. Procedural Fallback — Orthogonal laboratory grid (64px minor / 128px major)
 	var minor_col: Color = Color(0.20, 0.56, 0.62, 0.055)
 	var major_col: Color = Color(0.24, 0.68, 0.72, 0.095)
 	var x: float = ceilf(min_x / 64.0) * 64.0
@@ -123,7 +208,7 @@ func _draw_vat_basin() -> void:
 		draw_line(Vector2(min_x, y), Vector2(max_x, y), major_col if is_major_y else minor_col, 1.0)
 		y += 64.0
 
-	# 4. Faint diagonal bio-conduit channels connecting each real spawn base -> plaza
+	# 4. Procedural Fallback — Faint diagonal bio-conduit channels connecting each spawn base -> plaza
 	var conduit_outer: Color = Color(0.14, 0.64, 0.60, 0.085)
 	var conduit_core: Color = Color(0.28, 0.88, 0.76, 0.095)
 	for base_pt: Vector2 in bases:
@@ -143,7 +228,7 @@ func _draw_vat_basin() -> void:
 			draw_polyline(packed_f, conduit_outer, 14.0, true)
 			draw_polyline(packed_f, conduit_core, 2.0, true)
 
-	# 5. Concentric topographic basin contour rings around central Hyper-Uplink
+	# 5. Procedural Fallback — Concentric topographic basin contour rings around central Hyper-Uplink
 	var contour_col: Color = Color(0.26, 0.78, 0.76, 0.11)
 	var contour_faint: Color = Color(0.22, 0.68, 0.70, 0.075)
 	for rad: float in [150.0, 250.0, 360.0, 490.0, 640.0]:
@@ -154,7 +239,7 @@ func _draw_vat_basin() -> void:
 			var dir: Vector2 = Vector2.from_angle(ang)
 			draw_line(center_pt + dir * (rad - 6.0), center_pt + dir * (rad + 6.0), col, 1.2)
 
-	# 6. Circular pad contours around each actual spawn base (+ classic NW/SE pads on static fallback)
+	# 6. Procedural Fallback — Circular pad contours around each actual spawn base (+ classic NW/SE pads)
 	for base_center: Vector2 in bases:
 		draw_arc(base_center, 155.0, 0.0, TAU, 48, contour_col, 1.5, true)
 		draw_arc(base_center, 235.0, 0.0, TAU, 56, contour_faint, 1.2, true)

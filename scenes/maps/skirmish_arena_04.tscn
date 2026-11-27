@@ -1,4 +1,4 @@
-[gd_scene load_steps=39 format=3]
+[gd_scene load_steps=40 format=3]
 
 [ext_resource type="Script" path="res://scripts/camera/rts_camera.gd" id="1_rts_camera"]
 [ext_resource type="PackedScene" path="res://scenes/units/clone_trooper.tscn" id="2_clone_trooper"]
@@ -45,7 +45,21 @@ outlines = Array[PackedVector2Array]([PackedVector2Array(-1450, -1250, 1450, -12
 parsed_geometry_type = 1
 agent_radius = 24.0
 
+[sub_resource type="Environment" id="Environment_hdr_bloom"]
+background_mode = 3
+background_canvas_max_layer = 0
+glow_enabled = true
+glow_intensity = 0.32
+glow_strength = 0.88
+glow_bloom = 0.12
+glow_blend_mode = 1
+glow_hdr_threshold = 1.12
+glow_hdr_scale = 1.6
+
 [node name="SkirmishArena04" type="Node2D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_hdr_bloom")
 
 [node name="EconomyManager" type="Node" parent="."]
 script = ExtResource("10_econ_mgr")

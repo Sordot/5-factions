@@ -35,6 +35,8 @@ var _elev_poll_timer: float = 0.0
 var _idle_redraw_acc: float = 0.0
 var _mirror_check_cache: int = -1
 var _last_zoom_halo_state: bool = false
+var _shadow_outer_scratch: PackedVector2Array = PackedVector2Array()
+var _shadow_inner_scratch: PackedVector2Array = PackedVector2Array()
 
 
 static func _ensure_renderers() -> void:
@@ -330,18 +332,47 @@ func _fill_draw_ctx(p: Dictionary) -> Dictionary:
 	return _draw_ctx
 
 
+func _draw_unit_contact_shadow() -> void:
+	if _owner_unit == null or not is_instance_valid(_owner_unit) or _owner_unit.is_dead:
+		return
+	var rad: float = _owner_unit.data.collision_radius if _owner_unit.data != null else 15.0
+	var body_rot: float = _owner_unit.body_visual.rotation if _owner_unit.body_visual != null else 0.0
+	var is_elevated: bool = _unit_elevation > 0
+	var outer_off: Vector2 = (Vector2(3.5, 6.2) if is_elevated else Vector2(2.0, 3.6)).rotated(-body_rot)
+	var inner_off: Vector2 = (Vector2(2.2, 4.2) if is_elevated else Vector2(1.2, 2.2)).rotated(-body_rot)
+	var outer_r: float = rad * (1.12 if is_elevated else 1.04)
+	var inner_r: float = rad * (0.86 if is_elevated else 0.80)
+	draw_circle(outer_off, outer_r, Color(0.015, 0.025, 0.04, 0.26 if is_elevated else 0.24))
+	draw_circle(inner_off, inner_r, Color(0.01, 0.02, 0.035, 0.24 if is_elevated else 0.22))
+
+
+func _draw_building_contact_shadow(hull_poly: PackedVector2Array) -> void:
+	var n: int = hull_poly.size()
+	if n < 3:
+		return
+	if _shadow_outer_scratch.size() != n:
+		_shadow_outer_scratch.resize(n)
+	if _shadow_inner_scratch.size() != n:
+		_shadow_inner_scratch.resize(n)
+	var outer_off: Vector2 = Vector2(4.5, 7.0)
+	var inner_off: Vector2 = Vector2(2.4, 4.0)
+	for i: int in range(n):
+		var v: Vector2 = hull_poly[i]
+		_shadow_outer_scratch[i] = v * 1.06 + outer_off
+		_shadow_inner_scratch[i] = v * 1.01 + inner_off
+	draw_colored_polygon(_shadow_outer_scratch, Color(0.012, 0.022, 0.035, 0.22))
+	draw_colored_polygon(_shadow_inner_scratch, Color(0.01, 0.018, 0.03, 0.26))
+
+
 func _draw() -> void:
 	var p: Dictionary = _get_palette()
 	var ctx: Dictionary = _fill_draw_ctx(p)
 	_refresh_cached_renderer()
+	if mode == Mode.UNIT:
+		_draw_unit_contact_shadow()
 	_draw_hover_ring()
 	_draw_marquee_preview_ring()
 	if mode == Mode.UNIT:
-		if _unit_elevation > 0 and _owner_unit != null and is_instance_valid(_owner_unit) and not _owner_unit.is_dead:
-			if entity_type_id != &"titan_strider" and not String(entity_type_id).contains("strider"):
-				var rad: float = _owner_unit.data.collision_radius if _owner_unit.data != null else 15.0
-				var shadow_off: Vector2 = Vector2(2.0, 5.0).rotated(-_owner_unit.body_visual.rotation) if _owner_unit.body_visual != null else Vector2(2.0, 5.0)
-				draw_circle(shadow_off, rad * 0.92, Color(0.02, 0.03, 0.05, 0.34))
 		if _owner_unit != null and is_instance_valid(_owner_unit) and not _owner_unit.is_dead:
 			var cam_d: Camera2D = get_viewport().get_camera_2d() if is_inside_tree() else null
 			var cam_zoom: float = cam_d.zoom.x if cam_d != null else 1.0
@@ -474,6 +505,8 @@ func _draw_building_silhouette(p: Dictionary, ctx: Dictionary) -> void:
 	if not is_built:
 		_draw_building_blueprint(hull_poly, progress, p)
 		return
+
+	_draw_building_contact_shadow(hull_poly)
 
 	if _cached_renderer != null:
 		_cached_renderer.draw_building(self, entity_type_id, _owner_building, hull_poly, ctx)

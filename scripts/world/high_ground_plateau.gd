@@ -213,7 +213,8 @@ func _draw() -> void:
 		return
 
 	var drop: Vector2 = Vector2(0.0, cliff_drop_height)
-	var shadow_col: Color = Color(0.02, 0.03, 0.05, 0.58)
+	var shadow_col: Color = Color(0.02, 0.03, 0.05, 0.48)
+	var shadow_outer_col: Color = Color(0.015, 0.025, 0.04, 0.26)
 	var wall_dark: Color = biome_tint.darkened(0.56)
 	wall_dark.a = 0.98
 	var wall_stripe: Color = biome_tint.darkened(0.72)
@@ -223,11 +224,15 @@ func _draw() -> void:
 	if rim_highlight_override.a <= 0.01:
 		rim_hi.a = 0.85
 
-	# 1. Soft ground shadow beneath plateau footprint
+	# 1. Soft two-pass grounded shadow beneath plateau footprint
+	var shadow_outer: PackedVector2Array = PackedVector2Array()
 	var shadow_poly: PackedVector2Array = PackedVector2Array()
+	shadow_outer.resize(plateau_polygon.size())
 	shadow_poly.resize(plateau_polygon.size())
 	for i: int in range(plateau_polygon.size()):
+		shadow_outer[i] = plateau_polygon[i] + Vector2(5.5, cliff_drop_height + 9.0)
 		shadow_poly[i] = plateau_polygon[i] + Vector2(3.0, cliff_drop_height + 5.0)
+	draw_colored_polygon(shadow_outer, shadow_outer_col)
 	draw_colored_polygon(shadow_poly, shadow_col)
 
 	# 2. Dropped cliff-wall extrusions on bottom/side-facing non-ramp edges
