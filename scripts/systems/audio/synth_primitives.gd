@@ -4,6 +4,83 @@ extends RefCounted
 const SAMPLE_RATE: int = 22050
 
 
+static func soft_clip(sample: float, drive: float = 1.0) -> float:
+	var d: float = maxf(0.05, drive)
+	return tanh(sample * d) / maxf(0.001, tanh(d))
+
+
+static func remove_dc_offset(samples: PackedFloat32Array) -> void:
+	var n: int = samples.size()
+	if n <= 0:
+		return
+	var sum: float = 0.0
+	for i: int in range(n):
+		sum += samples[i]
+	var mean: float = sum / float(n)
+	if absf(mean) <= 0.00001:
+		return
+	for i: int in range(n):
+		samples[i] -= mean
+
+
+static func apply_biquad_lowpass(samples: PackedFloat32Array, cutoff_hz: float, q: float = 0.707) -> void:
+	var n: int = samples.size()
+	if n <= 0:
+		return
+	var fc: float = clampf(cutoff_hz, 20.0, float(SAMPLE_RATE) * 0.45)
+	var safe_q: float = maxf(0.1, q)
+	var w0: float = TAU * fc / float(SAMPLE_RATE)
+	var cos_w0: float = cos(w0)
+	var alpha: float = sin(w0) / (2.0 * safe_q)
+	var inv_a0: float = 1.0 / (1.0 + alpha)
+	var b0: float = ((1.0 - cos_w0) * 0.5) * inv_a0
+	var b1: float = (1.0 - cos_w0) * inv_a0
+	var b2: float = b0
+	var a1: float = (-2.0 * cos_w0) * inv_a0
+	var a2: float = (1.0 - alpha) * inv_a0
+	var x1: float = 0.0
+	var x2: float = 0.0
+	var y1: float = 0.0
+	var y2: float = 0.0
+	for i: int in range(n):
+		var x0: float = samples[i]
+		var y0: float = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+		x2 = x1
+		x1 = x0
+		y2 = y1
+		y1 = y0
+		samples[i] = y0
+
+
+static func apply_biquad_bandpass(samples: PackedFloat32Array, center_hz: float, q: float = 1.4) -> void:
+	var n: int = samples.size()
+	if n <= 0:
+		return
+	var fc: float = clampf(center_hz, 20.0, float(SAMPLE_RATE) * 0.45)
+	var safe_q: float = maxf(0.1, q)
+	var w0: float = TAU * fc / float(SAMPLE_RATE)
+	var cos_w0: float = cos(w0)
+	var alpha: float = sin(w0) / (2.0 * safe_q)
+	var inv_a0: float = 1.0 / (1.0 + alpha)
+	var b0: float = alpha * inv_a0
+	var b1: float = 0.0
+	var b2: float = -alpha * inv_a0
+	var a1: float = (-2.0 * cos_w0) * inv_a0
+	var a2: float = (1.0 - alpha) * inv_a0
+	var x1: float = 0.0
+	var x2: float = 0.0
+	var y1: float = 0.0
+	var y2: float = 0.0
+	for i: int in range(n):
+		var x0: float = samples[i]
+		var y0: float = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+		x2 = x1
+		x1 = x0
+		y2 = y1
+		y1 = y0
+		samples[i] = y0
+
+
 static func make_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
 	var wav: AudioStreamWAV = AudioStreamWAV.new()
 	wav.format = AudioStreamWAV.FORMAT_16_BITS
@@ -12,8 +89,8 @@ static func make_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
 	var bytes: PackedByteArray = PackedByteArray()
 	bytes.resize(samples.size() * 2)
 	for i: int in range(samples.size()):
-		var clamped: float = clampf(samples[i], -0.95, 0.95)
-		var pcm: int = int(round(clamped * 32767.0))
+		var shaped: float = clampf(soft_clip(samples[i], 1.15) * 0.95, -0.98, 0.98)
+		var pcm: int = int(round(shaped * 32767.0))
 		if pcm < 0:
 			pcm += 65536
 		bytes[i * 2] = pcm & 0xFF
@@ -22,12 +99,87 @@ static func make_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
 	return wav
 
 
-static func make_loop_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
-	var wav: AudioStreamWAV = make_wav(samples)
+static func _crossfade_loop_buffer(samples: PackedFloat32Array, crossfade_sec: float) -> PackedFloat32Array:
+	var buf: PackedFloat32Array = samples.duplicate()
+	remove_dc_offset(buf)
+	var n: int = buf.size()
+	if n < 256:
+		return buf
+	var fade_len: int = clampi(int(round(float(SAMPLE_RATE) * crossfade_sec)), 64, n / 4)
+	var out_len: int = n - fade_len
+	var looped: PackedFloat32Array = PackedFloat32Array()
+	looped.resize(out_len)
+	for i: int in range(fade_len):
+		var u: float = float(i) / float(fade_len)
+		var w_head: float = sin(u * PI * 0.5)
+		var w_tail: float = cos(u * PI * 0.5)
+		looped[i] = buf[i] * w_head + buf[out_len + i] * w_tail
+	for i: int in range(fade_len, out_len):
+		looped[i] = buf[i]
+	return looped
+
+
+static func make_seamless_loop_wav(samples: PackedFloat32Array, crossfade_sec: float = 0.14) -> AudioStreamWAV:
+	var looped: PackedFloat32Array = _crossfade_loop_buffer(samples, crossfade_sec)
+	var wav: AudioStreamWAV = make_wav(looped)
 	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
 	wav.loop_begin = 0
-	wav.loop_end = samples.size()
+	wav.loop_end = looped.size()
 	return wav
+
+
+static func make_stereo_loop_wav(left: PackedFloat32Array, right: PackedFloat32Array, crossfade_sec: float = 0.14) -> AudioStreamWAV:
+	var l_loop: PackedFloat32Array = _crossfade_loop_buffer(left, crossfade_sec)
+	var r_loop: PackedFloat32Array = _crossfade_loop_buffer(right, crossfade_sec)
+	var frame_count: int = mini(l_loop.size(), r_loop.size())
+	var wav: AudioStreamWAV = AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = SAMPLE_RATE
+	wav.stereo = true
+	var bytes: PackedByteArray = PackedByteArray()
+	bytes.resize(frame_count * 4)
+	for i: int in range(frame_count):
+		var sl: float = clampf(soft_clip(l_loop[i], 1.15) * 0.95, -0.98, 0.98)
+		var sr: float = clampf(soft_clip(r_loop[i], 1.15) * 0.95, -0.98, 0.98)
+		var pcm_l: int = int(round(sl * 32767.0))
+		if pcm_l < 0:
+			pcm_l += 65536
+		var pcm_r: int = int(round(sr * 32767.0))
+		if pcm_r < 0:
+			pcm_r += 65536
+		var base: int = i * 4
+		bytes[base] = pcm_l & 0xFF
+		bytes[base + 1] = (pcm_l >> 8) & 0xFF
+		bytes[base + 2] = pcm_r & 0xFF
+		bytes[base + 3] = (pcm_r >> 8) & 0xFF
+	wav.data = bytes
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = frame_count
+	return wav
+
+
+static func make_stereo_widened_loop_wav(mono_samples: PackedFloat32Array, delay_ms: float = 9.0, crossfade_sec: float = 0.14) -> AudioStreamWAV:
+	var n: int = mono_samples.size()
+	if n < 256:
+		return make_seamless_loop_wav(mono_samples, crossfade_sec)
+	var delay_samples: int = clampi(int(round(float(SAMPLE_RATE) * maxf(0.0, delay_ms) * 0.001)), 1, maxi(1, n / 8))
+	var left: PackedFloat32Array = PackedFloat32Array()
+	var right: PackedFloat32Array = PackedFloat32Array()
+	left.resize(n)
+	right.resize(n)
+	var inv_sr: float = 1.0 / float(SAMPLE_RATE)
+	for i: int in range(n):
+		var s0: float = mono_samples[i]
+		var s_del: float = mono_samples[(i - delay_samples + n) % n]
+		var breath: float = 0.055 * sin(TAU * 0.06 * (float(i) * inv_sr))
+		left[i] = s0 * (0.94 + breath) + s_del * 0.08
+		right[i] = s_del * (0.94 - breath) + s0 * 0.08
+	return make_stereo_loop_wav(left, right, crossfade_sec)
+
+
+static func make_loop_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
+	return make_seamless_loop_wav(samples, 0.12)
 
 
 static func synth_glass_click() -> AudioStreamWAV:

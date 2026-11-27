@@ -341,7 +341,7 @@ func _synth_ambience_base_loop() -> AudioStreamWAV:
 		var shimmer: float = sin(TAU * 588.0 * t) * (0.045 * pulse * pulse)
 		lp = lerpf(lp, pad + shimmer, 0.12)
 		out[i] = lp * 0.65
-	return SynthPrimitives.make_loop_wav(out)
+	return SynthPrimitives.make_stereo_widened_loop_wav(out, 11.0, 0.14)
 
 
 func _synth_ambience_combat_loop() -> AudioStreamWAV:
@@ -364,7 +364,7 @@ func _synth_ambience_combat_loop() -> AudioStreamWAV:
 		var arp: float = (sin(TAU * arp_f * t) * 0.7 + sin(TAU * arp_f * 2.0 * t) * 0.3) * arp_env * 0.18
 		lp = lerpf(lp, sub + arp, 0.22)
 		out[i] = lp * 0.72
-	return SynthPrimitives.make_loop_wav(out)
+	return SynthPrimitives.make_stereo_widened_loop_wav(out, 6.0, 0.14)
 
 
 func _synth_ambience_uplink_loop() -> AudioStreamWAV:
@@ -378,4 +378,4 @@ func _synth_ambience_uplink_loop() -> AudioStreamWAV:
 		var swell: float = 0.55 + 0.45 * sin(TAU * 0.5 * t)
 		var s: float = sin(TAU * 441.0 * t) * 0.35 + sin(TAU * 661.5 * t) * 0.30 + sin(TAU * 882.0 * t) * 0.20
 		out[i] = s * swell * 0.26
-	return SynthPrimitives.make_loop_wav(out)
+	return SynthPrimitives.make_stereo_widened_loop_wav(out, 11.0, 0.14)

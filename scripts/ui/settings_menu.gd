@@ -476,7 +476,7 @@ func _push_audio_settings(preview_channel: StringName = &"") -> void:
 		sld_ambience_vol.value / 100.0
 	)
 	_refresh_audio_labels()
-	if preview_channel == &"master" or preview_channel == &"sfx" or preview_channel == &"ui":
+	if preview_channel == &"master" or preview_channel == &"sfx" or preview_channel == &"ui" or preview_channel == &"ambience":
 		var now_ms: int = Time.get_ticks_msec()
 		if now_ms - _last_slider_preview_ms >= SLIDER_PREVIEW_COOLDOWN_MS:
 			_last_slider_preview_ms = now_ms

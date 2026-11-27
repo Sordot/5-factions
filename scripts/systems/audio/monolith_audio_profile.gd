@@ -433,7 +433,7 @@ func _synth_ambience_monolith_base_loop() -> AudioStreamWAV:
 		var clock_tick: float = sin(TAU * 880.0 * t) * exp(-tick_u * 48.0) * 0.06
 		lp = lerpf(lp, turbine * swell + metal_ring + clock_tick, 0.10)
 		out[i] = lp * 0.62
-	return SynthPrimitives.make_loop_wav(out)
+	return SynthPrimitives.make_stereo_widened_loop_wav(out, 11.0, 0.14)
 
 
 func _synth_ambience_monolith_combat_loop() -> AudioStreamWAV:
@@ -454,7 +454,7 @@ func _synth_ambience_monolith_combat_loop() -> AudioStreamWAV:
 		var anvil: float = (sin(TAU * brass_f * t) * 0.55 + sin(TAU * brass_f * 1.5 * t) * 0.28) * anvil_env * 0.22
 		lp = lerpf(lp, piston + anvil, 0.18)
 		out[i] = lp * 0.70
-	return SynthPrimitives.make_loop_wav(out)
+	return SynthPrimitives.make_stereo_widened_loop_wav(out, 6.0, 0.14)
 
 
 func _synth_ambience_monolith_uplink_loop() -> AudioStreamWAV:
@@ -470,4 +470,4 @@ func _synth_ambience_monolith_uplink_loop() -> AudioStreamWAV:
 		var ping_env: float = exp(-ping_u * 9.5)
 		var ping: float = (sin(TAU * 528.0 * t) * 0.30 + sin(TAU * 792.0 * t) * 0.18) * ping_env
 		out[i] = (xform + ping) * 0.26
-	return SynthPrimitives.make_loop_wav(out)
+	return SynthPrimitives.make_stereo_widened_loop_wav(out, 11.0, 0.14)

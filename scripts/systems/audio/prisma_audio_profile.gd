@@ -33,10 +33,8 @@ func register_cooldowns(cooldowns_ms: Dictionary) -> void:
 
 func build_weapon_and_ability_sfx(sfx_bank: Dictionary) -> void:
 	sfx_bank[&"weapon_prism_bolt"] = _synth_prism_bolt()
-	if not sfx_bank.has(&"weapon_prism_beam"):
-		sfx_bank[&"weapon_prism_beam"] = SynthPrimitives.synth_prism_beam()
-	if not sfx_bank.has(&"weapon_prism_refract"):
-		sfx_bank[&"weapon_prism_refract"] = SynthPrimitives.synth_prism_refract()
+	sfx_bank[&"weapon_prism_beam"] = SynthPrimitives.synth_prism_beam()
+	sfx_bank[&"weapon_prism_refract"] = SynthPrimitives.synth_prism_refract()
 	sfx_bank[&"weapon_prisma_lance"] = _synth_prisma_lance()
 	sfx_bank[&"ability_solar_step"] = _synth_solar_step()
 	sfx_bank[&"ability_radiant_mark"] = _synth_radiant_mark()
@@ -332,7 +330,7 @@ func _synth_ambience_prisma_base_loop() -> AudioStreamWAV:
 		var shimmer: float = (sin(TAU * 880.0 * t) * 0.06 + sin(TAU * 1174.66 * t) * 0.04) * sin(PI * shimmer_u)
 		lp = lerpf(lp, pad * swell + shimmer, 0.12)
 		out[i] = lp * 0.44
-	return SynthPrimitives.make_loop_wav(out)
+	return SynthPrimitives.make_stereo_widened_loop_wav(out, 11.0, 0.14)
 
 
 func _synth_ambience_prisma_combat_loop() -> AudioStreamWAV:
@@ -354,7 +352,7 @@ func _synth_ambience_prisma_combat_loop() -> AudioStreamWAV:
 		var bass: float = sin(TAU * 110.0 * t) * exp(-pulse_u * 4.5) * 0.24
 		lp = lerpf(lp, arp + bass, 0.22)
 		out[i] = lp * 0.56
-	return SynthPrimitives.make_loop_wav(out)
+	return SynthPrimitives.make_stereo_widened_loop_wav(out, 6.0, 0.14)
 
 
 func _synth_ambience_prisma_uplink_loop() -> AudioStreamWAV:
@@ -371,4 +369,4 @@ func _synth_ambience_prisma_uplink_loop() -> AudioStreamWAV:
 		var chime_env: float = exp(-chime_u * 7.5)
 		var chime: float = (sin(TAU * 880.0 * t) * 0.24 + sin(TAU * 1318.51 * t) * 0.14) * chime_env
 		out[i] = (choir + chime) * 0.26
-	return SynthPrimitives.make_loop_wav(out)
+	return SynthPrimitives.make_stereo_widened_loop_wav(out, 11.0, 0.14)
