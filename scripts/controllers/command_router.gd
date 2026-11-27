@@ -9,6 +9,16 @@ const VENT_SNAP_RADIUS: float = 64.0
 
 @export var buildable_bounds: Rect2 = Rect2(-640.0, -360.0, 1280.0, 720.0)
 
+static var _next_move_group_id: int = 1
+
+
+static func allocate_move_group_id() -> int:
+	var gid: int = _next_move_group_id
+	_next_move_group_id += 1
+	if _next_move_group_id <= 0:
+		_next_move_group_id = 1
+	return gid
+
 
 func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspected_entity: Node, shift_queued: bool = false, selected_buildings: Array[Building] = []) -> void:
 	if TeamManager != null and TeamManager.is_spectator_mode():
@@ -108,8 +118,9 @@ func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspect
 					worker.command_return_cargo(clicked_building, shift_queued)
 				if not other_units.is_empty():
 					var approach_targets: Array[Vector2] = _assign_building_perimeter_destinations(other_units, clicked_building)
+					var other_gid: int = allocate_move_group_id() if other_units.size() > 1 else 0
 					for i: int in range(other_units.size()):
-						other_units[i].command_move(approach_targets[i], shift_queued)
+						other_units[i].command_move(approach_targets[i], shift_queued, other_gid)
 				spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.INTERACT)
 				return
 
@@ -119,8 +130,9 @@ func handle_right_click(world_pos: Vector2, selected_units: Array[Unit], inspect
 
 		# Multi-building worker/unit waypoint stop: move cleanly to the building's perimeter so queues advance smoothly.
 		var perimeter_targets: Array[Vector2] = _assign_building_perimeter_destinations(selected_units, clicked_building)
+		var perim_gid: int = allocate_move_group_id() if selected_units.size() > 1 else 0
 		for i: int in range(selected_units.size()):
-			selected_units[i].command_move(perimeter_targets[i], shift_queued)
+			selected_units[i].command_move(perimeter_targets[i], shift_queued, perim_gid)
 		spawn_move_marker(clicked_building.global_position, MoveMarker.MarkerStyle.INTERACT)
 		return
 
@@ -132,8 +144,9 @@ func issue_move_order(selected_units: Array[Unit], world_pos: Vector2, shift_que
 	if selected_units.is_empty():
 		return
 	var targets: Array[Vector2] = assign_group_destinations(selected_units, world_pos)
+	var gid: int = allocate_move_group_id() if selected_units.size() > 1 else 0
 	for i: int in range(selected_units.size()):
-		selected_units[i].command_move(targets[i], shift_queued)
+		selected_units[i].command_move(targets[i], shift_queued, gid)
 	if AudioManager != null:
 		AudioManager.play_order_audio(selected_units, &"order_move")
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.MOVE)
@@ -189,8 +202,9 @@ func issue_gather_order(selected_units: Array[Unit], resource_node: ResourceNode
 
 	if not non_gatherers.is_empty():
 		var escort_targets: Array[Vector2] = assign_group_destinations(non_gatherers, resource_node.global_position)
+		var escort_gid: int = allocate_move_group_id() if non_gatherers.size() > 1 else 0
 		for i: int in range(non_gatherers.size()):
-			non_gatherers[i].command_move(escort_targets[i], shift_queued)
+			non_gatherers[i].command_move(escort_targets[i], shift_queued, escort_gid)
 	if AudioManager != null:
 		AudioManager.play_order_audio(gatherers if not gatherers.is_empty() else selected_units, &"order_gather")
 	spawn_move_marker(resource_node.global_position, MoveMarker.MarkerStyle.GATHER)
@@ -246,8 +260,9 @@ func issue_salvage_order(selected_units: Array[Unit], salvage_core: Node2D, shif
 		ext_u.command_salvage(salvage_core, shift_queued)
 	if not escorts.is_empty():
 		var escort_pts: Array[Vector2] = assign_group_destinations(escorts, salvage_core.global_position)
+		var salv_gid: int = allocate_move_group_id() if escorts.size() > 1 else 0
 		for i: int in range(escorts.size()):
-			escorts[i].command_move(escort_pts[i], shift_queued)
+			escorts[i].command_move(escort_pts[i], shift_queued, salv_gid)
 	if AudioManager != null:
 		AudioManager.play_order_audio(extractors, &"order_gather")
 	spawn_move_marker(salvage_core.global_position, MoveMarker.MarkerStyle.INTERACT)
@@ -270,8 +285,9 @@ func issue_staff_order(selected_units: Array[Unit], building: Building, shift_qu
 		eng.command_staff_building(building, shift_queued)
 	if not others.is_empty():
 		var move_targets: Array[Vector2] = _assign_building_perimeter_destinations(others, building) if fallback_pos == Vector2.ZERO else assign_group_destinations(others, fallback_pos)
+		var staff_gid: int = allocate_move_group_id() if others.size() > 1 else 0
 		for i: int in range(others.size()):
-			others[i].command_move(move_targets[i], shift_queued)
+			others[i].command_move(move_targets[i], shift_queued, staff_gid)
 	if AudioManager != null:
 		AudioManager.play_order_audio(engineers, &"order_gather")
 	spawn_move_marker(building.global_position, MoveMarker.MarkerStyle.INTERACT)
@@ -424,8 +440,9 @@ func issue_attack_move_order(selected_units: Array[Unit], world_pos: Vector2, sh
 		return
 
 	var targets: Array[Vector2] = assign_group_destinations(selected_units, world_pos)
+	var atk_gid: int = allocate_move_group_id() if selected_units.size() > 1 else 0
 	for i: int in range(selected_units.size()):
-		selected_units[i].command_attack_move(targets[i], shift_queued)
+		selected_units[i].command_attack_move(targets[i], shift_queued, atk_gid)
 	if AudioManager != null:
 		AudioManager.play_order_audio(selected_units, &"order_attack")
 	spawn_move_marker(world_pos, MoveMarker.MarkerStyle.ATTACK)

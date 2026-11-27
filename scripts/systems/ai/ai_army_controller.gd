@@ -385,8 +385,9 @@ func tick_breaching_state(core: Building) -> void:
 		wave_launch_strength = compute_units_strength(wave_units)
 		current_attack_target = intercept_pos as Vector2
 		army_state = SkirmishAICommander.ArmyState.ATTACKING
+		var intercept_gid: int = CommandRouter.allocate_move_group_id() if wave_units.size() > 1 else 0
 		for u: Unit in wave_units:
-			u.command_attack_move(current_attack_target, false)
+			u.command_attack_move(current_attack_target, false, intercept_gid)
 		return
 
 	# Keep breaching squad explicitly focus-firing the DestructibleBarricade (backline supports trail ~100 px behind)
@@ -414,8 +415,9 @@ func tick_attacking_state(core: Building) -> void:
 		army_state = SkirmishAICommander.ArmyState.RETREATING
 		regroup_timer = RETREAT_REGROUP_DURATION
 		wave_cooldown_timer = 16.0 if ai.is_relaxed_difficulty() else 8.0
+		var retreat_gid: int = CommandRouter.allocate_move_group_id() if wave_units.size() > 1 else 0
 		for u: Unit in wave_units:
-			u.command_move(staging_point, false)
+			u.command_move(staging_point, false, retreat_gid)
 		return
 
 	# Keep non-wave newly spawned reinforcements calmly staged at staging_point
@@ -462,11 +464,12 @@ func tick_attacking_state(core: Building) -> void:
 		current_attack_target = select_wave_target(wave_number, core)
 		var router: CommandRouter = ai.get_command_router()
 		var slots: Array[Vector2] = router.assign_group_destinations(idle_wave, current_attack_target) if router != null else []
+		var repush_gid: int = CommandRouter.allocate_move_group_id() if idle_wave.size() > 1 else 0
 		for i: int in range(idle_wave.size()):
 			var dest: Vector2 = slots[i] if i < slots.size() else current_attack_target
 			if is_backline_support_unit(idle_wave[i]):
 				dest = compute_support_trailing_pos(dest, back_anchor, 100.0)
-			idle_wave[i].command_attack_move(dest, false)
+			idle_wave[i].command_attack_move(dest, false, repush_gid)
 
 
 func tick_staging_state(core: Building) -> void:
@@ -540,6 +543,8 @@ func launch_wave_from_units(squad: Array[Unit], core: Building, allow_flank: boo
 		flank_slots = router.assign_group_destinations(wave_units, flank_wp)
 
 	var rear_ref: Vector2 = staging_point if staging_point_valid else core.global_position
+	var flank_gid: int = CommandRouter.allocate_move_group_id() if (use_flank and wave_units.size() > 1) else 0
+	var dest_gid: int = CommandRouter.allocate_move_group_id() if wave_units.size() > 1 else 0
 	for i: int in range(wave_units.size()):
 		var trooper: Unit = wave_units[i]
 		var dest: Vector2 = destinations[i] if i < destinations.size() else current_attack_target
@@ -552,16 +557,16 @@ func launch_wave_from_units(squad: Array[Unit], core: Building, allow_flank: boo
 			if is_sup:
 				leg1 = compute_support_trailing_pos(leg1, rear_ref, 100.0)
 			if is_pure_sup:
-				trooper.command_move(leg1, false)
-				trooper.command_move(dest, true)
+				trooper.command_move(leg1, false, flank_gid)
+				trooper.command_move(dest, true, dest_gid)
 			else:
-				trooper.command_attack_move(leg1, false)
-				trooper.command_attack_move(dest, true)
+				trooper.command_attack_move(leg1, false, flank_gid)
+				trooper.command_attack_move(dest, true, dest_gid)
 		else:
 			if is_pure_sup:
-				trooper.command_move(dest, false)
+				trooper.command_move(dest, false, dest_gid)
 			else:
-				trooper.command_attack_move(dest, false)
+				trooper.command_attack_move(dest, false, dest_gid)
 
 
 func collect_staging_combat_units() -> Array[Unit]:
@@ -590,11 +595,12 @@ func rally_idle_combat_to_staging(exclude_active_wave: bool = false) -> void:
 	var back_pos: Vector2 = core_ref.global_position if core_ref != null else Vector2.ZERO
 	var router: CommandRouter = ai.get_command_router()
 	var slots: Array[Vector2] = router.assign_group_destinations(strays, staging_point) if router != null else []
+	var rally_gid: int = CommandRouter.allocate_move_group_id() if strays.size() > 1 else 0
 	for i: int in range(strays.size()):
 		var dest: Vector2 = slots[i] if i < slots.size() else staging_point
 		if is_backline_support_unit(strays[i]):
 			dest = compute_support_trailing_pos(dest, back_pos, 100.0)
-		strays[i].command_move(dest, false)
+		strays[i].command_move(dest, false, rally_gid)
 
 
 func get_target_wave_size() -> int:

@@ -647,6 +647,18 @@ func extract(amount: int) -> int:
 	amount_changed.emit(self, remaining_amount, max_amount)
 	status_changed.emit(self)
 	if remaining_amount <= 0:
+		if is_in_group("nav_bake_obstacles"):
+			remove_from_group("nav_bake_obstacles")
+		if SpatialGrid != null:
+			SpatialGrid.unregister_resource(self)
+		collision_layer = 0
+		for child: Node in get_children():
+			if child is CollisionShape2D:
+				(child as CollisionShape2D).set_deferred("disabled", true)
+		if is_inside_tree():
+			var nav_reg: Node = get_tree().get_first_node_in_group("arena_nav_region")
+			if nav_reg != null and nav_reg.has_method("request_rebake"):
+				nav_reg.call("request_rebake")
 		depleted.emit(self)
 		queue_free()
 	return extracted

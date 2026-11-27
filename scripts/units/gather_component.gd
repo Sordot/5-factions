@@ -188,7 +188,7 @@ func _tick_moving_to_node(owner_unit: Unit) -> void:
 	var slot_dist: float = owner_unit.global_position.distance_to(_claimed_slot_pos)
 	var node_dist: float = owner_unit.global_position.distance_to(target_node.global_position)
 	var reach: float = _get_gather_reach(owner_unit, target_node)
-	if slot_dist <= 12.0 or (node_dist <= reach and slot_dist <= 20.0):
+	if slot_dist <= 16.0 or (node_dist <= reach and slot_dist <= 26.0):
 		owner_unit.stop_component_navigation()
 		gather_timer = 0.0
 		_set_state(GatherState.GATHERING)
@@ -400,7 +400,7 @@ func _ensure_valid_target_node(owner_unit: Unit, exclude_node: ResourceNode = nu
 func _get_gather_reach(owner_unit: Unit, node: ResourceNode) -> float:
 	var unit_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 13.0
 	var configured: float = owner_unit.data.gather_range if owner_unit.data != null else 54.0
-	var min_physical: float = maxf(54.0, node.collision_radius + unit_r + 22.0)
+	var min_physical: float = maxf(60.0, node.collision_radius + unit_r + 28.0)
 	return maxf(configured, min_physical)
 
 

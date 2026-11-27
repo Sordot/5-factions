@@ -104,14 +104,15 @@ func unregister_salvage(salvage_node: Node2D) -> void:
 	_unregister_static(_salvage_buckets, _salvage_cells, salvage_node)
 
 
-func query_units_in_radius(center: Vector2, radius: float, filter_team: int = -99) -> Array[Unit]:
-	var results: Array[Unit] = []
+func query_units_into(center: Vector2, radius: float, out_results: Array, filter_team: int = -99) -> void:
+	out_results.clear()
 	var safe_r: float = maxf(0.0, radius)
-	var min_c: Vector2i = world_to_cell(center - Vector2(safe_r, safe_r))
-	var max_c: Vector2i = world_to_cell(center + Vector2(safe_r, safe_r))
-	# Add generous unit-radius slack so edge-to-edge queries don't miss large units (Goliath / Arc-Lancer).
+	# Expand both cell bounds AND distance check by max unit radius slack so edge-to-edge
+	# queries across 128px cell borders never miss large units (Goliath / Arc-Lancer).
 	var pad_r: float = safe_r + 36.0
 	var pad_r_sq: float = pad_r * pad_r
+	var min_c: Vector2i = world_to_cell(center - Vector2(pad_r, pad_r))
+	var max_c: Vector2i = world_to_cell(center + Vector2(pad_r, pad_r))
 
 	for cy: int in range(min_c.y, max_c.y + 1):
 		for cx: int in range(min_c.x, max_c.x + 1):
@@ -123,10 +124,13 @@ func query_units_in_radius(center: Vector2, radius: float, filter_team: int = -9
 			while i >= 0:
 				var item: Variant = bucket[i]
 				if not is_instance_valid(item) or not (item is Unit):
-					bucket.remove_at(i)
+					var last: int = bucket.size() - 1
+					if i != last:
+						bucket[i] = bucket[last]
+					bucket.pop_back()
 					i -= 1
 					continue
-				var u: Unit = item
+				var u: Unit = item as Unit
 				if u.is_dead or u.is_staffed or u.is_queued_for_deletion():
 					i -= 1
 					continue
@@ -134,10 +138,15 @@ func query_units_in_radius(center: Vector2, radius: float, filter_team: int = -9
 					i -= 1
 					continue
 				if u.global_position.distance_squared_to(center) <= pad_r_sq:
-					results.append(u)
+					out_results.append(u)
 				i -= 1
 			if bucket.is_empty():
 				_unit_buckets.erase(key)
+
+
+func query_units_in_radius(center: Vector2, radius: float, filter_team: int = -99) -> Array[Unit]:
+	var results: Array[Unit] = []
+	query_units_into(center, radius, results, filter_team)
 	return results
 
 
@@ -159,10 +168,13 @@ func query_buildings_in_radius(center: Vector2, radius: float, filter_team: int 
 			while i >= 0:
 				var item: Variant = bucket[i]
 				if not is_instance_valid(item) or not (item is Building):
-					bucket.remove_at(i)
+					var last: int = bucket.size() - 1
+					if i != last:
+						bucket[i] = bucket[last]
+					bucket.pop_back()
 					i -= 1
 					continue
-				var b: Building = item
+				var b: Building = item as Building
 				if b.is_destroyed or b.is_queued_for_deletion():
 					i -= 1
 					continue
@@ -175,6 +187,82 @@ func query_buildings_in_radius(center: Vector2, radius: float, filter_team: int 
 				i -= 1
 			if bucket.is_empty():
 				_building_buckets.erase(key)
+	return results
+
+
+func query_resources_in_radius(center: Vector2, radius: float, include_vents: bool = false) -> Array[ResourceNode]:
+	var results: Array[ResourceNode] = []
+	var safe_r: float = maxf(0.0, radius)
+	var search_r: float = safe_r + 48.0
+	var min_c: Vector2i = world_to_cell(center - Vector2(search_r, search_r))
+	var max_c: Vector2i = world_to_cell(center + Vector2(search_r, search_r))
+
+	for cy: int in range(min_c.y, max_c.y + 1):
+		for cx: int in range(min_c.x, max_c.x + 1):
+			var key: Vector2i = Vector2i(cx, cy)
+			if not _resource_buckets.has(key):
+				continue
+			var bucket: Array = _resource_buckets[key]
+			var i: int = bucket.size() - 1
+			while i >= 0:
+				var item: Variant = bucket[i]
+				if not is_instance_valid(item) or not (item is ResourceNode):
+					var last: int = bucket.size() - 1
+					if i != last:
+						bucket[i] = bucket[last]
+					bucket.pop_back()
+					i -= 1
+					continue
+				var rn: ResourceNode = item as ResourceNode
+				if rn.is_depleted() or rn.is_queued_for_deletion():
+					i -= 1
+					continue
+				if not include_vents and rn.is_vent:
+					i -= 1
+					continue
+				var eff_r: float = safe_r + rn.collision_radius + 8.0
+				if rn.global_position.distance_squared_to(center) <= eff_r * eff_r:
+					results.append(rn)
+				i -= 1
+			if bucket.is_empty():
+				_resource_buckets.erase(key)
+	return results
+
+
+func query_barricades_in_radius(center: Vector2, radius: float) -> Array[Node2D]:
+	var results: Array[Node2D] = []
+	var safe_r: float = maxf(0.0, radius)
+	var search_r: float = safe_r + 84.0
+	var min_c: Vector2i = world_to_cell(center - Vector2(search_r, search_r))
+	var max_c: Vector2i = world_to_cell(center + Vector2(search_r, search_r))
+
+	for cy: int in range(min_c.y, max_c.y + 1):
+		for cx: int in range(min_c.x, max_c.x + 1):
+			var key: Vector2i = Vector2i(cx, cy)
+			if not _barricade_buckets.has(key):
+				continue
+			var bucket: Array = _barricade_buckets[key]
+			var i: int = bucket.size() - 1
+			while i >= 0:
+				var item: Variant = bucket[i]
+				if not is_instance_valid(item) or not (item is Node2D):
+					var last: int = bucket.size() - 1
+					if i != last:
+						bucket[i] = bucket[last]
+					bucket.pop_back()
+					i -= 1
+					continue
+				var bar: Node2D = item as Node2D
+				if bool(bar.get("is_destroyed")) or bar.is_queued_for_deletion():
+					i -= 1
+					continue
+				var fp_r: float = float(bar.call("get_footprint_radius")) if bar.has_method("get_footprint_radius") else 56.0
+				var eff_r: float = safe_r + fp_r + 12.0
+				if bar.global_position.distance_squared_to(center) <= eff_r * eff_r:
+					results.append(bar)
+				i -= 1
+			if bucket.is_empty():
+				_barricade_buckets.erase(key)
 	return results
 
 
@@ -191,33 +279,8 @@ func query_entities_in_radius(
 		for b: Building in query_buildings_in_radius(center, radius):
 			results.append(b)
 	if include_barricades:
-		var search_r: float = maxf(0.0, radius) + 84.0
-		var min_c: Vector2i = world_to_cell(center - Vector2(search_r, search_r))
-		var max_c: Vector2i = world_to_cell(center + Vector2(search_r, search_r))
-		for cy: int in range(min_c.y, max_c.y + 1):
-			for cx: int in range(min_c.x, max_c.x + 1):
-				var key: Vector2i = Vector2i(cx, cy)
-				if not _barricade_buckets.has(key):
-					continue
-				var bucket: Array = _barricade_buckets[key]
-				var i: int = bucket.size() - 1
-				while i >= 0:
-					var item: Variant = bucket[i]
-					if not is_instance_valid(item) or not (item is Node2D):
-						bucket.remove_at(i)
-						i -= 1
-						continue
-					var bar: Node2D = item as Node2D
-					if bool(bar.get("is_destroyed")) or bar.is_queued_for_deletion():
-						i -= 1
-						continue
-					var fp_r: float = float(bar.call("get_footprint_radius")) if bar.has_method("get_footprint_radius") else 56.0
-					var eff_r: float = maxf(0.0, radius) + fp_r + 12.0
-					if bar.global_position.distance_squared_to(center) <= eff_r * eff_r:
-						results.append(bar)
-					i -= 1
-				if bucket.is_empty():
-					_barricade_buckets.erase(key)
+		for bar: Node2D in query_barricades_in_radius(center, radius):
+			results.append(bar)
 	return results
 
 
@@ -238,7 +301,10 @@ func query_salvage_in_radius(center: Vector2, radius: float) -> Array[Node2D]:
 			while i >= 0:
 				var item: Variant = bucket[i]
 				if not is_instance_valid(item) or not (item is Node2D):
-					bucket.remove_at(i)
+					var last: int = bucket.size() - 1
+					if i != last:
+						bucket[i] = bucket[last]
+					bucket.pop_back()
 					i -= 1
 					continue
 				var sc: Node2D = item as Node2D
@@ -291,6 +357,11 @@ func _remove_from_bucket(buckets: Dictionary, cell: Vector2i, entity: Node2D) ->
 	if not buckets.has(cell):
 		return
 	var arr: Array = buckets[cell]
-	arr.erase(entity)
+	var idx: int = arr.find(entity)
+	if idx != -1:
+		var last: int = arr.size() - 1
+		if idx != last:
+			arr[idx] = arr[last]
+		arr.pop_back()
 	if arr.is_empty():
 		buckets.erase(cell)

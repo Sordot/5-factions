@@ -73,6 +73,7 @@ static func advance(unit: Unit) -> bool:
 		if result == CMD_EXEC_IMMEDIATE_DONE:
 			continue
 	unit.command_state = Unit.CommandState.HOLD_POSITION if unit.stance == Unit.Stance.HOLD_POSITION else Unit.CommandState.IDLE
+	unit.move_group_id = 0
 	unit.velocity = Vector2.ZERO
 	unit.command_queue_changed.emit(unit)
 	unit.status_changed.emit(unit)
@@ -84,9 +85,9 @@ static func execute_command(unit: Unit, cmd: Dictionary) -> int:
 	var result: int = CMD_EXEC_FAILED
 	match cmd_type:
 		&"move":
-			result = CMD_EXEC_ACTIVE if unit._start_move(cmd.get("pos", unit.global_position) as Vector2) else CMD_EXEC_FAILED
+			result = CMD_EXEC_ACTIVE if unit._start_move(cmd.get("pos", unit.global_position) as Vector2, int(cmd.get("group_id", 0))) else CMD_EXEC_FAILED
 		&"attack_move":
-			result = CMD_EXEC_ACTIVE if unit._start_attack_move(cmd.get("pos", unit.global_position) as Vector2) else CMD_EXEC_FAILED
+			result = CMD_EXEC_ACTIVE if unit._start_attack_move(cmd.get("pos", unit.global_position) as Vector2, int(cmd.get("group_id", 0))) else CMD_EXEC_FAILED
 		&"attack_target":
 			var atk_t: Variant = cmd.get("target", null)
 			if atk_t != null and is_instance_valid(atk_t) and atk_t is Node2D and not (atk_t as Node).is_queued_for_deletion():

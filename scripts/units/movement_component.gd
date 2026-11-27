@@ -1,11 +1,18 @@
 class_name MovementComponent
 extends Node
 
-const SETTLE_PROXIMITY_RADIUS: float = 160.0
-const SETTLE_NO_PROGRESS_TIME: float = 0.45
-const SOFT_SETTLE_SAMPLE_WINDOW: float = 0.25
-const SOFT_SETTLE_MAX_DISP_PX: float = 8.0
-const SOFT_SETTLE_CONFIRM_TIME: float = 0.30
+enum PushTier {
+	YIELDING_IDLE = 1,
+	ACTIVE_TRANSIT = 2,
+	ENGAGED_COMBAT = 3,
+	IMMOVABLE_ANCHOR = 4,
+}
+
+const SETTLE_PROXIMITY_RADIUS: float = 110.0
+const SETTLE_NO_PROGRESS_TIME: float = 0.85
+const SOFT_SETTLE_SAMPLE_WINDOW: float = 0.20
+const SOFT_SETTLE_MAX_DISP_PX: float = 7.0
+const SOFT_SETTLE_CONFIRM_TIME: float = 0.22
 
 var last_nav_target: Vector2 = Vector2.INF
 var wants_nav_movement: bool = false
@@ -27,6 +34,21 @@ var _stuck_consecutive_nudges: int = 0
 var _cached_approach_point: Vector2 = Vector2.INF
 var _cached_approach_target_pos: Vector2 = Vector2.INF
 var _cached_approach_target_id: int = 0
+
+var _yield_impulse: Vector2 = Vector2.ZERO
+var _yield_timer: float = 0.0
+var _wall_slide_dir: Vector2 = Vector2.ZERO
+var _wall_slide_timer: float = 0.0
+
+var _cached_arena_bounds: Rect2 = Rect2()
+var _has_cached_arena_bounds: bool = false
+
+# Zero-allocation scratch buffers reused every physics tick.
+var _scratch_sep_units: Array = []
+var _scratch_yield_units: Array = []
+var _scratch_static_units: Array = []
+var _scratch_settle_units: Array = []
+var _scratch_hostile_normals: Array[Vector2] = []
 
 
 func initialize_for_unit(owner_unit: Unit) -> void:
@@ -98,6 +120,69 @@ func reset_progress_tracker(owner_unit: Unit) -> void:
 	_stuck_accum_time = 0.0
 	_stuck_nudge_timer = 0.0
 	_stuck_consecutive_nudges = 0
+	_wall_slide_timer = 0.0
+	_wall_slide_dir = Vector2.ZERO
+
+
+func get_push_priority(u: Unit) -> int:
+	if u == null or u.is_dead or u.is_staffed:
+		return PushTier.YIELDING_IDLE
+	if u.is_movement_locked_by_deploy() or not u.can_unit_move():
+		return PushTier.IMMOVABLE_ANCHOR
+	if u.command_state == Unit.CommandState.HOLD_POSITION:
+		return PushTier.IMMOVABLE_ANCHOR
+	if u.command_state == Unit.CommandState.GATHERING and u.gather_component != null and u.gather_component.is_harvesting_in_place():
+		return PushTier.IMMOVABLE_ANCHOR
+	if u.command_state == Unit.CommandState.REPAIRING and u.repair_component != null and bool(u.repair_component.get("is_repairing_in_place")):
+		return PushTier.IMMOVABLE_ANCHOR
+	if u.command_state == Unit.CommandState.SALVAGING and u.is_salvaging_in_place():
+		return PushTier.IMMOVABLE_ANCHOR
+	if u.command_state == Unit.CommandState.CONSTRUCTING and not u.is_nav_movement_active():
+		return PushTier.IMMOVABLE_ANCHOR
+	if u.command_state == Unit.CommandState.CASTING_ABILITY:
+		return PushTier.ENGAGED_COMBAT
+	if u.current_target != null and is_instance_valid(u.current_target) and u.combat_component != null and u.combat_component.is_within_attack_envelope(u, u.current_target):
+		return PushTier.ENGAGED_COMBAT
+	if u.is_nav_movement_active():
+		return PushTier.ACTIVE_TRANSIT
+	if (
+		u.command_state == Unit.CommandState.MOVING
+		or u.command_state == Unit.CommandState.ATTACK_MOVING
+		or u.command_state == Unit.CommandState.PATROLLING
+		or u.command_state == Unit.CommandState.ATTACKING_TARGET
+		or u.command_state == Unit.CommandState.GATHERING
+		or u.command_state == Unit.CommandState.CONSTRUCTING
+		or u.command_state == Unit.CommandState.STAFFING_BUILDING
+		or u.command_state == Unit.CommandState.REPAIRING
+		or u.command_state == Unit.CommandState.SALVAGING
+	):
+		return PushTier.ACTIVE_TRANSIT
+	return PushTier.YIELDING_IDLE
+
+
+func get_unit_mass(u: Unit) -> float:
+	if u == null or u.data == null:
+		return 1.0
+	if u.data.ignore_friendly_unit_collision:
+		return 6.0
+	if u.data.is_heavy_unit():
+		return 3.5
+	if u.data.is_armored:
+		return 2.0
+	if u.data.is_worker_class():
+		return 0.75
+	return 1.0
+
+
+func apply_yield_nudge(dir: Vector2, strength: float) -> void:
+	if dir.length_squared() <= 0.001 or strength <= 0.0:
+		return
+	var impulse: Vector2 = dir.normalized() * strength
+	if _yield_timer <= 0.0:
+		_yield_impulse = impulse
+	else:
+		_yield_impulse = _yield_impulse.lerp(impulse, 0.55)
+	_yield_timer = 0.16
 
 
 func should_settle_at_destination(owner_unit: Unit, goal_pos: Vector2, delta: float) -> bool:
@@ -107,12 +192,20 @@ func should_settle_at_destination(owner_unit: Unit, goal_pos: Vector2, delta: fl
 	var arrive_dist: float = owner_unit.nav_agent.target_desired_distance + (14.0 if not owner_unit.command_queue.is_empty() else 0.0)
 	if dist_to_goal <= arrive_dist or owner_unit.nav_agent.is_navigation_finished():
 		_settle_timer = 0.0
+		if owner_unit.move_group_id > 0:
+			owner_unit.last_settled_group_id = owner_unit.move_group_id
 		return true
 
-	# Phase C.3: Soft-settling for shared Move destinations when settled allies occupy the goal center.
-	if owner_unit.command_state == Unit.CommandState.MOVING:
+	# Group-Aware Contagious Settling & Tier-4 Goal-Anchor Settling (MOVING and ATTACK_MOVING without target).
+	var is_group_move_state: bool = (
+		owner_unit.command_state == Unit.CommandState.MOVING
+		or (owner_unit.command_state == Unit.CommandState.ATTACK_MOVING and owner_unit.current_target == null)
+	)
+	if is_group_move_state:
 		var unit_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 16.0
-		var settle_band: float = maxf(arrive_dist * 2.5, unit_r * 3.5)
+		var settle_band: float = maxf(arrive_dist * 3.0, unit_r * 4.5)
+		if owner_unit.move_group_id > 0:
+			settle_band = maxf(settle_band, 220.0)
 		if dist_to_goal <= settle_band:
 			_settle_sample_timer += delta
 			if _settle_sample_timer >= SOFT_SETTLE_SAMPLE_WINDOW:
@@ -120,9 +213,17 @@ func should_settle_at_destination(owner_unit: Unit, goal_pos: Vector2, delta: fl
 				_settle_low_motion = disp < SOFT_SETTLE_MAX_DISP_PX
 				_settle_sample_pos = owner_unit.global_position
 				_settle_sample_timer = 0.0
-			if _settle_low_motion and _has_settled_ally_near_goal(owner_unit, goal_pos, maxf(unit_r * 2.8, 36.0)):
+			var can_soft_settle: bool = false
+			if _settle_low_motion:
+				if owner_unit.move_group_id > 0 and _is_touching_settled_groupmate(owner_unit, unit_r):
+					can_soft_settle = true
+				elif _has_settled_anchor_near_goal(owner_unit, goal_pos, maxf(unit_r * 2.8, 38.0)):
+					can_soft_settle = true
+			if can_soft_settle:
 				_settle_timer += delta
 				if _settle_timer >= SOFT_SETTLE_CONFIRM_TIME:
+					if owner_unit.move_group_id > 0:
+						owner_unit.last_settled_group_id = owner_unit.move_group_id
 					stop_navigation(owner_unit)
 					return true
 			else:
@@ -133,28 +234,58 @@ func should_settle_at_destination(owner_unit: Unit, goal_pos: Vector2, delta: fl
 			_settle_sample_pos = owner_unit.global_position
 			_settle_low_motion = false
 
+	# Safety timeout for unreachable clicks close to destination.
 	if dist_to_goal < _best_dist_to_goal - 4.0:
 		_best_dist_to_goal = dist_to_goal
 		_no_progress_timer = 0.0
 	elif dist_to_goal <= SETTLE_PROXIMITY_RADIUS:
 		_no_progress_timer += delta
 		if _no_progress_timer >= SETTLE_NO_PROGRESS_TIME:
+			if owner_unit.move_group_id > 0:
+				owner_unit.last_settled_group_id = owner_unit.move_group_id
 			return true
 	return false
 
 
-func _has_settled_ally_near_goal(owner_unit: Unit, goal_pos: Vector2, radius: float) -> bool:
-	if owner_unit == null or not owner_unit.is_inside_tree():
+func _is_touching_settled_groupmate(owner_unit: Unit, unit_r: float) -> bool:
+	if owner_unit == null or owner_unit.move_group_id <= 0 or not owner_unit.is_inside_tree():
 		return false
-	var candidates: Array = SpatialGrid.query_units_in_radius(goal_pos, radius, int(owner_unit.team)) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
-	var r_sq: float = radius * radius
-	for node: Variant in candidates:
+	var gid: int = owner_unit.move_group_id
+	_query_units_into_scratch(owner_unit, owner_unit.global_position, unit_r + 42.0, _scratch_settle_units, int(owner_unit.team))
+	for node: Variant in _scratch_settle_units:
 		if not is_instance_valid(node) or not (node is Unit) or node == owner_unit:
 			continue
 		var other: Unit = node as Unit
 		if other.is_dead or other.is_staffed or other.team != owner_unit.team:
 			continue
+		if other.last_settled_group_id != gid:
+			continue
 		if other.command_state != Unit.CommandState.IDLE and other.command_state != Unit.CommandState.HOLD_POSITION:
+			continue
+		var other_r: float = other.data.collision_radius if other.data != null else 16.0
+		var touch_d: float = unit_r + other_r + 12.0
+		if owner_unit.global_position.distance_squared_to(other.global_position) <= touch_d * touch_d:
+			return true
+	return false
+
+
+func _has_settled_anchor_near_goal(owner_unit: Unit, goal_pos: Vector2, radius: float) -> bool:
+	if owner_unit == null or not owner_unit.is_inside_tree():
+		return false
+	_query_units_into_scratch(owner_unit, goal_pos, radius, _scratch_settle_units, int(owner_unit.team))
+	var r_sq: float = radius * radius
+	for node: Variant in _scratch_settle_units:
+		if not is_instance_valid(node) or not (node is Unit) or node == owner_unit:
+			continue
+		var other: Unit = node as Unit
+		if other.is_dead or other.is_staffed or other.team != owner_unit.team:
+			continue
+		var is_settled_or_anchor: bool = (
+			other.command_state == Unit.CommandState.IDLE
+			or other.command_state == Unit.CommandState.HOLD_POSITION
+			or get_push_priority(other) == PushTier.IMMOVABLE_ANCHOR
+		)
+		if not is_settled_or_anchor:
 			continue
 		if other.global_position.distance_squared_to(goal_pos) <= r_sq:
 			return true
@@ -198,6 +329,28 @@ func compute_nav_desired_velocity(owner_unit: Unit) -> void:
 	if owner_unit == null or owner_unit.nav_agent == null:
 		return
 	var next_point: Vector2 = owner_unit.nav_agent.get_next_path_position()
+	var my_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 16.0
+
+	# 1-segment path corner lookahead for smooth corner rounding around buildings, resources, and ramps.
+	var dist_to_next: float = owner_unit.global_position.distance_to(next_point)
+	var corner_blend_r: float = clampf(my_r * 1.65, 22.0, 42.0)
+	if dist_to_next <= corner_blend_r:
+		var path: PackedVector2Array = owner_unit.nav_agent.get_current_navigation_path()
+		var path_idx: int = owner_unit.nav_agent.get_current_navigation_path_index()
+		if path_idx >= 0 and path_idx + 1 < path.size():
+			var lookahead_pt: Vector2 = path[path_idx + 1]
+			var midpoint: Vector2 = owner_unit.global_position.lerp(lookahead_pt, 0.5)
+			var ignore_b: Building = _get_active_target_building(owner_unit)
+			var ignore_rn: ResourceNode = _get_active_target_resource(owner_unit)
+			var bounds: Rect2 = _get_arena_bounds(owner_unit)
+			var safe_bounds: Rect2 = Rect2(
+				bounds.position + Vector2(my_r + 4.0, my_r + 4.0),
+				bounds.size - Vector2((my_r + 4.0) * 2.0, (my_r + 4.0) * 2.0)
+			)
+			if _is_point_clear_of_obstacles(owner_unit, midpoint, my_r + 2.0, safe_bounds, ignore_b, ignore_rn, true):
+				var blend_t: float = clampf(1.0 - (dist_to_next / maxf(1.0, corner_blend_r)), 0.0, 1.0) * 0.55
+				next_point = next_point.lerp(lookahead_pt, blend_t)
+
 	var to_next: Vector2 = next_point - owner_unit.global_position
 	if to_next.length_squared() < 1.0:
 		return
@@ -213,33 +366,46 @@ func finish_physics_step(owner_unit: Unit, delta: float) -> void:
 		wants_nav_movement = false
 		desired_move_velocity = Vector2.ZERO
 		owner_unit.velocity = Vector2.ZERO
-		if owner_unit.nav_agent != null and owner_unit.nav_agent.avoidance_enabled:
-			owner_unit.nav_agent.set_velocity(Vector2.ZERO)
+		_yield_timer = 0.0
+		_yield_impulse = Vector2.ZERO
 		return
-	update_worker_collision_passing(owner_unit)
 	apply_anti_stuck_steering(owner_unit, delta)
-
-	if owner_unit.can_unit_move() and owner_unit.nav_agent != null and owner_unit.nav_agent.avoidance_enabled:
-		owner_unit.nav_agent.set_velocity(desired_move_velocity)
-		if not wants_nav_movement:
-			apply_stationary_separation(owner_unit, delta)
-	else:
-		apply_direct_motion(owner_unit, desired_move_velocity, delta)
+	apply_direct_motion(owner_unit, desired_move_velocity, delta)
 
 
-func on_nav_velocity_computed(owner_unit: Unit, safe_velocity: Vector2, last_delta: float) -> void:
-	if owner_unit == null or owner_unit.is_dead or owner_unit.is_staffed or owner_unit.is_movement_locked_by_deploy() or not wants_nav_movement:
-		return
-	if owner_unit.nav_agent != null and not owner_unit.nav_agent.avoidance_enabled:
-		return
-	apply_direct_motion(owner_unit, safe_velocity, last_delta)
+func on_nav_velocity_computed(_owner_unit: Unit, _safe_velocity: Vector2, _last_delta: float) -> void:
+	# RVO2 avoidance is disabled; World-Only Physics + SC2 Push-Priority Solver drive motion directly.
+	pass
 
 
 func apply_direct_motion(owner_unit: Unit, target_velocity: Vector2, delta: float) -> void:
 	var accel: float = owner_unit.data.acceleration if (owner_unit.data != null and owner_unit.data.acceleration > 0.0) else 1800.0
 	var eff_speed: float = owner_unit.get_effective_move_speed()
 	if wants_nav_movement:
-		var combined: Vector2 = target_velocity + compute_overlap_separation(owner_unit, 1.0)
+		_yield_timer = 0.0
+		_yield_impulse = Vector2.ZERO
+
+		var drive_vel: Vector2 = target_velocity
+		if drive_vel.length_squared() > 16.0:
+			var move_dir: Vector2 = drive_vel.normalized()
+			_emit_proactive_ally_yields(owner_unit, move_dir, eff_speed)
+			if _wall_slide_timer > 0.0:
+				_wall_slide_timer = maxf(0.0, _wall_slide_timer - delta)
+				if _wall_slide_dir.length_squared() > 0.01:
+					var assisted: Vector2 = move_dir * 0.62 + _wall_slide_dir * 0.38
+					if assisted.length_squared() > 0.001:
+						drive_vel = assisted.normalized() * drive_vel.length()
+		elif _wall_slide_timer > 0.0:
+			_wall_slide_timer = maxf(0.0, _wall_slide_timer - delta)
+
+		var sep: Vector2 = compute_overlap_separation(owner_unit, 1.0, _scratch_hostile_normals)
+		if not _scratch_hostile_normals.is_empty():
+			for n: Vector2 in _scratch_hostile_normals:
+				var inward: float = drive_vel.dot(n)
+				if inward < 0.0:
+					drive_vel -= n * inward * 0.85
+
+		var combined: Vector2 = drive_vel + sep
 		if combined.length() > eff_speed:
 			combined = combined.normalized() * eff_speed
 		owner_unit.velocity = owner_unit.velocity.move_toward(combined, accel * delta)
@@ -248,14 +414,83 @@ func apply_direct_motion(owner_unit: Unit, target_velocity: Vector2, delta: floa
 		owner_unit.move_and_slide()
 		if SpatialGrid != null:
 			SpatialGrid.update_unit(owner_unit)
-		_check_post_slide_settling(owner_unit)
+
+		# Sample World StaticBody2D slide collisions for brief tangential wall-slide assist.
+		if drive_vel.length_squared() > 16.0:
+			var desired_dir_post: Vector2 = drive_vel.normalized()
+			for i: int in range(owner_unit.get_slide_collision_count()):
+				var col: KinematicCollision2D = owner_unit.get_slide_collision(i)
+				if col == null:
+					continue
+				var collider: Object = col.get_collider()
+				if collider is StaticBody2D:
+					var normal: Vector2 = col.get_normal()
+					if desired_dir_post.dot(normal) < -0.20:
+						var tangent: Vector2 = desired_dir_post - normal * desired_dir_post.dot(normal)
+						if tangent.length_squared() > 0.01:
+							_wall_slide_dir = tangent.normalized()
+							_wall_slide_timer = 0.22
+							break
 	else:
+		_wall_slide_timer = 0.0
+		_wall_slide_dir = Vector2.ZERO
 		apply_stationary_separation(owner_unit, delta)
 
 
+func _emit_proactive_ally_yields(owner_unit: Unit, move_dir: Vector2, eff_speed: float) -> void:
+	if owner_unit == null or owner_unit.data == null or owner_unit.data.ignore_friendly_unit_collision:
+		return
+	var my_tier: int = get_push_priority(owner_unit)
+	if my_tier <= PushTier.YIELDING_IDLE:
+		return
+	var my_r: float = owner_unit.data.collision_radius
+	var lookahead_r: float = my_r * 2.8 + 44.0
+	_query_units_into_scratch(owner_unit, owner_unit.global_position, lookahead_r, _scratch_yield_units, -99)
+	for node: Variant in _scratch_yield_units:
+		if not is_instance_valid(node) or not (node is Unit) or node == owner_unit:
+			continue
+		var other: Unit = node as Unit
+		if other.is_dead or other.is_staffed or other.is_queued_for_deletion():
+			continue
+		if other.data != null and other.data.ignore_friendly_unit_collision:
+			continue
+		var is_enemy: bool = TeamManager.are_enemies(int(owner_unit.team), int(other.team)) if TeamManager != null else (other.team != owner_unit.team)
+		if is_enemy:
+			continue
+		var other_tier: int = get_push_priority(other)
+		if other_tier != PushTier.YIELDING_IDLE or other_tier >= my_tier:
+			continue
+		var other_r: float = other.data.collision_radius if other.data != null else 16.0
+		var to_other: Vector2 = other.global_position - owner_unit.global_position
+		var dist: float = to_other.length()
+		var reach: float = my_r + other_r + 38.0
+		if dist < 0.1 or dist > reach:
+			continue
+		var to_other_dir: Vector2 = to_other / dist
+		if move_dir.dot(to_other_dir) <= 0.30:
+			continue
+		var cross_val: float = move_dir.cross(to_other_dir)
+		var side: float = 1.0 if cross_val >= 0.0 else -1.0
+		if absf(cross_val) < 0.08:
+			side = 1.0 if (other.get_instance_id() % 2) == 0 else -1.0
+		var tangent: Vector2 = Vector2(-move_dir.y, move_dir.x) * side
+		var yield_dir: Vector2 = (tangent * 0.90 + to_other_dir * 0.25).normalized()
+		var prox: float = clampf(1.0 - (dist / maxf(1.0, reach)), 0.20, 1.0)
+		var nudge_speed: float = clampf(eff_speed * 0.58 * prox, 65.0, 145.0)
+		if other.movement_component != null:
+			other.movement_component.call("apply_yield_nudge", yield_dir, nudge_speed)
+
+
 func apply_stationary_separation(owner_unit: Unit, delta: float) -> void:
+	if _yield_timer > 0.0:
+		_yield_timer = maxf(0.0, _yield_timer - delta)
+		if _yield_timer <= 0.0:
+			_yield_impulse = Vector2.ZERO
+
 	if owner_unit.is_movement_locked_by_deploy() or not owner_unit.can_unit_move():
 		owner_unit.velocity = Vector2.ZERO
+		_yield_timer = 0.0
+		_yield_impulse = Vector2.ZERO
 		return
 	if owner_unit.command_state == Unit.CommandState.GATHERING and owner_unit.gather_component != null and owner_unit.gather_component.is_harvesting_in_place():
 		_apply_harvester_perimeter_separation(owner_unit, delta)
@@ -271,10 +506,24 @@ func apply_stationary_separation(owner_unit: Unit, delta: float) -> void:
 		if owner_unit.global_position.distance_to(owner_unit._construction_target.global_position) <= owner_unit._construction_target.footprint_radius + unit_r + 28.0:
 			owner_unit.velocity = Vector2.ZERO
 			return
+
 	var sep_margin: float = 0.0 if owner_unit.command_state == Unit.CommandState.HOLD_POSITION else 2.5
-	var sep: Vector2 = compute_overlap_separation(owner_unit, sep_margin)
-	if sep.length_squared() > 1.0:
-		owner_unit.velocity = sep
+	var sep: Vector2 = compute_overlap_separation(owner_unit, sep_margin, _scratch_hostile_normals)
+	var total_push: Vector2 = sep
+	if _yield_timer > 0.0 and get_push_priority(owner_unit) == PushTier.YIELDING_IDLE:
+		total_push += _yield_impulse
+		if not _scratch_hostile_normals.is_empty():
+			for n: Vector2 in _scratch_hostile_normals:
+				var inward: float = total_push.dot(n)
+				if inward < 0.0:
+					total_push -= n * inward * 0.85
+
+	var max_stat_speed: float = owner_unit.get_effective_move_speed() * 0.85
+	if total_push.length() > max_stat_speed:
+		total_push = total_push.normalized() * max_stat_speed
+
+	if total_push.length_squared() > 1.0:
+		owner_unit.velocity = total_push
 		owner_unit.move_and_slide()
 		if SpatialGrid != null:
 			SpatialGrid.update_unit(owner_unit)
@@ -296,7 +545,7 @@ func _apply_harvester_perimeter_separation(owner_unit: Unit, _delta: float) -> v
 	var my_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 13.0
 	var min_sep: float = my_r * 1.95
 	var query_r: float = my_r * 2.35
-	var candidates: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, query_r, int(owner_unit.team)) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+	_query_units_into_scratch(owner_unit, owner_unit.global_position, query_r, _scratch_sep_units, int(owner_unit.team))
 
 	var radial: Vector2 = owner_unit.global_position - target_rn.global_position
 	var radial_len: float = radial.length()
@@ -304,7 +553,7 @@ func _apply_harvester_perimeter_separation(owner_unit: Unit, _delta: float) -> v
 	var tangent: Vector2 = Vector2(-radial_dir.y, radial_dir.x)
 	var tangent_push: float = 0.0
 
-	for node: Variant in candidates:
+	for node: Variant in _scratch_sep_units:
 		if not is_instance_valid(node) or not (node is Unit) or node == owner_unit:
 			continue
 		var other: Unit = node as Unit
@@ -336,52 +585,6 @@ func _apply_harvester_perimeter_separation(owner_unit: Unit, _delta: float) -> v
 	owner_unit.move_and_slide()
 	if SpatialGrid != null:
 		SpatialGrid.update_unit(owner_unit)
-
-
-func update_worker_collision_passing(owner_unit: Unit) -> void:
-	if owner_unit.data == null or owner_unit.data.ignore_friendly_unit_collision:
-		return
-	var is_worker_role: bool = owner_unit.data.can_gather or owner_unit.data.can_staff_compute or owner_unit.can_construct()
-	if not is_worker_role:
-		return
-	# During active task transit (gather, construct, staff, repair, salvage, or moving into a task),
-	# slide cleanly past friendly units while still colliding with World (Layer 1) and hostile units.
-	var active_type: StringName = owner_unit.active_command.get("type", &"")
-	var next_type: StringName = owner_unit.command_queue[0].get("type", &"") if not owner_unit.command_queue.is_empty() else &""
-	var is_task_transit: bool = (
-		owner_unit.command_state == Unit.CommandState.GATHERING
-		or owner_unit.command_state == Unit.CommandState.CONSTRUCTING
-		or owner_unit.command_state == Unit.CommandState.STAFFING_BUILDING
-		or owner_unit.command_state == Unit.CommandState.REPAIRING
-		or owner_unit.command_state == Unit.CommandState.SALVAGING
-		or (owner_unit.command_state == Unit.CommandState.MOVING and (
-			active_type == &"gather"
-			or active_type == &"return_cargo"
-			or active_type == &"build"
-			or active_type == &"staff"
-			or active_type == &"repair"
-			or active_type == &"salvage"
-			or next_type == &"gather"
-			or next_type == &"return_cargo"
-			or next_type == &"build"
-			or next_type == &"staff"
-			or next_type == &"repair"
-			or next_type == &"salvage"
-		))
-	)
-	var hostile_bit: int = 4 if int(owner_unit.team) == 0 else 2
-	var want_mask: int = (1 | hostile_bit) if is_task_transit else 7
-	if owner_unit.collision_mask != want_mask:
-		owner_unit.collision_mask = want_mask
-
-	# Disable RVO avoidance on workers during active task transit so Godot's RVO2 solver never
-	# zeros safe_velocity behind teammates or resource nodes.
-	if owner_unit.nav_agent != null:
-		var want_avoidance: bool = not is_task_transit
-		if owner_unit.nav_agent.avoidance_enabled != want_avoidance:
-			owner_unit.nav_agent.avoidance_enabled = want_avoidance
-			if not want_avoidance:
-				owner_unit.nav_agent.set_velocity(Vector2.ZERO)
 
 
 func apply_anti_stuck_steering(owner_unit: Unit, delta: float) -> void:
@@ -427,10 +630,14 @@ func apply_anti_stuck_steering(owner_unit: Unit, delta: float) -> void:
 			desired_move_velocity = blended.normalized() * owner_unit.get_effective_move_speed()
 
 
-func compute_overlap_separation(owner_unit: Unit, extra_margin: float) -> Vector2:
+func compute_overlap_separation(owner_unit: Unit, extra_margin: float, out_hostile_block_normals: Array[Vector2] = []) -> Vector2:
+	out_hostile_block_normals.clear()
 	var push: Vector2 = Vector2.ZERO
 	var my_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 16.0
-	var max_push: float = owner_unit.get_effective_move_speed() * 0.85 if owner_unit.data != null else 220.0
+	var max_push: float = maxf(owner_unit.get_effective_move_speed() * 0.92, 180.0) if owner_unit.data != null else 220.0
+	var my_tier: int = get_push_priority(owner_unit)
+	var my_mass: float = get_unit_mass(owner_unit)
+
 	var self_is_worker: bool = owner_unit.data != null and (owner_unit.data.can_gather or owner_unit.data.can_staff_compute or owner_unit.can_construct())
 	var self_in_task: bool = (
 		owner_unit.command_state == Unit.CommandState.GATHERING
@@ -442,29 +649,43 @@ func compute_overlap_separation(owner_unit: Unit, extra_margin: float) -> Vector
 	var active_dest: Variant = owner_unit.get_active_command_destination() if self_in_task else null
 	var self_near_task: bool = active_dest is Vector2 and owner_unit.global_position.distance_squared_to(active_dest as Vector2) <= 105.0 * 105.0
 
-	var query_r: float = my_r + 36.0 + extra_margin
-	var candidates: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, query_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
+	var query_r: float = my_r + 38.0 + extra_margin
+	_query_units_into_scratch(owner_unit, owner_unit.global_position, query_r, _scratch_sep_units, -99)
 
-	for node: Variant in candidates:
+	for node: Variant in _scratch_sep_units:
 		if not is_instance_valid(node) or not (node is Unit) or node == owner_unit:
 			continue
-		var other: Unit = node
+		var other: Unit = node as Unit
 		if other.is_dead or other.is_staffed or other.is_queued_for_deletion():
 			continue
-		if _should_ignore_unit_collision(owner_unit, other):
+		var is_enemy: bool = TeamManager.are_enemies(int(owner_unit.team), int(other.team)) if TeamManager != null else (other.team != owner_unit.team)
+		if not is_enemy and _should_ignore_unit_collision(owner_unit, other):
 			continue
+
 		var other_r: float = other.data.collision_radius if other.data != null else 16.0
 		var min_dist: float = my_r + other_r + extra_margin
 		var diff: Vector2 = owner_unit.global_position - other.global_position
 		var dist_sq: float = diff.length_squared()
 		if dist_sq >= min_dist * min_dist:
 			continue
+
 		var dist: float = sqrt(dist_sq)
 		var dir: Vector2 = Vector2.RIGHT.rotated(fmod(float(owner_unit.get_instance_id() % 360) * 1.618, TAU)) if dist < 0.01 else (diff / dist)
-		var overlap_ratio: float = clampf((min_dist - dist) / maxf(1.0, min_dist), 0.15, 1.0)
-		var push_scale: float = 1.0
+		var other_mass: float = get_unit_mass(other)
+
+		if is_enemy:
+			# Firm Hostile Body-Blocking: strong repulsion + contact normal projection in apply_direct_motion.
+			var overlap_depth: float = clampf((min_dist - dist) / maxf(1.0, min_dist), 0.18, 1.0)
+			var hostile_mass_ratio: float = clampf(other_mass / maxf(0.1, my_mass + other_mass), 0.25, 0.85)
+			push += dir * max_push * 1.45 * overlap_depth * (0.65 + hostile_mass_ratio * 0.70)
+			if out_hostile_block_normals.size() < 6:
+				out_hostile_block_normals.append(dir)
+			continue
+
+		# Friendly / Allied spacing: SC2 Mineral-Walking + 4-Tier Push-Priority & Mass Solver.
+		var worker_scale: float = 1.0
 		if self_is_worker and other.team == owner_unit.team and other.data != null and (other.data.can_gather or other.data.can_staff_compute or other.can_construct()):
-			# True transit ghosting: workers moving to resources or returning cargo pass smoothly through other workers
+			# True transit ghosting: workers moving to resources or returning cargo pass smoothly through other workers.
 			if owner_unit.command_state == Unit.CommandState.GATHERING and owner_unit.gather_component != null and not owner_unit.gather_component.is_harvesting_in_place():
 				continue
 			var other_stationary_working: bool = (
@@ -476,9 +697,28 @@ func compute_overlap_separation(owner_unit: Unit, extra_margin: float) -> Vector
 			if self_near_task and other_stationary_working:
 				continue
 			if self_in_task or other.command_state == Unit.CommandState.GATHERING or other.command_state == Unit.CommandState.CONSTRUCTING or other.command_state == Unit.CommandState.SALVAGING:
+				worker_scale = 0.25
+
+		var other_tier: int = get_push_priority(other)
+		var push_scale: float = 1.0
+		if my_tier == PushTier.IMMOVABLE_ANCHOR:
+			if other_tier == PushTier.IMMOVABLE_ANCHOR:
 				push_scale = 0.25
-		push += dir * max_push * overlap_ratio * push_scale
-	return push.normalized() * max_push if push.length() > max_push else push
+			else:
+				continue
+		elif other_tier > my_tier:
+			push_scale = 1.15 if other_tier == PushTier.IMMOVABLE_ANCHOR else 1.05
+		elif my_tier > other_tier:
+			push_scale = 0.20
+		else:
+			var mass_share: float = clampf(other_mass / maxf(0.1, my_mass + other_mass), 0.20, 0.80)
+			push_scale = mass_share * 1.45
+
+		var overlap_ratio: float = clampf((min_dist - dist) / maxf(1.0, min_dist), 0.12, 1.0)
+		push += dir * max_push * overlap_ratio * push_scale * worker_scale
+
+	var max_total: float = max_push * 1.35
+	return push.normalized() * max_total if push.length() > max_total else push
 
 
 func get_or_compute_approach_point(
@@ -554,7 +794,7 @@ func find_clear_approach_point(
 		for node: Variant in nearby_units:
 			if not (node is Unit) or not is_instance_valid(node) or node == owner_unit:
 				continue
-			var other: Unit = node
+			var other: Unit = node as Unit
 			if other.is_dead or other.is_staffed or other.team != owner_unit.team:
 				continue
 			if other.data == null or not (other.data.can_gather or other.data.can_staff_compute or other.can_construct()):
@@ -657,14 +897,17 @@ func _steer_around_static_units(owner_unit: Unit, move_dir: Vector2) -> Vector2:
 	var steer: Vector2 = move_dir
 	var my_r: float = owner_unit.data.collision_radius if owner_unit.data != null else 16.0
 	var scan_r: float = my_r + 58.0
-	var candidates: Array = SpatialGrid.query_units_in_radius(owner_unit.global_position, scan_r) if SpatialGrid != null else owner_unit.get_tree().get_nodes_in_group("units")
-	for node: Variant in candidates:
+	_query_units_into_scratch(owner_unit, owner_unit.global_position, scan_r, _scratch_static_units, -99)
+	for node: Variant in _scratch_static_units:
 		if not is_instance_valid(node) or not (node is Unit) or node == owner_unit:
 			continue
-		var other: Unit = node
-		if other.is_dead or other.is_staffed or other.is_queued_for_deletion() or other.can_unit_move():
+		var other: Unit = node as Unit
+		if other.is_dead or other.is_staffed or other.is_queued_for_deletion():
 			continue
-		if _should_ignore_unit_collision(owner_unit, other):
+		if get_push_priority(other) != PushTier.IMMOVABLE_ANCHOR:
+			continue
+		var is_enemy: bool = TeamManager.are_enemies(int(owner_unit.team), int(other.team)) if TeamManager != null else (other.team != owner_unit.team)
+		if not is_enemy and _should_ignore_unit_collision(owner_unit, other):
 			continue
 		var to_other: Vector2 = other.global_position - owner_unit.global_position
 		var dist: float = to_other.length()
@@ -703,31 +946,25 @@ func _pick_clearer_detour_side(owner_unit: Unit, forward: Vector2) -> float:
 	return _stuck_side_sign
 
 
-func _check_post_slide_settling(owner_unit: Unit) -> void:
-	if owner_unit.command_state != Unit.CommandState.MOVING and not (owner_unit.command_state == Unit.CommandState.ATTACK_MOVING and owner_unit.current_target == null):
-		return
-	var goal_pos: Vector2 = owner_unit._move_destination if owner_unit.command_state == Unit.CommandState.MOVING else owner_unit._attack_move_destination
-	if owner_unit.global_position.distance_to(goal_pos) > SETTLE_PROXIMITY_RADIUS:
-		return
-	for i: int in range(owner_unit.get_slide_collision_count()):
-		var collider: Object = owner_unit.get_slide_collision(i).get_collider()
-		if collider is Unit:
-			var other: Unit = collider
-			if other.team == owner_unit.team and (other.command_state == Unit.CommandState.IDLE or other.command_state == Unit.CommandState.HOLD_POSITION):
-				wants_nav_movement = false
-				reset_progress_tracker(owner_unit)
-				owner_unit.advance_command_queue()
-				return
-
-
 func _should_ignore_unit_collision(owner_unit: Unit, other: Unit) -> bool:
 	if other == null or owner_unit.data == null or other.data == null:
 		return false
-	if other.team != owner_unit.team:
+	var is_enemy: bool = TeamManager.are_enemies(int(owner_unit.team), int(other.team)) if TeamManager != null else (other.team != owner_unit.team)
+	if is_enemy:
 		return false
 	var self_strider: bool = owner_unit.data.ignore_friendly_unit_collision
 	var other_strider: bool = other.data.ignore_friendly_unit_collision
 	return self_strider != other_strider
+
+
+func _query_units_into_scratch(owner_unit: Unit, center: Vector2, radius: float, out_arr: Array, filter_team: int = -99) -> void:
+	if SpatialGrid != null:
+		SpatialGrid.query_units_into(center, radius, out_arr, filter_team)
+		return
+	out_arr.clear()
+	if owner_unit != null and owner_unit.is_inside_tree():
+		for node: Node in owner_unit.get_tree().get_nodes_in_group("units"):
+			out_arr.append(node)
 
 
 func _get_active_target_building(owner_unit: Unit) -> Building:
@@ -751,12 +988,16 @@ func _get_active_target_resource(owner_unit: Unit) -> ResourceNode:
 
 
 func _get_arena_bounds(owner_unit: Unit) -> Rect2:
+	if _has_cached_arena_bounds:
+		return _cached_arena_bounds
 	if owner_unit != null and owner_unit.is_inside_tree():
 		var nav_reg: Node = owner_unit.get_tree().get_first_node_in_group("arena_nav_region")
 		if nav_reg != null and "arena_bounds" in nav_reg:
 			var b: Variant = nav_reg.get("arena_bounds")
-			if b is Rect2:
-				return b as Rect2
+			if b is Rect2 and (b as Rect2).has_area():
+				_cached_arena_bounds = b as Rect2
+				_has_cached_arena_bounds = true
+				return _cached_arena_bounds
 	return Rect2(-1300.0, -950.0, 2600.0, 1900.0)
 
 
@@ -766,7 +1007,8 @@ func _is_point_clear_of_obstacles(
 	clearance_radius: float,
 	safe_bounds: Rect2,
 	ignore_building: Building = null,
-	ignore_resource: ResourceNode = null
+	ignore_resource: ResourceNode = null,
+	check_cliffs: bool = false
 ) -> bool:
 	if safe_bounds.has_area() and not safe_bounds.has_point(world_pos):
 		return false
@@ -781,7 +1023,13 @@ func _is_point_clear_of_obstacles(
 		if is_instance_valid(node) and node.has_method("overlaps_circle"):
 			if bool(node.call("overlaps_circle", world_pos, clearance_radius)):
 				return false
-	for node: Node in tree.get_nodes_in_group("destructible_barricades"):
+	if check_cliffs:
+		for node: Node in tree.get_nodes_in_group("high_ground_plateaus"):
+			if is_instance_valid(node) and node.has_method("overlaps_cliff_wall"):
+				if bool(node.call("overlaps_cliff_wall", world_pos, clearance_radius)):
+					return false
+	var nearby_bars: Array = SpatialGrid.query_barricades_in_radius(world_pos, clearance_radius + 72.0) if SpatialGrid != null else tree.get_nodes_in_group("destructible_barricades")
+	for node: Variant in nearby_bars:
 		if is_instance_valid(node) and not bool(node.get("is_destroyed")) and node.has_method("overlaps_circle"):
 			if bool(node.call("overlaps_circle", world_pos, clearance_radius)):
 				return false
@@ -789,16 +1037,17 @@ func _is_point_clear_of_obstacles(
 	for node: Variant in nearby_b:
 		if not (node is Building) or not is_instance_valid(node):
 			continue
-		var b: Building = node
+		var b: Building = node as Building
 		if b.is_destroyed or b == ignore_building:
 			continue
 		var min_d: float = b.footprint_radius + clearance_radius
 		if b.global_position.distance_squared_to(world_pos) < min_d * min_d:
 			return false
-	for node: Node in tree.get_nodes_in_group("resource_nodes"):
+	var nearby_rn: Array = SpatialGrid.query_resources_in_radius(world_pos, clearance_radius + 40.0, false) if SpatialGrid != null else tree.get_nodes_in_group("resource_nodes")
+	for node: Variant in nearby_rn:
 		if not (node is ResourceNode) or not is_instance_valid(node):
 			continue
-		var rn: ResourceNode = node
+		var rn: ResourceNode = node as ResourceNode
 		if rn.is_depleted() or rn.is_vent or rn == ignore_resource:
 			continue
 		var min_d: float = rn.collision_radius + clearance_radius

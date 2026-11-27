@@ -14,12 +14,24 @@ var _rebake_pending: bool = false
 var _rebake_timer: float = 0.0
 var _rebake_wait_elapsed: float = 0.0
 var _has_initial_bake: bool = false
+var _is_baking: bool = false
+var _rebake_queued_during_bake: bool = false
 
 
 func _ready() -> void:
 	add_to_group("arena_nav_region")
+	if not bake_finished.is_connected(_on_bake_finished):
+		bake_finished.connect(_on_bake_finished)
 	_rebake_queued = true
 	call_deferred("_perform_initial_rebake")
+
+
+func _on_bake_finished() -> void:
+	_is_baking = false
+	if _rebake_queued_during_bake:
+		_rebake_queued_during_bake = false
+		_rebake_pending = true
+		_rebake_timer = maxf(0.05, rebake_debounce_seconds)
 
 
 func _process(delta: float) -> void:
@@ -31,8 +43,11 @@ func _process(delta: float) -> void:
 		_rebake_pending = false
 		_rebake_timer = 0.0
 		_rebake_wait_elapsed = 0.0
+		if _is_baking:
+			_rebake_queued_during_bake = true
+			return
 		if is_inside_tree():
-			rebake_navmesh()
+			rebake_navmesh(true)
 
 
 func request_rebake() -> void:
@@ -53,14 +68,17 @@ func _perform_initial_rebake() -> void:
 	_rebake_wait_elapsed = 0.0
 	if not is_inside_tree():
 		return
-	rebake_navmesh()
+	rebake_navmesh(false)
 
 
-func rebake_navmesh() -> void:
+func rebake_navmesh(on_thread: bool = true) -> void:
 	if not is_inside_tree():
 		return
+	if _is_baking:
+		_rebake_queued_during_bake = true
+		return
 
-	# Synchronize nav bake group with all static terrain obstacles and living buildings/scaffolds.
+	# Synchronize nav bake group with all static terrain obstacles, resources, cliffs, and living buildings/scaffolds.
 	for old_node: Node in get_tree().get_nodes_in_group(NAV_BAKE_GROUP):
 		if not is_instance_valid(old_node):
 			continue
@@ -68,6 +86,10 @@ func rebake_navmesh() -> void:
 			var b_old: Building = old_node
 			if b_old.is_destroyed or b_old.is_queued_for_deletion():
 				b_old.remove_from_group(NAV_BAKE_GROUP)
+		elif old_node is ResourceNode:
+			var rn_old: ResourceNode = old_node
+			if rn_old.is_vent or rn_old.is_depleted() or rn_old.is_queued_for_deletion():
+				rn_old.remove_from_group(NAV_BAKE_GROUP)
 
 	for node: Node in get_tree().get_nodes_in_group(obstacle_group_name):
 		if is_instance_valid(node) and not node.is_queued_for_deletion():
@@ -83,6 +105,24 @@ func rebake_navmesh() -> void:
 			if lm.has_collision and col_body != null and is_instance_valid(col_body):
 				if not col_body.is_in_group(NAV_BAKE_GROUP):
 					col_body.add_to_group(NAV_BAKE_GROUP)
+
+	for node: Node in get_tree().get_nodes_in_group("high_ground_plateaus"):
+		if not is_instance_valid(node) or node.is_queued_for_deletion():
+			continue
+		for child: Node in node.get_children():
+			if child is StaticBody2D and is_instance_valid(child) and not child.is_queued_for_deletion():
+				if ((child as StaticBody2D).collision_layer & 1) != 0 and not child.is_in_group(NAV_BAKE_GROUP):
+					child.add_to_group(NAV_BAKE_GROUP)
+
+	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+		if not is_instance_valid(node) or not (node is ResourceNode):
+			continue
+		var rn: ResourceNode = node as ResourceNode
+		if rn.is_vent or rn.is_depleted() or rn.is_queued_for_deletion():
+			if rn.is_in_group(NAV_BAKE_GROUP):
+				rn.remove_from_group(NAV_BAKE_GROUP)
+		elif not rn.is_in_group(NAV_BAKE_GROUP):
+			rn.add_to_group(NAV_BAKE_GROUP)
 
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(node) or not (node is Building):
@@ -117,4 +157,5 @@ func rebake_navmesh() -> void:
 	nav_poly.add_outline(PackedVector2Array([p0, p1, p2, p3]))
 
 	navigation_polygon = nav_poly
-	bake_navigation_polygon(false)
+	_is_baking = on_thread
+	bake_navigation_polygon(on_thread)

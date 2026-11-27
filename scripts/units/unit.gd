@@ -120,6 +120,8 @@ var active_command: Dictionary = {}
 var patrol_waypoints: Array[Vector2] = []
 var patrol_index: int = 0
 var defensive_anchor: Vector2 = Vector2.ZERO
+var move_group_id: int = 0
+var last_settled_group_id: int = 0
 
 var _construction_target: Building = null
 var _salvage_target: Node2D = null
@@ -163,21 +165,20 @@ func _ready() -> void:
 	_update_health_bar()
 
 	if data.ignore_friendly_unit_collision:
-		# Colossus Stride: collide only with World terrain/buildings, walking cleanly over smaller units.
+		# Colossus Stride: hover/stride cleanly over smaller ground units; World-only physics.
 		collision_layer = 0
-		collision_mask = 1
 		z_index = maxi(z_index, 8)
 	else:
-		# Team-separated unit layers (Layer 2 = Player, Layer 3 = Enemy) so workers in transit can slide
-		# past friendly teammates while still colliding with World (Layer 1) and hostile units.
-		collision_layer = 2 if team == Team.PLAYER else 4
-		collision_mask = 7
+		# World-Only Physics: units stay on Layer 2 for queries while colliding physically only
+		# with World static bodies (Layer 1). Unit-unit spacing, push-priority, ally yielding,
+		# and firm hostile body-blocking are resolved in MovementComponent.
+		collision_layer = 2
+	collision_mask = 1
 
 	if nav_agent != null:
 		nav_agent.max_speed = maxf(1.0, get_effective_move_speed())
 		nav_agent.radius = data.collision_radius + 2.0
-		if data.ignore_friendly_unit_collision:
-			nav_agent.avoidance_enabled = false
+		nav_agent.avoidance_enabled = false
 		if not nav_agent.velocity_computed.is_connected(_on_nav_velocity_computed):
 			nav_agent.velocity_computed.connect(_on_nav_velocity_computed)
 
@@ -818,11 +819,11 @@ func toggle_deploy() -> void:
 	UNIT_DEPLOY_CONTROLLER_SCRIPT.toggle_deploy(self)
 
 
-func command_move(target_pos: Vector2, append_to_queue: bool = false) -> void:
-	issue_command({"type": &"move", "pos": target_pos}, append_to_queue)
+func command_move(target_pos: Vector2, append_to_queue: bool = false, group_id: int = 0) -> void:
+	issue_command({"type": &"move", "pos": target_pos, "group_id": group_id}, append_to_queue)
 
 
-func _start_move(target_pos: Vector2) -> bool:
+func _start_move(target_pos: Vector2, group_id: int = 0) -> bool:
 	if is_dead or is_staffed or not _can_move():
 		return false
 	if stance != Stance.AGGRESSIVE:
@@ -835,6 +836,8 @@ func _start_move(target_pos: Vector2) -> bool:
 	command_state = CommandState.MOVING
 	current_target = null
 	_move_destination = target_pos
+	move_group_id = group_id
+	last_settled_group_id = 0
 	_reset_progress_tracker()
 	_set_nav_target(target_pos)
 	status_changed.emit(self)
@@ -864,8 +867,8 @@ func _start_attack_target(target: Node2D) -> bool:
 	return true
 
 
-func command_attack_move(target_pos: Vector2, append_to_queue: bool = false) -> void:
-	issue_command({"type": &"attack_move", "pos": target_pos}, append_to_queue)
+func command_attack_move(target_pos: Vector2, append_to_queue: bool = false, group_id: int = 0) -> void:
+	issue_command({"type": &"attack_move", "pos": target_pos, "group_id": group_id}, append_to_queue)
 
 
 func command_patrol(target_pos: Vector2, append_to_queue: bool = false) -> void:
@@ -902,7 +905,7 @@ func _start_patrol(first_target: Vector2) -> bool:
 	return true
 
 
-func _start_attack_move(target_pos: Vector2) -> bool:
+func _start_attack_move(target_pos: Vector2, group_id: int = 0) -> bool:
 	if is_dead or is_staffed or not _can_move():
 		return false
 	if stance != Stance.AGGRESSIVE:
@@ -912,6 +915,8 @@ func _start_attack_move(target_pos: Vector2) -> bool:
 	command_state = CommandState.ATTACK_MOVING
 	_attack_move_destination = target_pos
 	_move_destination = target_pos
+	move_group_id = group_id
+	last_settled_group_id = 0
 	current_target = null
 	_auto_retarget_timer = 0.0
 	_reset_progress_tracker()
@@ -1684,6 +1689,9 @@ func _process_moving(delta: float) -> void:
 	if nav_agent == null:
 		_advance_command_queue()
 		return
+	var last_m: Vector2 = (movement_component.get("last_nav_target") as Vector2) if movement_component != null else Vector2.INF
+	if last_m == Vector2.INF or last_m.distance_squared_to(_move_destination) > 1.0:
+		_set_nav_target(_move_destination)
 	if not _is_nav_map_ready():
 		return
 	if _should_settle_at_destination(_move_destination, delta):
@@ -1955,6 +1963,8 @@ func _process_patrolling(delta: float) -> void:
 
 
 func _cancel_active_tasks(keep_gather: bool) -> void:
+	move_group_id = 0
+	last_settled_group_id = 0
 	clear_cached_approach_point()
 	if combat_component != null:
 		combat_component.cancel_attack_animation()
