@@ -454,6 +454,10 @@ func set_uplink_controller(team: int, bonus_pct: float = 0.05) -> void:
 		production_bonus_changed.emit(tid, get_production_speed_multiplier(tid))
 
 
+func get_uplink_bonus_percent() -> int:
+	return int(round(_uplink_bonus_pct * 100.0))
+
+
 func get_production_speed_multiplier(team: int) -> float:
 	var has_uplink: bool = false
 	if _uplink_controller >= 0:

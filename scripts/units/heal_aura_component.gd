@@ -69,6 +69,8 @@ func _apply_heal_tick(owner_unit: Unit) -> void:
 
 
 func _spawn_heal_tick_vfx(owner_unit: Unit, world_pos: Vector2, vfx_color: Color) -> void:
+	if VFXPool != null and VFXPool.is_high_vfx_load():
+		return
 	if owner_unit.get_parent() == null:
 		return
 	var fx: CombatVFX = VFXPool.acquire_combat_vfx(54) if VFXPool != null else null

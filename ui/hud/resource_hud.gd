@@ -41,6 +41,9 @@ var _tech_tree_instance: CanvasLayer = null
 var _controls_ref_instance: CanvasLayer = null
 var _flash_timers: Dictionary = {}
 var _alert_timer: float = 0.0
+var _toast_timer: float = 0.0
+var _system_toast_label: Label = null
+var _extra_spec_labels: Dictionary = {} # team_id: int -> Label
 var _hud_poll_timer: float = 0.0
 var _bandwidth_capped: bool = false
 var _bandwidth_near_cap: bool = false
@@ -48,6 +51,7 @@ var _bw_near_cap_armed: bool = true
 var _bw_near_cap_cooldown: float = 0.0
 var _bw_pulse_time: float = 0.0
 var _uplink_warn_pulse: bool = false
+var _uplink_pulse_time: float = 0.0
 var _uplink_base_col: Color = Color(0.68, 0.80, 0.88, 0.92)
 var _uplink_world_pos: Vector2 = Vector2.ZERO
 
@@ -96,6 +100,7 @@ func _ready() -> void:
 	if uplink_bonus_label != null:
 		uplink_bonus_label.add_to_group("blocks_edge_pan")
 		uplink_bonus_label.pressed.connect(_on_uplink_pill_pressed)
+	_setup_system_toast_label()
 
 	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and not TeamManager.teams_reconfigured.is_connected(_apply_faction_hud_theme):
 		TeamManager.teams_reconfigured.connect(_apply_faction_hud_theme)
@@ -150,8 +155,25 @@ func _wire_speed_button(btn: Button, speed_val: float) -> void:
 	)
 
 
+func _setup_system_toast_label() -> void:
+	if _system_toast_label != null or resource_alert_label == null:
+		return
+	var host: Node = resource_alert_label.get_parent()
+	if host == null:
+		return
+	_system_toast_label = Label.new()
+	_system_toast_label.name = "SystemToastLabel"
+	_system_toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_system_toast_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_system_toast_label.add_theme_font_size_override("font_size", 11)
+	_system_toast_label.visible = false
+	host.add_child(_system_toast_label)
+	host.move_child(_system_toast_label, resource_alert_label.get_index() + 1)
+
+
 func _refresh_speed_buttons() -> void:
 	var spd: float = float(_match_manager.get("current_game_speed")) if _match_manager != null else Engine.time_scale
+	var active_col: Color = FactionHudTheme.get_speed_active_color(FactionHudTheme.resolve_local_faction_id())
 	var pairs: Array = [
 		{"btn": btn_speed_05, "val": 0.5},
 		{"btn": btn_speed_10, "val": 1.0},
@@ -163,7 +185,7 @@ func _refresh_speed_buttons() -> void:
 		if b == null:
 			continue
 		var active: bool = absf(spd - float(item["val"])) < 0.05
-		b.modulate = Color(0.32, 1.0, 0.90, 1.0) if active else Color(0.68, 0.78, 0.84, 0.78)
+		b.modulate = active_col if active else Color(0.68, 0.78, 0.84, 0.78)
 
 
 func toggle_tech_tree() -> void:
@@ -321,6 +343,12 @@ func _apply_faction_hud_theme(_mode: StringName = &"") -> void:
 		FactionHudTheme.style_utility_button(btn_select_army, fid)
 	if uplink_bonus_label != null:
 		FactionHudTheme.style_utility_button(uplink_bonus_label, fid)
+	for spd_btn: Button in [btn_speed_05, btn_speed_10, btn_speed_15, btn_speed_20]:
+		if spd_btn != null:
+			FactionHudTheme.style_utility_button(spd_btn, fid)
+	if btn_spectator_fog != null:
+		FactionHudTheme.style_utility_button(btn_spectator_fog, &"spectator")
+	_refresh_speed_buttons()
 
 
 func _apply_faction_hud_accent() -> void:
@@ -345,24 +373,27 @@ func _refresh_controls_help_button_label() -> void:
 func _on_hud_toast(message: String) -> void:
 	if SettingsManager != null and not SettingsManager.show_alert_toasts:
 		return
-	_alert_timer = 1.85
-	if resource_alert_label != null:
-		resource_alert_label.text = message.to_upper()
-		resource_alert_label.visible = true
-		resource_alert_label.modulate = Color(0.38, 0.98, 0.90, 1.0)
+	if _system_toast_label == null:
+		_setup_system_toast_label()
+	_toast_timer = 1.85
+	if _system_toast_label != null:
+		_system_toast_label.text = message.to_upper()
+		_system_toast_label.visible = true
+		_system_toast_label.modulate = Color(0.42, 0.94, 0.96, 0.96)
 
 
 func _process(delta: float) -> void:
-	_hud_poll_timer += delta
+	var real_dt: float = minf(delta / maxf(0.1, Engine.time_scale), 0.05)
+	_hud_poll_timer += real_dt
 	if _hud_poll_timer >= 0.30:
 		_hud_poll_timer = 0.0
 		_refresh_income_rates_and_timer()
 
 	if _bw_near_cap_cooldown > 0.0:
-		_bw_near_cap_cooldown = maxf(0.0, _bw_near_cap_cooldown - delta)
+		_bw_near_cap_cooldown = maxf(0.0, _bw_near_cap_cooldown - real_dt)
 
 	if (_bandwidth_capped or _bandwidth_near_cap) and bandwidth_value_label != null and not _flash_timers.has(&"bandwidth"):
-		_bw_pulse_time += delta
+		_bw_pulse_time += real_dt
 		if _bandwidth_capped:
 			var pulse_c: float = 0.5 + 0.5 * sin(_bw_pulse_time * 5.2)
 			bandwidth_value_label.modulate = Color(1.0, 0.72, 0.28, 1.0).lerp(Color(1.0, 0.30, 0.34, 1.0), pulse_c)
@@ -371,19 +402,25 @@ func _process(delta: float) -> void:
 			bandwidth_value_label.modulate = Color(0.98, 0.86, 0.52, 1.0).lerp(Color(0.961, 0.620, 0.043, 1.0), pulse_n)
 
 	if _uplink_warn_pulse and uplink_bonus_label != null and uplink_bonus_label.visible:
-		var up_p: float = 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.008)
+		_uplink_pulse_time += real_dt
+		var up_p: float = 0.5 + 0.5 * sin(_uplink_pulse_time * 8.0)
 		uplink_bonus_label.modulate = Color(1.0, 0.78, 0.24, 1.0).lerp(Color(1.0, 0.34, 0.28, 1.0), up_p)
 
 	if _alert_timer > 0.0:
-		_alert_timer = maxf(0.0, _alert_timer - delta)
+		_alert_timer = maxf(0.0, _alert_timer - real_dt)
 		if resource_alert_label != null:
 			resource_alert_label.visible = _alert_timer > 0.0
 			resource_alert_label.modulate.a = clampf(_alert_timer / 0.45, 0.0, 1.0)
+	if _toast_timer > 0.0:
+		_toast_timer = maxf(0.0, _toast_timer - real_dt)
+		if _system_toast_label != null:
+			_system_toast_label.visible = _toast_timer > 0.0
+			_system_toast_label.modulate.a = clampf(_toast_timer / 0.45, 0.0, 0.96)
 	if not _flash_timers.is_empty():
 		var done_keys: Array[StringName] = []
 		for key: Variant in _flash_timers.keys():
 			var k: StringName = key as StringName
-			var rem: float = maxf(0.0, float(_flash_timers[k]) - delta)
+			var rem: float = maxf(0.0, float(_flash_timers[k]) - real_dt)
 			_flash_timers[k] = rem
 			var lbl: Label = _get_resource_label(k)
 			if lbl != null:
@@ -423,27 +460,75 @@ func _refresh_income_rates_and_timer() -> void:
 		_refresh_spectator_fog_button()
 
 
+func _get_faction_short_code(team_id: int) -> String:
+	if TeamManager == null or not TeamManager.has_method("get_team_faction"):
+		return "GEN"
+	var fid: StringName = TeamManager.get_team_faction(team_id)
+	match fid:
+		&"genesis_v2":
+			return "GEN"
+		&"monolith_os":
+			return "MON"
+		&"prisma_dei":
+			return "PRS"
+		_:
+			var raw: String = String(fid).to_upper()
+			return raw.substr(0, mini(3, raw.length())) if not raw.is_empty() else "FAC"
+
+
 func _refresh_spectator_telemetry() -> void:
 	if _economy_manager == null:
 		return
+	var active_teams: Array[int] = TeamManager.get_active_teams() if TeamManager != null else [0, 1]
+	var spec_parent: Node = spec_team1_label.get_parent() if spec_team1_label != null else null
+	var used_extra_ids: Dictionary = {}
+
 	if spec_team0_label != null:
-		var r0: Dictionary = _economy_manager.get_resources(0)
-		spec_team0_label.text = "AI-01: %dB %dS %dC | %d/%d BW" % [
-			int(r0.get(EconomyManager.RESOURCE_BIOMASS, 0)),
-			int(r0.get(EconomyManager.RESOURCE_SILICA, 0)),
-			int(r0.get(EconomyManager.RESOURCE_COMPUTE, 0)),
-			_economy_manager.get_bandwidth_used(0),
-			_economy_manager.get_bandwidth_cap(0),
-		]
+		spec_team0_label.visible = active_teams.size() >= 1
 	if spec_team1_label != null:
-		var r1: Dictionary = _economy_manager.get_resources(1)
-		spec_team1_label.text = "AI-02: %dB %dS %dC | %d/%d BW" % [
-			int(r1.get(EconomyManager.RESOURCE_BIOMASS, 0)),
-			int(r1.get(EconomyManager.RESOURCE_SILICA, 0)),
-			int(r1.get(EconomyManager.RESOURCE_COMPUTE, 0)),
-			_economy_manager.get_bandwidth_used(1),
-			_economy_manager.get_bandwidth_cap(1),
+		spec_team1_label.visible = active_teams.size() >= 2
+
+	for idx: int in range(active_teams.size()):
+		var tid: int = active_teams[idx]
+		var target_lbl: Label = null
+		if idx == 0:
+			target_lbl = spec_team0_label
+		elif idx == 1:
+			target_lbl = spec_team1_label
+		else:
+			used_extra_ids[tid] = true
+			if _extra_spec_labels.has(tid) and is_instance_valid(_extra_spec_labels[tid]):
+				target_lbl = _extra_spec_labels[tid] as Label
+			elif spec_parent != null:
+				target_lbl = Label.new()
+				target_lbl.name = "SpecTeam%dLabel" % tid
+				target_lbl.add_theme_font_size_override("font_size", 11)
+				spec_parent.add_child(target_lbl)
+				var insert_pos: int = spec_team1_label.get_index() + (idx - 1)
+				spec_parent.move_child(target_lbl, mini(insert_pos, spec_parent.get_child_count() - 1))
+				_extra_spec_labels[tid] = target_lbl
+		if target_lbl == null:
+			continue
+		target_lbl.visible = true
+		var res: Dictionary = _economy_manager.get_resources(tid)
+		var team_tag: String = TeamManager.get_team_short_label(tid, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("AI-%d" % (tid + 1))
+		var fac_code: String = _get_faction_short_code(tid)
+		target_lbl.text = "%s [%s]: %dB %dS %dC | %d/%d" % [
+			team_tag,
+			fac_code,
+			int(res.get(EconomyManager.RESOURCE_BIOMASS, 0)),
+			int(res.get(EconomyManager.RESOURCE_SILICA, 0)),
+			int(res.get(EconomyManager.RESOURCE_COMPUTE, 0)),
+			_economy_manager.get_bandwidth_used(tid),
+			_economy_manager.get_bandwidth_cap(tid),
 		]
+		if TeamManager != null:
+			target_lbl.modulate = TeamManager.get_team_color(tid).lightened(0.28)
+
+	for extra_tid: Variant in _extra_spec_labels.keys():
+		var lbl_ex: Label = _extra_spec_labels[extra_tid] as Label
+		if lbl_ex != null and is_instance_valid(lbl_ex):
+			lbl_ex.visible = used_extra_ids.has(int(extra_tid))
 
 
 func _on_audio_mute_changed(_muted: bool) -> void:
@@ -744,7 +829,8 @@ func _refresh_uplink_pill() -> void:
 			var is_ally: bool = local_t < 0 or (TeamManager.are_allies(local_t, ctrl_team) if TeamManager != null else (ctrl_team == local_t))
 			var col2: Color = TeamManager.get_team_color(ctrl_team) if TeamManager != null else Color(0.24, 0.98, 0.90, 1.0)
 			if is_ally and local_t >= 0:
-				uplink_bonus_label.text = "UPLINK: +5%"
+				var bonus_pct: int = _economy_manager.get_uplink_bonus_percent() if _economy_manager != null else 5
+				uplink_bonus_label.text = "UPLINK: +%d%%" % bonus_pct
 			else:
 				var tag2: String = TeamManager.get_team_short_label(ctrl_team, false) if (TeamManager != null and TeamManager.has_method("get_team_short_label")) else ("P%d" % (ctrl_team + 1))
 				uplink_bonus_label.text = "UPLINK: [%s]" % tag2

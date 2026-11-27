@@ -56,11 +56,12 @@ func _should_be_active() -> bool:
 
 
 func _process(delta: float) -> void:
+	var real_dt: float = minf(delta / maxf(0.1, Engine.time_scale), 0.05)
 	var active: bool = _should_be_active()
 	if active:
-		_alpha = minf(1.0, _alpha + delta / FADE_IN_DURATION)
+		_alpha = minf(1.0, _alpha + real_dt / FADE_IN_DURATION)
 	elif _alpha > 0.0:
-		_alpha = maxf(0.0, _alpha - delta / FADE_OUT_DURATION)
+		_alpha = maxf(0.0, _alpha - real_dt / FADE_OUT_DURATION)
 
 	if _alpha <= 0.001:
 		if _alpha > 0.0:
@@ -68,7 +69,7 @@ func _process(delta: float) -> void:
 			queue_redraw()
 		return
 
-	_pulse_time += delta
+	_pulse_time += real_dt
 	queue_redraw()
 
 
@@ -124,12 +125,32 @@ func _draw() -> void:
 					Color(team_col.r, team_col.g, team_col.b, 0.85 * a)
 				)
 
+		# 1e. Faction Macro Rings (Power Lattice & Capacitor Shield Aura) even when center is slightly off-edge
+		if not b.is_salvaging:
+			if b.provides_power_grid and b.power_radius > 0.0 and view_rect.grow(b.power_radius).has_point(b.global_position):
+				_draw_dashed_ring(b_pos, b.power_radius, Color(0.98, 0.80, 0.14, 0.24 * a), 1.5, 48)
+			if b.shield_regen_aura_radius > 0.0 and view_rect.grow(b.shield_regen_aura_radius).has_point(b.global_position):
+				_draw_dashed_ring(b_pos, b.shield_regen_aura_radius, Color(0.220, 0.741, 0.973, 0.22 * a), 1.5, 40)
+
 		if not view_rect.has_point(b.global_position):
 			continue
 
-		# 1b. Production / Overclock radial arc OR Idle military production badge
+		# 1b. Production / Overclock radial arc OR Unpowered / Idle military production badge
 		var q_size: int = b.get_training_queue_size()
-		if q_size > 0:
+		var is_unpowered: bool = b.requires_power_grid and not b.is_powered
+		if is_unpowered:
+			var warn_col: Color = Color(1.0, 0.36, 0.30, 0.96 * a)
+			if q_size > 0:
+				var st_u: Dictionary = b.get_active_training_status()
+				var prog_u: float = clampf(float(st_u.get("progress", 0.0)), 0.0, 1.0)
+				var ring_ru: float = b.footprint_radius + 7.0
+				draw_arc(b_pos, ring_ru, 0.0, TAU, 36, Color(0.06, 0.10, 0.14, 0.55 * a), 3.6, true)
+				if prog_u > 0.01:
+					draw_arc(b_pos, ring_ru, -PI * 0.5, -PI * 0.5 + TAU * prog_u, 32, warn_col, 3.4, true)
+				_draw_pill(font, b_pos + Vector2(0.0, -b.footprint_radius - 16.0), "PAUSED %d%%" % int(round(prog_u * 100.0)), warn_col, a)
+			else:
+				_draw_pill(font, b_pos + Vector2(0.0, -b.footprint_radius - 14.0), "UNPOWERED", warn_col, a)
+		elif q_size > 0:
 			var st: Dictionary = b.get_active_training_status()
 			var prog: float = clampf(float(st.get("progress", 0.0)), 0.0, 1.0)
 			var is_oc: bool = b.is_overclocked()
@@ -176,29 +197,30 @@ func _draw() -> void:
 		if min_rng > 0.0:
 			_draw_dashed_ring(u_pos, min_rng + u_r, Color(1.0, 0.34, 0.32, 0.18 * a), 1.2, 24)
 
-	# 3. Visible / Explored ResourceNode Saturation Badges inside viewport
+	# 3. Visible / Explored ResourceNode Saturation Badges, High-Yield & Surging Vents inside viewport
 	var sat_team: int = local_team if local_team >= 0 else 0
 	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
 		if not (node is ResourceNode) or not is_instance_valid(node):
 			continue
 		var rn: ResourceNode = node as ResourceNode
-		if rn.is_depleted() or rn.is_vent:
+		if rn.is_depleted():
 			continue
 		if not view_rect.has_point(rn.global_position):
 			continue
 		if fog != null and fog.fog_enabled and not fog.is_world_pos_explored(rn.global_position):
 			continue
-		var max_h: int = rn.get_effective_max_harvesters(sat_team) if rn.has_method("get_effective_max_harvesters") else rn.max_harvesters
-		var cur_h: int = rn.get_active_harvester_count()
-		var sat_col: Color = Color(0.68, 0.78, 0.86, 0.90 * a)
-		if cur_h > max_h:
-			sat_col = Color(1.0, 0.36, 0.30, 0.96 * a)
-		elif cur_h == max_h:
-			sat_col = Color(0.24, 0.96, 0.68, 0.95 * a)
-		elif cur_h > 0:
-			sat_col = Color(1.0, 0.80, 0.28, 0.95 * a)
 		var r_pt: Vector2 = to_local(rn.global_position)
-		_draw_pill(font, r_pt + Vector2(0.0, -rn.collision_radius - 12.0), "%d/%d" % [cur_h, max_h], sat_col, a)
+		if rn.is_vent:
+			if rn.is_surging():
+				var surge_col: Color = Color(0.24, 0.96, 1.0, 0.96 * a)
+				_draw_pill(font, r_pt + Vector2(0.0, -rn.collision_radius - 14.0), "2x SURGE %ds" % int(ceil(rn.surge_remaining)), surge_col, a)
+			continue
+		var max_h: int = rn.get_effective_max_harvesters(sat_team) if rn.has_method("get_effective_max_harvesters") else rn.max_harvesters
+		var cur_h: int = rn.get_assigned_count(sat_team)
+		var base_sat_col: Color = ResourceNode.get_saturation_color(cur_h, max_h)
+		var sat_col: Color = Color(base_sat_col.r, base_sat_col.g, base_sat_col.b, base_sat_col.a * a)
+		var pill_txt: String = ("%d/%d +35%%" % [cur_h, max_h]) if rn.is_high_yield else ("%d/%d" % [cur_h, max_h])
+		_draw_pill(font, r_pt + Vector2(0.0, -rn.collision_radius - 12.0), pill_txt, sat_col, a)
 
 
 func _draw_pill(font: Font, center: Vector2, text: String, accent: Color, alpha_mul: float) -> void:

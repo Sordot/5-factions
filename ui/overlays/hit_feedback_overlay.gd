@@ -17,6 +17,7 @@ var _write_idx: int = 0
 var _active_count: int = 0
 var _throttle_map: Dictionary = {} # int(key) -> int(last_ticks_msec)
 var _throttle_gc_timer: float = 0.0
+var _cached_view_rect: Rect2 = Rect2()
 
 
 func _ready() -> void:
@@ -27,16 +28,35 @@ func _ready() -> void:
 		_pips[i] = {"active": false}
 
 
+func _refresh_view_rect() -> void:
+	if not is_inside_tree():
+		return
+	var vp: Viewport = get_viewport()
+	if vp == null:
+		return
+	var cam: Camera2D = vp.get_camera_2d()
+	if cam == null:
+		_cached_view_rect = Rect2()
+		return
+	var vp_sz: Vector2 = vp.get_visible_rect().size / maxf(0.25, cam.zoom.x)
+	_cached_view_rect = Rect2(cam.global_position - vp_sz * 0.5, vp_sz).grow(96.0)
+
+
 func push_hit_pip(world_pos: Vector2, kind: StringName, value: int = 0, entity_id: int = 0) -> void:
 	if SettingsManager != null and not SettingsManager.show_combat_hit_feedback:
 		return
+	if not _cached_view_rect.has_area():
+		_refresh_view_rect()
+	if _cached_view_rect.has_area() and not _cached_view_rect.has_point(world_pos):
+		return
 
 	var now_ms: int = Time.get_ticks_msec()
+	var eff_throttle: int = 240 if _active_count >= 64 else (185 if _active_count >= 40 else THROTTLE_MS)
 	if entity_id != 0:
 		var k_code: int = 1 if kind == KIND_SHIELD_ABSORB else (2 if kind == KIND_ARMOR_BLUNTED else 3)
 		var t_key: int = entity_id * 8 + k_code
 		var last_ms: int = int(_throttle_map.get(t_key, -99999))
-		if (now_ms - last_ms) < THROTTLE_MS:
+		if (now_ms - last_ms) < eff_throttle:
 			return
 		_throttle_map[t_key] = now_ms
 
@@ -66,6 +86,7 @@ func push_hit_pip(world_pos: Vector2, kind: StringName, value: int = 0, entity_i
 
 
 func _process(delta: float) -> void:
+	_refresh_view_rect()
 	_throttle_gc_timer += delta
 	if _throttle_gc_timer >= 4.0:
 		_throttle_gc_timer = 0.0

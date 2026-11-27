@@ -457,7 +457,7 @@ func _execute_weapon_shot(owner_unit: Unit, target_node: Node2D, cooldown_oversh
 		kick_px = 2.0
 	owner_unit.trigger_weapon_recoil(kick_px)
 
-	if is_heavy_shot and owner_unit.is_inside_tree():
+	if is_heavy_shot and owner_unit.is_inside_tree() and not (VFXPool != null and VFXPool.is_high_vfx_load()):
 		var viewer_ms: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
 		var vis_ms: bool = viewer_ms < 0 or (TeamManager.are_allies(viewer_ms, int(owner_unit.team)) if TeamManager != null else (owner_unit.team == Unit.Team.PLAYER)) or owner_unit.visible
 		if vis_ms and owner_unit.get_parent() != null:
@@ -877,6 +877,8 @@ func _spawn_melee_cleave_vfx(owner_unit: Unit, origin_pos: Vector2, target_pos: 
 
 
 func _spawn_armor_pierce_spark_vfx(owner_unit: Unit, world_pos: Vector2, dir: Vector2, vfx_color: Color) -> void:
+	if VFXPool != null and VFXPool.is_high_vfx_load():
+		return
 	if owner_unit.get_parent() == null or not _is_vfx_visible(owner_unit, world_pos, world_pos):
 		return
 	var fx: CombatVFX = VFXPool.acquire_combat_vfx(52) if VFXPool != null else null

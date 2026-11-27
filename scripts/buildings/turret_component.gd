@@ -365,6 +365,8 @@ func _spawn_tracer(origin: Vector2, end_pos: Vector2, col: Color, width: float, 
 
 
 func _spawn_heavy_muzzle_shock(origin: Vector2, end_pos: Vector2, col: Color, is_brutalist: bool) -> void:
+	if VFXPool != null and VFXPool.is_high_vfx_load():
+		return
 	if owner_building == null or not owner_building.is_inside_tree() or owner_building.get_parent() == null:
 		return
 	var viewer: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
@@ -381,6 +383,8 @@ func _spawn_heavy_muzzle_shock(origin: Vector2, end_pos: Vector2, col: Color, is
 
 
 func _spawn_armor_spark(world_pos: Vector2, shot_dir: Vector2, col: Color) -> void:
+	if VFXPool != null and VFXPool.is_high_vfx_load():
+		return
 	if owner_building == null or not owner_building.is_inside_tree():
 		return
 	if not _is_point_visible_local(world_pos):

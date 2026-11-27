@@ -22,10 +22,24 @@ var _ping_pos: Vector2 = Vector2.ZERO
 var _ping_color: Color = Color(0.24, 0.96, 0.90, 1.0)
 var _ping_timer: float = 0.0
 var _alert_pings: Array[Dictionary] = []
+var _terrain_cache_vp: SubViewport = null
+var _terrain_cache_canvas: _MinimapTerrainCanvas = null
+var _terrain_cache_dirty: bool = true
+var _terrain_cache_size: Vector2i = Vector2i.ZERO
+var _terrain_cache_ready_frames: int = 0
+
+
+class _MinimapTerrainCanvas extends Node2D:
+	var draw_cb: Callable = Callable()
+
+	func _draw() -> void:
+		if draw_cb.is_valid():
+			draw_cb.call(self)
 
 
 func _ready() -> void:
 	add_to_group("tactical_minimap")
+	_setup_terrain_cache_viewport()
 	if map_viewport != null:
 		map_viewport.add_to_group("blocks_edge_pan")
 		map_viewport.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
@@ -33,10 +47,55 @@ func _ready() -> void:
 			map_viewport.draw.connect(_on_map_viewport_draw)
 		if not map_viewport.gui_input.is_connected(_on_map_viewport_gui_input):
 			map_viewport.gui_input.connect(_on_map_viewport_gui_input)
+		if not map_viewport.resized.is_connected(_invalidate_terrain_cache):
+			map_viewport.resized.connect(_invalidate_terrain_cache)
 	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and not TeamManager.teams_reconfigured.is_connected(_apply_faction_theme):
 		TeamManager.teams_reconfigured.connect(_apply_faction_theme)
 	_apply_faction_theme()
 	call_deferred("_resolve_references")
+
+
+func _setup_terrain_cache_viewport() -> void:
+	if _terrain_cache_vp != null:
+		return
+	_terrain_cache_vp = SubViewport.new()
+	_terrain_cache_vp.name = "MinimapTerrainCacheVP"
+	_terrain_cache_vp.disable_3d = true
+	_terrain_cache_vp.transparent_bg = false
+	_terrain_cache_vp.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+	_terrain_cache_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_terrain_cache_vp.size = Vector2i(200, 150)
+	add_child(_terrain_cache_vp)
+
+	_terrain_cache_canvas = _MinimapTerrainCanvas.new()
+	_terrain_cache_canvas.name = "MinimapTerrainCanvas"
+	_terrain_cache_canvas.draw_cb = Callable(self, "_draw_terrain_cache_canvas")
+	_terrain_cache_vp.add_child(_terrain_cache_canvas)
+
+
+func _invalidate_terrain_cache() -> void:
+	_terrain_cache_dirty = true
+	_terrain_cache_ready_frames = 0
+	if map_viewport != null:
+		map_viewport.queue_redraw()
+
+
+func _rebuild_terrain_cache(target_size: Vector2) -> void:
+	if _terrain_cache_vp == null or _terrain_cache_canvas == null:
+		return
+	var isz: Vector2i = Vector2i(maxi(4, int(round(target_size.x))), maxi(4, int(round(target_size.y))))
+	_terrain_cache_vp.size = isz
+	_terrain_cache_size = isz
+	_terrain_cache_dirty = false
+	_terrain_cache_ready_frames = 0
+	_terrain_cache_canvas.queue_redraw()
+	_terrain_cache_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+
+
+func _draw_terrain_cache_canvas(canvas: CanvasItem) -> void:
+	if _terrain_cache_size.x <= 4 or _terrain_cache_size.y <= 4:
+		return
+	_draw_static_terrain_layers(canvas, Rect2(Vector2.ZERO, Vector2(_terrain_cache_size)))
 
 
 func _apply_faction_theme(_mode: StringName = &"") -> void:
@@ -79,8 +138,7 @@ func _resolve_references() -> void:
 	if _match_manager != null and not _match_manager.tactical_alert_triggered.is_connected(_on_tactical_alert_triggered):
 		_match_manager.tactical_alert_triggered.connect(_on_tactical_alert_triggered)
 
-	if map_viewport != null:
-		map_viewport.queue_redraw()
+	_invalidate_terrain_cache()
 
 
 func refresh_arena_bounds(new_bounds: Rect2 = Rect2()) -> void:
@@ -88,8 +146,7 @@ func refresh_arena_bounds(new_bounds: Rect2 = Rect2()) -> void:
 		arena_bounds = new_bounds
 	elif _fog_system != null and _fog_system.arena_bounds.has_area():
 		arena_bounds = _fog_system.arena_bounds
-	if map_viewport != null:
-		map_viewport.queue_redraw()
+	_invalidate_terrain_cache()
 
 
 func _on_tactical_alert_triggered(world_pos: Vector2, alert_type: StringName, _message: String) -> void:
@@ -127,6 +184,8 @@ func flash_ping(world_pos: Vector2, color: Color = Color(0.28, 0.96, 1.0, 1.0), 
 
 
 func _process(delta: float) -> void:
+	if not _terrain_cache_dirty and _terrain_cache_ready_frames < 2:
+		_terrain_cache_ready_frames += 1
 	if _ping_timer > 0.0:
 		_ping_timer = maxf(0.0, _ping_timer - delta)
 
@@ -316,23 +375,18 @@ func _issue_order_at_minimap_point(local_pos: Vector2) -> void:
 		map_viewport.queue_redraw()
 
 
-func _on_map_viewport_draw() -> void:
-	if map_viewport == null:
-		return
-	var rect: Rect2 = Rect2(Vector2.ZERO, map_viewport.size)
-	if rect.size.x <= 4.0 or rect.size.y <= 4.0:
-		return
-
-	# 1. Arena backdrop + subtle tactical grid.
-	map_viewport.draw_rect(rect, Color(0.06, 0.09, 0.13, 1.0), true)
+func _draw_static_terrain_layers(canvas: CanvasItem, rect: Rect2) -> void:
+	var sz: Vector2 = rect.size
+	# 1. Arena backdrop + subtle 4x4 tactical grid.
+	canvas.draw_rect(rect, Color(0.06, 0.09, 0.13, 1.0), true)
 	var grid_col: Color = Color(0.14, 0.24, 0.32, 0.35)
 	for i: int in range(1, 4):
-		var gx: float = rect.size.x * float(i) * 0.25
-		var gy: float = rect.size.y * float(i) * 0.25
-		map_viewport.draw_line(Vector2(gx, 0.0), Vector2(gx, rect.size.y), grid_col, 1.0)
-		map_viewport.draw_line(Vector2(0.0, gy), Vector2(rect.size.x, gy), grid_col, 1.0)
+		var gx: float = sz.x * float(i) * 0.25
+		var gy: float = sz.y * float(i) * 0.25
+		canvas.draw_line(Vector2(gx, 0.0), Vector2(gx, sz.y), grid_col, 1.0)
+		canvas.draw_line(Vector2(0.0, gy), Vector2(sz.x, gy), grid_col, 1.0)
 
-	# 1.5. High-Ground Plateaus (subtle raised-contrast terraces beneath obstacles/units/Fog).
+	# 1.5. High-Ground Plateaus + crisp subtle ramp-lip highlights.
 	for node: Node in get_tree().get_nodes_in_group("high_ground_plateaus"):
 		if not is_instance_valid(node) or not node.has_method("get_world_polygon"):
 			continue
@@ -342,9 +396,18 @@ func _on_map_viewport_draw() -> void:
 		var mini_hg: PackedVector2Array = PackedVector2Array()
 		mini_hg.resize(hg_poly.size())
 		for hi: int in range(hg_poly.size()):
-			mini_hg[hi] = _world_to_minimap(hg_poly[hi])
-		map_viewport.draw_colored_polygon(mini_hg, Color(0.18, 0.25, 0.32, 0.92))
-		map_viewport.draw_polyline(mini_hg + PackedVector2Array([mini_hg[0]]), Color(0.46, 0.62, 0.74, 0.55), 1.0)
+			mini_hg[hi] = _world_to_minimap_size(hg_poly[hi], sz)
+		canvas.draw_colored_polygon(mini_hg, Color(0.18, 0.25, 0.32, 0.92))
+		canvas.draw_polyline(mini_hg + PackedVector2Array([mini_hg[0]]), Color(0.46, 0.62, 0.74, 0.55), 1.0)
+		if node.has_method("get_ramp_segments_world"):
+			var rsegs: Array = node.call("get_ramp_segments_world") as Array
+			for rseg_var: Variant in rsegs:
+				if not (rseg_var is Dictionary):
+					continue
+				var rseg: Dictionary = rseg_var as Dictionary
+				var ra: Vector2 = _world_to_minimap_size(rseg["a"] as Vector2, sz)
+				var rb: Vector2 = _world_to_minimap_size(rseg["b"] as Vector2, sz)
+				canvas.draw_line(ra, rb, Color(0.84, 0.94, 1.0, 0.78), 1.8)
 
 	# 2. Terrain obstacle silhouettes.
 	for node: Node in get_tree().get_nodes_in_group("terrain_obstacles"):
@@ -356,11 +419,56 @@ func _on_map_viewport_draw() -> void:
 		var mini_poly: PackedVector2Array = PackedVector2Array()
 		mini_poly.resize(world_poly.size())
 		for i: int in range(world_poly.size()):
-			mini_poly[i] = _world_to_minimap(world_poly[i])
-		map_viewport.draw_colored_polygon(mini_poly, Color(0.24, 0.32, 0.40, 0.96))
-		map_viewport.draw_polyline(mini_poly + PackedVector2Array([mini_poly[0]]), Color(0.36, 0.62, 0.72, 0.65), 1.0)
+			mini_poly[i] = _world_to_minimap_size(world_poly[i], sz)
+		canvas.draw_colored_polygon(mini_poly, Color(0.24, 0.32, 0.40, 0.96))
+		canvas.draw_polyline(mini_poly + PackedVector2Array([mini_poly[0]]), Color(0.36, 0.62, 0.72, 0.65), 1.0)
 
-	# 2.25. Destructible Barricades (distinct hashed amber/slate rectangular block matching orientation).
+	# 2.5. Static Map landmarks (subtle Technozen geometric pips).
+	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
+		if not (node is MapLandmarkScript) or not is_instance_valid(node):
+			continue
+		var lm: MapLandmarkScript = node
+		if not lm.show_on_minimap:
+			continue
+		var lp: Vector2 = _world_to_minimap_size(lm.global_position, sz)
+		var lcol: Color = lm.accent_color
+		match lm.visual_style:
+			MapLandmarkScript.VisualStyle.MONOLITH_SPIRE:
+				var d_pts: PackedVector2Array = PackedVector2Array([
+					lp + Vector2(0.0, -3.6),
+					lp + Vector2(3.6, 0.0),
+					lp + Vector2(0.0, 3.6),
+					lp + Vector2(-3.6, 0.0),
+				])
+				canvas.draw_colored_polygon(d_pts, Color(lcol.r, lcol.g, lcol.b, 0.85))
+				canvas.draw_polyline(d_pts + PackedVector2Array([d_pts[0]]), Color(0.92, 0.98, 1.0, 0.85), 1.0)
+			MapLandmarkScript.VisualStyle.RELAY_ARCH:
+				var arch_col: Color = Color(lcol.r, lcol.g, lcol.b, 0.82)
+				canvas.draw_line(lp + Vector2(-5.0, -1.6), lp + Vector2(5.0, -1.6), arch_col, 1.2)
+				canvas.draw_line(lp + Vector2(-5.0, 1.6), lp + Vector2(5.0, 1.6), arch_col, 1.2)
+			MapLandmarkScript.VisualStyle.CAPACITOR_PYLON:
+				canvas.draw_rect(Rect2(lp - Vector2(1.8, 1.8), Vector2(3.6, 3.6)), Color(lcol.r, lcol.g, lcol.b, 0.82), true)
+			MapLandmarkScript.VisualStyle.PLAZA_BEACON:
+				canvas.draw_arc(lp, 5.4, 0.0, TAU, 14, Color(lcol.r, lcol.g, lcol.b, 0.42), 1.1)
+
+
+func _on_map_viewport_draw() -> void:
+	if map_viewport == null:
+		return
+	var rect: Rect2 = Rect2(Vector2.ZERO, map_viewport.size)
+	if rect.size.x <= 4.0 or rect.size.y <= 4.0:
+		return
+
+	# Layers 1 - 2.5: Static terrain & landmarks from cached SubViewport (with seamless first-frame fallback).
+	var want_sz: Vector2i = Vector2i(maxi(4, int(round(rect.size.x))), maxi(4, int(round(rect.size.y))))
+	if _terrain_cache_dirty or _terrain_cache_size != want_sz:
+		_rebuild_terrain_cache(rect.size)
+	if _terrain_cache_ready_frames >= 1 and _terrain_cache_vp != null and _terrain_cache_vp.get_texture() != null:
+		map_viewport.draw_texture_rect(_terrain_cache_vp.get_texture(), rect, false)
+	else:
+		_draw_static_terrain_layers(map_viewport, rect)
+
+	# 2.25. Dynamic Destructible Barricades (distinct hashed amber/slate rectangular block matching orientation).
 	for node: Node in get_tree().get_nodes_in_group("destructible_barricades"):
 		if not is_instance_valid(node) or bool(node.get("is_destroyed")) or not node.has_method("get_world_polygon"):
 			continue
@@ -384,34 +492,6 @@ func _on_map_viewport_draw() -> void:
 			var p_bot: Vector2 = bot_a.lerp(bot_b, clampf(frac - 0.18, 0.0, 1.0))
 			map_viewport.draw_line(p_top, p_bot, hash_col, 1.1)
 		map_viewport.draw_polyline(mini_bar + PackedVector2Array([mini_bar[0]]), Color(1.0, 0.78, 0.28, 0.96), 1.3)
-
-	# 2.5. Map landmarks (subtle Technozen geometric pips).
-	for node: Node in get_tree().get_nodes_in_group("map_landmarks"):
-		if not (node is MapLandmarkScript) or not is_instance_valid(node):
-			continue
-		var lm: MapLandmarkScript = node
-		if not lm.show_on_minimap:
-			continue
-		var lp: Vector2 = _world_to_minimap(lm.global_position)
-		var lcol: Color = lm.accent_color
-		match lm.visual_style:
-			MapLandmarkScript.VisualStyle.MONOLITH_SPIRE:
-				var d_pts: PackedVector2Array = PackedVector2Array([
-					lp + Vector2(0.0, -3.6),
-					lp + Vector2(3.6, 0.0),
-					lp + Vector2(0.0, 3.6),
-					lp + Vector2(-3.6, 0.0),
-				])
-				map_viewport.draw_colored_polygon(d_pts, Color(lcol.r, lcol.g, lcol.b, 0.85))
-				map_viewport.draw_polyline(d_pts + PackedVector2Array([d_pts[0]]), Color(0.92, 0.98, 1.0, 0.85), 1.0)
-			MapLandmarkScript.VisualStyle.RELAY_ARCH:
-				var arch_col: Color = Color(lcol.r, lcol.g, lcol.b, 0.82)
-				map_viewport.draw_line(lp + Vector2(-5.0, -1.6), lp + Vector2(5.0, -1.6), arch_col, 1.2)
-				map_viewport.draw_line(lp + Vector2(-5.0, 1.6), lp + Vector2(5.0, 1.6), arch_col, 1.2)
-			MapLandmarkScript.VisualStyle.CAPACITOR_PYLON:
-				map_viewport.draw_rect(Rect2(lp - Vector2(1.8, 1.8), Vector2(3.6, 3.6)), Color(lcol.r, lcol.g, lcol.b, 0.82), true)
-			MapLandmarkScript.VisualStyle.PLAZA_BEACON:
-				map_viewport.draw_arc(lp, 5.4, 0.0, TAU, 14, Color(lcol.r, lcol.g, lcol.b, 0.42), 1.1)
 
 	# 3. Resource nodes (Biomass green, Silica gold, Compute Vents violet/cyan; high-yield gleam + surging vent ping).
 	var pulse: float = 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.0045)
@@ -644,6 +724,26 @@ func _on_map_viewport_draw() -> void:
 		map_viewport.draw_colored_polygon(d_pts, Color(p_col.r, p_col.g, p_col.b, base_fade))
 		map_viewport.draw_polyline(d_pts + PackedVector2Array([d_pts[0]]), Color(1.0, 1.0, 1.0, base_fade * 0.9), 1.0)
 
+	# 9.8. Saved Camera Bookmark Pips (1-8).
+	if _camera != null and is_instance_valid(_camera) and not _camera.camera_bookmarks.is_empty():
+		var bm_font: Font = ThemeDB.fallback_font
+		var bm_col: Color = Color(0.76, 0.96, 1.0, 0.72)
+		for slot_var: Variant in _camera.camera_bookmarks.keys():
+			var slot_num: int = int(slot_var)
+			if slot_num < 1 or slot_num > RTSCamera.MAX_BOOKMARKS:
+				continue
+			var bm_pos: Vector2 = _world_to_minimap(_camera.camera_bookmarks[slot_var] as Vector2)
+			var br_d: float = 4.2
+			var bm_dia: PackedVector2Array = PackedVector2Array([
+				bm_pos + Vector2(0.0, -br_d),
+				bm_pos + Vector2(br_d, 0.0),
+				bm_pos + Vector2(0.0, br_d),
+				bm_pos + Vector2(-br_d, 0.0),
+				bm_pos + Vector2(0.0, -br_d),
+			])
+			map_viewport.draw_polyline(bm_dia, bm_col, 1.1, true)
+			map_viewport.draw_string(bm_font, bm_pos + Vector2(4.5, 3.0), str(slot_num), HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.84, 0.98, 1.0, 0.85))
+
 	# 10. White Camera Viewport Rectangle.
 	if _camera != null and is_instance_valid(_camera):
 		var vp_size: Vector2 = get_viewport().get_visible_rect().size / _camera.zoom
@@ -658,11 +758,14 @@ func _on_map_viewport_draw() -> void:
 	map_viewport.draw_rect(rect.grow(-0.5), Color(0.22, 0.68, 0.78, 0.85), false, 1.2)
 
 
-func _world_to_minimap(world_pos: Vector2) -> Vector2:
-	var sz: Vector2 = map_viewport.size
+func _world_to_minimap_size(world_pos: Vector2, sz: Vector2) -> Vector2:
 	var nx: float = (world_pos.x - arena_bounds.position.x) / maxf(1.0, arena_bounds.size.x)
 	var ny: float = (world_pos.y - arena_bounds.position.y) / maxf(1.0, arena_bounds.size.y)
 	return Vector2(nx * sz.x, ny * sz.y)
+
+
+func _world_to_minimap(world_pos: Vector2) -> Vector2:
+	return _world_to_minimap_size(world_pos, map_viewport.size)
 
 
 func _minimap_to_world(local_pos: Vector2) -> Vector2:

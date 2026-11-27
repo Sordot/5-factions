@@ -12,6 +12,7 @@ const CAP_TRACER: int = 96
 const CAP_COMBAT_VFX: int = 64
 const CAP_MOVE_MARKER: int = 24
 const CAP_ABILITY_EFFECT: int = 24
+const HIGH_VFX_LOAD_THRESHOLD: int = 96
 
 var _vfx_layer: Node2D = null
 var _bound_scene_id: int = 0
@@ -31,6 +32,10 @@ var _active_abilities: Array[Node2D] = []
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+
+
+func is_high_vfx_load() -> bool:
+	return (_active_combat_vfx.size() + _active_tracers.size()) > HIGH_VFX_LOAD_THRESHOLD
 
 
 func _ensure_vfx_layer() -> Node2D:

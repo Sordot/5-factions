@@ -4,6 +4,7 @@ extends Control
 const WIREFRAME_GRID_SCRIPT: GDScript = preload("res://ui/hud/selection_wireframe_grid.gd")
 const COMMAND_CARD_BUILDER_SCRIPT: GDScript = preload("res://ui/hud/command_card_builder.gd")
 const SELECTION_TELEMETRY_RENDERER_SCRIPT: GDScript = preload("res://ui/hud/selection_telemetry_renderer.gd")
+const SELECTION_ENTITY_PORTRAIT_SCRIPT: GDScript = preload("res://ui/hud/selection_entity_portrait.gd")
 
 @export var selection_controller_path: NodePath
 
@@ -57,12 +58,16 @@ var _active_hud_accent: Color = Color(0.20, 0.96, 0.86, 1.0)
 var _active_hud_primary: Color = Color(0.90, 0.96, 0.98, 1.0)
 var _faction_frame_overlay: Control = null
 var _wireframe_grid: SelectionWireframeGrid = null
+var _entity_portrait: SelectionEntityPortrait = null
 var _last_unit_subgroups: Array[Dictionary] = []
 var _last_active_subgroup_idx: int = 0
+var _unit_display_dirty: bool = false
+var _unit_refresh_acc: float = 0.0
 
 
 func _ready() -> void:
 	_setup_dynamic_bar_styles()
+	_setup_entity_portrait()
 	_setup_wireframe_selection_grid()
 	_selection_controller = get_node_or_null(selection_controller_path) as SelectionController
 	if _selection_controller != null:
@@ -207,6 +212,8 @@ func _apply_faction_hud_theme(force: bool = false) -> void:
 
 	if _wireframe_grid != null:
 		_wireframe_grid.apply_faction_theme(_active_hud_faction_id, _active_hud_accent)
+	if _entity_portrait != null:
+		_entity_portrait.apply_faction_theme(_active_hud_faction_id, _active_hud_accent)
 
 
 func _get_compact_action_badge(action_name: StringName, fallback: String) -> String:
@@ -455,11 +462,13 @@ func _on_selection_changed(selected_units: Array[Unit], subgroups: Array[Diction
 
 	if is_single_unit:
 		var lead_data: Dictionary = InspectionHelper.get_inspection_data(selected_units[0])
-		_telemetry.apply_left_column(self, lead_data)
+		_telemetry.apply_left_column(self, lead_data, selected_units[0], 1)
 		_telemetry.rebuild_telemetry_grid(self, lead_data["stats"])
 	else:
 		_telemetry.refresh_squad_left_column(self, active_group)
 		_telemetry.rebuild_subgroup_tabs(self, subgroups, safe_idx)
+	_unit_display_dirty = false
+	_unit_refresh_acc = 0.0
 
 	_card_builder.rebuild_unit_card(self, active_group)
 	_card_builder.refresh_all_ability_states(self)
@@ -537,7 +546,14 @@ func _render_inspected_entity(entity: Node, rebuild_actions: bool) -> void:
 
 	_card_builder.clear_unit_bindings()
 
-	_telemetry.apply_left_column(self, info)
+	var portrait_count: int = 1
+	if is_multi_building:
+		if _building_subgroups.size() > 1:
+			var safe_pc_idx: int = clampi(_active_building_subgroup_index, 0, _building_subgroups.size() - 1)
+			portrait_count = maxi(1, (_building_subgroups[safe_pc_idx].get("buildings", []) as Array).size())
+		else:
+			portrait_count = _selected_buildings.size()
+	_telemetry.apply_left_column(self, info, entity, portrait_count)
 	if not is_multi_building:
 		_telemetry.rebuild_telemetry_grid(self, info["stats"])
 	_telemetry.refresh_production_queue_ui(self, entity)
@@ -709,8 +725,18 @@ func _on_ability_targeting_changed(active_ability: AbilityData) -> void:
 	_card_builder.refresh_all_ability_states(self)
 
 
+func _process(delta: float) -> void:
+	if not _unit_display_dirty:
+		return
+	_unit_refresh_acc += delta
+	if _unit_refresh_acc >= 0.10:
+		_unit_refresh_acc = 0.0
+		_unit_display_dirty = false
+		_refresh_selected_units_display()
+
+
 func _on_unit_health_changed(_unit: Unit, _current_hp: float, _max_hp: float) -> void:
-	_refresh_selected_units_display()
+	_unit_display_dirty = true
 
 
 func _on_unit_ability_cooldown_updated(ability_id: StringName, _remaining: float, _duration: float) -> void:
@@ -718,11 +744,11 @@ func _on_unit_ability_cooldown_updated(ability_id: StringName, _remaining: float
 
 
 func _on_unit_cargo_changed(_unit: Unit, _resource_type: StringName, _amount: int) -> void:
-	_refresh_selected_units_display()
+	_unit_display_dirty = true
 
 
 func _on_unit_status_changed(_unit: Unit) -> void:
-	_refresh_selected_units_display()
+	_unit_display_dirty = true
 
 
 func _on_unit_stance_changed(_unit: Unit, _new_stance: Unit.Stance) -> void:
@@ -738,12 +764,10 @@ func _refresh_selected_units_display() -> void:
 		return
 	if _selection_controller.selected_units.size() == 1 and is_instance_valid(_selection_controller.selected_units[0]):
 		var lead_info: Dictionary = InspectionHelper.get_inspection_data(_selection_controller.selected_units[0])
-		_telemetry.apply_left_column(self, lead_info)
+		_telemetry.apply_left_column(self, lead_info, _selection_controller.selected_units[0], 1)
 		_telemetry.rebuild_telemetry_grid(self, lead_info["stats"])
 	else:
 		_telemetry.refresh_squad_left_column(self, active_group)
-		if _wireframe_grid != null and _wireframe_grid.visible:
-			_wireframe_grid.redraw_visible_tiles()
 	_card_builder.refresh_stance_button(self)
 	_card_builder.refresh_deploy_button(self)
 
@@ -781,6 +805,19 @@ func _disconnect_unit_signals() -> void:
 			if unit.stance_changed.is_connected(_on_unit_stance_changed):
 				unit.stance_changed.disconnect(_on_unit_stance_changed)
 	_connected_units.clear()
+
+
+func _setup_entity_portrait() -> void:
+	if portrait_swatch == null or _entity_portrait != null:
+		return
+	var parent_node: Node = portrait_swatch.get_parent()
+	if parent_node == null:
+		return
+	portrait_swatch.visible = false
+	_entity_portrait = SELECTION_ENTITY_PORTRAIT_SCRIPT.new() as SelectionEntityPortrait
+	_entity_portrait.name = "SelectionEntityPortrait"
+	parent_node.add_child(_entity_portrait)
+	parent_node.move_child(_entity_portrait, portrait_swatch.get_index())
 
 
 func _setup_wireframe_selection_grid() -> void:

@@ -491,3 +491,75 @@ static func draw_upgrade_icon(canvas: CanvasItem, c: Vector2, fg: Color, hi: Col
 	canvas.draw_rect(Rect2(c - Vector2(9, 9), Vector2(18, 18)), fg, false, 1.5)
 	canvas.draw_polyline(PackedVector2Array([c + Vector2(-6, 0), c + Vector2(0, -6), c + Vector2(6, 0)]), hi, 2.0, true)
 	canvas.draw_polyline(PackedVector2Array([c + Vector2(-6, 5.5), c + Vector2(0, -0.5), c + Vector2(6, 5.5)]), fg, 2.0, true)
+
+
+static func draw_glyph(
+	canvas: CanvasItem,
+	glyph_id: StringName,
+	rect: Rect2,
+	fg: Color,
+	icon_category: StringName = &""
+) -> void:
+	var c: Vector2 = rect.get_center()
+	var hi: Color = fg.lightened(0.36)
+	var dark: Color = Color(0.05, 0.08, 0.12, 0.94)
+	match glyph_id:
+		&"resource_biomass":
+			var pod: PackedVector2Array = PackedVector2Array([
+				c + Vector2(0.0, -10.0), c + Vector2(8.0, -2.0), c + Vector2(5.5, 9.0),
+				c + Vector2(-5.5, 9.0), c + Vector2(-8.0, -2.0),
+			])
+			poly_icon(canvas, pod, Color(fg.r, fg.g, fg.b, 0.28), fg, 1.7)
+			canvas.draw_circle(c + Vector2(-2.2, 0.5), 2.4, hi)
+			canvas.draw_circle(c + Vector2(2.8, 2.2), 1.9, hi)
+			canvas.draw_circle(c + Vector2(0.5, -4.0), 1.8, fg)
+		&"resource_silica":
+			var c1: PackedVector2Array = PackedVector2Array([
+				c + Vector2(-4.0, -9.5), c + Vector2(1.0, -2.0), c + Vector2(-1.5, 9.0), c + Vector2(-8.0, 4.0),
+			])
+			var c2: PackedVector2Array = PackedVector2Array([
+				c + Vector2(4.0, -7.5), c + Vector2(9.0, 2.5), c + Vector2(3.5, 9.0), c + Vector2(-0.5, 1.0),
+			])
+			poly_icon(canvas, c1, Color(fg.r, fg.g, fg.b, 0.34), hi, 1.6)
+			poly_icon(canvas, c2, Color(fg.r, fg.g, fg.b, 0.26), fg, 1.6)
+		&"resource_vent":
+			canvas.draw_arc(c, 9.5, 0.0, TAU, 20, fg, 1.8, true)
+			canvas.draw_arc(c, 5.2, 0.0, TAU, 16, hi, 1.5, true)
+			var vd: PackedVector2Array = PackedVector2Array([
+				c + Vector2(0.0, -3.5), c + Vector2(3.5, 0.0), c + Vector2(0.0, 3.5), c + Vector2(-3.5, 0.0),
+			])
+			poly_icon(canvas, vd, hi, fg, 1.0)
+		&"hyper_uplink":
+			canvas.draw_arc(c, 10.5, 0.0, TAU, 22, Color(fg.r, fg.g, fg.b, 0.72), 1.5, true)
+			var ud: PackedVector2Array = PackedVector2Array([
+				c + Vector2(0.0, -7.0), c + Vector2(7.0, 0.0), c + Vector2(0.0, 7.0), c + Vector2(-7.0, 0.0),
+			])
+			poly_icon(canvas, ud, Color(fg.r, fg.g, fg.b, 0.34), hi, 1.7)
+			canvas.draw_circle(c, 2.4, hi)
+		&"sensor_relay":
+			canvas.draw_arc(c + Vector2(0.0, 2.0), 10.0, -PI * 0.85, -PI * 0.15, 12, hi, 1.6, true)
+			canvas.draw_arc(c + Vector2(0.0, 2.0), 6.0, -PI * 0.85, -PI * 0.15, 10, fg, 1.5, true)
+			canvas.draw_line(c + Vector2(0.0, -1.0), c + Vector2(0.0, 9.5), fg, 2.0, true)
+			canvas.draw_line(c + Vector2(-6.0, 9.5), c + Vector2(6.0, 9.5), hi, 1.8, true)
+			canvas.draw_circle(c + Vector2(0.0, -1.5), 2.4, hi)
+		&"barricade":
+			canvas.draw_rect(Rect2(c - Vector2(10.0, 6.5), Vector2(20.0, 13.0)), dark, true)
+			canvas.draw_rect(Rect2(c - Vector2(10.0, 6.5), Vector2(20.0, 13.0)), fg, false, 1.7)
+			canvas.draw_line(c + Vector2(-6.0, -6.0), c + Vector2(-1.0, 6.0), hi, 1.8, true)
+			canvas.draw_line(c + Vector2(1.0, -6.0), c + Vector2(6.0, 6.0), hi, 1.8, true)
+		&"salvage_core":
+			var hx: PackedVector2Array = PackedVector2Array()
+			for hi_i: int in range(6):
+				var ha: float = float(hi_i) * (TAU / 6.0)
+				hx.append(c + Vector2.RIGHT.rotated(ha) * 9.0)
+			poly_icon(canvas, hx, Color(fg.r, fg.g, fg.b, 0.28), fg, 1.7)
+			canvas.draw_line(c + Vector2(-4.0, 0.0), c + Vector2(4.0, 0.0), hi, 1.8, true)
+			canvas.draw_line(c + Vector2(0.0, -4.0), c + Vector2(0.0, 4.0), hi, 1.8, true)
+		&"", &"unknown":
+			var fd: PackedVector2Array = PackedVector2Array([
+				c + Vector2(0.0, -9.0), c + Vector2(9.0, 0.0), c + Vector2(0.0, 9.0), c + Vector2(-9.0, 0.0),
+			])
+			poly_icon(canvas, fd, Color(fg.r, fg.g, fg.b, 0.24), fg, 1.7)
+			canvas.draw_circle(c, 2.5, hi)
+		_:
+			draw_icon(canvas, glyph_id, icon_category, c, fg, hi, dark)

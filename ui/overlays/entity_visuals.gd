@@ -32,6 +32,9 @@ var _draw_ctx: Dictionary = {}
 var _fog_cache: FogOfWarSystem = null
 var _unit_elevation: int = 0
 var _elev_poll_timer: float = 0.0
+var _idle_redraw_acc: float = 0.0
+var _mirror_check_cache: int = -1
+var _last_zoom_halo_state: bool = false
 
 
 static func _ensure_renderers() -> void:
@@ -69,16 +72,25 @@ static func has_renderer_for(type_id: StringName, is_building: bool) -> bool:
 
 func _ready() -> void:
 	_upgrade_callable = Callable(self, "_has_team_upgrade")
+	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and not TeamManager.teams_reconfigured.is_connected(_on_teams_reconfigured):
+		TeamManager.teams_reconfigured.connect(_on_teams_reconfigured)
 	call_deferred("_bind_economy_manager")
 
 
 func _exit_tree() -> void:
+	if TeamManager != null and TeamManager.has_signal("teams_reconfigured") and TeamManager.teams_reconfigured.is_connected(_on_teams_reconfigured):
+		TeamManager.teams_reconfigured.disconnect(_on_teams_reconfigured)
 	if _economy_manager != null and is_instance_valid(_economy_manager):
 		if _economy_manager.tech_changed.is_connected(_on_economy_tech_changed):
 			_economy_manager.tech_changed.disconnect(_on_economy_tech_changed)
 		if _economy_manager.upgrade_completed.is_connected(_on_economy_upgrade_completed):
 			_economy_manager.upgrade_completed.disconnect(_on_economy_upgrade_completed)
 	_economy_manager = null
+
+
+func _on_teams_reconfigured(_mode: StringName = &"") -> void:
+	_mirror_check_cache = -1
+	queue_redraw()
 
 
 func bind_unit(unit: Unit) -> void:
@@ -170,7 +182,13 @@ func _process(delta: float) -> void:
 		if next_id != entity_type_id:
 			entity_type_id = next_id
 			_refresh_cached_renderer()
-		team = int(_owner_unit.team)
+		if team != int(_owner_unit.team):
+			team = int(_owner_unit.team)
+			_mirror_check_cache = -1
+		var cam_u: Camera2D = get_viewport().get_camera_2d() if is_inside_tree() else null
+		var want_zoom_halo: bool = cam_u != null and cam_u.zoom.x < 0.78
+		var zoom_halo_changed: bool = (want_zoom_halo != _last_zoom_halo_state)
+		_last_zoom_halo_state = want_zoom_halo
 		_elev_poll_timer += delta
 		var elev_changed: bool = false
 		if _elev_poll_timer >= 0.20:
@@ -180,6 +198,7 @@ func _process(delta: float) -> void:
 		var renderer_wants_anim: bool = _cached_renderer != null and _cached_renderer.needs_unit_animation(entity_type_id, _draw_ctx)
 		if (
 			elev_changed
+			or zoom_halo_changed
 			or _owner_unit.is_hovered
 			or _owner_unit.spawn_anim_timer > 0.0
 			or renderer_wants_anim
@@ -194,8 +213,66 @@ func _process(delta: float) -> void:
 		if next_bid != entity_type_id:
 			entity_type_id = next_bid
 			_refresh_cached_renderer()
-		team = int(_owner_building.team)
-		queue_redraw()
+		if team != int(_owner_building.team):
+			team = int(_owner_building.team)
+			_mirror_check_cache = -1
+		if not _owner_building.visible or not _is_in_camera_view(120.0):
+			return
+		var turret_active: bool = _owner_building.has_turret and (
+			_owner_building.get_turret_recoil() > 0.01
+			or (_owner_building.turret_component != null and _owner_building.turret_component.current_target != null)
+		)
+		var needs_fast_redraw: bool = (
+			not _owner_building.is_constructed
+			or _owner_building.is_actively_producing()
+			or _owner_building.is_overclocked()
+			or _owner_building.is_salvaging
+			or _owner_building.completion_flash_timer > 0.0
+			or _owner_building.is_hovered
+			or turret_active
+			or (_owner_building.requires_power_grid and not _owner_building.is_powered)
+			or (_owner_building.current_hp / maxf(1.0, _owner_building.max_hp)) <= 0.40
+		)
+		if needs_fast_redraw:
+			_idle_redraw_acc = 0.0
+			queue_redraw()
+		else:
+			_idle_redraw_acc += delta
+			if _idle_redraw_acc >= 0.10:
+				_idle_redraw_acc = 0.0
+				queue_redraw()
+
+
+func _is_in_camera_view(pad_px: float = 96.0) -> bool:
+	if not is_inside_tree():
+		return false
+	var vp: Viewport = get_viewport()
+	if vp == null:
+		return true
+	var cam: Camera2D = vp.get_camera_2d()
+	if cam == null:
+		return true
+	var vp_sz: Vector2 = vp.get_visible_rect().size / maxf(0.25, cam.zoom.x)
+	var view_rect: Rect2 = Rect2(cam.global_position - vp_sz * 0.5, vp_sz).grow(pad_px)
+	return view_rect.has_point(global_position)
+
+
+func _is_mirror_matchup() -> bool:
+	if _mirror_check_cache >= 0:
+		return _mirror_check_cache == 1
+	if TeamManager == null or not TeamManager.has_method("get_active_teams") or not TeamManager.has_method("get_team_faction"):
+		_mirror_check_cache = 0
+		return false
+	var my_fid: StringName = TeamManager.get_team_faction(team)
+	if my_fid == &"":
+		_mirror_check_cache = 0
+		return false
+	for other_t: int in TeamManager.get_active_teams():
+		if other_t != team and TeamManager.are_enemies(team, other_t) and TeamManager.get_team_faction(other_t) == my_fid:
+			_mirror_check_cache = 1
+			return true
+	_mirror_check_cache = 0
+	return false
 
 
 func _poll_unit_elevation() -> bool:
@@ -265,6 +342,14 @@ func _draw() -> void:
 				var rad: float = _owner_unit.data.collision_radius if _owner_unit.data != null else 15.0
 				var shadow_off: Vector2 = Vector2(2.0, 5.0).rotated(-_owner_unit.body_visual.rotation) if _owner_unit.body_visual != null else Vector2(2.0, 5.0)
 				draw_circle(shadow_off, rad * 0.92, Color(0.02, 0.03, 0.05, 0.34))
+		if _owner_unit != null and is_instance_valid(_owner_unit) and not _owner_unit.is_dead:
+			var cam_d: Camera2D = get_viewport().get_camera_2d() if is_inside_tree() else null
+			var cam_zoom: float = cam_d.zoom.x if cam_d != null else 1.0
+			if cam_zoom < 0.78 or _is_mirror_matchup():
+				var r_halo: float = (_owner_unit.data.collision_radius if _owner_unit.data != null else 15.0) + 1.5
+				var team_col_h: Color = ctx.get("team_color", p["core"]) as Color
+				draw_arc(Vector2.ZERO, r_halo, 0.0, TAU, 28, Color(0.02, 0.03, 0.05, 0.42), 2.6, true)
+				draw_arc(Vector2.ZERO, r_halo, 0.0, TAU, 28, Color(team_col_h.r, team_col_h.g, team_col_h.b, 0.48 if cam_zoom < 0.78 else 0.38), 1.4, true)
 		if _cached_renderer != null:
 			_cached_renderer.draw_unit(self, entity_type_id, _owner_unit, ctx)
 			if _owner_unit != null and is_instance_valid(_owner_unit) and not _owner_unit.is_dead:

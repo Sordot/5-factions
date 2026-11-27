@@ -3,6 +3,8 @@ extends RefCounted
 
 var _short_name_cache: Dictionary = {}
 var _short_name_cache_built: bool = false
+var _telemetry_rows: Array[Dictionary] = []
+var _telemetry_grid_owner: Control = null
 
 
 func _ensure_short_name_cache() -> void:
@@ -32,9 +34,68 @@ func shorten_name(full_name: String) -> String:
 	return full_name
 
 
-func apply_left_column(hud: SelectionHUD, info: Dictionary) -> void:
+func _resolve_portrait_meta(entity: Node, info: Dictionary) -> Dictionary:
+	var meta: Dictionary = {
+		"glyph_id": &"",
+		"glyph_category": &"",
+		"veterancy_rank": 0,
+		"is_ghost": false,
+		"is_unpowered": false,
+	}
+	if entity == null or not is_instance_valid(entity):
+		return meta
+	if entity is Unit:
+		var u: Unit = entity as Unit
+		meta["glyph_id"] = u.get_unit_type_id()
+		meta["glyph_category"] = &"unit"
+		meta["veterancy_rank"] = u.veterancy_rank
+	elif entity is Building:
+		var b: Building = entity as Building
+		meta["glyph_id"] = b.building_type_id
+		meta["glyph_category"] = &"building"
+		meta["is_unpowered"] = b.is_constructed and b.requires_power_grid and not b.is_powered
+	elif entity is ResourceNode:
+		var rn: ResourceNode = entity as ResourceNode
+		if rn.is_vent:
+			meta["glyph_id"] = &"resource_vent"
+		elif rn.resource_type == &"silica":
+			meta["glyph_id"] = &"resource_silica"
+		else:
+			meta["glyph_id"] = &"resource_biomass"
+	elif entity is HyperUplink or entity.is_in_group("hyper_uplinks"):
+		meta["glyph_id"] = &"hyper_uplink"
+	elif entity.is_in_group("sensor_relays"):
+		meta["glyph_id"] = &"sensor_relay"
+	elif entity.is_in_group("destructible_barricades"):
+		meta["glyph_id"] = &"barricade"
+	elif entity.is_in_group("salvage_cores"):
+		meta["glyph_id"] = &"salvage_core"
+	elif entity.is_in_group("fog_ghost_handles"):
+		meta["is_ghost"] = true
+		meta["glyph_category"] = &"building"
+		if entity.has_method("get_ghost_snapshot"):
+			var snap: Dictionary = entity.call("get_ghost_snapshot") as Dictionary
+			meta["glyph_id"] = snap.get("building_type_id", &"") as StringName
+	elif info.has("glyph_id"):
+		meta["glyph_id"] = info["glyph_id"] as StringName
+	return meta
+
+
+func apply_left_column(hud: SelectionHUD, info: Dictionary, entity: Node = null, squad_count: int = 1) -> void:
 	var accent: Color = info.get("accent_color", hud._active_hud_accent) as Color
-	hud.portrait_swatch.color = accent
+	if hud._entity_portrait != null and is_instance_valid(hud._entity_portrait):
+		var p_meta: Dictionary = _resolve_portrait_meta(entity, info)
+		hud._entity_portrait.bind_display(
+			p_meta["glyph_id"] as StringName,
+			accent,
+			int(p_meta["veterancy_rank"]),
+			squad_count,
+			bool(p_meta["is_ghost"]),
+			bool(p_meta["is_unpowered"]),
+			p_meta["glyph_category"] as StringName
+		)
+	elif hud.portrait_swatch != null:
+		hud.portrait_swatch.color = accent
 	hud.unit_name_label.text = String(info.get("title", "Entity"))
 	hud.entity_subtitle_label.text = String(info.get("subtitle", "TELEMETRY"))
 	hud.entity_subtitle_label.modulate = accent
@@ -87,40 +148,66 @@ func refresh_squad_left_column(hud: SelectionHUD, active_group: Dictionary) -> v
 		return
 	var lead_info: Dictionary = InspectionHelper.get_inspection_data(units[0])
 	lead_info["title"] = "%s x%d" % [String(active_group.get("display_name", "Unit")), units.size()]
-	apply_left_column(hud, lead_info)
+	apply_left_column(hud, lead_info, units[0], units.size())
 
 
 func rebuild_telemetry_grid(hud: SelectionHUD, stats: Variant) -> void:
-	for child: Node in hud.telemetry_grid.get_children():
-		child.queue_free()
-
-	if not (stats is Array):
+	if hud == null or hud.telemetry_grid == null:
 		return
-	for item: Variant in stats:
-		if not (item is Dictionary):
-			continue
-		var entry: Dictionary = item as Dictionary
+	if _telemetry_grid_owner != hud.telemetry_grid:
+		_telemetry_rows.clear()
+		for child: Node in hud.telemetry_grid.get_children():
+			child.queue_free()
+		_telemetry_grid_owner = hud.telemetry_grid
+
+	var valid_entries: Array[Dictionary] = []
+	if stats is Array:
+		for item: Variant in stats:
+			if item is Dictionary:
+				valid_entries.append(item as Dictionary)
+
+	var needed: int = valid_entries.size()
+	while _telemetry_rows.size() < needed:
 		var cell: HBoxContainer = HBoxContainer.new()
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cell.add_theme_constant_override("separation", 4)
 
 		var k_label: Label = Label.new()
-		k_label.text = "%s:" % String(entry.get("label", ""))
 		k_label.add_theme_font_size_override("font_size", 10)
-		k_label.add_theme_color_override("font_color", Color(0.58, 0.72, 0.80, 0.90) if hud._active_hud_faction_id != &"monolith_os" else Color(0.76, 0.75, 0.72, 0.90))
 		cell.add_child(k_label)
 
 		var v_label: Label = Label.new()
-		v_label.text = String(entry.get("value", ""))
 		v_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		v_label.clip_text = true
 		v_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		v_label.add_theme_font_size_override("font_size", 11)
-		var val_col: Color = entry.get("color", Color(0.94, 0.98, 1.0, 1.0)) as Color
-		v_label.add_theme_color_override("font_color", val_col)
 		cell.add_child(v_label)
 
 		hud.telemetry_grid.add_child(cell)
+		_telemetry_rows.append({
+			"box": cell,
+			"key": k_label,
+			"val": v_label,
+		})
+
+	var key_col: Color = Color(0.58, 0.72, 0.80, 0.90) if hud._active_hud_faction_id != &"monolith_os" else Color(0.76, 0.75, 0.72, 0.90)
+	for i: int in range(_telemetry_rows.size()):
+		var row: Dictionary = _telemetry_rows[i]
+		var box: HBoxContainer = row["box"] as HBoxContainer
+		if not is_instance_valid(box):
+			continue
+		if i >= needed:
+			box.visible = false
+			continue
+		box.visible = true
+		var entry: Dictionary = valid_entries[i]
+		var k_lbl: Label = row["key"] as Label
+		var v_lbl: Label = row["val"] as Label
+		k_lbl.text = "%s:" % String(entry.get("label", ""))
+		k_lbl.add_theme_color_override("font_color", key_col)
+		v_lbl.text = String(entry.get("value", ""))
+		var val_col: Color = entry.get("color", Color(0.94, 0.98, 1.0, 1.0)) as Color
+		v_lbl.add_theme_color_override("font_color", val_col)
 
 
 func update_production_progress_bar(hud: SelectionHUD, building: Building) -> void:

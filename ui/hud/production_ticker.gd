@@ -1,9 +1,8 @@
 class_name ProductionTicker
 extends Control
 
-const MAX_VISIBLE_ROWS: int = 5
+const MAX_VISIBLE_ROWS: int = 6
 const REFRESH_INTERVAL: float = 0.20
-const DOUBLE_CLICK_MS: int = 350
 
 @onready var ticker_panel: PanelContainer = %TickerPanel
 @onready var header_label: Label = %HeaderLabel
@@ -14,8 +13,6 @@ const DOUBLE_CLICK_MS: int = 350
 var _selection_controller: SelectionController = null
 var _collapsed: bool = false
 var _refresh_timer: float = 0.0
-var _last_clicked_building_id: int = 0
-var _last_click_ms: int = 0
 var _row_widgets: Array[Dictionary] = []
 var _active_faction_id: StringName = &"genesis_v2"
 var _faction_accent: Color = Color(0.24, 0.96, 0.86, 1.0)
@@ -97,8 +94,9 @@ func _resolve_selection_controller() -> void:
 
 
 func _process(delta: float) -> void:
-	_pulse_time += delta
-	_refresh_timer += delta
+	var real_dt: float = minf(delta / maxf(0.1, Engine.time_scale), 0.05)
+	_pulse_time += real_dt
+	_refresh_timer += real_dt
 	if _refresh_timer < REFRESH_INTERVAL:
 		return
 	_refresh_timer = 0.0
@@ -196,14 +194,24 @@ func _refresh_ticker() -> void:
 		var prefix: String = "[UPG] " if is_upgrade else ""
 		var batch_tag: String = (" x%d" % batch_cnt) if (not is_upgrade and batch_cnt > 1) else ""
 		var q_tag: String = (" (+%d)" % (q_size - 1)) if q_size > 1 else ""
-		var is_oc: bool = b.is_overclocked()
+		var is_unpowered: bool = b.requires_power_grid and not b.is_powered
+		var is_oc: bool = b.is_overclocked() and not is_unpowered
 		var oc_tag: String = " [2x]" if is_oc else ""
 		title_lbl.text = "%s%s%s%s%s" % [prefix, short_name, batch_tag, q_tag, oc_tag]
-		title_lbl.modulate = Color(1.0, 0.88, 0.42, 1.0) if (is_upgrade or is_oc) else Color(0.92, 0.96, 0.98, 1.0)
-		pct_lbl.text = "%d%%" % pct
+		if is_unpowered:
+			title_lbl.modulate = Color(1.0, 0.54, 0.42, 1.0)
+			pct_lbl.text = "PAUSED"
+			pct_lbl.add_theme_color_override("font_color", Color(1.0, 0.40, 0.30, 1.0))
+		else:
+			title_lbl.modulate = Color(1.0, 0.88, 0.42, 1.0) if (is_upgrade or is_oc) else Color(0.92, 0.96, 0.98, 1.0)
+			pct_lbl.text = "%d%%" % pct
+			pct_lbl.add_theme_color_override("font_color", Color(0.56, 0.90, 0.96, 0.95))
 		bar.value = progress * 100.0
 		if fill_style != null:
-			if is_oc:
+			if is_unpowered:
+				var up_p: float = 0.5 + 0.5 * sin(_pulse_time * 6.0)
+				fill_style.bg_color = Color(0.96, 0.48, 0.20, 0.96).lerp(Color(1.0, 0.28, 0.24, 0.98), up_p)
+			elif is_oc:
 				var oc_p: float = 0.5 + 0.5 * sin(_pulse_time * 8.0)
 				fill_style.bg_color = Color(1.0, 0.624, 0.110, 1.0).lerp(Color(1.0, 0.86, 0.40, 1.0), oc_p * 0.55)
 			elif is_upgrade:
@@ -227,7 +235,7 @@ func _ensure_row_count(target_count: int) -> void:
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.custom_minimum_size = Vector2(204.0, 32.0)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.tooltip_text = "LMB: Select  •  Double-Click: Focus  •  RMB: Cancel"
+		btn.tooltip_text = "LMB Select & Center • Shift+LMB All of Type • RMB Focus Camera"
 		btn.add_to_group("blocks_edge_pan")
 		_apply_row_button_theme(btn, _active_faction_id)
 
@@ -319,14 +327,10 @@ func _on_row_clicked(row_index: int) -> void:
 		_resolve_selection_controller()
 	if _selection_controller == null:
 		return
-
-	var now_ms: int = Time.get_ticks_msec()
-	var b_id: int = b.get_instance_id()
-	var is_double: bool = (_last_clicked_building_id == b_id and (now_ms - _last_click_ms) <= DOUBLE_CLICK_MS)
-	_last_clicked_building_id = b_id
-	_last_click_ms = now_ms
-
-	_selection_controller.select_single_entity(b, is_double)
+	if Input.is_key_pressed(KEY_SHIFT):
+		_selection_controller.select_buildings_of_type(b.building_type_id, false)
+	else:
+		_selection_controller.select_single_entity(b, true)
 
 
 func _on_row_right_clicked(row_index: int) -> void:
@@ -335,10 +339,11 @@ func _on_row_right_clicked(row_index: int) -> void:
 	var b: Building = _row_widgets[row_index].get("building", null) as Building
 	if b == null or not is_instance_valid(b) or b.is_destroyed:
 		return
-	if b.cancel_last_queued():
-		if AudioManager != null:
-			AudioManager.play_sfx(&"ui_click", -5.5, 0.04)
-		_refresh_ticker()
+	if _selection_controller == null:
+		_resolve_selection_controller()
+	if _selection_controller == null:
+		return
+	_selection_controller.focus_camera_on_entity(b)
 
 
 func _shorten_name(full_name: String) -> String:

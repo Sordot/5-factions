@@ -1223,6 +1223,33 @@ func get_idle_production_buildings() -> Array[Building]:
 	return idle_list
 
 
+func select_buildings_of_type(building_type_id: StringName, focus_camera: bool = false) -> int:
+	if building_type_id == &"" or not is_inside_tree():
+		return 0
+	var local_team: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
+	if local_team < 0:
+		return 0
+	var matches: Array[Building] = []
+	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not (node is Building) or not is_instance_valid(node):
+			continue
+		var b: Building = node as Building
+		if b.is_destroyed or b.is_queued_for_deletion() or not b.is_constructed or b.is_salvaging:
+			continue
+		if int(b.team) != local_team:
+			continue
+		if b.building_type_id == building_type_id:
+			matches.append(b)
+	if matches.is_empty():
+		return 0
+	cancel_all_targeting()
+	_set_selected_units([])
+	_set_selected_buildings(matches)
+	if focus_camera:
+		_center_camera_on_nodes(matches)
+	return matches.size()
+
+
 func select_next_idle_production(allow_center_on_repeat: bool = true, select_all: bool = false) -> int:
 	var idle_list: Array[Building] = get_idle_production_buildings()
 	if idle_list.is_empty():

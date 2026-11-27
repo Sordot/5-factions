@@ -7,6 +7,7 @@ extends RefCounted
 
 static var _theme_providers: Dictionary = {} # StringName -> Dictionary
 static var _builtins_registered: bool = false
+static var _style_cache: Dictionary = {} # String -> StyleBoxFlat
 
 
 static func _ensure_builtin_providers() -> void:
@@ -89,6 +90,7 @@ static func register_theme_provider(faction_id: StringName, provider: Dictionary
 	var entry: Dictionary = provider.duplicate(true)
 	entry["faction_id"] = faction_id
 	_theme_providers[faction_id] = entry
+	_style_cache.clear()
 
 
 static func has_theme_provider(faction_id: StringName) -> bool:
@@ -142,7 +144,15 @@ static func get_palette(faction_id: StringName) -> Dictionary:
 	}
 
 
+static func get_speed_active_color(faction_id: StringName) -> Color:
+	var pal: Dictionary = get_palette(faction_id)
+	return pal.get("accent", Color(0.20, 0.96, 0.86, 1.0)) as Color
+
+
 static func make_panel_style(faction_id: StringName, compact: bool = false) -> StyleBoxFlat:
+	var cache_key: String = "panel:%s:%d" % [String(faction_id), 1 if compact else 0]
+	if _style_cache.has(cache_key):
+		return _style_cache[cache_key] as StyleBoxFlat
 	var pal: Dictionary = get_palette(faction_id)
 	var sb: StyleBoxFlat = StyleBoxFlat.new()
 	var is_brutal: bool = (pal["style"] == &"brutalist")
@@ -169,10 +179,14 @@ static func make_panel_style(faction_id: StringName, compact: bool = false) -> S
 		sb.content_margin_top = 8.0
 		sb.content_margin_right = 10.0
 		sb.content_margin_bottom = 8.0
+	_style_cache[cache_key] = sb
 	return sb
 
 
 static func make_utility_button_style(faction_id: StringName, hovered: bool = false) -> StyleBoxFlat:
+	var cache_key: String = "ubtn:%s:%d" % [String(faction_id), 1 if hovered else 0]
+	if _style_cache.has(cache_key):
+		return _style_cache[cache_key] as StyleBoxFlat
 	var pal: Dictionary = get_palette(faction_id)
 	var is_brutal: bool = (pal["style"] == &"brutalist")
 	var is_bauhaus: bool = (pal["style"] == &"bauhaus_sacred")
@@ -198,6 +212,7 @@ static func make_utility_button_style(faction_id: StringName, hovered: bool = fa
 		sb.set_corner_radius_all(4)
 		sb.set_border_width_all(1)
 		sb.border_color = Color(accent.r, accent.g, accent.b, 0.92 if hovered else 0.45)
+	_style_cache[cache_key] = sb
 	return sb
 
 
