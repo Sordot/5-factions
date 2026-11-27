@@ -324,10 +324,26 @@ func _draw() -> void:
 		var edge_dir: Vector2 = rseg["dir"] as Vector2
 		draw_line(a + edge_dir * 4.0, b - edge_dir * 4.0, crest_col, 1.6, true)
 
-	# 5. Crisp 2px bevel outline strictly on cliff edges (leaving ramp lips cleanly open)
+	# 5. Crisp 2px bevel outline strictly on cliff edges (leaving ramp lips cleanly open),
+	# plus north-facing cliff rim shadows, inner bevel ledges, and buttress ticks for 360-degree readability.
+	var north_outer_shadow: Color = Color(0.02, 0.03, 0.05, 0.65)
+	var north_inner_ledge: Color = biome_tint.lightened(0.24)
+	north_inner_ledge.a = 0.88
+	var north_tick_col: Color = Color(0.03, 0.05, 0.08, 0.78)
 	for seg: Dictionary in _cliff_segments:
 		var a: Vector2 = seg["a"] as Vector2
 		var b: Vector2 = seg["b"] as Vector2
 		var out_n: Vector2 = seg["out_normal"] as Vector2
+		if out_n.y <= -0.25:
+			var edge_len_n: float = float(seg["len"])
+			var outer_lip: PackedVector2Array = PackedVector2Array([a, b, b + out_n * 5.0, a + out_n * 5.0])
+			draw_colored_polygon(outer_lip, north_outer_shadow)
+			var inner_ledge: PackedVector2Array = PackedVector2Array([a, b, b - out_n * 4.5, a - out_n * 4.5])
+			draw_colored_polygon(inner_ledge, north_inner_ledge)
+			var tick_cnt: int = maxi(2, int(floor(edge_len_n / 26.0)))
+			for ti: int in range(1, tick_cnt):
+				var t_frac: float = float(ti) / float(tick_cnt)
+				var tp: Vector2 = a.lerp(b, t_frac)
+				draw_line(tp - out_n * 1.0, tp + out_n * 4.5, north_tick_col, 1.6, true)
 		draw_line(a, b, rim_dark, 3.2, true)
 		draw_line(a - out_n * 1.4, b - out_n * 1.4, rim_hi, 1.6, true)

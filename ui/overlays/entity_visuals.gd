@@ -29,6 +29,9 @@ var _cached_renderer_type_id: StringName = &""
 var _cached_renderer_mode: Mode = Mode.UNIT
 var _upgrade_callable: Callable = Callable()
 var _draw_ctx: Dictionary = {}
+var _fog_cache: FogOfWarSystem = null
+var _unit_elevation: int = 0
+var _elev_poll_timer: float = 0.0
 
 
 static func _ensure_renderers() -> void:
@@ -83,6 +86,8 @@ func bind_unit(unit: Unit) -> void:
 	_owner_unit = unit
 	entity_type_id = unit.get_unit_type_id()
 	team = int(unit.team)
+	_elev_poll_timer = 0.0
+	_poll_unit_elevation()
 	_refresh_cached_renderer()
 	_sync_upgrade_cache()
 	queue_redraw()
@@ -166,10 +171,16 @@ func _process(delta: float) -> void:
 			entity_type_id = next_id
 			_refresh_cached_renderer()
 		team = int(_owner_unit.team)
+		_elev_poll_timer += delta
+		var elev_changed: bool = false
+		if _elev_poll_timer >= 0.20:
+			_elev_poll_timer = 0.0
+			elev_changed = _poll_unit_elevation()
 		_draw_ctx["upgrades"] = _upgrade_callable
 		var renderer_wants_anim: bool = _cached_renderer != null and _cached_renderer.needs_unit_animation(entity_type_id, _draw_ctx)
 		if (
-			_owner_unit.is_hovered
+			elev_changed
+			or _owner_unit.is_hovered
 			or _owner_unit.spawn_anim_timer > 0.0
 			or renderer_wants_anim
 			or _owner_unit.has_status_effect(&"adrenal_surge")
@@ -187,10 +198,22 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 
-func _get_palette() -> Dictionary:
+func _poll_unit_elevation() -> bool:
+	if _owner_unit == null or not is_instance_valid(_owner_unit) or not is_inside_tree():
+		return false
+	if _fog_cache == null or not is_instance_valid(_fog_cache):
+		_fog_cache = get_tree().get_first_node_in_group("fog_of_war") as FogOfWarSystem
+	var next_elev: int = _fog_cache.get_elevation_at(_owner_unit.global_position) if _fog_cache != null else 0
+	if next_elev != _unit_elevation:
+		_unit_elevation = next_elev
+		return true
+	return false
+
+
+static func _get_palette_for_team(team_id: int) -> Dictionary:
 	if TeamManager != null:
-		return TeamManager.get_team_palette(team)
-	var is_enemy: bool = (team == int(Unit.Team.ENEMY))
+		return TeamManager.get_team_palette(team_id)
+	var is_enemy: bool = (team_id == int(Unit.Team.ENEMY))
 	if is_enemy:
 		return {
 			"shell": Color(0.84, 0.78, 0.80, 0.96),
@@ -214,6 +237,10 @@ func _get_palette() -> Dictionary:
 	}
 
 
+func _get_palette() -> Dictionary:
+	return _get_palette_for_team(team)
+
+
 func _fill_draw_ctx(p: Dictionary) -> Dictionary:
 	var team_col: Color = TeamManager.get_team_color(team) if TeamManager != null else (p["core"] as Color)
 	_draw_ctx["palette"] = p
@@ -233,6 +260,11 @@ func _draw() -> void:
 	_draw_hover_ring()
 	_draw_marquee_preview_ring()
 	if mode == Mode.UNIT:
+		if _unit_elevation > 0 and _owner_unit != null and is_instance_valid(_owner_unit) and not _owner_unit.is_dead:
+			if entity_type_id != &"titan_strider" and not String(entity_type_id).contains("strider"):
+				var rad: float = _owner_unit.data.collision_radius if _owner_unit.data != null else 15.0
+				var shadow_off: Vector2 = Vector2(2.0, 5.0).rotated(-_owner_unit.body_visual.rotation) if _owner_unit.body_visual != null else Vector2(2.0, 5.0)
+				draw_circle(shadow_off, rad * 0.92, Color(0.02, 0.03, 0.05, 0.34))
 		if _cached_renderer != null:
 			_cached_renderer.draw_unit(self, entity_type_id, _owner_unit, ctx)
 			if _owner_unit != null and is_instance_valid(_owner_unit) and not _owner_unit.is_dead:
@@ -383,7 +415,7 @@ func _draw_building_silhouette(p: Dictionary, ctx: Dictionary) -> void:
 	_draw_hub_saturation_badge()
 
 
-func _draw_building_blueprint(hull_poly: PackedVector2Array, progress: float, p: Dictionary) -> void:
+static func draw_building_blueprint(canvas: CanvasItem, hull_poly: PackedVector2Array, progress: float, p: Dictionary, draw_scanline: bool = true) -> void:
 	var wire: Color = p["wire"]
 	var shell: Color = p["shell"]
 	var deck: Color = p["deck"]
@@ -399,15 +431,15 @@ func _draw_building_blueprint(hull_poly: PackedVector2Array, progress: float, p:
 		min_x = minf(min_x, pt.x)
 		max_x = maxf(max_x, pt.x)
 
-	draw_colored_polygon(hull_poly, Color(wire.r, wire.g, wire.b, 0.11))
+	canvas.draw_colored_polygon(hull_poly, Color(wire.r, wire.g, wire.b, 0.11))
 	var step: float = 12.0
 	var gx: float = min_x + step
 	while gx < max_x:
-		draw_line(Vector2(gx, min_y + 4.0), Vector2(gx, max_y - 4.0), Color(wire.r, wire.g, wire.b, 0.16), 1.0)
+		canvas.draw_line(Vector2(gx, min_y + 4.0), Vector2(gx, max_y - 4.0), Color(wire.r, wire.g, wire.b, 0.16), 1.0)
 		gx += step
 	var gy: float = min_y + step
 	while gy < max_y:
-		draw_line(Vector2(min_x + 4.0, gy), Vector2(max_x - 4.0, gy), Color(wire.r, wire.g, wire.b, 0.16), 1.0)
+		canvas.draw_line(Vector2(min_x + 4.0, gy), Vector2(max_x - 4.0, gy), Color(wire.r, wire.g, wire.b, 0.16), 1.0)
 		gy += step
 
 	var fill_top_y: float = lerpf(max_y, min_y, progress)
@@ -421,41 +453,41 @@ func _draw_building_blueprint(hull_poly: PackedVector2Array, progress: float, p:
 		var clipped_list: Array[PackedVector2Array] = Geometry2D.intersect_polygons(hull_poly, clip_rect)
 		for part: PackedVector2Array in clipped_list:
 			if part.size() >= 3:
-				draw_colored_polygon(part, Color(shell.r, shell.g, shell.b, 0.68))
+				canvas.draw_colored_polygon(part, Color(shell.r, shell.g, shell.b, 0.68))
 		var inner_poly: PackedVector2Array = FactionVisualRenderer.scale_poly(hull_poly, 0.72)
 		var inner_clips: Array[PackedVector2Array] = Geometry2D.intersect_polygons(inner_poly, clip_rect)
 		for part_i: PackedVector2Array in inner_clips:
 			if part_i.size() >= 3:
-				draw_colored_polygon(part_i, Color(deck.r, deck.g, deck.b, 0.72))
-		var scan_w: float = (max_x - min_x) * 0.48
-		draw_line(Vector2(-scan_w, fill_top_y), Vector2(scan_w, fill_top_y), Color(core.r, core.g, core.b, 0.96), 2.4, true)
+				canvas.draw_colored_polygon(part_i, Color(deck.r, deck.g, deck.b, 0.72))
+		if draw_scanline:
+			var scan_w: float = (max_x - min_x) * 0.48
+			canvas.draw_line(Vector2(-scan_w, fill_top_y), Vector2(scan_w, fill_top_y), Color(core.r, core.g, core.b, 0.96), 2.4, true)
 
-	FactionVisualRenderer.draw_closed_outline(self, hull_poly, wire, 2.0)
-	FactionVisualRenderer.draw_closed_outline(self, FactionVisualRenderer.scale_poly(hull_poly, 0.72), Color(wire.r, wire.g, wire.b, 0.45), 1.2)
+	FactionVisualRenderer.draw_closed_outline(canvas, hull_poly, wire, 2.0)
+	FactionVisualRenderer.draw_closed_outline(canvas, FactionVisualRenderer.scale_poly(hull_poly, 0.72), Color(wire.r, wire.g, wire.b, 0.45), 1.2)
 	var corners: PackedVector2Array = PackedVector2Array([
 		Vector2(min_x, min_y), Vector2(max_x, min_y), Vector2(max_x, max_y), Vector2(min_x, max_y),
 	])
 	for c: Vector2 in corners:
 		var toward: Vector2 = -c.normalized() * 7.0
-		draw_line(c, c + Vector2(toward.x, 0.0), wire, 2.0)
-		draw_line(c, c + Vector2(0.0, toward.y), wire, 2.0)
+		canvas.draw_line(c, c + Vector2(toward.x, 0.0), wire, 2.0)
+		canvas.draw_line(c, c + Vector2(0.0, toward.y), wire, 2.0)
 
 
-func _draw_default_building_turret_overlay(p: Dictionary) -> void:
-	if _owner_building == null or not _owner_building.is_constructed:
-		return
+func _draw_building_blueprint(hull_poly: PackedVector2Array, progress: float, p: Dictionary) -> void:
+	draw_building_blueprint(self, hull_poly, progress, p, true)
+
+
+static func draw_default_building_turret(canvas: CanvasItem, p: Dictionary, team_id: int, ang: float, recoil: float, style: StringName) -> void:
 	var shell_hi: Color = p["shell_hi"]
 	var deck: Color = p["deck"]
 	var trim: Color = p["trim"]
 	var core: Color = p["core"]
 	var core_alt: Color = p["core_alt"]
-	var ang: float = _owner_building.get_turret_angle()
-	var recoil: float = _owner_building.get_turret_recoil()
 	var dir: Vector2 = Vector2.RIGHT.rotated(ang)
 	var perp: Vector2 = Vector2(-dir.y, dir.x)
-	var style: StringName = _owner_building.turret_tracer_style
-	var accent: Color = Color(1.0, 0.82, 0.32, 1.0) if (style == &"rail" and team == 0) else core
-	if style == &"mortar" and team == 0:
+	var accent: Color = Color(1.0, 0.82, 0.32, 1.0) if (style == &"rail" and team_id == 0) else core
+	if style == &"mortar" and team_id == 0:
 		accent = core_alt
 
 	var base_pts: PackedVector2Array = PackedVector2Array([
@@ -466,26 +498,101 @@ func _draw_default_building_turret_overlay(p: Dictionary) -> void:
 		dir * -12.0 + perp * -4.5,
 		dir * -8.0 + perp * -9.5,
 	])
-	FactionVisualRenderer.poly_outlined(self, base_pts, shell_hi, accent, 1.6)
+	FactionVisualRenderer.poly_outlined(canvas, base_pts, shell_hi, accent, 1.6)
 
 	var b_start: Vector2 = dir * (6.0 - recoil)
 	var b_end: Vector2 = dir * (26.0 - recoil)
 	if style == &"heavy":
-		draw_line(b_start + perp * -4.0, b_end + perp * -4.0, deck, 4.2, true)
-		draw_line(b_start + perp * 4.0, b_end + perp * 4.0, deck, 4.2, true)
-		draw_line(b_start + perp * -4.0, b_end + perp * -4.0, accent, 1.6, true)
-		draw_line(b_start + perp * 4.0, b_end + perp * 4.0, accent, 1.6, true)
+		canvas.draw_line(b_start + perp * -4.0, b_end + perp * -4.0, deck, 4.2, true)
+		canvas.draw_line(b_start + perp * 4.0, b_end + perp * 4.0, deck, 4.2, true)
+		canvas.draw_line(b_start + perp * -4.0, b_end + perp * -4.0, accent, 1.6, true)
+		canvas.draw_line(b_start + perp * 4.0, b_end + perp * 4.0, accent, 1.6, true)
 	elif style == &"mortar":
-		draw_line(b_start, dir * (21.0 - recoil), trim, 9.0, true)
-		draw_circle(dir * (20.0 - recoil), 4.2, deck)
-		draw_circle(dir * (20.0 - recoil), 2.4, accent)
+		canvas.draw_line(b_start, dir * (21.0 - recoil), trim, 9.0, true)
+		canvas.draw_circle(dir * (20.0 - recoil), 4.2, deck)
+		canvas.draw_circle(dir * (20.0 - recoil), 2.4, accent)
 	else:
-		draw_line(b_start + perp * -3.2, b_end + perp * -2.6, trim, 2.8, true)
-		draw_line(b_start + perp * 3.2, b_end + perp * 2.6, trim, 2.8, true)
-		draw_line(dir * (4.0 - recoil), dir * (27.5 - recoil), accent, 2.2, true)
+		canvas.draw_line(b_start + perp * -3.2, b_end + perp * -2.6, trim, 2.8, true)
+		canvas.draw_line(b_start + perp * 3.2, b_end + perp * 2.6, trim, 2.8, true)
+		canvas.draw_line(dir * (4.0 - recoil), dir * (27.5 - recoil), accent, 2.2, true)
 
-	draw_circle(Vector2.ZERO, 6.2, deck)
-	draw_circle(dir * 1.5, 3.2, accent)
+	canvas.draw_circle(Vector2.ZERO, 6.2, deck)
+	canvas.draw_circle(dir * 1.5, 3.2, accent)
+
+
+func _draw_default_building_turret_overlay(p: Dictionary) -> void:
+	if _owner_building == null or not _owner_building.is_constructed:
+		return
+	draw_default_building_turret(
+		self,
+		p,
+		team,
+		_owner_building.get_turret_angle(),
+		_owner_building.get_turret_recoil(),
+		_owner_building.turret_tracer_style
+	)
+
+
+static func draw_frozen_building_ghost(canvas: CanvasItem, ghost: Dictionary) -> void:
+	var type_id: StringName = ghost.get("building_type_id", &"") as StringName
+	var g_team: int = int(ghost.get("team", 1))
+	var footprint_r: float = maxf(22.0, float(ghost.get("footprint_radius", 34.0)))
+	var is_built: bool = bool(ghost.get("is_constructed", true))
+	var progress: float = clampf(float(ghost.get("construction_progress", 1.0)), 0.0, 1.0)
+	var p: Dictionary = _get_palette_for_team(g_team)
+	var renderer: FactionVisualRenderer = _resolve_renderer(type_id, true)
+	var hull_poly: PackedVector2Array
+	if renderer != null:
+		hull_poly = renderer.get_building_outer_poly(type_id, footprint_r)
+	else:
+		var c: float = footprint_r * 0.42
+		var e: float = footprint_r * 0.96
+		hull_poly = PackedVector2Array([
+			Vector2(e, -c), Vector2(e, c), Vector2(c, e), Vector2(-c, e),
+			Vector2(-e, c), Vector2(-e, -c), Vector2(-c, -e), Vector2(c, -e),
+		])
+
+	if not is_built:
+		draw_building_blueprint(canvas, hull_poly, progress, p, false)
+		return
+
+	var team_col: Color = TeamManager.get_team_color(g_team) if TeamManager != null else (p["core"] as Color)
+	var ctx: Dictionary = {
+		"palette": p,
+		"team": g_team,
+		"team_color": team_col,
+		"anim_time": 0.0,
+		"pulse": 0.0,
+		"active_pulse": 0.0,
+		"upgrades": Callable(),
+		"is_ghost": true,
+		"footprint_radius": footprint_r,
+		"is_powered": bool(ghost.get("is_powered", true)),
+		"staffed_count": int(ghost.get("staffed_count", 0)),
+		"max_staff_slots": int(ghost.get("max_staff_slots", 0)),
+		"turret_angle": float(ghost.get("turret_angle", 0.0)),
+		"turret_tracer_style": ghost.get("turret_tracer_style", &"") as StringName,
+		"building_type_id": type_id,
+	}
+
+	if renderer != null:
+		renderer.draw_building(canvas, type_id, null, hull_poly, ctx)
+	else:
+		FactionVisualRenderer.poly_outlined(canvas, hull_poly, p["shell"], p["outline"], 2.2)
+		canvas.draw_colored_polygon(FactionVisualRenderer.scale_poly(hull_poly, 0.65), p["deck"])
+		canvas.draw_circle(Vector2.ZERO, footprint_r * 0.32, p["core"])
+
+	if bool(ghost.get("has_turret", false)):
+		var handled: bool = renderer != null and renderer.draw_building_turret(canvas, null, ctx)
+		if not handled:
+			draw_default_building_turret(
+				canvas,
+				p,
+				g_team,
+				float(ghost.get("turret_angle", 0.0)),
+				0.0,
+				ghost.get("turret_tracer_style", &"") as StringName
+			)
 
 
 func _draw_hub_saturation_badge() -> void:

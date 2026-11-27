@@ -79,6 +79,11 @@ static func find_top_hover_entity(sc: SelectionController, world_point: Vector2)
 		var eb: Building = router.find_hostile_building_at_point(world_point, local_int)
 		if eb != null:
 			return eb
+		var ghost_ov: Node = sc.get_tree().get_first_node_in_group("fog_ghost_overlay")
+		if ghost_ov != null and is_instance_valid(ghost_ov) and ghost_ov.has_method("get_hover_handle_at_point"):
+			var gh: Node = ghost_ov.call("get_hover_handle_at_point", world_point) as Node
+			if gh != null:
+				return gh
 
 	var bar: Node2D = router.find_barricade_at_point(world_point)
 	if bar != null:

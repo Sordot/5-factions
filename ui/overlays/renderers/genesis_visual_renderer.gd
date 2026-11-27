@@ -319,8 +319,10 @@ func draw_building(
 	var core: Color = p["core"]
 	var core_alt: Color = p["core_alt"]
 	var outline: Color = p["outline"]
-	var is_training: bool = building.get_training_queue_size() > 0
-	var is_active_prod: bool = building.is_actively_producing()
+	var has_b: bool = building != null and is_instance_valid(building)
+	var is_training: bool = building.get_training_queue_size() > 0 if has_b else false
+	var is_active_prod: bool = building.is_actively_producing() if has_b else false
+	var footprint_r: float = building.footprint_radius if has_b else float(ctx.get("footprint_radius", 34.0))
 	var standby_slate: Color = Color(0.28, 0.42, 0.50, 0.72)
 
 	# Subtle Technozen circuit grounding pad under completed structures
@@ -328,7 +330,7 @@ func draw_building(
 		var pad_poly: PackedVector2Array = scale_poly(hull_poly, 1.18)
 		canvas.draw_colored_polygon(pad_poly, Color(0.04, 0.07, 0.10, 0.42))
 		draw_closed_outline(canvas, pad_poly, Color(core.r, core.g, core.b, 0.20), 1.1)
-		var pad_r: float = maxf(26.0, building.footprint_radius * 1.12)
+		var pad_r: float = maxf(26.0, footprint_r * 1.12)
 		for ci: int in range(4):
 			var c_ang: float = PI * 0.25 + float(ci) * (PI * 0.5)
 			var c_dir: Vector2 = Vector2.RIGHT.rotated(c_ang)
@@ -385,7 +387,7 @@ func draw_building(
 			var mf_border: Color = cmp_col if is_active_prod else standby_slate.lerp(cmp_col, 0.45)
 			poly_outlined(canvas, hull_poly, shell_hi, mf_border, 2.2)
 			canvas.draw_rect(Rect2(-24, -24, 48, 48), deck, true)
-			var staffed: int = building.get_assigned_engineer_count()
+			var staffed: int = building.get_assigned_engineer_count() if has_b else int(ctx.get("staffed_count", 0))
 			var g_col: Color = Color(cmp_col.r, cmp_col.g, cmp_col.b, 0.62 + active_pulse * 0.36) if is_active_prod else Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.42)
 			for gx: float in [-16.0, -6.0, 6.0, 16.0]:
 				canvas.draw_line(Vector2(gx, -21), Vector2(gx, 14), g_col, 1.8 if is_active_prod else 1.4)
@@ -400,7 +402,7 @@ func draw_building(
 				draw_active_conduit_sparks(canvas, cmp_col, 22.0, anim_time)
 			else:
 				canvas.draw_colored_polygon(cpu, Color(standby_slate.r, standby_slate.g, standby_slate.b, 0.45))
-			var slots: int = maxi(1, building.max_staff_slots)
+			var slots: int = maxi(1, building.max_staff_slots if has_b else int(ctx.get("max_staff_slots", 3)))
 			for s: int in range(slots):
 				var px: float = (float(s) - float(slots - 1) * 0.5) * 16.0
 				var pip_rect: Rect2 = Rect2(px - 5.5, 16.5, 11.0, 6.0)

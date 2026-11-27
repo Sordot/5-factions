@@ -396,9 +396,10 @@ func draw_building(
 	var anim_time: float = float(ctx["anim_time"])
 	var pulse: float = float(ctx["pulse"])
 	var active_pulse: float = float(ctx["active_pulse"])
-	var is_producing: bool = building != null and is_instance_valid(building) and building.is_actively_producing()
-	var is_powered: bool = building == null or not is_instance_valid(building) or building.is_powered
-	var r: float = building.footprint_radius if (building != null and is_instance_valid(building)) else 40.0
+	var has_b: bool = building != null and is_instance_valid(building)
+	var is_producing: bool = has_b and building.is_actively_producing()
+	var is_powered: bool = building.is_powered if has_b else bool(ctx.get("is_powered", true))
+	var r: float = building.footprint_radius if has_b else float(ctx.get("footprint_radius", 40.0))
 	var ribbon: Color = team_col.lerp(PRISMA_GOLD, 0.16)
 	var energy_col: Color = PRISMA_MAGENTA if is_powered else Color(0.36, 0.30, 0.44, 0.75)
 
@@ -479,7 +480,7 @@ func draw_building(
 			canvas.draw_line(Vector2(0.0, -r * 0.86), Vector2(0.0, r * 0.52), ribbon, 2.2, true)
 			canvas.draw_arc(Vector2(0.0, -r * 0.08), r * 0.28, 0.0, TAU, 22, PRISMA_GOLD, 1.4, true)
 			# 3 recessed gold/magenta diamond staffing pips
-			var staffed: int = building.get_assigned_engineer_count() if (building != null and is_instance_valid(building)) else 0
+			var staffed: int = building.get_assigned_engineer_count() if has_b else int(ctx.get("staffed_count", 0))
 			var pip_xs: Array[float] = [-14.0, 0.0, 14.0]
 			for pi: int in range(3):
 				var p_pos: Vector2 = Vector2(pip_xs[pi], r * 0.34)
@@ -649,14 +650,16 @@ func draw_building_upgrade_telltales(canvas: CanvasItem, type_id: StringName, bu
 
 
 func draw_building_turret(canvas: CanvasItem, building: Building, ctx: Dictionary) -> bool:
-	if building == null or not is_instance_valid(building) or building.building_type_id != &"solar_obelisk":
+	var has_b: bool = building != null and is_instance_valid(building)
+	var b_type: StringName = building.building_type_id if has_b else (ctx.get("building_type_id", &"") as StringName)
+	if b_type != &"solar_obelisk":
 		return false
-	var angle: float = building.get_turret_angle()
-	var recoil: float = building.get_turret_recoil()
+	var angle: float = building.get_turret_angle() if has_b else float(ctx.get("turret_angle", 0.0))
+	var recoil: float = building.get_turret_recoil() if has_b else 0.0
 	var dir: Vector2 = Vector2.RIGHT.rotated(angle)
 	var perp: Vector2 = Vector2(-dir.y, dir.x)
 	var base: Vector2 = -dir * recoil
-	var is_powered: bool = building.is_powered
+	var is_powered: bool = building.is_powered if has_b else bool(ctx.get("is_powered", true))
 	var lens_col: Color = PRISMA_MAGENTA if is_powered else Color(0.35, 0.30, 0.42, 0.75)
 	var team_col: Color = ctx["team_color"] as Color
 

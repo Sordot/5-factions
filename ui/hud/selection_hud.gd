@@ -634,6 +634,9 @@ func _connect_inspected_signals(entity: Node) -> void:
 			entity.connect("capture_state_changed", _on_inspected_entity_updated)
 		if entity.has_signal("controller_changed") and not entity.is_connected("controller_changed", _on_inspected_entity_updated):
 			entity.connect("controller_changed", _on_inspected_entity_updated)
+	elif entity.is_in_group("fog_ghost_handles"):
+		if entity.has_signal("ghost_invalidated") and not entity.is_connected("ghost_invalidated", _on_inspected_entity_removed):
+			entity.connect("ghost_invalidated", _on_inspected_entity_removed)
 
 
 func _disconnect_inspected_signals() -> void:
@@ -685,6 +688,9 @@ func _disconnect_inspected_signals() -> void:
 			_inspected_entity.disconnect("capture_state_changed", _on_inspected_entity_updated)
 		if _inspected_entity.has_signal("controller_changed") and _inspected_entity.is_connected("controller_changed", _on_inspected_entity_updated):
 			_inspected_entity.disconnect("controller_changed", _on_inspected_entity_updated)
+	elif _inspected_entity.is_in_group("fog_ghost_handles"):
+		if _inspected_entity.has_signal("ghost_invalidated") and _inspected_entity.is_connected("ghost_invalidated", _on_inspected_entity_removed):
+			_inspected_entity.disconnect("ghost_invalidated", _on_inspected_entity_removed)
 
 
 func _on_ability_targeting_changed(active_ability: AbilityData) -> void:

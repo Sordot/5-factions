@@ -474,24 +474,27 @@ func _on_map_viewport_draw() -> void:
 		map_viewport.draw_colored_polygon(diamond, u_col)
 		map_viewport.draw_polyline(diamond + PackedVector2Array([diamond[0]]), Color(0.98, 1.0, 1.0, 0.96), 1.2)
 
-	# 4.5. Capturable Sensor Relays (radar-diamond + subtle sensor ring).
+	# 4.5. Capturable Sensor Relays (radar-diamond + subtle sensor ring; strictly fog-safe via viewer display state).
 	for node: Node in get_tree().get_nodes_in_group("sensor_relays"):
 		if not is_instance_valid(node) or not (node is Node2D):
 			continue
 		var relay: Node2D = node as Node2D
 		var rp: Vector2 = _world_to_minimap(relay.global_position)
-		var r_vis: bool = _fog_system == null or not _fog_system.fog_enabled or _fog_system.is_world_pos_visible(relay.global_position)
 		var r_col: Color = Color(0.56, 0.78, 0.88, 0.92)
-		var r_active: bool = relay.has_method("is_active") and bool(relay.call("is_active"))
-		var r_contested: bool = relay.has_method("is_contested") and bool(relay.call("is_contested"))
-		var ctrl_t: int = int(relay.get("controlling_team"))
-		var viewer_r: int = TeamManager.get_local_human_team() if TeamManager != null else int(Unit.Team.PLAYER)
-		var is_allied_r: bool = r_active and ctrl_t >= 0 and (viewer_r < 0 or (TeamManager.are_allies(viewer_r, ctrl_t) if TeamManager != null else (ctrl_t == int(Unit.Team.PLAYER))))
-		if r_vis or is_allied_r:
-			if r_contested:
+		var is_allied_r: bool = false
+		if relay.has_method("get_viewer_display_state"):
+			var disp: Dictionary = relay.call("get_viewer_display_state") as Dictionary
+			var disp_state: int = int(disp.get("state", 0))
+			var disp_team: int = int(disp.get("team", -1))
+			var disp_live: bool = bool(disp.get("is_live", false))
+			is_allied_r = bool(disp.get("is_allied", false))
+			if disp_state == 2:
 				r_col = Color(1.0, 0.78, 0.24, 1.0)
-			elif r_active and ctrl_t >= 0:
-				r_col = TeamManager.get_team_color(ctrl_t) if TeamManager != null else (Color(0.22, 0.96, 0.88, 1.0) if ctrl_t == int(Unit.Team.PLAYER) else Color(1.0, 0.36, 0.28, 1.0))
+			elif disp_state == 1 and disp_team >= 0:
+				r_col = TeamManager.get_team_color(disp_team) if TeamManager != null else (Color(0.22, 0.96, 0.88, 1.0) if disp_team == int(Unit.Team.PLAYER) else Color(1.0, 0.36, 0.28, 1.0))
+			if not disp_live:
+				r_col = r_col.lerp(Color(0.50, 0.58, 0.66, 1.0), 0.45)
+				r_col.a = 0.72
 		if is_allied_r:
 			var r_scale: float = rect.size.x / maxf(1.0, arena_bounds.size.x)
 			var vis_mini_r: float = clampf(float(relay.get("vision_radius")) * r_scale, 6.0, 48.0)
@@ -551,6 +554,25 @@ func _on_map_viewport_draw() -> void:
 			map_viewport.draw_rect(b_rect.grow(0.5), Color(0.96, 0.99, 1.0, 0.92 * col.a), false, 1.1)
 		else:
 			map_viewport.draw_rect(b_rect, Color(0.03, 0.06, 0.10, 0.75 * col.a), false, 0.9)
+
+	# 6.5. Frozen Hostile Building Ghosts in explored Fog of War (desaturated last-seen intel).
+	if _fog_system != null and _fog_system.fog_enabled and not _fog_system.post_match_reveal and _fog_system.has_method("get_active_building_ghosts"):
+		var ghosts: Array[Dictionary] = _fog_system.get_active_building_ghosts()
+		for ghost: Dictionary in ghosts:
+			var g_pos: Vector2 = ghost.get("pos", Vector2.ZERO) as Vector2
+			var gp: Vector2 = _world_to_minimap(g_pos)
+			var g_team: int = int(ghost.get("team", 1))
+			var g_hub: bool = bool(ghost.get("is_command_hub", false))
+			var g_sz: float = 7.0 if g_hub else 4.5
+			var base_col: Color = TeamManager.get_team_color(g_team) if TeamManager != null else Color(1.0, 0.32, 0.26, 0.95)
+			var g_col: Color = base_col.lerp(Color(0.50, 0.56, 0.62, 1.0), 0.52)
+			g_col.a = 0.58
+			var g_rect: Rect2 = Rect2(gp - Vector2(g_sz * 0.5, g_sz * 0.5), Vector2(g_sz, g_sz))
+			map_viewport.draw_rect(g_rect, g_col, true)
+			if g_hub:
+				map_viewport.draw_rect(g_rect.grow(0.5), Color(0.76, 0.82, 0.88, 0.56), false, 1.0)
+			else:
+				map_viewport.draw_rect(g_rect, Color(0.04, 0.06, 0.10, 0.54), false, 0.9)
 
 	# 8. Units (Heavy = 5.5px upward triangle; Infantry/Support = 2.6px dot; Workers = compact 2.0px dot).
 	for node: Node in get_tree().get_nodes_in_group("units"):

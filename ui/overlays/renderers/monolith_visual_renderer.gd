@@ -412,9 +412,10 @@ func draw_building(
 	var active_pulse: float = float(ctx["active_pulse"])
 	var slab_base: Color = MONO_CONCRETE_MID.lerp(team_col, 0.10)
 	var slab_dark: Color = MONO_CONCRETE_DARK.lerp(team_col, 0.08)
-	var is_training: bool = building.get_training_queue_size() > 0
-	var is_active_prod: bool = building.is_actively_producing()
-	var r: float = maxf(24.0, building.footprint_radius)
+	var has_b: bool = building != null and is_instance_valid(building)
+	var is_training: bool = building.get_training_queue_size() > 0 if has_b else false
+	var is_active_prod: bool = building.is_actively_producing() if has_b else false
+	var r: float = maxf(24.0, building.footprint_radius if has_b else float(ctx.get("footprint_radius", 34.0)))
 	var half: float = r * 0.94
 
 	# Subtle brutalist concrete foundation pad
@@ -469,7 +470,7 @@ func draw_building(
 
 		&"logic_monolith":
 			var main_rect: Rect2 = Rect2(-half, -half, half * 2.0, half * 2.0)
-			var staffed: int = building.get_assigned_engineer_count()
+			var staffed: int = building.get_assigned_engineer_count() if has_b else int(ctx.get("staffed_count", 0))
 			draw_brutalist_slab(canvas, main_rect, slab_base, MONO_INK, Vector2(4.0, 4.0), 7.0, MONO_SHIELD_CYAN if is_active_prod else MONO_OFFWHITE)
 			canvas.draw_rect(Rect2(-25, -26, 50, 38), slab_dark, true)
 			var fin_col: Color = Color(MONO_SHIELD_CYAN.r, MONO_SHIELD_CYAN.g, MONO_SHIELD_CYAN.b, 0.65 + active_pulse * 0.35) if is_active_prod else Color(0.45, 0.50, 0.56, 0.45)
@@ -479,7 +480,7 @@ func draw_building(
 			canvas.draw_rect(Rect2(-5, -11, 10, 8), MONO_SHIELD_CYAN if is_active_prod else Color(0.28, 0.32, 0.38, 0.9), true)
 			if is_active_prod:
 				draw_active_conduit_sparks(canvas, MONO_SHIELD_CYAN, 22.0, anim_time)
-			var slots: int = maxi(1, building.max_staff_slots)
+			var slots: int = maxi(1, building.max_staff_slots if has_b else int(ctx.get("max_staff_slots", 3)))
 			var pip_span: float = 13.5
 			for s: int in range(slots):
 				var px: float = (float(s) - float(slots - 1) * 0.5) * pip_span
@@ -572,10 +573,12 @@ func draw_building(
 
 
 func draw_building_turret(canvas: CanvasItem, building: Building, ctx: Dictionary) -> bool:
-	if building == null or building.turret_tracer_style != &"heavy_slug":
+	var has_b: bool = building != null and is_instance_valid(building)
+	var style: StringName = building.turret_tracer_style if has_b else (ctx.get("turret_tracer_style", &"") as StringName)
+	if style != &"heavy_slug":
 		return false
-	var ang: float = building.get_turret_angle()
-	var recoil: float = building.get_turret_recoil()
+	var ang: float = building.get_turret_angle() if has_b else float(ctx.get("turret_angle", 0.0))
+	var recoil: float = building.get_turret_recoil() if has_b else 0.0
 	var dir: Vector2 = Vector2.RIGHT.rotated(ang)
 	var perp: Vector2 = Vector2(-dir.y, dir.x)
 	var mono_ink: Color = Color(0.05, 0.06, 0.08, 0.96)

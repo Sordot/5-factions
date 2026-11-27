@@ -1625,19 +1625,29 @@ func _select_at_point(world_point: Vector2, shift_pressed: bool = false, is_doub
 	_last_click_building = null
 	_last_click_building_time_ms = 0
 
-	var clicked_enemy: Unit = command_router.find_unit_at_point(world_point, Unit.Team.ENEMY)
+	var local_int: int = int(_get_local_human_team_enum())
+	var clicked_enemy: Unit = command_router.find_hostile_unit_at_point(world_point, local_int)
 	if clicked_enemy != null:
 		_set_selected_units([])
 		_set_selected_buildings([])
 		_set_inspected_entity(clicked_enemy)
 		return
 
-	var clicked_enemy_building: Building = command_router.find_building_at_point(world_point, Unit.Team.ENEMY)
+	var clicked_enemy_building: Building = command_router.find_hostile_building_at_point(world_point, local_int)
 	if clicked_enemy_building != null:
 		_set_selected_units([])
 		_set_selected_buildings([])
 		_set_inspected_entity(clicked_enemy_building)
 		return
+
+	var ghost_ov: Node = get_tree().get_first_node_in_group("fog_ghost_overlay")
+	if ghost_ov != null and is_instance_valid(ghost_ov) and ghost_ov.has_method("has_ghost_at_point") and bool(ghost_ov.call("has_ghost_at_point", world_point)):
+		_set_selected_units([])
+		_set_selected_buildings([])
+		var clicked_ghost: Node = ghost_ov.call("get_ghost_handle_at_point", world_point) as Node
+		if clicked_ghost != null:
+			_set_inspected_entity(clicked_ghost)
+			return
 
 	var clicked_barricade: Node2D = command_router.find_barricade_at_point(world_point)
 	if clicked_barricade != null:
@@ -2105,8 +2115,18 @@ func _set_inspected_entity(entity: Node, emit_audio: bool = true) -> void:
 			next_entity = entity
 		elif entity.is_in_group("hyper_uplinks"):
 			next_entity = entity
+		elif entity.is_in_group("fog_ghost_handles") and entity.has_method("is_ghost_active") and bool(entity.call("is_ghost_active")):
+			next_entity = entity
 
 	if inspected_entity == next_entity:
+		if next_entity != null and next_entity.is_in_group("fog_ghost_handles"):
+			if next_entity.has_method("set_selected"):
+				next_entity.call("set_selected", true)
+			if next_entity.has_signal("ghost_invalidated") and not next_entity.is_connected("ghost_invalidated", _on_inspected_entity_removed):
+				next_entity.connect("ghost_invalidated", _on_inspected_entity_removed)
+			if emit_audio and AudioManager != null:
+				AudioManager.play_selection_audio([next_entity])
+			inspection_changed.emit(inspected_entity)
 		return
 
 	if inspected_entity != null and is_instance_valid(inspected_entity):
@@ -2138,6 +2158,11 @@ func _set_inspected_entity(entity: Node, emit_audio: bool = true) -> void:
 			if inspected_entity.has_method("set_selected"):
 				inspected_entity.call("set_selected", false)
 		elif inspected_entity.is_in_group("sensor_relays") or inspected_entity.is_in_group("hyper_uplinks"):
+			if inspected_entity.has_method("set_selected"):
+				inspected_entity.call("set_selected", false)
+		elif inspected_entity.is_in_group("fog_ghost_handles"):
+			if inspected_entity.has_signal("ghost_invalidated") and inspected_entity.is_connected("ghost_invalidated", _on_inspected_entity_removed):
+				inspected_entity.disconnect("ghost_invalidated", _on_inspected_entity_removed)
 			if inspected_entity.has_method("set_selected"):
 				inspected_entity.call("set_selected", false)
 
@@ -2177,6 +2202,11 @@ func _set_inspected_entity(entity: Node, emit_audio: bool = true) -> void:
 		elif inspected_entity.is_in_group("sensor_relays") or inspected_entity.is_in_group("hyper_uplinks"):
 			if inspected_entity.has_method("set_selected"):
 				inspected_entity.call("set_selected", true)
+		elif inspected_entity.is_in_group("fog_ghost_handles"):
+			if inspected_entity.has_method("set_selected"):
+				inspected_entity.call("set_selected", true)
+			if inspected_entity.has_signal("ghost_invalidated") and not inspected_entity.is_connected("ghost_invalidated", _on_inspected_entity_removed):
+				inspected_entity.connect("ghost_invalidated", _on_inspected_entity_removed)
 
 	if emit_audio and inspected_entity != null and AudioManager != null:
 		AudioManager.play_selection_audio([inspected_entity])
@@ -2327,6 +2357,8 @@ func _prune_invalid_units() -> void:
 		elif inspected_entity is Unit and (inspected_entity as Unit).is_dead:
 			_set_inspected_entity(null)
 		elif inspected_entity is ResourceNode and (inspected_entity as ResourceNode).is_depleted():
+			_set_inspected_entity(null)
+		elif inspected_entity.is_in_group("fog_ghost_handles") and (not inspected_entity.has_method("is_ghost_active") or not bool(inspected_entity.call("is_ghost_active"))):
 			_set_inspected_entity(null)
 
 

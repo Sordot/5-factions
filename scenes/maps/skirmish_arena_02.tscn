@@ -410,7 +410,7 @@ team = 1
 [node name="FogOfWarSystem" type="Node" parent="."]
 script = ExtResource("24_fog_of_war")
 arena_bounds = Rect2(-1300, -950, 2600, 1900)
-cell_size = 64.0
+cell_size = 32.0
 update_interval = 0.15
 
 [node name="FogOverlay" type="Node2D" parent="."]
